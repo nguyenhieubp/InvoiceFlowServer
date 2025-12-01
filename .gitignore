@@ -1,0 +1,66 @@
+# Dependencies
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Script files (in node_modules)
+node_modules/**/*.ps1
+node_modules/**/*.sh
+node_modules/**/*.cmd
+node_modules/**/*.bat
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment variables
+# .env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# Testing
+coverage/
+.nyc_output/
+*.lcov
+
+# Logs
+logs/
+*.log
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+
+# Misc
+*.pid
+*.seed
+*.pid.lock
+
