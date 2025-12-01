@@ -8,6 +8,7 @@ import { getDatabaseConfig } from './config/database.config';
 import { SyncModule } from './modules/sync/sync.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { SalesModule } from './modules/sales/sales.module';
+import { CategoriesModule } from './modules/categories/categories.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { SalesModule } from './modules/sales/sales.module';
     SyncModule,
     InvoicesModule,
     SalesModule,
+    CategoriesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
