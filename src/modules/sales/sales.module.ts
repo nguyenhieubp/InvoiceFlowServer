@@ -5,6 +5,7 @@ import { SalesController } from './sales.controller';
 import { SalesService } from './sales.service';
 import { Sale } from '../../entities/sale.entity';
 import { Customer } from '../../entities/customer.entity';
+import { ProductItem } from '../../entities/product-item.entity';
 import { InvoicePrintService } from '../../services/invoice-print.service';
 import { InvoiceService } from '../../services/invoice.service';
 import { Invoice } from '../../entities/invoice.entity';
@@ -13,7 +14,7 @@ import { InvoicesModule } from '../invoices/invoices.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Sale, Customer, Invoice, InvoiceItem]),
+    TypeOrmModule.forFeature([Sale, Customer, ProductItem, Invoice, InvoiceItem]),
     HttpModule,
     forwardRef(() => InvoicesModule),
   ],

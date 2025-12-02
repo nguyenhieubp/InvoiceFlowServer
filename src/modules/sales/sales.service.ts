@@ -1,8 +1,9 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Sale } from '../../entities/sale.entity';
+import { ProductItem } from '../../entities/product-item.entity';
 import { Invoice } from '../../entities/invoice.entity';
 import { InvoicePrintService } from '../../services/invoice-print.service';
 import { InvoiceService } from '../../services/invoice.service';
@@ -14,6 +15,8 @@ export class SalesService {
   constructor(
     @InjectRepository(Sale)
     private saleRepository: Repository<Sale>,
+    @InjectRepository(ProductItem)
+    private productItemRepository: Repository<ProductItem>,
     @InjectRepository(Invoice)
     private invoiceRepository: Repository<Invoice>,
     private invoicePrintService: InvoicePrintService,
@@ -79,6 +82,36 @@ export class SalesService {
     }
 
     const allSales = await query.getMany();
+    
+    // Lấy tất cả itemCode unique từ sales
+    const itemCodes = Array.from(
+      new Set(
+        allSales
+          .map((sale) => sale.itemCode)
+          .filter((code): code is string => !!code && code.trim() !== '')
+      )
+    );
+    
+    // Load tất cả products một lần
+    const products = itemCodes.length > 0
+      ? await this.productItemRepository.find({
+          where: { maERP: In(itemCodes) },
+        })
+      : [];
+    
+    // Tạo map để lookup nhanh
+    const productMap = new Map<string, ProductItem>();
+    products.forEach((product) => {
+      if (product.maERP) {
+        productMap.set(product.maERP, product);
+      }
+    });
+    
+    // Enrich sales với product information
+    const enrichedSales = allSales.map((sale) => ({
+      ...sale,
+      product: sale.itemCode ? productMap.get(sale.itemCode) || null : null,
+    }));
 
     // Gộp theo docCode
     const orderMap = new Map<string, {
@@ -94,7 +127,7 @@ export class SalesService {
       sales: any[];
     }>();
 
-    for (const sale of allSales) {
+    for (const sale of enrichedSales) {
       const docCode = sale.docCode;
       
       if (!orderMap.has(docCode)) {
@@ -169,6 +202,36 @@ export class SalesService {
       throw new NotFoundException(`Order with docCode ${docCode} not found`);
     }
 
+    // Lấy tất cả itemCode unique từ sales
+    const itemCodes = Array.from(
+      new Set(
+        sales
+          .map((sale) => sale.itemCode)
+          .filter((code): code is string => !!code && code.trim() !== '')
+      )
+    );
+    
+    // Load tất cả products một lần
+    const products = itemCodes.length > 0
+      ? await this.productItemRepository.find({
+          where: { maERP: In(itemCodes) },
+        })
+      : [];
+    
+    // Tạo map để lookup nhanh
+    const productMap = new Map<string, ProductItem>();
+    products.forEach((product) => {
+      if (product.maERP) {
+        productMap.set(product.maERP, product);
+      }
+    });
+    
+    // Enrich sales với product information
+    const enrichedSales = sales.map((sale) => ({
+      ...sale,
+      product: sale.itemCode ? productMap.get(sale.itemCode) || null : null,
+    }));
+
     // Tính tổng doanh thu của đơn hàng
     const totalRevenue = sales.reduce((sum, sale) => sum + Number(sale.revenue), 0);
     const totalQty = sales.reduce((sum, sale) => sum + Number(sale.qty), 0);
@@ -217,7 +280,7 @@ export class SalesService {
     }
 
     // Gắn promotion tương ứng vào từng dòng sale (chỉ để trả ra API, không lưu DB)
-    const enrichedSales = sales.map((sale) => {
+    const enrichedSalesWithPromotion = enrichedSales.map((sale) => {
       const promCode = sale.promCode;
       const promotion =
         promCode && promotionsByCode[promCode]
@@ -239,7 +302,7 @@ export class SalesService {
       totalRevenue,
       totalQty,
       totalItems: sales.length,
-      sales: enrichedSales,
+      sales: enrichedSalesWithPromotion,
       promotions: promotionsByCode,
     };
   }
