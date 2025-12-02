@@ -7,6 +7,12 @@ export class PersonalInfoDto {
   sexual?: string;
   phone?: string;
   mobile?: string; // Một số API dùng mobile thay vì phone
+  idnumber?: string;
+  enteredat?: string;
+  crm_lead_source?: string;
+  province_name?: string;
+  grade_name?: string;
+  branch_code?: string;
 }
 
 export class SaleDto {

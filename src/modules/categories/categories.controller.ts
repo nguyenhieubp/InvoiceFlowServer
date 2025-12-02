@@ -234,5 +234,25 @@ export class CategoriesController {
       );
     }
   }
+
+  // ========== CUSTOMER ENDPOINTS ==========
+
+  @Get('customers')
+  async findAllCustomers(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.categoriesService.findAllCustomers({
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 50,
+      search,
+    });
+  }
+
+  @Get('customers/:code')
+  async findCustomerByCode(@Param('code') code: string) {
+    return this.categoriesService.findCustomerByCode(code);
+  }
 }
 

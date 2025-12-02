@@ -42,11 +42,14 @@ export class SyncService {
     this.logger.log('Hoàn thành đồng bộ dữ liệu');
   }
 
-  async syncBrand(brandName: string, endpoint: string): Promise<void> {
+  async syncBrand(brandName: string, endpoint: string, useT8: boolean = false): Promise<void> {
     this.logger.log(`Đang đồng bộ dữ liệu từ ${brandName}...`);
 
     try {
-      const url = `${this.n8nBaseUrl}/${endpoint}/daily`;
+      // Nếu useT8 = true, dùng endpoint /t8, ngược lại dùng /daily
+      const url = useT8 
+        ? `${this.n8nBaseUrl}/${endpoint}/t8`
+        : `${this.n8nBaseUrl}/${endpoint}/daily`;
       const response = await firstValueFrom(
         this.httpService.get<SyncApiResponse>(url, {
           headers: { accept: 'application/json' },
@@ -143,17 +146,31 @@ export class SyncService {
         newCustomerData.street = personalInfo.street;
       } else if (personalInfo.address) {
         newCustomerData.street = personalInfo.address;
+        newCustomerData.address = personalInfo.address;
       }
       
       if (personalInfo.birthday) newCustomerData.birthday = new Date(personalInfo.birthday);
       if (personalInfo.sexual) newCustomerData.sexual = personalInfo.sexual;
       
-      // Xử lý số điện thoại: ưu tiên phone, nếu không có thì dùng mobile
+      // Xử lý số điện thoại: lưu cả phone và mobile
       if (personalInfo.phone) {
         newCustomerData.phone = personalInfo.phone;
-      } else if (personalInfo.mobile) {
-        newCustomerData.phone = personalInfo.mobile;
       }
+      if (personalInfo.mobile) {
+        newCustomerData.mobile = personalInfo.mobile;
+        // Nếu chưa có phone thì dùng mobile
+        if (!newCustomerData.phone) {
+          newCustomerData.phone = personalInfo.mobile;
+        }
+      }
+      
+      // Lưu các trường mới
+      if (personalInfo.idnumber) newCustomerData.idnumber = personalInfo.idnumber;
+      if (personalInfo.enteredat) newCustomerData.enteredat = new Date(personalInfo.enteredat);
+      if (personalInfo.crm_lead_source) newCustomerData.crm_lead_source = personalInfo.crm_lead_source;
+      if (personalInfo.province_name) newCustomerData.province_name = personalInfo.province_name;
+      if (personalInfo.grade_name) newCustomerData.grade_name = personalInfo.grade_name;
+      if (personalInfo.branch_code) newCustomerData.branch_code = personalInfo.branch_code;
 
       customer = this.customerRepository.create(newCustomerData);
       customer = await this.customerRepository.save(customer);
@@ -164,20 +181,38 @@ export class SyncService {
       // Xử lý địa chỉ
       if (personalInfo.street !== undefined) {
         customer.street = personalInfo.street;
-      } else if (personalInfo.address !== undefined) {
-        customer.street = personalInfo.address;
+      }
+      if (personalInfo.address !== undefined) {
+        customer.address = personalInfo.address;
+        if (!customer.street) {
+          customer.street = personalInfo.address;
+        }
       }
       
-      // Xử lý số điện thoại
+      // Xử lý số điện thoại: lưu cả phone và mobile
       if (personalInfo.phone !== undefined) {
         customer.phone = personalInfo.phone;
-      } else if (personalInfo.mobile !== undefined) {
-        customer.phone = personalInfo.mobile;
+      }
+      if (personalInfo.mobile !== undefined) {
+        customer.mobile = personalInfo.mobile;
+        // Nếu chưa có phone thì dùng mobile
+        if (!customer.phone) {
+          customer.phone = personalInfo.mobile;
+        }
       }
       
       if (personalInfo.birthday) {
         customer.birthday = new Date(personalInfo.birthday);
       }
+      
+      // Cập nhật các trường mới
+      if (personalInfo.idnumber !== undefined) customer.idnumber = personalInfo.idnumber;
+      if (personalInfo.enteredat) customer.enteredat = new Date(personalInfo.enteredat);
+      if (personalInfo.crm_lead_source !== undefined) customer.crm_lead_source = personalInfo.crm_lead_source;
+      if (personalInfo.province_name !== undefined) customer.province_name = personalInfo.province_name;
+      if (personalInfo.grade_name !== undefined) customer.grade_name = personalInfo.grade_name;
+      if (personalInfo.branch_code !== undefined) customer.branch_code = personalInfo.branch_code;
+      
       await this.customerRepository.save(customer);
     }
 

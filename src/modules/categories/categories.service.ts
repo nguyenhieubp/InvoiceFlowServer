@@ -4,6 +4,8 @@ import { Repository, Like, ILike, DataSource, In } from 'typeorm';
 import { ProductItem } from '../../entities/product-item.entity';
 import { PromotionItem } from '../../entities/promotion-item.entity';
 import { WarehouseItem } from '../../entities/warehouse-item.entity';
+import { Customer } from '../../entities/customer.entity';
+import { Sale } from '../../entities/sale.entity';
 import { CreateProductItemDto, UpdateProductItemDto } from '../../dto/create-product-item.dto';
 import { CreatePromotionItemDto, UpdatePromotionItemDto } from '../../dto/create-promotion-item.dto';
 import { CreateWarehouseItemDto, UpdateWarehouseItemDto } from '../../dto/create-warehouse-item.dto';
@@ -20,6 +22,10 @@ export class CategoriesService {
     private promotionItemRepository: Repository<PromotionItem>,
     @InjectRepository(WarehouseItem)
     private warehouseItemRepository: Repository<WarehouseItem>,
+    @InjectRepository(Customer)
+    private customerRepository: Repository<Customer>,
+    @InjectRepository(Sale)
+    private saleRepository: Repository<Sale>,
     @InjectDataSource()
     private dataSource: DataSource,
   ) {}
@@ -912,6 +918,124 @@ export class CategoriesService {
       this.logger.error(`Error importing warehouses Excel file: ${error.message}`);
       throw new Error(`Lỗi khi import file Excel: ${error.message}`);
     }
+  }
+
+  // ========== CUSTOMER METHODS ==========
+
+  async findAllCustomers(options: {
+    page?: number;
+    limit?: number;
+    search?: string;
+  }) {
+    const { page = 1, limit = 50, search } = options;
+
+    const query = this.customerRepository
+      .createQueryBuilder('customer')
+      .orderBy('customer.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (search) {
+      query.andWhere(
+        '(customer.code ILIKE :search OR customer.name ILIKE :search OR customer.mobile ILIKE :search OR customer.address ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    const [data, total] = await query.getManyAndCount();
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async findCustomerByCode(code: string) {
+    const customer = await this.customerRepository.findOne({
+      where: { code },
+      relations: ['sales'],
+    });
+
+    if (!customer) {
+      throw new NotFoundException(`Customer with code ${code} not found`);
+    }
+
+    // Format response theo cấu trúc data_customer
+    const sales = customer.sales || [];
+    
+    // Map sales to match the expected format
+    // Note: Some fields from the API response may not exist in Sale entity
+    // We'll map available fields and set others to null
+    const formattedSales = sales.map((sale) => {
+      // Format docmonth from docDate
+      const docDate = sale.docDate ? new Date(sale.docDate) : null;
+      const docmonth = docDate ? `${docDate.getFullYear()}/${String(docDate.getMonth() + 1).padStart(2, '0')}` : null;
+      
+      return {
+        qty: sale.qty,
+        cat1: null, // Not in Sale entity
+        cat2: null, // Not in Sale entity
+        cat3: null, // Not in Sale entity
+        ck_tm: null, // Not in Sale entity
+        docid: null, // Not in Sale entity
+        ck_dly: null, // Not in Sale entity
+        serial: sale.soSerial || null,
+        cm_code: null, // Not in Sale entity
+        doccode: sale.docCode,
+        docdate: sale.docDate,
+        line_id: null, // Not in Sale entity
+        revenue: sale.revenue,
+        catcode1: null, // Not in Sale entity
+        catcode2: null, // Not in Sale entity
+        catcode3: null, // Not in Sale entity
+        disc_amt: null, // Not in Sale entity
+        docmonth: docmonth,
+        itemcode: sale.itemCode,
+        itemcost: null, // Not in Sale entity
+        itemname: sale.itemName,
+        linetotal: sale.tienHang || null,
+        ordertype: null, // Not in Sale entity
+        prom_code: sale.promCode || null,
+        totalcost: null, // Not in Sale entity
+        crm_emp_id: null, // Not in Sale entity
+        branch_code: sale.branchCode,
+        description: sale.description || null,
+        doctype_name: null, // Not in Sale entity
+        order_source: null, // Not in Sale entity
+        partner_code: sale.partnerCode || null,
+        partner_name: null, // Not in Sale entity
+        crm_branch_id: null, // Not in Sale entity
+        docsourcetype: sale.docSourceType || null,
+        grade_discamt: null, // Not in Sale entity
+        revenue_wsale: null, // Not in Sale entity
+        saleperson_id: null, // Not in Sale entity
+        revenue_retail: null, // Not in Sale entity
+        paid_by_voucher_ecode_ecoin_bp: null, // Not in Sale entity
+      };
+    });
+
+    return {
+      data_customer: {
+        Personal_Info: {
+          code: customer.code,
+          name: customer.name,
+          mobile: customer.mobile,
+          sexual: customer.sexual,
+          idnumber: customer.idnumber,
+          enteredat: customer.enteredat,
+          crm_lead_source: customer.crm_lead_source,
+          address: customer.address,
+          province_name: customer.province_name,
+          birthday: customer.birthday,
+          grade_name: customer.grade_name,
+          branch_code: customer.branch_code,
+        },
+        Sales: formattedSales,
+      },
+    };
   }
 }
 
