@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, ILike } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, Like, ILike, DataSource, In } from 'typeorm';
 import { ProductItem } from '../../entities/product-item.entity';
 import { PromotionItem } from '../../entities/promotion-item.entity';
 import { WarehouseItem } from '../../entities/warehouse-item.entity';
@@ -20,6 +20,8 @@ export class CategoriesService {
     private promotionItemRepository: Repository<PromotionItem>,
     @InjectRepository(WarehouseItem)
     private warehouseItemRepository: Repository<WarehouseItem>,
+    @InjectDataSource()
+    private dataSource: DataSource,
   ) {}
 
   async findAll(options: {
@@ -294,6 +296,9 @@ export class CategoriesService {
           });
         });
 
+      // Parse tất cả dữ liệu trước
+      const parsedProducts: Array<{ productData: Partial<ProductItem>; rowNumber: number }> = [];
+      
       for (let i = 0; i < nonEmptyRowsWithIndex.length; i++) {
         const { row, originalIndex } = nonEmptyRowsWithIndex[i];
         const rowNumber = originalIndex + 2; // +2 vì bắt đầu từ row 2 (row 1 là header)
@@ -351,38 +356,88 @@ export class CategoriesService {
           // Validate required fields với thông báo chi tiết hơn
           if (!productData.maVatTu || (typeof productData.maVatTu === 'string' && productData.maVatTu.trim() === '')) {
             const availableHeaders = actualHeaders.join(', ');
-            const normalizedHeaders = actualHeaders.map(h => normalizeHeader(h)).join(', ');
             errors.push({
               row: rowNumber,
-              error: `Mã vật tư là bắt buộc nhưng không tìm thấy trong dòng ${rowNumber}. Headers trong file: ${availableHeaders}. Giá trị trong row: ${JSON.stringify(row)}`,
+              error: `Mã vật tư là bắt buộc nhưng không tìm thấy trong dòng ${rowNumber}. Headers trong file: ${availableHeaders}`,
             });
             failed++;
             continue;
           }
 
-          // Kiểm tra xem đã tồn tại chưa (dựa trên maVatTu)
-          const existing = await this.productItemRepository.findOne({
-            where: { maVatTu: productData.maVatTu },
-          });
-
-          if (existing) {
-            // Xóa record cũ và tạo mới thay vì cập nhật
-            await this.productItemRepository.remove(existing);
-          }
-          
-          // Tạo mới (hoặc tạo lại sau khi xóa)
-          const product = this.productItemRepository.create(productData);
-          await this.productItemRepository.save(product);
-
-          success++;
+          parsedProducts.push({ productData, rowNumber });
         } catch (error: any) {
-          this.logger.error(`Error importing row ${rowNumber}: ${error.message}`);
+          this.logger.error(`Error parsing row ${rowNumber}: ${error.message}`);
           errors.push({
             row: rowNumber,
             error: error.message || 'Unknown error',
           });
           failed++;
         }
+      }
+
+      // Tối ưu: Load tất cả existing records trong một query
+      const maVatTuList = parsedProducts.map(p => p.productData.maVatTu).filter(Boolean) as string[];
+      const existingProducts = await this.productItemRepository.find({
+        where: { maVatTu: In(maVatTuList) },
+      });
+      const existingMap = new Map(existingProducts.map(p => [p.maVatTu, p]));
+
+      // Batch processing: xử lý theo từng batch 1000 records
+      const BATCH_SIZE = 1000;
+      const queryRunner = this.dataSource.createQueryRunner();
+      
+      try {
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+
+        for (let i = 0; i < parsedProducts.length; i += BATCH_SIZE) {
+          const batch = parsedProducts.slice(i, i + BATCH_SIZE);
+          const productsToSave: ProductItem[] = [];
+          const productsToDelete: ProductItem[] = [];
+
+          for (const { productData, rowNumber } of batch) {
+            try {
+              const existing = existingMap.get(productData.maVatTu!);
+              
+              if (existing) {
+                // Xóa record cũ
+                productsToDelete.push(existing);
+              }
+              
+              // Tạo entity mới
+              const product = this.productItemRepository.create(productData);
+              productsToSave.push(product);
+            } catch (error: any) {
+              this.logger.error(`Error processing row ${rowNumber}: ${error.message}`);
+              errors.push({
+                row: rowNumber,
+                error: error.message || 'Unknown error',
+              });
+              failed++;
+            }
+          }
+
+          // Bulk delete
+          if (productsToDelete.length > 0) {
+            await queryRunner.manager.remove(productsToDelete);
+          }
+
+          // Bulk insert
+          if (productsToSave.length > 0) {
+            await queryRunner.manager.save(ProductItem, productsToSave);
+            success += productsToSave.length;
+          }
+
+          this.logger.log(`Processed batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(parsedProducts.length / BATCH_SIZE)} (${productsToSave.length} records)`);
+        }
+
+        await queryRunner.commitTransaction();
+      } catch (error: any) {
+        await queryRunner.rollbackTransaction();
+        this.logger.error(`Transaction error: ${error.message}`);
+        throw error;
+      } finally {
+        await queryRunner.release();
       }
 
       return {
