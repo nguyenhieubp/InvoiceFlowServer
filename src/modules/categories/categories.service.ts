@@ -102,10 +102,11 @@ export class CategoriesService {
     errors: Array<{ row: number; error: string }>;
   }> {
     try {
-      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const workbook = XLSX.read(file.buffer, { type: 'buffer', cellDates: false, cellNF: false, cellText: false });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(worksheet, { raw: false }) as any[];
+      // Sử dụng raw: true để lấy giá trị gốc (số), sau đó convert sang string nếu cần
+      const data = XLSX.utils.sheet_to_json(worksheet, { raw: true, defval: null }) as any[];
 
       const errors: Array<{ row: number; error: string }> = [];
       let success = 0;
@@ -252,10 +253,55 @@ export class CategoriesService {
 
       // Normalize boolean values
       const normalizeBoolean = (value: any): boolean | undefined => {
-        if (value === null || value === undefined || value === '') return undefined;
+        // Xử lý null/undefined/empty
+        if (value === null || value === undefined) return undefined;
+        
+        // Xử lý boolean trực tiếp
         if (typeof value === 'boolean') return value;
-        const str = String(value).toLowerCase().trim();
-        return str === 'true' || str === '1' || str === 'yes' || str === 'có' || str === 'x';
+        
+        // Xử lý số: 1 = true, 0 = false, các số khác = undefined
+        if (typeof value === 'number') {
+          // Kiểm tra NaN và Infinity
+          if (isNaN(value) || !isFinite(value)) return undefined;
+          if (value === 1 || value === 1.0 || Math.abs(value - 1) < 0.0001) return true;
+          if (value === 0 || value === 0.0 || Math.abs(value) < 0.0001) return false;
+          return undefined;
+        }
+        
+        // Xử lý string
+        if (typeof value === 'string') {
+          const str = value.trim();
+          
+          // Nếu là string rỗng hoặc chỉ có khoảng trắng, return undefined
+          if (str === '') return undefined;
+          
+          // Bỏ qua các ký tự đặc biệt không hợp lệ (như $ü)
+          // Chỉ xử lý nếu string chứa ký tự hợp lệ
+          if (!/^[\d\s\.,\-+eE]+$/.test(str) && !/^(true|false|yes|no|có|không|x|y|n|1|0)$/i.test(str)) {
+            // Nếu không phải số hoặc giá trị boolean text hợp lệ, return undefined
+            return undefined;
+          }
+          
+          const lowerStr = str.toLowerCase();
+          
+          // Thử parse thành số trước (để xử lý "1.0", " 1 ", "0", "0.0", etc.)
+          const numValue = parseFloat(lowerStr);
+          if (!isNaN(numValue) && isFinite(numValue)) {
+            if (numValue === 1 || numValue === 1.0 || Math.abs(numValue - 1) < 0.0001) return true;
+            if (numValue === 0 || numValue === 0.0 || Math.abs(numValue) < 0.0001) return false;
+          }
+          
+          // Xử lý các giá trị text
+          if (lowerStr === 'true' || lowerStr === 'yes' || lowerStr === 'có' || lowerStr === 'x' || lowerStr === 'y' || lowerStr === '1') {
+            return true;
+          }
+          if (lowerStr === 'false' || lowerStr === 'no' || lowerStr === 'không' || lowerStr === 'n' || lowerStr === '0') {
+            return false;
+          }
+        }
+        
+        // Nếu không match, return undefined (không set giá trị)
+        return undefined;
       };
 
       // Normalize number values
@@ -321,17 +367,23 @@ export class CategoriesService {
             
             if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
               const rawValue = row[actualHeader];
-              // Kiểm tra nếu là string rỗng hoặc chỉ có khoảng trắng
-              if (typeof rawValue === 'string' && rawValue.trim() === '') {
-                continue;
-              }
-
-              // Xử lý boolean fields
+              
+              // Xử lý boolean fields trước (để xử lý cả giá trị 0)
               if (fieldName.includes('theoDoi') || fieldName === 'nhieuDvt' || fieldName === 'suaTkVatTu' || fieldName === 'choPhepTaoLoNgayKhiNhap') {
                 const boolValue = normalizeBoolean(rawValue);
+                // Lưu cả true và false (chỉ bỏ qua khi undefined)
                 if (boolValue !== undefined) {
                   productData[fieldName] = boolValue;
+                  this.logger.debug(`Row ${rowNumber}: Set ${fieldName} = ${boolValue} (from rawValue: ${rawValue}, type: ${typeof rawValue})`);
+                } else {
+                  this.logger.debug(`Row ${rowNumber}: Skip ${fieldName} (rawValue: ${rawValue}, type: ${typeof rawValue}, normalized: undefined)`);
                 }
+                continue; // Đã xử lý boolean, skip các xử lý khác
+              }
+              
+              // Kiểm tra nếu là string rỗng hoặc chỉ có khoảng trắng (cho các field khác)
+              if (typeof rawValue === 'string' && rawValue.trim() === '') {
+                continue;
               }
               // Xử lý number fields
               else if (
@@ -532,10 +584,11 @@ export class CategoriesService {
     errors: Array<{ row: number; error: string }>;
   }> {
     try {
-      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const workbook = XLSX.read(file.buffer, { type: 'buffer', cellDates: false, cellNF: false, cellText: false });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(worksheet, { raw: false }) as any[];
+      // Sử dụng raw: true để lấy giá trị gốc (số), sau đó convert sang string nếu cần
+      const data = XLSX.utils.sheet_to_json(worksheet, { raw: true, defval: null }) as any[];
 
       const errors: Array<{ row: number; error: string }> = [];
       let success = 0;
@@ -608,10 +661,55 @@ export class CategoriesService {
 
       // Normalize boolean values
       const normalizeBoolean = (value: any): boolean | undefined => {
-        if (value === null || value === undefined || value === '') return undefined;
+        // Xử lý null/undefined/empty
+        if (value === null || value === undefined) return undefined;
+        
+        // Xử lý boolean trực tiếp
         if (typeof value === 'boolean') return value;
-        const str = String(value).toLowerCase().trim();
-        return str === 'true' || str === '1' || str === 'yes' || str === 'có' || str === 'x';
+        
+        // Xử lý số: 1 = true, 0 = false, các số khác = undefined
+        if (typeof value === 'number') {
+          // Kiểm tra NaN và Infinity
+          if (isNaN(value) || !isFinite(value)) return undefined;
+          if (value === 1 || value === 1.0 || Math.abs(value - 1) < 0.0001) return true;
+          if (value === 0 || value === 0.0 || Math.abs(value) < 0.0001) return false;
+          return undefined;
+        }
+        
+        // Xử lý string
+        if (typeof value === 'string') {
+          const str = value.trim();
+          
+          // Nếu là string rỗng hoặc chỉ có khoảng trắng, return undefined
+          if (str === '') return undefined;
+          
+          // Bỏ qua các ký tự đặc biệt không hợp lệ (như $ü)
+          // Chỉ xử lý nếu string chứa ký tự hợp lệ
+          if (!/^[\d\s\.,\-+eE]+$/.test(str) && !/^(true|false|yes|no|có|không|x|y|n|1|0)$/i.test(str)) {
+            // Nếu không phải số hoặc giá trị boolean text hợp lệ, return undefined
+            return undefined;
+          }
+          
+          const lowerStr = str.toLowerCase();
+          
+          // Thử parse thành số trước (để xử lý "1.0", " 1 ", "0", "0.0", etc.)
+          const numValue = parseFloat(lowerStr);
+          if (!isNaN(numValue) && isFinite(numValue)) {
+            if (numValue === 1 || numValue === 1.0 || Math.abs(numValue - 1) < 0.0001) return true;
+            if (numValue === 0 || numValue === 0.0 || Math.abs(numValue) < 0.0001) return false;
+          }
+          
+          // Xử lý các giá trị text
+          if (lowerStr === 'true' || lowerStr === 'yes' || lowerStr === 'có' || lowerStr === 'x' || lowerStr === 'y' || lowerStr === '1') {
+            return true;
+          }
+          if (lowerStr === 'false' || lowerStr === 'no' || lowerStr === 'không' || lowerStr === 'n' || lowerStr === '0') {
+            return false;
+          }
+        }
+        
+        // Nếu không match, return undefined (không set giá trị)
+        return undefined;
       };
 
       // Lấy danh sách headers thực tế từ Excel
@@ -647,30 +745,27 @@ export class CategoriesService {
             
             if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
               const rawValue = row[actualHeader];
+              
+              // Kiểm tra nếu là string rỗng hoặc chỉ có khoảng trắng
               if (typeof rawValue === 'string' && rawValue.trim() === '') {
-                continue;
+                continue; // Không set, để null
               }
-
-              // Xử lý boolean fields
-              if (fieldName.includes('muaHangGiamGia') || 
-                  fieldName.includes('ck') || 
-                  fieldName === 'voucher' || 
-                  fieldName === 'coupon' || 
-                  fieldName === 'ecode' || 
-                  fieldName === 'tangHang' || 
-                  fieldName === 'nskm' || 
-                  fieldName === 'combo') {
-                const boolValue = normalizeBoolean(rawValue);
-                if (boolValue !== undefined) {
-                  promotionData[fieldName] = boolValue;
+              
+              // Kiểm tra nếu là số 0 hoặc string "0" (kể cả có khoảng trắng) → không set (để null)
+              if (typeof rawValue === 'number' && (rawValue === 0 || rawValue === 0.0)) {
+                continue; // Không set, để null
+              }
+              if (typeof rawValue === 'string') {
+                const trimmed = rawValue.trim();
+                if (trimmed === '0' || trimmed === '0.0' || trimmed === '') {
+                  continue; // Không set, để null
                 }
               }
-              // Xử lý string fields
-              else {
-                const stringValue = String(rawValue).trim();
-                if (stringValue !== '') {
-                  promotionData[fieldName] = stringValue;
-                }
+              
+              // Lưu trực tiếp giá trị từ Excel (không normalize boolean)
+              // Dữ liệu từ Excel trả ra gì thì viết vào như vậy
+              if (rawValue !== null && rawValue !== undefined) {
+                promotionData[fieldName] = rawValue;
               }
             }
           }

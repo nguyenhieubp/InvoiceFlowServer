@@ -17,32 +17,32 @@ export class PromotionItem {
   @Column({ type: 'text', nullable: true })
   tenChuongTrinh?: string;
 
-  @Column({ type: 'boolean', default: false })
-  muaHangGiamGia?: boolean;
+  @Column({ nullable: true })
+  muaHangGiamGia?: string;
 
-  @Column({ type: 'boolean', default: false })
-  ckTheoCS?: boolean; // CK theo CS
+  @Column({ nullable: true })
+  ckTheoCS?: string; // CK theo CS
 
-  @Column({ type: 'boolean', default: false })
-  ckVIP?: boolean; // CK VIP
+  @Column({ nullable: true })
+  ckVIP?: string; // CK VIP
 
-  @Column({ type: 'boolean', default: false })
-  voucher?: boolean; // VOUCHER
+  @Column({ nullable: true })
+  voucher?: string; // VOUCHER
 
-  @Column({ type: 'boolean', default: false })
-  coupon?: boolean; // COUPON
+  @Column({ nullable: true })
+  coupon?: string; // COUPON
 
-  @Column({ type: 'boolean', default: false })
-  ecode?: boolean; // ECODE
+  @Column({ nullable: true })
+  ecode?: string; // ECODE
 
-  @Column({ type: 'boolean', default: false })
-  tangHang?: boolean; // Tặng hàng
+  @Column({ nullable: true })
+  tangHang?: string; // Tặng hàng
 
-  @Column({ type: 'boolean', default: false })
-  nskm?: boolean; // NSKM
+  @Column({ nullable: true })
+  nskm?: string; // NSKM
 
-  @Column({ type: 'boolean', default: false })
-  combo?: boolean; // Combo
+  @Column({ nullable: true })
+  combo?: string; // Combo
 
   @Column({ nullable: true })
   maPhi?: string;

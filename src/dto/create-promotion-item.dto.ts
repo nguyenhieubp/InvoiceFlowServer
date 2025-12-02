@@ -1,5 +1,4 @@
-import { IsOptional, IsString, IsBoolean } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsOptional, IsString } from 'class-validator';
 
 export class CreatePromotionItemDto {
   @IsOptional()
@@ -11,49 +10,40 @@ export class CreatePromotionItemDto {
   tenChuongTrinh?: string;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  muaHangGiamGia?: boolean;
+  @IsString()
+  muaHangGiamGia?: string;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  ckTheoCS?: boolean;
+  @IsString()
+  ckTheoCS?: string;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  ckVIP?: boolean;
+  @IsString()
+  ckVIP?: string;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  voucher?: boolean;
+  @IsString()
+  voucher?: string;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  coupon?: boolean;
+  @IsString()
+  coupon?: string;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  ecode?: boolean;
+  @IsString()
+  ecode?: string;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  tangHang?: boolean;
+  @IsString()
+  tangHang?: string;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  nskm?: boolean;
+  @IsString()
+  nskm?: string;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  combo?: boolean;
+  @IsString()
+  combo?: string;
 
   @IsOptional()
   @IsString()
