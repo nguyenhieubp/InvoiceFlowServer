@@ -26,6 +26,9 @@ export class Sale {
   @Column({ nullable: true, default: 'sale' })
   docSourceType: string;
 
+  @Column({ nullable: true })
+  ordertype?: string; // Loại đơn hàng (LAM_DV, NORMAL, etc.)
+
   @Column({ type: 'text', nullable: true })
   description: string;
 
@@ -307,6 +310,88 @@ export class Sale {
 
   @Column({ nullable: true })
   soSerial?: string; // Số serial
+
+  // ========== CÁC TRƯỜNG BỔ SUNG TỪ API ==========
+  @Column({ nullable: true })
+  cat1?: string; // Category 1
+
+  @Column({ nullable: true })
+  cat2?: string; // Category 2
+
+  @Column({ nullable: true })
+  cat3?: string; // Category 3
+
+  @Column({ nullable: true })
+  catcode1?: string; // Category code 1
+
+  @Column({ nullable: true })
+  catcode2?: string; // Category code 2
+
+  @Column({ nullable: true })
+  catcode3?: string; // Category code 3
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  ck_tm?: number; // Chiết khấu thương mại
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  ck_dly?: number; // Chiết khấu đại lý
+
+  @Column({ nullable: true })
+  docid?: number; // Document ID
+
+  @Column({ nullable: true })
+  serial?: string; // Serial number
+
+  @Column({ nullable: true })
+  cm_code?: string; // CM code
+
+  @Column({ nullable: true })
+  line_id?: number; // Line ID
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  disc_amt?: number; // Discount amount
+
+  @Column({ nullable: true })
+  docmonth?: string; // Document month
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  itemcost?: number; // Item cost
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  linetotal?: number; // Line total
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  totalcost?: number; // Total cost
+
+  @Column({ nullable: true })
+  crm_emp_id?: number; // CRM employee ID
+
+  @Column({ nullable: true })
+  doctype_name?: string; // Document type name
+
+  @Column({ nullable: true })
+  order_source?: string; // Order source
+
+  @Column({ nullable: true })
+  partner_name?: string; // Partner name
+
+  @Column({ nullable: true })
+  crm_branch_id?: number; // CRM branch ID
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  grade_discamt?: number; // Grade discount amount
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  revenue_wsale?: number; // Revenue wholesale
+
+  @Column({ nullable: true })
+  saleperson_id?: number; // Salesperson ID
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  revenue_retail?: number; // Revenue retail
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  paid_by_voucher_ecode_ecoin_bp?: number; // Paid by voucher/ecoin/BP
 
   @CreateDateColumn()
   createdAt: Date;

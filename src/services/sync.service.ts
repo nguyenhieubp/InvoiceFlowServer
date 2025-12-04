@@ -274,9 +274,40 @@ export class SyncService {
             isProcessed: false, // Mặc định chưa xử lý (chưa tạo invoice)
           };
           
+          // Các trường optional
           if (saleData.description) saleDataToCreate.description = saleData.description;
           if (saleData.kenh) saleDataToCreate.kenh = saleData.kenh;
           if (saleData.prom_code) saleDataToCreate.promCode = saleData.prom_code;
+          if (saleData.ordertype) saleDataToCreate.ordertype = saleData.ordertype;
+          
+          // Các trường bổ sung từ API
+          if (saleData.cat1 !== undefined) saleDataToCreate.cat1 = saleData.cat1;
+          if (saleData.cat2 !== undefined) saleDataToCreate.cat2 = saleData.cat2;
+          if (saleData.cat3 !== undefined) saleDataToCreate.cat3 = saleData.cat3;
+          if (saleData.catcode1 !== undefined) saleDataToCreate.catcode1 = saleData.catcode1;
+          if (saleData.catcode2 !== undefined) saleDataToCreate.catcode2 = saleData.catcode2;
+          if (saleData.catcode3 !== undefined) saleDataToCreate.catcode3 = saleData.catcode3;
+          if (saleData.ck_tm !== undefined && saleData.ck_tm !== null) saleDataToCreate.ck_tm = saleData.ck_tm;
+          if (saleData.ck_dly !== undefined && saleData.ck_dly !== null) saleDataToCreate.ck_dly = saleData.ck_dly;
+          if (saleData.docid !== undefined) saleDataToCreate.docid = saleData.docid;
+          if (saleData.serial !== undefined && saleData.serial !== null) saleDataToCreate.serial = saleData.serial;
+          if (saleData.cm_code !== undefined && saleData.cm_code !== null) saleDataToCreate.cm_code = saleData.cm_code;
+          if (saleData.line_id !== undefined) saleDataToCreate.line_id = saleData.line_id;
+          if (saleData.disc_amt !== undefined) saleDataToCreate.disc_amt = saleData.disc_amt;
+          if (saleData.docmonth !== undefined) saleDataToCreate.docmonth = saleData.docmonth;
+          if (saleData.itemcost !== undefined) saleDataToCreate.itemcost = saleData.itemcost;
+          if (saleData.linetotal !== undefined) saleDataToCreate.linetotal = saleData.linetotal;
+          if (saleData.totalcost !== undefined) saleDataToCreate.totalcost = saleData.totalcost;
+          if (saleData.crm_emp_id !== undefined) saleDataToCreate.crm_emp_id = saleData.crm_emp_id;
+          if (saleData.doctype_name !== undefined) saleDataToCreate.doctype_name = saleData.doctype_name;
+          if (saleData.order_source !== undefined && saleData.order_source !== null) saleDataToCreate.order_source = saleData.order_source;
+          if (saleData.partner_name !== undefined) saleDataToCreate.partner_name = saleData.partner_name;
+          if (saleData.crm_branch_id !== undefined) saleDataToCreate.crm_branch_id = saleData.crm_branch_id;
+          if (saleData.grade_discamt !== undefined) saleDataToCreate.grade_discamt = saleData.grade_discamt;
+          if (saleData.revenue_wsale !== undefined) saleDataToCreate.revenue_wsale = saleData.revenue_wsale;
+          if (saleData.saleperson_id !== undefined) saleDataToCreate.saleperson_id = saleData.saleperson_id;
+          if (saleData.revenue_retail !== undefined) saleDataToCreate.revenue_retail = saleData.revenue_retail;
+          if (saleData.paid_by_voucher_ecode_ecoin_bp !== undefined) saleDataToCreate.paid_by_voucher_ecode_ecoin_bp = saleData.paid_by_voucher_ecode_ecoin_bp;
 
           const sale = this.saleRepository.create(saleDataToCreate);
           await this.saleRepository.save(sale);
