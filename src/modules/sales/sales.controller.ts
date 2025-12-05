@@ -12,6 +12,7 @@ export class SalesController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('groupBy') groupBy?: string,
+    @Query('date') date?: string, // Format: DDMMMYYYY (ví dụ: 04DEC2025)
   ) {
     // Nếu groupBy=order thì trả về danh sách đơn hàng (gộp theo docCode)
     if (groupBy === 'order') {
@@ -20,6 +21,7 @@ export class SalesController {
         isProcessed: processed === 'true' ? true : processed === 'false' ? false : undefined,
         page: page ? parseInt(page) : 1,
         limit: limit ? parseInt(limit) : 50,
+        date, // Pass date parameter
       });
     }
     
@@ -58,6 +60,14 @@ export class SalesController {
   @Post('mark-processed-from-invoices')
   async markProcessedOrdersFromInvoices() {
     return this.salesService.markProcessedOrdersFromInvoices();
+  }
+
+  @Post('sync-from-zappy')
+  async syncFromZappy(@Body('date') date: string) {
+    if (!date) {
+      throw new BadRequestException('Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 04DEC2025)');
+    }
+    return this.salesService.syncFromZappy(date);
   }
 }
 

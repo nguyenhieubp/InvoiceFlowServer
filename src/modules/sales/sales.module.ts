@@ -8,6 +8,7 @@ import { Customer } from '../../entities/customer.entity';
 import { ProductItem } from '../../entities/product-item.entity';
 import { InvoicePrintService } from '../../services/invoice-print.service';
 import { InvoiceService } from '../../services/invoice.service';
+import { ZappyApiService } from '../../services/zappy-api.service';
 import { Invoice } from '../../entities/invoice.entity';
 import { InvoiceItem } from '../../entities/invoice-item.entity';
 import { InvoicesModule } from '../invoices/invoices.module';
@@ -19,7 +20,7 @@ import { InvoicesModule } from '../invoices/invoices.module';
     forwardRef(() => InvoicesModule),
   ],
   controllers: [SalesController],
-  providers: [SalesService, InvoicePrintService],
+  providers: [SalesService, InvoicePrintService, ZappyApiService],
   exports: [SalesService],
 })
 export class SalesModule {}

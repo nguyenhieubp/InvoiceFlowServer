@@ -3,10 +3,13 @@ import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Sale } from '../../entities/sale.entity';
+import { Customer } from '../../entities/customer.entity';
 import { ProductItem } from '../../entities/product-item.entity';
 import { Invoice } from '../../entities/invoice.entity';
 import { InvoicePrintService } from '../../services/invoice-print.service';
 import { InvoiceService } from '../../services/invoice.service';
+import { ZappyApiService } from '../../services/zappy-api.service';
+import { Order } from '../../types/order.types';
 
 @Injectable()
 export class SalesService {
@@ -15,6 +18,8 @@ export class SalesService {
   constructor(
     @InjectRepository(Sale)
     private saleRepository: Repository<Sale>,
+    @InjectRepository(Customer)
+    private customerRepository: Repository<Customer>,
     @InjectRepository(ProductItem)
     private productItemRepository: Repository<ProductItem>,
     @InjectRepository(Invoice)
@@ -22,6 +27,7 @@ export class SalesService {
     private invoicePrintService: InvoicePrintService,
     private invoiceService: InvoiceService,
     private httpService: HttpService,
+    private zappyApiService: ZappyApiService,
   ) {}
 
   async findAll(options: {
@@ -63,8 +69,42 @@ export class SalesService {
     isProcessed?: boolean;
     page?: number;
     limit?: number;
+    date?: string; // Format: DDMMMYYYY (ví dụ: 04DEC2025)
   }) {
-    const { brand, isProcessed, page = 1, limit = 50 } = options;
+    const { brand, isProcessed, page = 1, limit = 50, date } = options;
+
+    // Nếu có date parameter, lấy dữ liệu từ Zappy API
+    if (date) {
+      try {
+        const orders = await this.zappyApiService.getDailySales(date);
+        
+        // Filter by brand nếu có
+        let filteredOrders = orders;
+        if (brand) {
+          filteredOrders = orders.filter(
+            (order) => order.customer.brand?.toLowerCase() === brand.toLowerCase()
+          );
+        }
+
+        // Phân trang
+        const total = filteredOrders.length;
+        const startIndex = (page - 1) * limit;
+        const endIndex = startIndex + limit;
+        const paginatedOrders = filteredOrders.slice(startIndex, endIndex);
+
+        return {
+          data: paginatedOrders,
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        };
+      } catch (error: any) {
+        this.logger.error(`Error fetching orders from Zappy API: ${error?.message || error}`);
+        // Fallback to database if Zappy API fails
+        this.logger.warn('Falling back to database query');
+      }
+    }
 
     // Lấy tất cả sales với filter
     let query = this.saleRepository
@@ -577,6 +617,242 @@ export class SalesService {
     await this.invoiceRepository.save(invoice);
 
     return invoice;
+  }
+
+  /**
+   * Đồng bộ dữ liệu từ Zappy API và lưu vào database
+   * @param date - Ngày theo format DDMMMYYYY (ví dụ: 04DEC2025)
+   * @returns Kết quả đồng bộ
+   */
+  async syncFromZappy(date: string): Promise<{
+    success: boolean;
+    message: string;
+    ordersCount: number;
+    salesCount: number;
+    customersCount: number;
+    errors?: string[];
+  }> {
+    this.logger.log(`Bắt đầu đồng bộ dữ liệu từ Zappy API cho ngày ${date}`);
+
+    try {
+      // Lấy dữ liệu từ Zappy API
+      const orders = await this.zappyApiService.getDailySales(date);
+
+      if (orders.length === 0) {
+        return {
+          success: true,
+          message: `Không có dữ liệu để đồng bộ cho ngày ${date}`,
+          ordersCount: 0,
+          salesCount: 0,
+          customersCount: 0,
+        };
+      }
+
+      let salesCount = 0;
+      let customersCount = 0;
+      const errors: string[] = [];
+
+      // Collect tất cả branchCodes để fetch departments
+      const branchCodes = Array.from(
+        new Set(
+          orders
+            .map((o) => o.branchCode)
+            .filter((code): code is string => !!code && code.trim() !== '')
+        )
+      );
+
+      // Fetch departments để lấy company và map sang brand
+      const departmentMap = new Map<string, { company?: string }>();
+      for (const branchCode of branchCodes) {
+        try {
+          const response = await this.httpService.axiosRef.get(
+            `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+            { headers: { accept: 'application/json' } },
+          );
+          const department = response?.data?.data?.items?.[0];
+          if (department?.company) {
+            departmentMap.set(branchCode, { company: department.company });
+          }
+        } catch (error) {
+          this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+        }
+      }
+
+      // Map company sang brand
+      const mapCompanyToBrand = (company: string | null | undefined): string => {
+        if (!company) return '';
+        const companyUpper = company.toUpperCase();
+        const brandMap: Record<string, string> = {
+          'F3': 'f3',
+          'FACIALBAR': 'f3',
+          'MENARD': 'menard',
+          'CHANDO': 'chando',
+          'LABHAIR': 'labhair',
+          'YAMAN': 'yaman',
+        };
+        return brandMap[companyUpper] || company.toLowerCase();
+      };
+
+      // Xử lý từng order
+      for (const order of orders) {
+        try {
+          // Lấy brand từ department.company
+          const department = departmentMap.get(order.branchCode);
+          const brandFromDepartment = department?.company
+            ? mapCompanyToBrand(department.company)
+            : order.customer.brand || '';
+
+          // Tìm hoặc tạo customer
+          let customer = await this.customerRepository.findOne({
+            where: { code: order.customer.code },
+          });
+
+          if (!customer) {
+            const newCustomer = this.customerRepository.create({
+              code: order.customer.code,
+              name: order.customer.name,
+              brand: brandFromDepartment,
+              mobile: order.customer.mobile,
+              sexual: order.customer.sexual,
+              idnumber: order.customer.idnumber,
+              enteredat: order.customer.enteredat ? new Date(order.customer.enteredat) : null,
+              crm_lead_source: order.customer.crm_lead_source,
+              address: order.customer.address,
+              province_name: order.customer.province_name,
+              birthday: order.customer.birthday ? new Date(order.customer.birthday) : null,
+              grade_name: order.customer.grade_name,
+              branch_code: order.customer.branch_code,
+            } as Partial<Customer>);
+            customer = await this.customerRepository.save(newCustomer);
+            customersCount++;
+          } else {
+            // Cập nhật thông tin customer nếu cần
+            customer.name = order.customer.name || customer.name;
+            customer.mobile = order.customer.mobile || customer.mobile;
+            customer.grade_name = order.customer.grade_name || customer.grade_name;
+            // Cập nhật brand từ department nếu có
+            if (brandFromDepartment) {
+              customer.brand = brandFromDepartment;
+            }
+            customer = await this.customerRepository.save(customer);
+          }
+
+          // Đảm bảo customer không null
+          if (!customer) {
+            const errorMsg = `Không thể tạo hoặc tìm customer với code ${order.customer.code}`;
+            this.logger.error(errorMsg);
+            errors.push(errorMsg);
+            continue;
+          }
+
+          // Xử lý từng sale trong order
+          if (order.sales && order.sales.length > 0) {
+            for (const saleItem of order.sales) {
+              try {
+                // Kiểm tra xem sale đã tồn tại chưa (dựa trên docCode, itemCode)
+                const existingSale = await this.saleRepository.findOne({
+                  where: {
+                    docCode: order.docCode,
+                    itemCode: saleItem.itemCode,
+                    customer: { id: customer.id },
+                  },
+                });
+
+                if (existingSale) {
+                  // Cập nhật sale đã tồn tại
+                  existingSale.qty = saleItem.qty || existingSale.qty;
+                  existingSale.revenue = saleItem.revenue || existingSale.revenue;
+                  existingSale.linetotal = saleItem.linetotal || existingSale.linetotal;
+                  existingSale.tienHang = saleItem.tienHang || existingSale.tienHang;
+                  existingSale.giaBan = saleItem.giaBan || existingSale.giaBan;
+                  existingSale.itemName = saleItem.itemName || existingSale.itemName;
+                  existingSale.ordertype = saleItem.ordertype || existingSale.ordertype;
+                  existingSale.branchCode = saleItem.branchCode || existingSale.branchCode;
+                  existingSale.promCode = saleItem.promCode || existingSale.promCode;
+                  existingSale.serial = saleItem.serial || existingSale.serial;
+                  existingSale.disc_amt = saleItem.disc_amt || existingSale.disc_amt;
+                  existingSale.grade_discamt = saleItem.grade_discamt || existingSale.grade_discamt;
+                  existingSale.paid_by_voucher_ecode_ecoin_bp = saleItem.paid_by_voucher_ecode_ecoin_bp || existingSale.paid_by_voucher_ecode_ecoin_bp;
+                  existingSale.saleperson_id = saleItem.saleperson_id || existingSale.saleperson_id;
+                  existingSale.partnerCode = saleItem.partnerCode || existingSale.partnerCode;
+                  existingSale.partner_name = saleItem.partner_name || existingSale.partner_name;
+                  existingSale.order_source = saleItem.order_source || existingSale.order_source;
+                  // Category fields
+                  existingSale.cat1 = saleItem.cat1 !== undefined ? saleItem.cat1 : existingSale.cat1;
+                  existingSale.cat2 = saleItem.cat2 !== undefined ? saleItem.cat2 : existingSale.cat2;
+                  existingSale.cat3 = saleItem.cat3 !== undefined ? saleItem.cat3 : existingSale.cat3;
+                  existingSale.catcode1 = saleItem.catcode1 !== undefined ? saleItem.catcode1 : existingSale.catcode1;
+                  existingSale.catcode2 = saleItem.catcode2 !== undefined ? saleItem.catcode2 : existingSale.catcode2;
+                  existingSale.catcode3 = saleItem.catcode3 !== undefined ? saleItem.catcode3 : existingSale.catcode3;
+                  await this.saleRepository.save(existingSale);
+                } else {
+                  // Tạo sale mới
+                  const newSale = this.saleRepository.create({
+                    docCode: order.docCode,
+                    docDate: new Date(order.docDate),
+                    branchCode: order.branchCode,
+                    docSourceType: order.docSourceType,
+                    ordertype: saleItem.ordertype,
+                    description: saleItem.description,
+                    partnerCode: saleItem.partnerCode,
+                    itemCode: saleItem.itemCode || '',
+                    itemName: saleItem.itemName || '',
+                    qty: saleItem.qty || 0,
+                    revenue: saleItem.revenue || 0,
+                    linetotal: saleItem.linetotal || saleItem.revenue || 0,
+                    tienHang: saleItem.tienHang || saleItem.linetotal || saleItem.revenue || 0,
+                    giaBan: saleItem.giaBan || 0,
+                    promCode: saleItem.promCode,
+                    serial: saleItem.serial,
+                    disc_amt: saleItem.disc_amt,
+                    grade_discamt: saleItem.grade_discamt,
+                    paid_by_voucher_ecode_ecoin_bp: saleItem.paid_by_voucher_ecode_ecoin_bp,
+                    saleperson_id: saleItem.saleperson_id,
+                    partner_name: saleItem.partner_name,
+                    order_source: saleItem.order_source,
+                    // Category fields
+                    cat1: saleItem.cat1,
+                    cat2: saleItem.cat2,
+                    cat3: saleItem.cat3,
+                    catcode1: saleItem.catcode1,
+                    catcode2: saleItem.catcode2,
+                    catcode3: saleItem.catcode3,
+                    customer: customer,
+                    isProcessed: false,
+                  } as Partial<Sale>);
+                  await this.saleRepository.save(newSale);
+                  salesCount++;
+                }
+              } catch (saleError: any) {
+                const errorMsg = `Lỗi khi lưu sale ${order.docCode}/${saleItem.itemCode}: ${saleError?.message || saleError}`;
+                this.logger.error(errorMsg);
+                errors.push(errorMsg);
+              }
+            }
+          }
+        } catch (orderError: any) {
+          const errorMsg = `Lỗi khi xử lý order ${order.docCode}: ${orderError?.message || orderError}`;
+          this.logger.error(errorMsg);
+          errors.push(errorMsg);
+        }
+      }
+
+      this.logger.log(
+        `Hoàn thành đồng bộ: ${orders.length} orders, ${salesCount} sales mới, ${customersCount} customers mới`,
+      );
+
+      return {
+        success: errors.length === 0,
+        message: `Đồng bộ thành công ${orders.length} đơn hàng cho ngày ${date}`,
+        ordersCount: orders.length,
+        salesCount,
+        customersCount,
+        errors: errors.length > 0 ? errors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ từ Zappy API: ${error?.message || error}`);
+      throw error;
+    }
   }
 }
 
