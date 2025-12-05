@@ -637,6 +637,27 @@ export class SalesService {
     try {
       // Lấy dữ liệu từ Zappy API
       const orders = await this.zappyApiService.getDailySales(date);
+      
+      // Lấy dữ liệu cash/voucher từ get_daily_cash để enrich
+      let cashData: any[] = [];
+      try {
+        cashData = await this.zappyApiService.getDailyCash(date);
+        this.logger.log(`Fetched ${cashData.length} cash records for date ${date}`);
+      } catch (error) {
+        this.logger.warn(`Failed to fetch daily cash data: ${error}`);
+      }
+
+      // Tạo map cash data theo so_code để dễ lookup
+      const cashMapBySoCode = new Map<string, any[]>();
+      cashData.forEach((cash) => {
+        const soCode = cash.so_code || cash.master_code;
+        if (soCode) {
+          if (!cashMapBySoCode.has(soCode)) {
+            cashMapBySoCode.set(soCode, []);
+          }
+          cashMapBySoCode.get(soCode)!.push(cash);
+        }
+      });
 
       if (orders.length === 0) {
         return {
@@ -745,6 +766,10 @@ export class SalesService {
             continue;
           }
 
+          // Lấy cash/voucher data cho order này
+          const orderCashData = cashMapBySoCode.get(order.docCode) || [];
+          const voucherData = orderCashData.filter((cash) => cash.fop_syscode === 'VOUCHER');
+          
           // Xử lý từng sale trong order
           if (order.sales && order.sales.length > 0) {
             for (const saleItem of order.sales) {
@@ -757,6 +782,16 @@ export class SalesService {
                     customer: { id: customer.id },
                   },
                 });
+                
+                // Enrich voucher data từ get_daily_cash
+                let voucherRefno: string | undefined;
+                let voucherAmount: number | undefined;
+                if (voucherData.length > 0) {
+                  // Lấy voucher đầu tiên (có thể có nhiều voucher)
+                  const firstVoucher = voucherData[0];
+                  voucherRefno = firstVoucher.refno;
+                  voucherAmount = firstVoucher.total_in || 0;
+                }
 
                 if (existingSale) {
                   // Cập nhật sale đã tồn tại
@@ -772,7 +807,10 @@ export class SalesService {
                   existingSale.serial = saleItem.serial || existingSale.serial;
                   existingSale.disc_amt = saleItem.disc_amt || existingSale.disc_amt;
                   existingSale.grade_discamt = saleItem.grade_discamt || existingSale.grade_discamt;
+                  existingSale.other_discamt = saleItem.other_discamt !== undefined ? saleItem.other_discamt : existingSale.other_discamt;
+                  existingSale.chietKhauMuaHangGiamGia = saleItem.chietKhauMuaHangGiamGia !== undefined ? saleItem.chietKhauMuaHangGiamGia : existingSale.chietKhauMuaHangGiamGia;
                   existingSale.paid_by_voucher_ecode_ecoin_bp = saleItem.paid_by_voucher_ecode_ecoin_bp || existingSale.paid_by_voucher_ecode_ecoin_bp;
+                  existingSale.maCa = saleItem.shift_code || existingSale.maCa;
                   existingSale.saleperson_id = saleItem.saleperson_id || existingSale.saleperson_id;
                   existingSale.partnerCode = saleItem.partnerCode || existingSale.partnerCode;
                   existingSale.partner_name = saleItem.partner_name || existingSale.partner_name;
@@ -784,6 +822,13 @@ export class SalesService {
                   existingSale.catcode1 = saleItem.catcode1 !== undefined ? saleItem.catcode1 : existingSale.catcode1;
                   existingSale.catcode2 = saleItem.catcode2 !== undefined ? saleItem.catcode2 : existingSale.catcode2;
                   existingSale.catcode3 = saleItem.catcode3 !== undefined ? saleItem.catcode3 : existingSale.catcode3;
+                  // Enrich voucher data
+                  if (voucherRefno) {
+                    existingSale.voucherDp1 = voucherRefno;
+                  }
+                  if (voucherAmount !== undefined && voucherAmount > 0) {
+                    existingSale.thanhToanVoucher = voucherAmount;
+                  }
                   await this.saleRepository.save(existingSale);
                 } else {
                   // Tạo sale mới
@@ -806,7 +851,10 @@ export class SalesService {
                     serial: saleItem.serial,
                     disc_amt: saleItem.disc_amt,
                     grade_discamt: saleItem.grade_discamt,
+                    other_discamt: saleItem.other_discamt,
+                    chietKhauMuaHangGiamGia: saleItem.chietKhauMuaHangGiamGia,
                     paid_by_voucher_ecode_ecoin_bp: saleItem.paid_by_voucher_ecode_ecoin_bp,
+                    maCa: saleItem.shift_code,
                     saleperson_id: saleItem.saleperson_id,
                     partner_name: saleItem.partner_name,
                     order_source: saleItem.order_source,
@@ -817,6 +865,9 @@ export class SalesService {
                     catcode1: saleItem.catcode1,
                     catcode2: saleItem.catcode2,
                     catcode3: saleItem.catcode3,
+                    // Enrich voucher data từ get_daily_cash
+                    voucherDp1: voucherRefno,
+                    thanhToanVoucher: voucherAmount && voucherAmount > 0 ? voucherAmount : undefined,
                     customer: customer,
                     isProcessed: false,
                   } as Partial<Sale>);

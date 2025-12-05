@@ -36,7 +36,10 @@ export interface SaleItem {
   giaBan?: number;
   disc_amt?: number;
   grade_discamt?: number;
+  other_discamt?: number;
+  chietKhauMuaHangGiamGia?: number; // Chiết khấu mua hàng giảm giá (từ other_discamt)
   paid_by_voucher_ecode_ecoin_bp?: number;
+  shift_code?: string;
   saleperson_id?: number;
   order_source?: string;
   partner_name?: string;

@@ -382,6 +382,9 @@ export class Sale {
   grade_discamt?: number; // Grade discount amount
 
   @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  other_discamt?: number; // Other discount amount
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
   revenue_wsale?: number; // Revenue wholesale
 
   @Column({ nullable: true })
