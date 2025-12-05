@@ -804,7 +804,8 @@ export class SalesService {
                   existingSale.ordertype = saleItem.ordertype || existingSale.ordertype;
                   existingSale.branchCode = saleItem.branchCode || existingSale.branchCode;
                   existingSale.promCode = saleItem.promCode || existingSale.promCode;
-                  existingSale.serial = saleItem.serial || existingSale.serial;
+                  existingSale.serial = saleItem.serial !== undefined ? saleItem.serial : existingSale.serial;
+                  existingSale.soSerial = saleItem.serial !== undefined ? saleItem.serial : existingSale.soSerial;
                   existingSale.disc_amt = saleItem.disc_amt || existingSale.disc_amt;
                   existingSale.grade_discamt = saleItem.grade_discamt || existingSale.grade_discamt;
                   existingSale.other_discamt = saleItem.other_discamt !== undefined ? saleItem.other_discamt : existingSale.other_discamt;
@@ -815,6 +816,8 @@ export class SalesService {
                   existingSale.partnerCode = saleItem.partnerCode || existingSale.partnerCode;
                   existingSale.partner_name = saleItem.partner_name || existingSale.partner_name;
                   existingSale.order_source = saleItem.order_source || existingSale.order_source;
+                  // Lưu mvc_serial vào maThe
+                  existingSale.maThe = saleItem.mvc_serial !== undefined ? saleItem.mvc_serial : existingSale.maThe;
                   // Category fields
                   existingSale.cat1 = saleItem.cat1 !== undefined ? saleItem.cat1 : existingSale.cat1;
                   existingSale.cat2 = saleItem.cat2 !== undefined ? saleItem.cat2 : existingSale.cat2;
@@ -849,6 +852,7 @@ export class SalesService {
                     giaBan: saleItem.giaBan || 0,
                     promCode: saleItem.promCode,
                     serial: saleItem.serial,
+                    soSerial: saleItem.serial,
                     disc_amt: saleItem.disc_amt,
                     grade_discamt: saleItem.grade_discamt,
                     other_discamt: saleItem.other_discamt,
@@ -858,6 +862,8 @@ export class SalesService {
                     saleperson_id: saleItem.saleperson_id,
                     partner_name: saleItem.partner_name,
                     order_source: saleItem.order_source,
+                    // Lưu mvc_serial vào maThe
+                    maThe: saleItem.mvc_serial,
                     // Category fields
                     cat1: saleItem.cat1,
                     cat2: saleItem.cat2,
