@@ -69,5 +69,51 @@ export class SalesController {
     }
     return this.salesService.syncFromZappy(date);
   }
+
+  @Post('order/:docCode/create-invoice-fast')
+  async createInvoiceViaFastApi(@Param('docCode') docCode: string) {
+    return this.salesService.createInvoiceViaFastApi(docCode);
+  }
+
+  @Post('orders/create-invoice-fast')
+  async createMultipleInvoicesViaFastApi(@Body('docCodes') docCodes: string[]) {
+    if (!Array.isArray(docCodes) || docCodes.length === 0) {
+      throw new BadRequestException('Danh sách đơn hàng không hợp lệ');
+    }
+    
+    const results: Array<{
+      docCode: string;
+      success: boolean;
+      message?: string;
+      result?: any;
+      error?: string;
+    }> = [];
+    for (const docCode of docCodes) {
+      try {
+        const result = await this.salesService.createInvoiceViaFastApi(docCode);
+        results.push({
+          docCode,
+          success: true,
+          ...result,
+        });
+      } catch (error: any) {
+        results.push({
+          docCode,
+          success: false,
+          error: error?.message || 'Unknown error',
+        });
+      }
+    }
+
+    const successCount = results.filter((r) => r.success).length;
+    const failureCount = results.length - successCount;
+
+    return {
+      total: results.length,
+      successCount,
+      failureCount,
+      results,
+    };
+  }
 }
 

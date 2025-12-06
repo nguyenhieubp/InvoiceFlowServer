@@ -1,6 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, Like, ILike, DataSource, In } from 'typeorm';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
 import { ProductItem } from '../../entities/product-item.entity';
 import { PromotionItem } from '../../entities/promotion-item.entity';
 import { WarehouseItem } from '../../entities/warehouse-item.entity';
@@ -28,6 +30,7 @@ export class CategoriesService {
     private saleRepository: Repository<Sale>,
     @InjectDataSource()
     private dataSource: DataSource,
+    private httpService: HttpService,
   ) {}
 
   async findAll(options: {
@@ -1131,6 +1134,75 @@ export class CategoriesService {
         Sales: formattedSales,
       },
     };
+  }
+
+  /**
+   * Lấy product từ Loyalty API theo itemCode
+   */
+  async getProductFromLoyaltyAPI(itemCode: string): Promise<any> {
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(
+          `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+          {
+            headers: { accept: 'application/json' },
+          },
+        ),
+      );
+
+      if (response?.data?.data?.item) {
+        return response.data.data.item;
+      }
+
+      return null;
+    } catch (error: any) {
+      this.logger.error(`Error fetching product ${itemCode} from Loyalty API: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy department từ Loyalty API theo branchcode
+   */
+  async getDepartmentFromLoyaltyAPI(branchcode: string): Promise<any> {
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(
+          `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchcode}`,
+          {
+            headers: { accept: 'application/json' },
+          },
+        ),
+      );
+
+      const department = response?.data?.data?.items?.[0] || null;
+      return department;
+    } catch (error: any) {
+      this.logger.error(`Error fetching department ${branchcode} from Loyalty API: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy promotion từ Loyalty API theo code
+   */
+  async getPromotionFromLoyaltyAPI(code: string): Promise<any> {
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(
+          `https://loyaltyapi.vmt.vn/promotions/item/code/${encodeURIComponent(code)}`,
+          {
+            headers: { accept: 'application/json' },
+          },
+        ),
+      );
+
+      const promotion = response?.data || null;
+      return promotion && promotion.code ? promotion : null;
+    } catch (error: any) {
+      this.logger.error(`Error fetching promotion ${code} from Loyalty API: ${error?.message || error}`);
+      throw error;
+    }
   }
 }
 

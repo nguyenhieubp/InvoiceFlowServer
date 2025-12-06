@@ -9,6 +9,9 @@ import { SyncModule } from './modules/sync/sync.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { CategoriesModule } from './modules/categories/categories.module';
+import { SyncTask } from './tasks/sync.task';
+import { AutoInvoiceTask } from './tasks/auto-invoice.task';
+import { Sale } from './entities/sale.entity';
 
 @Module({
   imports: [
@@ -25,8 +28,9 @@ import { CategoriesModule } from './modules/categories/categories.module';
     InvoicesModule,
     SalesModule,
     CategoriesModule,
+    TypeOrmModule.forFeature([Sale]),
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, SyncTask, AutoInvoiceTask],
 })
 export class AppModule {}

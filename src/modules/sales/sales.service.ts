@@ -9,6 +9,7 @@ import { Invoice } from '../../entities/invoice.entity';
 import { InvoicePrintService } from '../../services/invoice-print.service';
 import { InvoiceService } from '../../services/invoice.service';
 import { ZappyApiService } from '../../services/zappy-api.service';
+import { FastApiService } from '../../services/fast-api.service';
 import { Order } from '../../types/order.types';
 
 @Injectable()
@@ -28,6 +29,7 @@ export class SalesService {
     private invoiceService: InvoiceService,
     private httpService: HttpService,
     private zappyApiService: ZappyApiService,
+    private fastApiService: FastApiService,
   ) {}
 
   async findAll(options: {
@@ -272,6 +274,37 @@ export class SalesService {
       product: sale.itemCode ? productMap.get(sale.itemCode) || null : null,
     }));
 
+    // Fetch departments để lấy ma_dvcs
+    const branchCodes = Array.from(
+      new Set(
+        sales
+          .map((sale) => sale.branchCode)
+          .filter((code): code is string => !!code && code.trim() !== '')
+      )
+    );
+
+    const departmentMap = new Map<string, any>();
+    for (const branchCode of branchCodes) {
+      try {
+        const response = await this.httpService.axiosRef.get(
+          `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+          { headers: { accept: 'application/json' } },
+        );
+        const department = response?.data?.data?.items?.[0];
+        if (department) {
+          departmentMap.set(branchCode, department);
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+      }
+    }
+
+    // Enrich sales với department information
+    const enrichedSalesWithDepartment = enrichedSales.map((sale) => ({
+      ...sale,
+      department: sale.branchCode ? departmentMap.get(sale.branchCode) || null : null,
+    }));
+
     // Tính tổng doanh thu của đơn hàng
     const totalRevenue = sales.reduce((sum, sale) => sum + Number(sale.revenue), 0);
     const totalQty = sales.reduce((sum, sale) => sum + Number(sale.qty), 0);
@@ -320,7 +353,7 @@ export class SalesService {
     }
 
     // Gắn promotion tương ứng vào từng dòng sale (chỉ để trả ra API, không lưu DB)
-    const enrichedSalesWithPromotion = enrichedSales.map((sale) => {
+    const enrichedSalesWithPromotion = enrichedSalesWithDepartment.map((sale) => {
       const promCode = sale.promCode;
       const promotion =
         promCode && promotionsByCode[promCode]
@@ -910,6 +943,246 @@ export class SalesService {
       this.logger.error(`Lỗi khi đồng bộ từ Zappy API: ${error?.message || error}`);
       throw error;
     }
+  }
+
+  /**
+   * Tạo hóa đơn qua Fast API từ đơn hàng
+   */
+  async createInvoiceViaFastApi(docCode: string): Promise<any> {
+    this.logger.log(`Creating invoice via Fast API for order ${docCode}`);
+
+    try {
+      // Lấy thông tin đơn hàng
+      const orderData = await this.findByOrderCode(docCode);
+
+      if (!orderData || !orderData.sales || orderData.sales.length === 0) {
+        throw new NotFoundException(`Order ${docCode} not found or has no sales`);
+      }
+
+      // Build invoice data
+      const invoiceData = this.buildFastApiInvoiceData(orderData);
+
+      // Gọi Fast API
+      const result = await this.fastApiService.submitSalesInvoice(invoiceData);
+
+      // Đánh dấu đơn hàng là đã xử lý
+      await this.markOrderAsProcessed(docCode);
+
+      this.logger.log(`Invoice created successfully for order ${docCode}`);
+
+      return {
+        success: true,
+        message: `Tạo hóa đơn ${docCode} thành công`,
+        result,
+      };
+    } catch (error: any) {
+      this.logger.error(`Error creating invoice for order ${docCode}: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Build invoice data cho Fast API (format mới)
+   */
+  private buildFastApiInvoiceData(orderData: any): any {
+    const toNumber = (value: any, defaultValue: number = 0): number => {
+      if (value === null || value === undefined || value === '') {
+        return defaultValue;
+      }
+      const num = Number(value);
+      return isNaN(num) ? defaultValue : num;
+    };
+
+    // Format ngày theo ISO 8601 với milliseconds và Z
+    const formatDateISO = (date: Date): string => {
+      if (isNaN(date.getTime())) {
+        throw new Error('Invalid date');
+      }
+      return date.toISOString();
+    };
+
+    // Format ngày
+    let docDate: Date;
+    if (orderData.docDate instanceof Date) {
+      docDate = orderData.docDate;
+    } else if (typeof orderData.docDate === 'string') {
+      docDate = new Date(orderData.docDate);
+      if (isNaN(docDate.getTime())) {
+        docDate = new Date();
+      }
+    } else {
+      docDate = new Date();
+    }
+
+    const minDate = new Date('1753-01-01T00:00:00');
+    const maxDate = new Date('9999-12-31T23:59:59');
+    if (docDate < minDate || docDate > maxDate) {
+      throw new Error('Date out of range for SQL Server');
+    }
+
+    const ngayCt = formatDateISO(docDate);
+    const ngayLct = formatDateISO(docDate);
+
+    // Xử lý từng sale với index để tính dong
+    const detail = orderData.sales.map((sale: any, index: number) => {
+      const tienHang = toNumber(sale.tienHang || sale.linetotal || sale.revenue, 0);
+      const qty = toNumber(sale.qty, 0);
+      let giaBan = toNumber(sale.giaBan, 0);
+      if (tienHang > 0 && qty > 0) {
+        giaBan = tienHang / qty;
+      }
+
+      // Tính toán các chiết khấu
+      const ck01_nt = toNumber(sale.other_discamt || sale.chietKhauMuaHangGiamGia, 0);
+      const ck02_nt = toNumber(sale.chietKhauCkTheoChinhSach, 0);
+      const ck03_nt = toNumber(sale.chietKhauMuaHangCkVip || sale.grade_discamt, 0);
+      const ck04_nt = toNumber(sale.chietKhauThanhToanVoucher, 0);
+      const ck05_nt = toNumber(sale.chietKhauThanhToanTkTienAo, 0);
+      const ck06_nt = toNumber(sale.chietKhauVoucherDp1, 0);
+      const ck07_nt = toNumber(sale.chietKhauVoucherDp2, 0);
+      const ck08_nt = toNumber(sale.chietKhauVoucherDp3, 0);
+      // Các chiết khấu từ 09-22 mặc định là 0
+      const ck09_nt = toNumber(sale.chietKhau09, 0);
+      const ck10_nt = toNumber(sale.chietKhau10, 0);
+      const ck11_nt = toNumber(sale.chietKhau11, 0);
+      const ck12_nt = toNumber(sale.chietKhau12, 0);
+      const ck13_nt = toNumber(sale.chietKhau13, 0);
+      const ck14_nt = toNumber(sale.chietKhau14, 0);
+      const ck15_nt = toNumber(sale.chietKhau15, 0);
+      const ck16_nt = toNumber(sale.chietKhau16, 0);
+      const ck17_nt = toNumber(sale.chietKhau17, 0);
+      const ck18_nt = toNumber(sale.chietKhau18, 0);
+      const ck19_nt = toNumber(sale.chietKhau19, 0);
+      const ck20_nt = toNumber(sale.chietKhau20, 0);
+      const ck21_nt = toNumber(sale.chietKhau21, 0);
+      const ck22_nt = toNumber(sale.chietKhau22, 0);
+
+      // Tính maKho, maLo
+      const maKho = sale.maKho || '';
+      const maLo = sale.maLo || '';
+      const maThe = sale.maThe || sale.mvc_serial || '';
+      const soSerial = sale.serial || sale.soSerial || '';
+      const loaiGd = sale.ordertype || '01';
+      const loai = sale.loai || sale.cat1 || '';
+
+      return {
+        ma_vt: sale.itemCode || sale.product?.maVatTu || '',
+        dvt: sale.dvt || sale.product?.dvt || '',
+        so_serial: soSerial,
+        loai: loai,
+        ma_ctkm_th: sale.maCtkmTangHang || '',
+        ma_kho: maKho,
+        so_luong: qty,
+        gia_ban: giaBan,
+        tien_hang: tienHang,
+        is_reward_line: sale.isRewardLine ? 1 : 0,
+        is_bundle_reward_line: sale.isBundleRewardLine ? 1 : 0,
+        km_yn: sale.promCode ? 1 : 0,
+        dong_thuoc_goi: sale.dongThuocGoi || '',
+        trang_thai: sale.trangThai || '',
+        barcode: sale.barcode || '',
+        ma_ck01: sale.muaHangGiamGia ? 'MUA_HANG_GIAM_GIA' : '',
+        ck01_nt: ck01_nt,
+        ma_ck02: sale.ckTheoChinhSach || '',
+        ck02_nt: ck02_nt,
+        ma_ck03: sale.muaHangCkVip || '',
+        ck03_nt: ck03_nt,
+        ma_ck04: sale.thanhToanVoucher ? 'VOUCHER' : '',
+        ck04_nt: ck04_nt,
+        ma_ck05: sale.thanhToanTkTienAo ? 'TK_TIEN_AO' : '',
+        ck05_nt: ck05_nt,
+        ma_ck06: sale.voucherDp1 ? 'VOUCHER_DP1' : '',
+        ck06_nt: ck06_nt,
+        ma_ck07: sale.voucherDp2 ? 'VOUCHER_DP2' : '',
+        ck07_nt: ck07_nt,
+        ma_ck08: sale.voucherDp3 ? 'VOUCHER_DP3' : '',
+        ck08_nt: ck08_nt,
+        ma_ck09: sale.maCk09 || '',
+        ck09_nt: ck09_nt,
+        ma_ck10: sale.maCk10 || '',
+        ck10_nt: ck10_nt,
+        ma_ck11: sale.maCk11 || '',
+        ck11_nt: ck11_nt,
+        ma_ck12: sale.maCk12 || '',
+        ck12_nt: ck12_nt,
+        ma_ck13: sale.maCk13 || '',
+        ck13_nt: ck13_nt,
+        ma_ck14: sale.maCk14 || '',
+        ck14_nt: ck14_nt,
+        ma_ck15: sale.maCk15 || '',
+        ck15_nt: ck15_nt,
+        ma_ck16: sale.maCk16 || '',
+        ck16_nt: ck16_nt,
+        ma_ck17: sale.maCk17 || '',
+        ck17_nt: ck17_nt,
+        ma_ck18: sale.maCk18 || '',
+        ck18_nt: ck18_nt,
+        ma_ck19: sale.maCk19 || '',
+        ck19_nt: ck19_nt,
+        ma_ck20: sale.maCk20 || '',
+        ck20_nt: ck20_nt,
+        ma_ck21: sale.maCk21 || '',
+        ck21_nt: ck21_nt,
+        ma_ck22: sale.maCk22 || '',
+        ck22_nt: ck22_nt,
+        dt_tg_nt: toNumber(sale.dtTgNt, 0),
+        ma_thue: sale.maThue || '10',
+        thue_suat: toNumber(sale.thueSuat, 0),
+        tien_thue: toNumber(sale.tienThue, 0),
+        tk_thue: sale.tkThueCo || '',
+        tk_cpbh: sale.tkCpbh || '',
+        ma_bp: sale.department?.ma_bp || sale.branchCode || '',
+        ma_the: maThe,
+        ma_lo: maLo,
+        loai_gd: loaiGd,
+        ma_combo: sale.maCombo || '',
+        id_goc: sale.idGoc || '',
+        id_goc_ct: sale.idGocCt || '',
+        id_goc_so: toNumber(sale.idGocSo, 0),
+        dong: index + 1, // Số thứ tự dòng
+        id_goc_ngay: sale.idGocNgay ? formatDateISO(new Date(sale.idGocNgay)) : formatDateISO(new Date()),
+        id_goc_dv: sale.idGocDv || null,
+      };
+    });
+
+    // cbdetail có thể là null theo format mới
+    const cbdetail = null;
+
+    const maKenh = orderData.sales[0]?.kenh || orderData.sales[0]?.branchCode || orderData.branchCode || '';
+    const soSeri = orderData.sales[0]?.kyHieu || orderData.sales[0]?.branchCode || orderData.branchCode || 'DEFAULT';
+    const loaiGd = orderData.sales[0]?.ordertype || '01';
+
+    // Lấy ma_dvcs từ department API (ưu tiên), nếu không có thì fallback
+    const maDvcs = orderData.sales[0]?.department?.ma_dvcs 
+      || orderData.sales[0]?.department?.ma_dvcs_ht
+      || orderData.customer?.brand 
+      || orderData.branchCode 
+      || '';
+
+    return {
+      action: 0,
+      ma_dvcs: maDvcs,
+      ma_kh: orderData.customer?.code || '',
+      ong_ba: orderData.customer?.name || null,
+      ma_gd: '2',
+      ma_tt: null,
+      ma_ca: orderData.sales[0]?.maCa || null,
+      hinh_thuc: '0',
+      dien_giai: null,
+      ngay_lct: ngayLct,
+      ngay_ct: ngayCt,
+      so_ct: orderData.docCode || '',
+      so_seri: soSeri,
+      ma_nt: 'VND',
+      ty_gia: 1.0,
+      ma_bp: orderData.sales[0]?.department?.ma_bp || orderData.sales[0]?.branchCode || '',
+      ma_nvbh: orderData.sales[0]?.saleperson_id?.toString() || orderData.sales[0]?.tenNhanVienBan || '',
+      tk_thue_no: '131111',
+      ma_kenh: maKenh,
+      loai_gd: loaiGd,
+      detail,
+      cbdetail,
+    };
   }
 }
 

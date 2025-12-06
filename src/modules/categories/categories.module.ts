@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { HttpModule } from '@nestjs/axios';
 import { CategoriesController } from './categories.controller';
 import { CategoriesService } from './categories.service';
 import { ProductItem } from '../../entities/product-item.entity';
@@ -9,7 +10,10 @@ import { Customer } from '../../entities/customer.entity';
 import { Sale } from '../../entities/sale.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ProductItem, PromotionItem, WarehouseItem, Customer, Sale])],
+  imports: [
+    TypeOrmModule.forFeature([ProductItem, PromotionItem, WarehouseItem, Customer, Sale]),
+    HttpModule,
+  ],
   controllers: [CategoriesController],
   providers: [CategoriesService],
   exports: [CategoriesService],

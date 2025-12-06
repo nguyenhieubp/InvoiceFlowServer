@@ -254,5 +254,25 @@ export class CategoriesController {
   async findCustomerByCode(@Param('code') code: string) {
     return this.categoriesService.findCustomerByCode(code);
   }
+
+  // ========== LOYALTY API PROXY ENDPOINTS ==========
+
+  @Get('loyalty/products/code/:itemCode')
+  async getProductByCode(@Param('itemCode') itemCode: string) {
+    return this.categoriesService.getProductFromLoyaltyAPI(itemCode);
+  }
+
+  @Get('loyalty/departments')
+  async getDepartmentByBranchCode(@Query('branchcode') branchcode: string) {
+    if (!branchcode) {
+      throw new BadRequestException('branchcode parameter is required');
+    }
+    return this.categoriesService.getDepartmentFromLoyaltyAPI(branchcode);
+  }
+
+  @Get('loyalty/promotions/item/code/:code')
+  async getPromotionByCode(@Param('code') code: string) {
+    return this.categoriesService.getPromotionFromLoyaltyAPI(code);
+  }
 }
 
