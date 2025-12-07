@@ -6,10 +6,12 @@ import { Sale } from '../../entities/sale.entity';
 import { Customer } from '../../entities/customer.entity';
 import { ProductItem } from '../../entities/product-item.entity';
 import { Invoice } from '../../entities/invoice.entity';
+import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
 import { InvoicePrintService } from '../../services/invoice-print.service';
 import { InvoiceService } from '../../services/invoice.service';
 import { ZappyApiService } from '../../services/zappy-api.service';
 import { FastApiService } from '../../services/fast-api.service';
+import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { Order } from '../../types/order.types';
 
 @Injectable()
@@ -25,11 +27,14 @@ export class SalesService {
     private productItemRepository: Repository<ProductItem>,
     @InjectRepository(Invoice)
     private invoiceRepository: Repository<Invoice>,
+    @InjectRepository(FastApiInvoice)
+    private fastApiInvoiceRepository: Repository<FastApiInvoice>,
     private invoicePrintService: InvoicePrintService,
     private invoiceService: InvoiceService,
     private httpService: HttpService,
     private zappyApiService: ZappyApiService,
     private fastApiService: FastApiService,
+    private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
   ) {}
 
   async findAll(options: {
@@ -268,11 +273,52 @@ export class SalesService {
       }
     });
     
-    // Enrich sales với product information
+    // Enrich sales với product information từ database
     const enrichedSales = sales.map((sale) => ({
       ...sale,
       product: sale.itemCode ? productMap.get(sale.itemCode) || null : null,
     }));
+
+    // Fetch products từ Loyalty API cho các itemCode không có trong database hoặc không có dvt
+    const loyaltyProductMap = new Map<string, any>();
+    for (const itemCode of itemCodes) {
+      try {
+        const response = await this.httpService.axiosRef.get(
+          `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+          { headers: { accept: 'application/json' } },
+        );
+        const loyaltyProduct = response?.data?.data?.item || response?.data;
+        if (loyaltyProduct) {
+          loyaltyProductMap.set(itemCode, loyaltyProduct);
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
+      }
+    }
+
+    // Enrich sales với product từ Loyalty API (thêm dvt từ unit)
+    const enrichedSalesWithLoyalty = enrichedSales.map((sale) => {
+      const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
+      const existingProduct = sale.product;
+      
+      // Nếu có product từ Loyalty API, merge thông tin (ưu tiên dvt từ Loyalty API)
+      if (loyaltyProduct) {
+        return {
+          ...sale,
+          product: {
+            ...existingProduct,
+            ...loyaltyProduct,
+            // Map unit từ Loyalty API thành dvt
+            dvt: loyaltyProduct.unit || existingProduct?.dvt || null,
+            // Giữ lại các field từ database nếu có
+            maVatTu: existingProduct?.maVatTu || loyaltyProduct.code || sale.itemCode,
+            maERP: existingProduct?.maERP || loyaltyProduct.code || sale.itemCode,
+          },
+        };
+      }
+      
+      return sale;
+    });
 
     // Fetch departments để lấy ma_dvcs
     const branchCodes = Array.from(
@@ -300,7 +346,7 @@ export class SalesService {
     }
 
     // Enrich sales với department information
-    const enrichedSalesWithDepartment = enrichedSales.map((sale) => ({
+    const enrichedSalesWithDepartment = enrichedSalesWithLoyalty.map((sale) => ({
       ...sale,
       department: sale.branchCode ? departmentMap.get(sale.branchCode) || null : null,
     }));
@@ -444,6 +490,62 @@ export class SalesService {
       failureCount,
       results,
     };
+  }
+
+  /**
+   * Lưu hóa đơn vào bảng kê hóa đơn (FastApiInvoice)
+   */
+  private async saveFastApiInvoice(data: {
+    docCode: string;
+    maDvcs?: string;
+    maKh?: string;
+    tenKh?: string;
+    ngayCt?: Date;
+    status: number;
+    message?: string;
+    guid?: string | null;
+    fastApiResponse?: string;
+  }): Promise<FastApiInvoice> {
+    try {
+      // Kiểm tra xem đã có chưa
+      const existing = await this.fastApiInvoiceRepository.findOne({
+        where: { docCode: data.docCode },
+      });
+
+      if (existing) {
+        // Cập nhật record hiện có
+        existing.status = data.status;
+        existing.message = data.message || existing.message;
+        existing.guid = data.guid || existing.guid;
+        existing.fastApiResponse = data.fastApiResponse || existing.fastApiResponse;
+        if (data.maDvcs) existing.maDvcs = data.maDvcs;
+        if (data.maKh) existing.maKh = data.maKh;
+        if (data.tenKh) existing.tenKh = data.tenKh;
+        if (data.ngayCt) existing.ngayCt = data.ngayCt;
+        
+        const saved = await this.fastApiInvoiceRepository.save(existing);
+        return Array.isArray(saved) ? saved[0] : saved;
+      } else {
+        // Tạo mới
+        const fastApiInvoice = this.fastApiInvoiceRepository.create({
+          docCode: data.docCode,
+          maDvcs: data.maDvcs ?? null,
+          maKh: data.maKh ?? null,
+          tenKh: data.tenKh ?? null,
+          ngayCt: data.ngayCt ?? new Date(),
+          status: data.status,
+          message: data.message ?? null,
+          guid: data.guid ?? null,
+          fastApiResponse: data.fastApiResponse ?? null,
+        } as Partial<FastApiInvoice>);
+        
+        const saved = await this.fastApiInvoiceRepository.save(fastApiInvoice);
+        return Array.isArray(saved) ? saved[0] : saved;
+      }
+    } catch (error: any) {
+      this.logger.error(`Error saving FastApiInvoice for ${data.docCode}: ${error?.message || error}`);
+      throw error;
+    }
   }
 
   private async markOrderAsProcessed(docCode: string): Promise<void> {
@@ -948,10 +1050,28 @@ export class SalesService {
   /**
    * Tạo hóa đơn qua Fast API từ đơn hàng
    */
-  async createInvoiceViaFastApi(docCode: string): Promise<any> {
-    this.logger.log(`Creating invoice via Fast API for order ${docCode}`);
+  async createInvoiceViaFastApi(docCode: string, forceRetry: boolean = false): Promise<any> {
+    this.logger.log(`Creating invoice via Fast API for order ${docCode}${forceRetry ? ' (force retry)' : ''}`);
 
     try {
+      // Kiểm tra xem đơn hàng đã có trong bảng kê hóa đơn chưa (đã tạo thành công)
+      // Nếu forceRetry = true, bỏ qua check này để cho phép retry
+      if (!forceRetry) {
+        const existingInvoice = await this.fastApiInvoiceRepository.findOne({
+          where: { docCode },
+        });
+
+        if (existingInvoice && existingInvoice.status === 1) {
+          this.logger.log(`Order ${docCode} already exists in invoice list with success status, skipping creation`);
+          return {
+            success: true,
+            message: `Đơn hàng ${docCode} đã được tạo hóa đơn thành công trước đó`,
+            result: existingInvoice.fastApiResponse ? JSON.parse(existingInvoice.fastApiResponse) : null,
+            alreadyExists: true,
+          };
+        }
+      }
+
       // Lấy thông tin đơn hàng
       const orderData = await this.findByOrderCode(docCode);
 
@@ -959,11 +1079,81 @@ export class SalesService {
         throw new NotFoundException(`Order ${docCode} not found or has no sales`);
       }
 
+      this.logger.debug(`Order data retrieved: ${JSON.stringify({
+        docCode: orderData.docCode,
+        docDate: orderData.docDate,
+        salesCount: orderData.sales?.length,
+        firstSaleBranchCode: orderData.sales[0]?.branchCode,
+        firstSaleDepartment: orderData.sales[0]?.department ? 'exists' : 'missing',
+      })}`);
+
       // Build invoice data
       const invoiceData = this.buildFastApiInvoiceData(orderData);
 
-      // Gọi Fast API
-      const result = await this.fastApiService.submitSalesInvoice(invoiceData);
+      this.logger.debug(`Invoice data built: ${JSON.stringify({
+        ma_dvcs: invoiceData.ma_dvcs,
+        ma_kh: invoiceData.ma_kh,
+        so_ct: invoiceData.so_ct,
+        detailCount: invoiceData.detail?.length,
+      })}`);
+
+      // Sử dụng FastApiInvoiceFlowService để thực hiện toàn bộ luồng
+      // Luồng: Customer → Item → salesInvoice
+      // Enrich detail với product information để có ten_vt
+      const enrichedDetail = invoiceData.detail.map((item: any) => {
+        const sale = orderData.sales.find((s: any) => s.itemCode === item.ma_vt);
+        return {
+          ...item,
+          product: sale?.product || null,
+        };
+      });
+
+      const result = await this.fastApiInvoiceFlowService.executeFullInvoiceFlow({
+        ...invoiceData,
+        detail: enrichedDetail,
+        customer: orderData.customer,
+        ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+      });
+
+      // Check response từ Fast API - nếu status === 0 thì coi là lỗi
+      const isSuccess = Array.isArray(result) 
+        ? result.every((item: any) => item.status !== 0)
+        : (result?.status !== 0 && result?.status !== undefined);
+
+      // Lấy thông tin từ response
+      const responseStatus = Array.isArray(result) && result.length > 0 
+        ? result[0].status 
+        : result?.status ?? 0;
+      const responseMessage = Array.isArray(result) && result.length > 0
+        ? result[0].message || 'Tạo hóa đơn thất bại'
+        : result?.message || 'Tạo hóa đơn thất bại';
+      const responseGuid = Array.isArray(result) && result.length > 0
+        ? (Array.isArray(result[0].guid) ? result[0].guid[0] : result[0].guid)
+        : result?.guid;
+
+      // Lưu vào bảng kê hóa đơn (cả thành công và thất bại)
+      await this.saveFastApiInvoice({
+        docCode,
+        maDvcs: invoiceData.ma_dvcs,
+        maKh: invoiceData.ma_kh,
+        tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+        ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
+        status: responseStatus,
+        message: responseMessage,
+        guid: responseGuid || null,
+        fastApiResponse: JSON.stringify(result),
+      });
+
+      if (!isSuccess) {
+        // Có lỗi từ Fast API
+        this.logger.error(`Invoice creation failed for order ${docCode}: ${responseMessage}`);
+        
+        return {
+          success: false,
+          message: responseMessage,
+          result,
+        };
+      }
 
       // Đánh dấu đơn hàng là đã xử lý
       await this.markOrderAsProcessed(docCode);
@@ -977,6 +1167,7 @@ export class SalesService {
       };
     } catch (error: any) {
       this.logger.error(`Error creating invoice for order ${docCode}: ${error?.message || error}`);
+      this.logger.error(`Error stack: ${error?.stack || 'No stack trace'}`);
       throw error;
     }
   }
@@ -985,43 +1176,46 @@ export class SalesService {
    * Build invoice data cho Fast API (format mới)
    */
   private buildFastApiInvoiceData(orderData: any): any {
-    const toNumber = (value: any, defaultValue: number = 0): number => {
-      if (value === null || value === undefined || value === '') {
-        return defaultValue;
-      }
-      const num = Number(value);
-      return isNaN(num) ? defaultValue : num;
-    };
+    try {
+      const toNumber = (value: any, defaultValue: number = 0): number => {
+        if (value === null || value === undefined || value === '') {
+          return defaultValue;
+        }
+        const num = Number(value);
+        return isNaN(num) ? defaultValue : num;
+      };
 
-    // Format ngày theo ISO 8601 với milliseconds và Z
-    const formatDateISO = (date: Date): string => {
-      if (isNaN(date.getTime())) {
-        throw new Error('Invalid date');
-      }
-      return date.toISOString();
-    };
+      // Format ngày theo ISO 8601 với milliseconds và Z
+      const formatDateISO = (date: Date): string => {
+        if (isNaN(date.getTime())) {
+          throw new Error('Invalid date');
+        }
+        return date.toISOString();
+      };
 
-    // Format ngày
-    let docDate: Date;
-    if (orderData.docDate instanceof Date) {
-      docDate = orderData.docDate;
-    } else if (typeof orderData.docDate === 'string') {
-      docDate = new Date(orderData.docDate);
-      if (isNaN(docDate.getTime())) {
+      // Format ngày
+      let docDate: Date;
+      if (orderData.docDate instanceof Date) {
+        docDate = orderData.docDate;
+      } else if (typeof orderData.docDate === 'string') {
+        docDate = new Date(orderData.docDate);
+        if (isNaN(docDate.getTime())) {
+          this.logger.warn(`Invalid docDate string: ${orderData.docDate}, using current date`);
+          docDate = new Date();
+        }
+      } else {
+        this.logger.warn(`docDate is missing or invalid, using current date`);
         docDate = new Date();
       }
-    } else {
-      docDate = new Date();
-    }
 
-    const minDate = new Date('1753-01-01T00:00:00');
-    const maxDate = new Date('9999-12-31T23:59:59');
-    if (docDate < minDate || docDate > maxDate) {
-      throw new Error('Date out of range for SQL Server');
-    }
+      const minDate = new Date('1753-01-01T00:00:00');
+      const maxDate = new Date('9999-12-31T23:59:59');
+      if (docDate < minDate || docDate > maxDate) {
+        throw new Error(`Date out of range for SQL Server: ${docDate.toISOString()}`);
+      }
 
-    const ngayCt = formatDateISO(docDate);
-    const ngayLct = formatDateISO(docDate);
+      const ngayCt = formatDateISO(docDate);
+      const ngayLct = formatDateISO(docDate);
 
     // Xử lý từng sale với index để tính dong
     const detail = orderData.sales.map((sale: any, index: number) => {
@@ -1057,132 +1251,216 @@ export class SalesService {
       const ck21_nt = toNumber(sale.chietKhau21, 0);
       const ck22_nt = toNumber(sale.chietKhau22, 0);
 
-      // Tính maKho, maLo
-      const maKho = sale.maKho || '';
-      const maLo = sale.maLo || '';
-      const maThe = sale.maThe || sale.mvc_serial || '';
-      const soSerial = sale.serial || sale.soSerial || '';
-      const loaiGd = sale.ordertype || '01';
-      const loai = sale.loai || sale.cat1 || '';
+      // Helper function để đảm bảo giá trị luôn là string, không phải null/undefined
+      const toString = (value: any, defaultValue: string = ''): string => {
+        if (value === null || value === undefined || value === '') {
+          return defaultValue;
+        }
+        return String(value);
+      };
+
+      // Mỗi sale item xử lý riêng, không dùng giá trị mặc định chung
+      // Lấy dvt từ chính sale item hoặc từ product của nó (đã được fetch từ Loyalty API với unit)
+      // Nếu không có thì dùng 'Cái' làm mặc định (Fast API yêu cầu field này phải có giá trị)
+      const dvt = toString(sale.dvt || sale.product?.dvt || sale.product?.unit, 'Cái');
+      
+      // Lấy maKho từ chính sale item, nếu không có thì lấy từ branchCode của chính sale item đó
+      // Fast API yêu cầu field này phải có giá trị
+      const maKho = toString(sale.maKho || sale.branchCode, '');
+      
+      // Debug: Log maLo value từ sale
+      if (index === 0) {
+        this.logger.debug(`[BuildInvoice] sale.maLo for item ${sale.itemCode}: "${sale.maLo || ''}"`);
+      }
+      
+      const maLo = toString(sale.serial ||  '');
+      const maThe = toString(sale.maThe || sale.mvc_serial, '');
+      const soSerial = toString(sale.serial || sale.soSerial, '');
+      
+      // Extract chỉ phần số từ ordertype (ví dụ: "01.Thường" -> "01", "02. Làm dịch vụ" -> "02")
+      let loaiGd = '01';
+      if (sale.ordertype) {
+        const match = String(sale.ordertype).match(/^(\d+)/);
+        loaiGd = match ? match[1] : '01';
+      }
+      
+      const loai = toString(sale.loai || sale.cat1, '');
 
       return {
-        ma_vt: sale.itemCode || sale.product?.maVatTu || '',
-        dvt: sale.dvt || sale.product?.dvt || '',
+        ma_vt: toString(sale.itemCode || sale.product?.maVatTu, ''),
+        dvt: dvt,
         so_serial: soSerial,
         loai: loai,
-        ma_ctkm_th: sale.maCtkmTangHang || '',
+        ma_ctkm_th: toString(sale.maCtkmTangHang, ''),
         ma_kho: maKho,
-        so_luong: qty,
-        gia_ban: giaBan,
-        tien_hang: tienHang,
+        so_luong: Number(qty),
+        gia_ban: Number(giaBan),
+        tien_hang: Number(tienHang),
         is_reward_line: sale.isRewardLine ? 1 : 0,
         is_bundle_reward_line: sale.isBundleRewardLine ? 1 : 0,
         km_yn: sale.promCode ? 1 : 0,
-        dong_thuoc_goi: sale.dongThuocGoi || '',
-        trang_thai: sale.trangThai || '',
-        barcode: sale.barcode || '',
+        dong_thuoc_goi: toString(sale.dongThuocGoi, ''),
+        trang_thai: toString(sale.trangThai, ''),
+        barcode: toString(sale.barcode, ''),
         ma_ck01: sale.muaHangGiamGia ? 'MUA_HANG_GIAM_GIA' : '',
-        ck01_nt: ck01_nt,
-        ma_ck02: sale.ckTheoChinhSach || '',
-        ck02_nt: ck02_nt,
-        ma_ck03: sale.muaHangCkVip || '',
-        ck03_nt: ck03_nt,
+        ck01_nt: Number(ck01_nt),
+        ma_ck02: toString(sale.ckTheoChinhSach, ''),
+        ck02_nt: Number(ck02_nt),
+        ma_ck03: toString(sale.muaHangCkVip, ''),
+        ck03_nt: Number(ck03_nt),
         ma_ck04: sale.thanhToanVoucher ? 'VOUCHER' : '',
-        ck04_nt: ck04_nt,
+        ck04_nt: Number(ck04_nt),
         ma_ck05: sale.thanhToanTkTienAo ? 'TK_TIEN_AO' : '',
-        ck05_nt: ck05_nt,
+        ck05_nt: Number(ck05_nt),
         ma_ck06: sale.voucherDp1 ? 'VOUCHER_DP1' : '',
-        ck06_nt: ck06_nt,
+        ck06_nt: Number(ck06_nt),
         ma_ck07: sale.voucherDp2 ? 'VOUCHER_DP2' : '',
-        ck07_nt: ck07_nt,
+        ck07_nt: Number(ck07_nt),
         ma_ck08: sale.voucherDp3 ? 'VOUCHER_DP3' : '',
-        ck08_nt: ck08_nt,
-        ma_ck09: sale.maCk09 || '',
-        ck09_nt: ck09_nt,
-        ma_ck10: sale.maCk10 || '',
-        ck10_nt: ck10_nt,
-        ma_ck11: sale.maCk11 || '',
-        ck11_nt: ck11_nt,
-        ma_ck12: sale.maCk12 || '',
-        ck12_nt: ck12_nt,
-        ma_ck13: sale.maCk13 || '',
-        ck13_nt: ck13_nt,
-        ma_ck14: sale.maCk14 || '',
-        ck14_nt: ck14_nt,
-        ma_ck15: sale.maCk15 || '',
-        ck15_nt: ck15_nt,
-        ma_ck16: sale.maCk16 || '',
-        ck16_nt: ck16_nt,
-        ma_ck17: sale.maCk17 || '',
-        ck17_nt: ck17_nt,
-        ma_ck18: sale.maCk18 || '',
-        ck18_nt: ck18_nt,
-        ma_ck19: sale.maCk19 || '',
-        ck19_nt: ck19_nt,
-        ma_ck20: sale.maCk20 || '',
-        ck20_nt: ck20_nt,
-        ma_ck21: sale.maCk21 || '',
-        ck21_nt: ck21_nt,
-        ma_ck22: sale.maCk22 || '',
-        ck22_nt: ck22_nt,
-        dt_tg_nt: toNumber(sale.dtTgNt, 0),
-        ma_thue: sale.maThue || '10',
-        thue_suat: toNumber(sale.thueSuat, 0),
-        tien_thue: toNumber(sale.tienThue, 0),
-        tk_thue: sale.tkThueCo || '',
-        tk_cpbh: sale.tkCpbh || '',
-        ma_bp: sale.department?.ma_bp || sale.branchCode || '',
+        ck08_nt: Number(ck08_nt),
+        ma_ck09: toString(sale.maCk09, ''),
+        ck09_nt: Number(ck09_nt),
+        ma_ck10: toString(sale.maCk10, ''),
+        ck10_nt: Number(ck10_nt),
+        ma_ck11: toString(sale.maCk11, ''),
+        ck11_nt: Number(ck11_nt),
+        ma_ck12: toString(sale.maCk12, ''),
+        ck12_nt: Number(ck12_nt),
+        ma_ck13: toString(sale.maCk13, ''),
+        ck13_nt: Number(ck13_nt),
+        ma_ck14: toString(sale.maCk14, ''),
+        ck14_nt: Number(ck14_nt),
+        ma_ck15: toString(sale.maCk15, ''),
+        ck15_nt: Number(ck15_nt),
+        ma_ck16: toString(sale.maCk16, ''),
+        ck16_nt: Number(ck16_nt),
+        ma_ck17: toString(sale.maCk17, ''),
+        ck17_nt: Number(ck17_nt),
+        ma_ck18: toString(sale.maCk18, ''),
+        ck18_nt: Number(ck18_nt),
+        ma_ck19: toString(sale.maCk19, ''),
+        ck19_nt: Number(ck19_nt),
+        ma_ck20: toString(sale.maCk20, ''),
+        ck20_nt: Number(ck20_nt),
+        ma_ck21: toString(sale.maCk21, ''),
+        ck21_nt: Number(ck21_nt),
+        ma_ck22: toString(sale.maCk22, ''),
+        ck22_nt: Number(ck22_nt),
+        dt_tg_nt: Number(toNumber(sale.dtTgNt, 0)),
+        ma_thue: toString(sale.maThue, '10'),
+        thue_suat: Number(toNumber(sale.thueSuat, 0)),
+        tien_thue: Number(toNumber(sale.tienThue, 0)),
+        tk_thue: toString(sale.tkThueCo, ''),
+        tk_cpbh: toString(sale.tkCpbh, ''),
+        ma_bp: toString(sale.department?.ma_bp || sale.branchCode, ''),
         ma_the: maThe,
-        ma_lo: maLo,
+        // Chỉ thêm ma_lo nếu có giá trị (không rỗng)
+        ...(maLo && maLo.trim() !== '' ? { ma_lo: maLo } : {}),
         loai_gd: loaiGd,
-        ma_combo: sale.maCombo || '',
-        id_goc: sale.idGoc || '',
-        id_goc_ct: sale.idGocCt || '',
-        id_goc_so: toNumber(sale.idGocSo, 0),
+        ma_combo: toString(sale.maCombo, ''),
+        id_goc: toString(sale.idGoc, ''),
+        id_goc_ct: toString(sale.idGocCt, ''),
+        id_goc_so: Number(toNumber(sale.idGocSo, 0)),
         dong: index + 1, // Số thứ tự dòng
         id_goc_ngay: sale.idGocNgay ? formatDateISO(new Date(sale.idGocNgay)) : formatDateISO(new Date()),
         id_goc_dv: sale.idGocDv || null,
       };
     });
 
-    // cbdetail có thể là null theo format mới
-    const cbdetail = null;
+      // Validate sales array
+      if (!orderData.sales || orderData.sales.length === 0) {
+        throw new Error('Order has no sales items');
+      }
 
-    const maKenh = orderData.sales[0]?.kenh || orderData.sales[0]?.branchCode || orderData.branchCode || '';
-    const soSeri = orderData.sales[0]?.kyHieu || orderData.sales[0]?.branchCode || orderData.branchCode || 'DEFAULT';
-    const loaiGd = orderData.sales[0]?.ordertype || '01';
+      // Build cbdetail từ detail (tổng hợp thông tin sản phẩm)
+      const cbdetail = detail.map((item: any) => {
+        // Tính tổng chiết khấu từ tất cả các loại chiết khấu
+        const tongChietKhau = 
+          Number(item.ck01_nt || 0) +
+          Number(item.ck02_nt || 0) +
+          Number(item.ck03_nt || 0) +
+          Number(item.ck04_nt || 0) +
+          Number(item.ck05_nt || 0) +
+          Number(item.ck06_nt || 0) +
+          Number(item.ck07_nt || 0) +
+          Number(item.ck08_nt || 0) +
+          Number(item.ck09_nt || 0) +
+          Number(item.ck10_nt || 0) +
+          Number(item.ck11_nt || 0) +
+          Number(item.ck12_nt || 0) +
+          Number(item.ck13_nt || 0) +
+          Number(item.ck14_nt || 0) +
+          Number(item.ck15_nt || 0) +
+          Number(item.ck16_nt || 0) +
+          Number(item.ck17_nt || 0) +
+          Number(item.ck18_nt || 0) +
+          Number(item.ck19_nt || 0) +
+          Number(item.ck20_nt || 0) +
+          Number(item.ck21_nt || 0) +
+          Number(item.ck22_nt || 0);
 
-    // Lấy ma_dvcs từ department API (ưu tiên), nếu không có thì fallback
-    const maDvcs = orderData.sales[0]?.department?.ma_dvcs 
-      || orderData.sales[0]?.department?.ma_dvcs_ht
-      || orderData.customer?.brand 
-      || orderData.branchCode 
-      || '';
+        return {
+          ma_vt: item.ma_vt || '',
+          dvt: item.dvt || '',
+          so_luong: Number(item.so_luong || 0),
+          ck_nt: Number(tongChietKhau),
+          gia_nt: Number(item.gia_ban || 0),
+          tien_nt: Number(item.tien_hang || 0),
+        };
+      });
 
-    return {
-      action: 0,
-      ma_dvcs: maDvcs,
-      ma_kh: orderData.customer?.code || '',
-      ong_ba: orderData.customer?.name || null,
-      ma_gd: '2',
-      ma_tt: null,
-      ma_ca: orderData.sales[0]?.maCa || null,
-      hinh_thuc: '0',
-      dien_giai: null,
-      ngay_lct: ngayLct,
-      ngay_ct: ngayCt,
-      so_ct: orderData.docCode || '',
-      so_seri: soSeri,
-      ma_nt: 'VND',
-      ty_gia: 1.0,
-      ma_bp: orderData.sales[0]?.department?.ma_bp || orderData.sales[0]?.branchCode || '',
-      ma_nvbh: orderData.sales[0]?.saleperson_id?.toString() || orderData.sales[0]?.tenNhanVienBan || '',
-      tk_thue_no: '131111',
-      ma_kenh: maKenh,
-      loai_gd: loaiGd,
-      detail,
-      cbdetail,
-    };
+      const firstSale = orderData.sales[0];
+      const maKenh = 'ONLINE'; // Fix mã kênh là ONLINE
+      const soSeri = firstSale?.kyHieu || firstSale?.branchCode || orderData.branchCode || 'DEFAULT';
+      
+      // Extract chỉ phần số từ ordertype (ví dụ: "01.Thường" -> "01")
+      let loaiGd = '01';
+      if (firstSale?.ordertype) {
+        const match = String(firstSale.ordertype).match(/^(\d+)/);
+        loaiGd = match ? match[1] : '01';
+      }
+
+      // Lấy ma_dvcs từ department API (ưu tiên), nếu không có thì fallback
+      const maDvcs = firstSale?.department?.ma_dvcs 
+        || firstSale?.department?.ma_dvcs_ht
+        || orderData.customer?.brand 
+        || orderData.branchCode 
+        || '';
+
+      return {
+        action: 0,
+        ma_dvcs: maDvcs,
+        ma_kh: orderData.customer?.code || '',
+        ong_ba: orderData.customer?.name || null,
+        ma_gd: '2',
+        ma_tt: null,
+        ma_ca: firstSale?.maCa || null,
+        hinh_thuc: '0',
+        dien_giai: null,
+        ngay_lct: ngayLct,
+        ngay_ct: ngayCt,
+        so_ct: orderData.docCode || '',
+        so_seri: soSeri,
+        ma_nt: 'VND',
+        ty_gia: 1.0,
+        ma_bp: firstSale?.department?.ma_bp || firstSale?.branchCode || '',
+        tk_thue_no: '131111',
+        ma_kenh: maKenh,
+        loai_gd: loaiGd,
+        detail,
+        cbdetail,
+      };
+    } catch (error: any) {
+      this.logger.error(`Error building Fast API invoice data: ${error?.message || error}`);
+      this.logger.error(`Error stack: ${error?.stack || 'No stack trace'}`);
+      this.logger.error(`Order data: ${JSON.stringify({
+        docCode: orderData?.docCode,
+        docDate: orderData?.docDate,
+        salesCount: orderData?.sales?.length,
+        customer: orderData?.customer ? { code: orderData.customer.code, name: orderData.customer.name } : null,
+      })}`);
+      throw new Error(`Failed to build invoice data: ${error?.message || error}`);
+    }
   }
 }
 

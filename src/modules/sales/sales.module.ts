@@ -10,18 +10,20 @@ import { InvoicePrintService } from '../../services/invoice-print.service';
 import { InvoiceService } from '../../services/invoice.service';
 import { ZappyApiService } from '../../services/zappy-api.service';
 import { FastApiService } from '../../services/fast-api.service';
+import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { Invoice } from '../../entities/invoice.entity';
 import { InvoiceItem } from '../../entities/invoice-item.entity';
+import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
 import { InvoicesModule } from '../invoices/invoices.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Sale, Customer, ProductItem, Invoice, InvoiceItem]),
+    TypeOrmModule.forFeature([Sale, Customer, ProductItem, Invoice, InvoiceItem, FastApiInvoice]),
     HttpModule,
     forwardRef(() => InvoicesModule),
   ],
   controllers: [SalesController],
-  providers: [SalesService, InvoicePrintService, ZappyApiService, FastApiService],
+  providers: [SalesService, InvoicePrintService, ZappyApiService, FastApiService, FastApiInvoiceFlowService],
   exports: [SalesService],
 })
 export class SalesModule {}

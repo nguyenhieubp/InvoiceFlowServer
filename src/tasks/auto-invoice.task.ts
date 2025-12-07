@@ -19,10 +19,10 @@ export class AutoInvoiceTask {
    * Tự động tạo hóa đơn cho các đơn hàng chưa xử lý
    * Chạy mỗi 10 phút
    */
-  @Cron('*/10 * * * *', {
-    name: 'auto-create-invoice',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  // @Cron('*/10 * * * *', {
+  //   name: 'auto-create-invoice',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
   async handleAutoCreateInvoice() {
     this.logger.log('Bắt đầu tự động tạo hóa đơn cho các đơn hàng chưa xử lý...');
 

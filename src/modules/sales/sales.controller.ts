@@ -71,8 +71,11 @@ export class SalesController {
   }
 
   @Post('order/:docCode/create-invoice-fast')
-  async createInvoiceViaFastApi(@Param('docCode') docCode: string) {
-    return this.salesService.createInvoiceViaFastApi(docCode);
+  async createInvoiceViaFastApi(
+    @Param('docCode') docCode: string,
+    @Body('forceRetry') forceRetry?: boolean,
+  ) {
+    return this.salesService.createInvoiceViaFastApi(docCode, forceRetry || false);
   }
 
   @Post('orders/create-invoice-fast')
