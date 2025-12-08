@@ -1188,24 +1188,6 @@ export class SalesService {
       this.logger.error(`Error creating invoice for order ${docCode}: ${error?.message || error}`);
       this.logger.error(`Error stack: ${error?.stack || 'No stack trace'}`);
       
-      // Lưu lỗi vào bảng kê hóa đơn để theo dõi (ngay cả khi có lỗi)
-      try {
-        const orderData = await this.findByOrderCode(docCode).catch(() => null);
-        await this.saveFastApiInvoice({
-          docCode,
-          maDvcs: orderData?.branchCode || undefined,
-          maKh: orderData?.customer?.code || undefined,
-          tenKh: orderData?.customer?.name || undefined,
-          ngayCt: orderData?.docDate ? new Date(orderData.docDate) : new Date(),
-          status: 0, // Thất bại
-          message: error?.message || 'Lỗi không xác định khi tạo hóa đơn',
-          guid: undefined,
-          fastApiResponse: undefined,
-        });
-      } catch (saveError: any) {
-        this.logger.error(`Error saving failed invoice to database: ${saveError?.message || saveError}`);
-      }
-      
       throw error;
     }
   }
