@@ -9,19 +9,39 @@ import { Order, OrderCustomer, SaleItem } from '../types/order.types';
 @Injectable()
 export class ZappyApiService {
   private readonly logger = new Logger(ZappyApiService.name);
-  private readonly ZAPPY_API_BASE_URL = process.env.ZAPPY_API_BASE_URL || 'https://zappy.io.vn/ords/vmt/api';
+  private readonly DEFAULT_ZAPPY_API_BASE_URL = process.env.ZAPPY_API_BASE_URL || 'https://zappy.io.vn/ords/vmt/api';
+
+  // Map brand name to Zappy API base URL
+  private readonly brandApiUrls: Record<string, string> = {
+    'f3': 'https://zappy.io.vn/ords/vmt/api',
+    'labhair': 'https://zappy.io.vn/ords/labhair/api',
+    'yaman': 'https://zappy.io.vn/ords/yaman/api',
+    'menard': 'https://vmterp.com/ords/erp/retail/api',
+  };
 
   constructor(private readonly httpService: HttpService) {}
 
   /**
+   * Lấy base URL cho brand
+   */
+  private getBaseUrlForBrand(brand?: string): string {
+    if (brand && this.brandApiUrls[brand.toLowerCase()]) {
+      return this.brandApiUrls[brand.toLowerCase()];
+    }
+    return this.DEFAULT_ZAPPY_API_BASE_URL;
+  }
+
+  /**
    * Lấy dữ liệu đơn hàng từ Zappy API
    * @param date - Ngày theo format DDMMMYYYY (ví dụ: 04DEC2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
    * @returns Array of Order objects
    */
-  async getDailySales(date: string): Promise<Order[]> {
+  async getDailySales(date: string, brand?: string): Promise<Order[]> {
     try {
-      const url = `${this.ZAPPY_API_BASE_URL}/get_daily_sale?P_DATE=${date}`;
-      this.logger.log(`Fetching daily sales from Zappy API: ${url}`);
+      const baseUrl = this.getBaseUrlForBrand(brand);
+      const url = `${baseUrl}/get_daily_sale?P_DATE=${date}`;
+      this.logger.log(`Fetching daily sales from Zappy API (brand: ${brand || 'default'}): ${url}`);
 
       const response = await firstValueFrom(
         this.httpService.get(url, {
@@ -46,12 +66,19 @@ export class ZappyApiService {
   /**
    * Lấy dữ liệu thanh toán từ Zappy API (voucher payments)
    * @param date - Ngày theo format DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
    * @returns Array of cash payment records
    */
-  async getDailyCash(date: string): Promise<any[]> {
+  async getDailyCash(date: string, brand?: string): Promise<any[]> {
     try {
-      const url = `${this.ZAPPY_API_BASE_URL}/get_daily_cash?P_DATE=${date}`;
-      this.logger.log(`Fetching daily cash from Zappy API: ${url}`);
+      const baseUrl = this.getBaseUrlForBrand(brand);
+      // labhair, yaman, menard dùng get_daily_cashio, f3 và default dùng get_daily_cash
+      const brandLower = brand?.toLowerCase();
+      const endpoint = ['labhair', 'yaman', 'menard'].includes(brandLower || '') 
+        ? 'get_daily_cashio' 
+        : 'get_daily_cash';
+      const url = `${baseUrl}/${endpoint}?P_DATE=${date}`;
+      this.logger.log(`Fetching daily cash from Zappy API (brand: ${brand || 'default'}): ${url}`);
 
       const response = await firstValueFrom(
         this.httpService.get(url, {

@@ -1,24 +1,16 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
-import { firstValueFrom } from 'rxjs';
 import { Customer } from '../entities/customer.entity';
 import { Sale } from '../entities/sale.entity';
-import { SyncDataDto, SyncResponseDto, SyncApiResponse } from '../dto/sync-data.dto';
+import { ZappyApiService } from './zappy-api.service';
+import { Order } from '../types/order.types';
+import { SalesService } from '../modules/sales/sales.service';
 
 @Injectable()
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
-  private readonly n8nBaseUrl = 'https://n8n.vmt.vn/webhook';
-
-  private readonly brands = [
-    { name: 'chando', endpoint: 'kh_chando' },
-    { name: 'f3', endpoint: 'kh_f3' },
-    { name: 'labhair', endpoint: 'kh_labhair' },
-    { name: 'yaman', endpoint: 'kh_yaman' },
-    { name: 'menard', endpoint: 'kh_menard' },
-  ];
 
   constructor(
     @InjectRepository(Customer)
@@ -26,108 +18,424 @@ export class SyncService {
     @InjectRepository(Sale)
     private saleRepository: Repository<Sale>,
     private httpService: HttpService,
+    private zappyApiService: ZappyApiService,
+    @Inject(forwardRef(() => SalesService))
+    private salesService: SalesService,
   ) {}
 
-  async syncAllBrands(): Promise<void> {
-    this.logger.log('Bắt đầu đồng bộ dữ liệu từ tất cả nhãn hàng...');
+  async syncAllBrands(date: string): Promise<{
+    success: boolean;
+    message: string;
+    ordersCount: number;
+    salesCount: number;
+    customersCount: number;
+    invoiceSuccessCount?: number;
+    invoiceFailureCount?: number;
+    errors?: string[];
+    invoiceErrors?: string[];
+  }> {
+    this.logger.log(`Bắt đầu đồng bộ dữ liệu từ Zappy API cho tất cả nhãn hàng cho ngày ${date}`);
+    const brands = ['f3', 'labhair', 'yaman', 'menard']; // Các brand có Zappy API
+    const allErrors: string[] = [];
+    let totalOrdersCount = 0;
+    let totalSalesCount = 0;
+    let totalCustomersCount = 0;
+    let totalInvoiceSuccessCount = 0;
+    let totalInvoiceFailureCount = 0;
+    const totalInvoiceErrors: string[] = [];
 
-    for (const brand of this.brands) {
+    for (const brand of brands) {
       try {
-        await this.syncBrand(brand.name, brand.endpoint);
-      } catch (error) {
-        this.logger.error(`Lỗi khi đồng bộ ${brand.name}: ${error.message}`);
+        const result = await this.syncBrand(brand, date);
+        totalOrdersCount += result.ordersCount;
+        totalSalesCount += result.salesCount;
+        totalCustomersCount += result.customersCount;
+        totalInvoiceSuccessCount += result.invoiceSuccessCount || 0;
+        totalInvoiceFailureCount += result.invoiceFailureCount || 0;
+        if (result.invoiceErrors) {
+          totalInvoiceErrors.push(...result.invoiceErrors);
+        }
+        if (result.errors) {
+          allErrors.push(...result.errors);
+        }
+      } catch (error: any) {
+        const errorMsg = `Lỗi khi đồng bộ ${brand} cho ngày ${date}: ${error?.message || error}`;
+        this.logger.error(errorMsg);
+        allErrors.push(errorMsg);
       }
     }
 
-    this.logger.log('Hoàn thành đồng bộ dữ liệu');
+    this.logger.log(
+      `Hoàn thành đồng bộ tất cả nhãn hàng cho ngày ${date}: ${totalOrdersCount} orders, ${totalSalesCount} sales mới, ${totalCustomersCount} customers mới. ` +
+      `Hóa đơn Fast API: ${totalInvoiceSuccessCount} thành công, ${totalInvoiceFailureCount} thất bại.`,
+    );
+
+    return {
+      success: allErrors.length === 0,
+      message: allErrors.length === 0
+        ? `Đồng bộ tất cả nhãn hàng thành công cho ngày ${date}`
+        : `Đồng bộ tất cả nhãn hàng hoàn thành với ${allErrors.length} lỗi cho ngày ${date}`,
+      ordersCount: totalOrdersCount,
+      salesCount: totalSalesCount,
+      customersCount: totalCustomersCount,
+      invoiceSuccessCount: totalInvoiceSuccessCount,
+      invoiceFailureCount: totalInvoiceFailureCount,
+      invoiceErrors: totalInvoiceErrors,
+      errors: allErrors.length > 0 ? allErrors : undefined,
+    };
   }
 
-  async syncBrand(brandName: string, endpoint: string, useT8: boolean = false): Promise<void> {
-    this.logger.log(`Đang đồng bộ dữ liệu từ ${brandName}...`);
+  async syncBrand(brandName: string, date: string): Promise<{
+    success: boolean;
+    message: string;
+    ordersCount: number;
+    salesCount: number;
+    customersCount: number;
+    invoiceSuccessCount?: number;
+    invoiceFailureCount?: number;
+    errors?: string[];
+    invoiceErrors?: string[];
+  }> {
+    // Sync từ Zappy API với brand cụ thể
+    this.logger.log(`Đang đồng bộ dữ liệu từ Zappy API cho ngày ${date} (brand: ${brandName})`);
+    return this.syncFromZappy(date, brandName);
+  }
+
+  async syncFromZappy(date: string, brand?: string): Promise<{
+    success: boolean;
+    message: string;
+    ordersCount: number;
+    salesCount: number;
+    customersCount: number;
+    invoiceSuccessCount?: number;
+    invoiceFailureCount?: number;
+    errors?: string[];
+    invoiceErrors?: string[];
+  }> {
+    this.logger.log(`Bắt đầu đồng bộ dữ liệu từ Zappy API cho ngày ${date}${brand ? ` (brand: ${brand})` : ''}`);
 
     try {
-      // Nếu useT8 = true, dùng endpoint /t8, ngược lại dùng /daily
-      const url = useT8 
-        ? `${this.n8nBaseUrl}/${endpoint}/t8`
-        : `${this.n8nBaseUrl}/${endpoint}/daily`;
-      const response = await firstValueFrom(
-        this.httpService.get<SyncApiResponse>(url, {
-          headers: { accept: 'application/json' },
-        }),
+      // Lấy dữ liệu từ Zappy API với brand cụ thể
+      const orders = await this.zappyApiService.getDailySales(date, brand);
+      
+      // Lấy dữ liệu cash/voucher từ get_daily_cash/get_daily_cashio để enrich
+      let cashData: any[] = [];
+      try {
+        cashData = await this.zappyApiService.getDailyCash(date, brand);
+        this.logger.log(`Fetched ${cashData.length} cash records for date ${date}${brand ? ` (brand: ${brand})` : ''}`);
+      } catch (error) {
+        this.logger.warn(`Failed to fetch daily cash data: ${error}`);
+      }
+
+      // Tạo map cash data theo so_code để dễ lookup
+      const cashMapBySoCode = new Map<string, any[]>();
+      cashData.forEach((cash) => {
+        const soCode = cash.so_code || cash.master_code;
+        if (soCode) {
+          if (!cashMapBySoCode.has(soCode)) {
+            cashMapBySoCode.set(soCode, []);
+          }
+          cashMapBySoCode.get(soCode)!.push(cash);
+      }
+      });
+
+      if (orders.length === 0) {
+        return {
+          success: true,
+          message: `Không có dữ liệu để đồng bộ cho ngày ${date}`,
+          ordersCount: 0,
+          salesCount: 0,
+          customersCount: 0,
+        };
+  }
+
+      let salesCount = 0;
+      let customersCount = 0;
+      const errors: string[] = [];
+
+      // Collect tất cả branchCodes để fetch departments
+      const branchCodes = Array.from(
+        new Set(
+          orders
+            .map((o) => o.branchCode)
+            .filter((code): code is string => !!code && code.trim() !== '')
+        )
       );
 
-      // Xử lý cấu trúc dữ liệu: [{ data: [{ data_customer: {...} }, ...] }, ...]
-      const responseBody: any = response.data;
-      let allCustomers: SyncDataDto[] = [];
-      
-      // Response là mảng các object, mỗi object có key "data"
-      if (Array.isArray(responseBody)) {
-        // Kiểm tra xem phần tử đầu tiên có phải là object với key "data" không
-        const firstItem = responseBody[0];
-        if (firstItem && typeof firstItem === 'object' && 'data' in firstItem && Array.isArray(firstItem.data)) {
-          // Cấu trúc mới: [{ data: [...] }, ...]
-          for (const batch of responseBody) {
-            if (batch && batch.data && Array.isArray(batch.data)) {
-              allCustomers = allCustomers.concat(batch.data);
+      // Fetch departments để lấy company và map sang brand
+      const departmentMap = new Map<string, { company?: string }>();
+      for (const branchCode of branchCodes) {
+        try {
+          const response = await this.httpService.axiosRef.get(
+            `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+            { headers: { accept: 'application/json' } },
+          );
+          const department = response?.data?.data?.items?.[0];
+          if (department?.company) {
+            departmentMap.set(branchCode, { company: department.company });
+          }
+        } catch (error) {
+          this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+        }
+      }
+
+      // Map company sang brand
+      const mapCompanyToBrand = (company: string | null | undefined): string => {
+        if (!company) return '';
+        const companyUpper = company.toUpperCase();
+        const brandMap: Record<string, string> = {
+          'F3': 'f3',
+          'FACIALBAR': 'f3',
+          'MENARD': 'menard',
+          'CHANDO': 'chando',
+          'LABHAIR': 'labhair',
+          'YAMAN': 'yaman',
+        };
+        return brandMap[companyUpper] || company.toLowerCase();
+      };
+
+      // Xử lý từng order
+      for (const order of orders) {
+        try {
+          // Lấy brand từ department.company
+          const department = departmentMap.get(order.branchCode);
+          const brandFromDepartment = department?.company
+            ? mapCompanyToBrand(department.company)
+            : order.customer.brand || '';
+
+          // Tìm hoặc tạo customer
+          let customer = await this.customerRepository.findOne({
+            where: { code: order.customer.code },
+          });
+
+          if (!customer) {
+            const newCustomer = this.customerRepository.create({
+              code: order.customer.code,
+              name: order.customer.name,
+              brand: brandFromDepartment,
+              mobile: order.customer.mobile,
+              sexual: order.customer.sexual,
+              idnumber: order.customer.idnumber,
+              enteredat: order.customer.enteredat ? new Date(order.customer.enteredat) : null,
+              crm_lead_source: order.customer.crm_lead_source,
+              address: order.customer.address,
+              province_name: order.customer.province_name,
+              birthday: order.customer.birthday ? new Date(order.customer.birthday) : null,
+              grade_name: order.customer.grade_name,
+              branch_code: order.customer.branch_code,
+            } as Partial<Customer>);
+            customer = await this.customerRepository.save(newCustomer);
+            customersCount++;
+          } else {
+            // Cập nhật thông tin customer nếu cần
+            customer.name = order.customer.name || customer.name;
+            customer.mobile = order.customer.mobile || customer.mobile;
+            customer.grade_name = order.customer.grade_name || customer.grade_name;
+            // Cập nhật brand từ department nếu có
+            if (brandFromDepartment) {
+              customer.brand = brandFromDepartment;
+            }
+            customer = await this.customerRepository.save(customer);
+          }
+
+          // Đảm bảo customer không null
+          if (!customer) {
+            const errorMsg = `Không thể tạo hoặc tìm customer với code ${order.customer.code}`;
+            this.logger.error(errorMsg);
+            errors.push(errorMsg);
+            continue;
+          }
+
+          // Lấy cash/voucher data cho order này
+          const orderCashData = cashMapBySoCode.get(order.docCode) || [];
+          const voucherData = orderCashData.filter((cash) => cash.fop_syscode === 'VOUCHER');
+          
+          // Xử lý từng sale trong order
+          if (order.sales && order.sales.length > 0) {
+            for (const saleItem of order.sales) {
+              try {
+                // Kiểm tra xem sale đã tồn tại chưa (dựa trên docCode, itemCode)
+                const existingSale = await this.saleRepository.findOne({
+                  where: {
+                    docCode: order.docCode,
+                    itemCode: saleItem.itemCode,
+                    customer: { id: customer.id },
+                  },
+                });
+                
+                // Enrich voucher data từ get_daily_cash
+                let voucherRefno: string | undefined;
+                let voucherAmount: number | undefined;
+                if (voucherData.length > 0) {
+                  // Lấy voucher đầu tiên (có thể có nhiều voucher)
+                  const firstVoucher = voucherData[0];
+                  voucherRefno = firstVoucher.refno;
+                  voucherAmount = firstVoucher.total_in || 0;
+                }
+
+                if (existingSale) {
+                  // Cập nhật sale đã tồn tại
+                  existingSale.qty = saleItem.qty || existingSale.qty;
+                  existingSale.revenue = saleItem.revenue || existingSale.revenue;
+                  existingSale.linetotal = saleItem.linetotal || existingSale.linetotal;
+                  existingSale.tienHang = saleItem.tienHang || existingSale.tienHang;
+                  existingSale.giaBan = saleItem.giaBan || existingSale.giaBan;
+                  existingSale.itemName = saleItem.itemName || existingSale.itemName;
+                  existingSale.ordertype = saleItem.ordertype || existingSale.ordertype;
+                  existingSale.branchCode = saleItem.branchCode || existingSale.branchCode;
+                  existingSale.promCode = saleItem.promCode || existingSale.promCode;
+                  existingSale.serial = saleItem.serial !== undefined ? saleItem.serial : existingSale.serial;
+                  existingSale.soSerial = saleItem.serial !== undefined ? saleItem.serial : existingSale.soSerial;
+                  existingSale.disc_amt = saleItem.disc_amt || existingSale.disc_amt;
+                  existingSale.grade_discamt = saleItem.grade_discamt || existingSale.grade_discamt;
+                  existingSale.other_discamt = saleItem.other_discamt !== undefined ? saleItem.other_discamt : existingSale.other_discamt;
+                  existingSale.chietKhauMuaHangGiamGia = saleItem.chietKhauMuaHangGiamGia !== undefined ? saleItem.chietKhauMuaHangGiamGia : existingSale.chietKhauMuaHangGiamGia;
+                  existingSale.paid_by_voucher_ecode_ecoin_bp = saleItem.paid_by_voucher_ecode_ecoin_bp || existingSale.paid_by_voucher_ecode_ecoin_bp;
+                  existingSale.maCa = saleItem.shift_code || existingSale.maCa;
+                  existingSale.saleperson_id = saleItem.saleperson_id || existingSale.saleperson_id;
+                  existingSale.partnerCode = saleItem.partnerCode || existingSale.partnerCode;
+                  existingSale.partner_name = saleItem.partner_name || existingSale.partner_name;
+                  existingSale.order_source = saleItem.order_source || existingSale.order_source;
+                  // Lưu mvc_serial vào maThe
+                  existingSale.maThe = saleItem.mvc_serial !== undefined ? saleItem.mvc_serial : existingSale.maThe;
+                  // Category fields
+                  existingSale.cat1 = saleItem.cat1 !== undefined ? saleItem.cat1 : existingSale.cat1;
+                  existingSale.cat2 = saleItem.cat2 !== undefined ? saleItem.cat2 : existingSale.cat2;
+                  existingSale.cat3 = saleItem.cat3 !== undefined ? saleItem.cat3 : existingSale.cat3;
+                  existingSale.catcode1 = saleItem.catcode1 !== undefined ? saleItem.catcode1 : existingSale.catcode1;
+                  existingSale.catcode2 = saleItem.catcode2 !== undefined ? saleItem.catcode2 : existingSale.catcode2;
+                  existingSale.catcode3 = saleItem.catcode3 !== undefined ? saleItem.catcode3 : existingSale.catcode3;
+                  // Enrich voucher data
+                  if (voucherRefno) {
+                    existingSale.voucherDp1 = voucherRefno;
+                  }
+                  if (voucherAmount !== undefined && voucherAmount > 0) {
+                    existingSale.thanhToanVoucher = voucherAmount;
+                  }
+                  await this.saleRepository.save(existingSale);
+        } else {
+                  // Tạo sale mới
+                  const newSale = this.saleRepository.create({
+                    docCode: order.docCode,
+                    docDate: new Date(order.docDate),
+                    branchCode: order.branchCode,
+                    docSourceType: order.docSourceType,
+                    ordertype: saleItem.ordertype,
+                    description: saleItem.description,
+                    partnerCode: saleItem.partnerCode,
+                    itemCode: saleItem.itemCode || '',
+                    itemName: saleItem.itemName || '',
+                    qty: saleItem.qty || 0,
+                    revenue: saleItem.revenue || 0,
+                    linetotal: saleItem.linetotal || saleItem.revenue || 0,
+                    tienHang: saleItem.tienHang || saleItem.linetotal || saleItem.revenue || 0,
+                    giaBan: saleItem.giaBan || 0,
+                    promCode: saleItem.promCode,
+                    serial: saleItem.serial,
+                    soSerial: saleItem.serial,
+                    disc_amt: saleItem.disc_amt,
+                    grade_discamt: saleItem.grade_discamt,
+                    other_discamt: saleItem.other_discamt,
+                    chietKhauMuaHangGiamGia: saleItem.chietKhauMuaHangGiamGia,
+                    paid_by_voucher_ecode_ecoin_bp: saleItem.paid_by_voucher_ecode_ecoin_bp,
+                    maCa: saleItem.shift_code,
+                    saleperson_id: saleItem.saleperson_id,
+                    partner_name: saleItem.partner_name,
+                    order_source: saleItem.order_source,
+                    // Lưu mvc_serial vào maThe
+                    maThe: saleItem.mvc_serial,
+                    // Category fields
+                    cat1: saleItem.cat1,
+                    cat2: saleItem.cat2,
+                    cat3: saleItem.cat3,
+                    catcode1: saleItem.catcode1,
+                    catcode2: saleItem.catcode2,
+                    catcode3: saleItem.catcode3,
+                    // Enrich voucher data từ get_daily_cash
+                    voucherDp1: voucherRefno,
+                    thanhToanVoucher: voucherAmount && voucherAmount > 0 ? voucherAmount : undefined,
+                    customer: customer,
+                    isProcessed: false,
+                  } as Partial<Sale>);
+                  await this.saleRepository.save(newSale);
+                  salesCount++;
+                }
+              } catch (saleError: any) {
+                const errorMsg = `Lỗi khi lưu sale ${order.docCode}/${saleItem.itemCode}: ${saleError?.message || saleError}`;
+                this.logger.error(errorMsg);
+                errors.push(errorMsg);
+      }
             }
           }
-          this.logger.debug(`${brandName}: Nhận được ${allCustomers.length} customers từ ${responseBody.length} batch(es)`);
-        } else {
-          // Cấu trúc cũ: trực tiếp là mảng các data_customer
-          allCustomers = responseBody as SyncDataDto[];
-          this.logger.debug(`${brandName}: Nhận được ${allCustomers.length} items từ mảng trực tiếp`);
-        }
-      } 
-      // Tương thích ngược: nếu response trực tiếp là { data: [...] }
-      else if (responseBody && typeof responseBody === 'object' && 'data' in responseBody && Array.isArray(responseBody.data)) {
-        allCustomers = responseBody.data;
-        this.logger.debug(`${brandName}: Nhận được ${allCustomers.length} items từ cấu trúc { data: [...] }`);
-      }
-      else {
-        this.logger.warn(`${brandName}: Dữ liệu không đúng định dạng. Response type: ${typeof responseBody}`);
-        return;
-      }
-
-      if (allCustomers.length === 0) {
-        this.logger.log(`${brandName}: Không có dữ liệu để đồng bộ`);
-        return;
-      }
-
-      let processedCount = 0;
-      let skippedCount = 0;
-      
-      for (const item of allCustomers) {
-        if (item && item.data_customer) {
-          try {
-            await this.processCustomerData(item.data_customer, brandName);
-            processedCount++;
-          } catch (error) {
-            this.logger.error(`${brandName}: Lỗi khi xử lý customer ${item.data_customer?.Personal_Info?.code}: ${error.message}`);
-            skippedCount++;
-          }
-        } else {
-          skippedCount++;
-          this.logger.warn(`${brandName}: Item không có data_customer: ${JSON.stringify(item).substring(0, 100)}`);
+        } catch (orderError: any) {
+          const errorMsg = `Lỗi khi xử lý order ${order.docCode}: ${orderError?.message || orderError}`;
+          this.logger.error(errorMsg);
+          errors.push(errorMsg);
         }
       }
 
       this.logger.log(
-        `${brandName}: Đã xử lý ${processedCount} khách hàng${skippedCount > 0 ? `, bỏ qua ${skippedCount} items` : ''}`,
+        `Hoàn thành đồng bộ: ${orders.length} orders, ${salesCount} sales mới, ${customersCount} customers mới`,
       );
-    } catch (error) {
-      this.logger.error(
-        `Lỗi khi lấy dữ liệu từ ${brandName}: ${error.message}`,
+
+      // Tự động tạo hóa đơn cho tất cả các đơn hàng vừa đồng bộ
+      const docCodes = Array.from(new Set(orders.map(o => o.docCode)));
+      let invoiceSuccessCount = 0;
+      let invoiceFailureCount = 0;
+      const invoiceErrors: string[] = [];
+
+      this.logger.log(`Bắt đầu tự động tạo hóa đơn cho ${docCodes.length} đơn hàng...`);
+      
+      for (const docCode of docCodes) {
+          try {
+          this.logger.log(`Đang tạo hóa đơn cho đơn hàng: ${docCode}`);
+          const result = await this.salesService.createInvoiceViaFastApi(docCode);
+          if (result.success) {
+            invoiceSuccessCount++;
+            this.logger.log(`✓ Tạo hóa đơn thành công cho đơn hàng: ${docCode}`);
+          } else {
+            invoiceFailureCount++;
+            const errorMsg = `Tạo hóa đơn thất bại cho ${docCode}: ${result.message || 'Unknown error'}`;
+            invoiceErrors.push(errorMsg);
+            this.logger.warn(`✗ ${errorMsg}`);
+          }
+        } catch (error: any) {
+          invoiceFailureCount++;
+          const errorMsg = `Lỗi khi tạo hóa đơn cho đơn hàng ${docCode}: ${error?.message || error}`;
+          invoiceErrors.push(errorMsg);
+          this.logger.error(`✗ ${errorMsg}`);
+        }
+      }
+
+      this.logger.log(
+        `Hoàn thành tự động tạo hóa đơn: ${invoiceSuccessCount} thành công, ${invoiceFailureCount} thất bại`,
       );
+
+      return {
+        success: errors.length === 0,
+        message: `Đồng bộ thành công ${orders.length} đơn hàng cho ngày ${date}. Tự động tạo hóa đơn: ${invoiceSuccessCount} thành công, ${invoiceFailureCount} thất bại`,
+        ordersCount: orders.length,
+        salesCount,
+        customersCount,
+        invoiceSuccessCount,
+        invoiceFailureCount,
+        errors: errors.length > 0 ? errors : undefined,
+        invoiceErrors: invoiceErrors.length > 0 ? invoiceErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ từ Zappy API: ${error?.message || error}`);
       throw error;
     }
   }
 
-  private async processCustomerData(
-    customerData: SyncDataDto['data_customer'],
+  // Method cũ không còn dùng - đã chuyển sang Zappy API
+  // Giữ lại để tương thích nếu cần, nhưng không được gọi
+  private async processCustomerData_OLD(
+    customerData: any,
     brand: string,
   ): Promise<void> {
-    const personalInfo = customerData.Personal_Info;
-    const sales = customerData.Sales || [];
+    const personalInfo = customerData?.Personal_Info;
+    const sales = customerData?.Sales || [];
 
     // Tìm hoặc tạo customer
     let customer = await this.customerRepository.findOne({

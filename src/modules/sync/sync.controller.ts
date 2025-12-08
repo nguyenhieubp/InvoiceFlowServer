@@ -1,4 +1,4 @@
-import { Controller, Post, Param, Get, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Param, Get, Body, HttpException, HttpStatus } from '@nestjs/common';
 import { SyncService } from '../../services/sync.service';
 
 @Controller('sync')
@@ -6,12 +6,21 @@ export class SyncController {
   constructor(private readonly syncService: SyncService) {}
 
   @Post('all')
-  async syncAll() {
+  async syncAll(@Body('date') date: string) {
+    if (!date) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 04DEC2025)',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     try {
-      await this.syncService.syncAllBrands();
+      const result = await this.syncService.syncAllBrands(date);
       return { 
-        success: true,
-        message: 'Đồng bộ dữ liệu từ tất cả nhãn hàng thành công',
+        ...result,
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
@@ -27,32 +36,21 @@ export class SyncController {
   }
 
   @Post('brand/:brandName')
-  async syncBrand(@Param('brandName') brandName: string) {
-    const brandMap: Record<string, string> = {
-      chando: 'kh_chando',
-      f3: 'kh_f3',
-      labhair: 'kh_labhair',
-      yaman: 'kh_yaman',
-      menard: 'kh_menard',
-    };
-
-    const endpoint = brandMap[brandName.toLowerCase()];
-    if (!endpoint) {
+  async syncBrand(@Param('brandName') brandName: string, @Body('date') date: string) {
+    if (!date) {
       throw new HttpException(
         {
           success: false,
-          message: 'Nhãn hàng không hợp lệ',
-          validBrands: Object.keys(brandMap),
+          message: 'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 04DEC2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
     }
 
     try {
-      await this.syncService.syncBrand(brandName, endpoint);
+      const result = await this.syncService.syncBrand(brandName, date);
       return {
-        success: true,
-        message: `Đồng bộ ${brandName} thành công`,
+        ...result,
         brand: brandName,
         timestamp: new Date().toISOString(),
       };
@@ -69,32 +67,22 @@ export class SyncController {
   }
 
   @Post('brand/:brandName/t8')
-  async syncBrandT8(@Param('brandName') brandName: string) {
-    const brandMap: Record<string, string> = {
-      chando: 'kh_chando',
-      f3: 'kh_f3',
-      labhair: 'kh_labhair',
-      yaman: 'kh_yaman',
-      menard: 'kh_menard',
-    };
-
-    const endpoint = brandMap[brandName.toLowerCase()];
-    if (!endpoint) {
+  async syncBrandT8(@Param('brandName') brandName: string, @Body('date') date: string) {
+    if (!date) {
       throw new HttpException(
         {
           success: false,
-          message: 'Nhãn hàng không hợp lệ',
-          validBrands: Object.keys(brandMap),
+          message: 'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 04DEC2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
     }
 
+    // T8 endpoint giờ cũng dùng Zappy API
     try {
-      await this.syncService.syncBrand(brandName, endpoint, true);
+      const result = await this.syncService.syncBrand(brandName, date);
       return {
-        success: true,
-        message: `Đồng bộ ${brandName} từ t8 thành công`,
+        ...result,
         brand: brandName,
         timestamp: new Date().toISOString(),
       };
@@ -102,7 +90,7 @@ export class SyncController {
       throw new HttpException(
         {
           success: false,
-          message: `Lỗi khi đồng bộ ${brandName} từ t8`,
+          message: `Lỗi khi đồng bộ ${brandName}`,
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,

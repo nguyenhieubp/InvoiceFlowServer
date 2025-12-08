@@ -16,7 +16,16 @@ export class SyncTask {
   async handleDailySync() {
     this.logger.log('Bắt đầu đồng bộ dữ liệu tự động (scheduled task)...');
     try {
-      await this.syncService.syncAllBrands();
+      // Format ngày hôm qua (DDMMMYYYY)
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const day = yesterday.getDate().toString().padStart(2, '0');
+      const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+      const month = months[yesterday.getMonth()];
+      const year = yesterday.getFullYear();
+      const date = `${day}${month}${year}`;
+      
+      await this.syncService.syncAllBrands(date);
       this.logger.log('Hoàn thành đồng bộ dữ liệu tự động');
     } catch (error) {
       this.logger.error(`Lỗi khi đồng bộ tự động: ${error.message}`);

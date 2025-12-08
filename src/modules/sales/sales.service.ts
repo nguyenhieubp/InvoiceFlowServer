@@ -1097,20 +1097,9 @@ export class SalesService {
         detailCount: invoiceData.detail?.length,
       })}`);
 
-      // Sử dụng FastApiInvoiceFlowService để thực hiện toàn bộ luồng
-      // Luồng: Customer → Item → salesInvoice
-      // Enrich detail với product information để có ten_vt
-      const enrichedDetail = invoiceData.detail.map((item: any) => {
-        const sale = orderData.sales.find((s: any) => s.itemCode === item.ma_vt);
-        return {
-          ...item,
-          product: sale?.product || null,
-        };
-      });
-
+      // Gọi API tạo đơn hàng
       const result = await this.fastApiInvoiceFlowService.executeFullInvoiceFlow({
         ...invoiceData,
-        detail: enrichedDetail,
         customer: orderData.customer,
         ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
       });
@@ -1147,6 +1136,36 @@ export class SalesService {
       if (!isSuccess) {
         // Có lỗi từ Fast API
         this.logger.error(`Invoice creation failed for order ${docCode}: ${responseMessage}`);
+        
+        // Kiểm tra nếu là lỗi duplicate key - có thể đơn hàng đã tồn tại trong Fast API
+        const isDuplicateError = responseMessage && (
+          responseMessage.toLowerCase().includes('duplicate') ||
+          responseMessage.toLowerCase().includes('primary key constraint') ||
+          responseMessage.toLowerCase().includes('pk_d81')
+        );
+        
+        if (isDuplicateError) {
+          this.logger.warn(`Order ${docCode} appears to already exist in Fast API (duplicate key error). Treating as already processed.`);
+          // Cập nhật status thành 1 (thành công) vì có thể đã tồn tại trong Fast API
+          await this.saveFastApiInvoice({
+            docCode,
+            maDvcs: invoiceData.ma_dvcs,
+            maKh: invoiceData.ma_kh,
+            tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+            ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
+            status: 1, // Coi như thành công vì đã tồn tại
+            message: `Đơn hàng đã tồn tại trong Fast API: ${responseMessage}`,
+            guid: responseGuid || null,
+            fastApiResponse: JSON.stringify(result),
+          });
+          
+          return {
+            success: true,
+            message: `Đơn hàng ${docCode} đã tồn tại trong Fast API (có thể đã được tạo trước đó)`,
+            result,
+            alreadyExists: true,
+          };
+        }
         
         return {
           success: false,
@@ -1289,7 +1308,7 @@ export class SalesService {
       return {
         ma_vt: toString(sale.itemCode || sale.product?.maVatTu, ''),
         dvt: dvt,
-        so_serial: soSerial,
+        // so_serial: soSerial, // Tạm thời comment
         loai: loai,
         ma_ctkm_th: toString(sale.maCtkmTangHang, ''),
         ma_kho: maKho,
