@@ -1249,15 +1249,18 @@ export class SalesService {
       const ck01_nt = toNumber(sale.other_discamt || sale.chietKhauMuaHangGiamGia, 0);
       const ck02_nt = toNumber(sale.chietKhauCkTheoChinhSach, 0);
       const ck03_nt = toNumber(sale.chietKhauMuaHangCkVip || sale.grade_discamt, 0);
-      const ck04_nt = toNumber(sale.chietKhauThanhToanVoucher, 0);
-      const ck05_nt = toNumber(sale.chietKhauThanhToanTkTienAo, 0);
+      // ma_ck04: Thanh toán coupon
+      const ck04_nt = toNumber(sale.chietKhauThanhToanCoupon || sale.chietKhau09, 0);
+      // ma_ck05: Thanh toán voucher
+      const ck05_nt = toNumber(sale.chietKhauThanhToanVoucher || sale.paid_by_voucher_ecode_ecoin_bp, 0);
       const ck06_nt = toNumber(sale.chietKhauVoucherDp1, 0);
       const ck07_nt = toNumber(sale.chietKhauVoucherDp2, 0);
       const ck08_nt = toNumber(sale.chietKhauVoucherDp3, 0);
       // Các chiết khấu từ 09-22 mặc định là 0
       const ck09_nt = toNumber(sale.chietKhau09, 0);
       const ck10_nt = toNumber(sale.chietKhau10, 0);
-      const ck11_nt = toNumber(sale.chietKhau11, 0);
+      // ck11_nt: Thanh toán TK tiền ảo
+      const ck11_nt = toNumber(sale.chietKhauThanhToanTkTienAo || sale.chietKhau11, 0);
       const ck12_nt = toNumber(sale.chietKhau12, 0);
       const ck13_nt = toNumber(sale.chietKhau13, 0);
       const ck14_nt = toNumber(sale.chietKhau14, 0);
@@ -1305,6 +1308,22 @@ export class SalesService {
       
       const loai = toString(sale.loai || sale.cat1, '');
 
+      // Lấy ma_bp - bắt buộc phải có giá trị
+      const maBp = toString(
+        sale.department?.ma_bp || sale.branchCode || orderData.branchCode,
+        ''
+      );
+      
+      // Validate ma_bp - nếu vẫn empty thì log warning
+      if (!maBp || maBp.trim() === '') {
+        this.logger.warn(
+          `[BuildInvoice] Warning: ma_bp is empty for sale ${sale.itemCode} in order ${orderData.docCode}. ` +
+          `department.ma_bp: ${sale.department?.ma_bp || 'N/A'}, ` +
+          `sale.branchCode: ${sale.branchCode || 'N/A'}, ` +
+          `orderData.branchCode: ${orderData.branchCode || 'N/A'}`
+        );
+      }
+
       return {
         ma_vt: toString(sale.itemCode || sale.product?.maVatTu, ''),
         dvt: dvt,
@@ -1321,15 +1340,17 @@ export class SalesService {
         dong_thuoc_goi: toString(sale.dongThuocGoi, ''),
         trang_thai: toString(sale.trangThai, ''),
         barcode: toString(sale.barcode, ''),
-        ma_ck01: sale.muaHangGiamGia ? 'MUA_HANG_GIAM_GIA' : '',
+        ma_ck01: sale.promCode ? sale.promCode : '',
         ck01_nt: Number(ck01_nt),
         ma_ck02: toString(sale.ckTheoChinhSach, ''),
         ck02_nt: Number(ck02_nt),
         ma_ck03: toString(sale.muaHangCkVip, ''),
         ck03_nt: Number(ck03_nt),
-        ma_ck04: sale.thanhToanVoucher ? 'VOUCHER' : '',
+        // ma_ck04: Thanh toán coupon
+        ma_ck04: (ck04_nt > 0 || sale.thanhToanCoupon) ? toString(sale.maCk04 || 'COUPON', '') : '',
         ck04_nt: Number(ck04_nt),
-        ma_ck05: sale.thanhToanTkTienAo ? 'TK_TIEN_AO' : '',
+        // ma_ck05: Thanh toán voucher
+        ma_ck05: (ck05_nt > 0 || sale.thanhToanVoucher) ? toString(sale.maCk05 || 'VOUCHER', '') : '',
         ck05_nt: Number(ck05_nt),
         ma_ck06: sale.voucherDp1 ? 'VOUCHER_DP1' : '',
         ck06_nt: Number(ck06_nt),
@@ -1337,11 +1358,14 @@ export class SalesService {
         ck07_nt: Number(ck07_nt),
         ma_ck08: sale.voucherDp3 ? 'VOUCHER_DP3' : '',
         ck08_nt: Number(ck08_nt),
+        // ma_ck09: Chiết khấu hãng
         ma_ck09: toString(sale.maCk09, ''),
         ck09_nt: Number(ck09_nt),
+        // ma_ck10: Thưởng bằng hàng
         ma_ck10: toString(sale.maCk10, ''),
         ck10_nt: Number(ck10_nt),
-        ma_ck11: toString(sale.maCk11, ''),
+        // ma_ck11: Thanh toán TK tiền ảo
+        ma_ck11: (ck11_nt > 0 || sale.thanhToanTkTienAo) ? toString(sale.maCk11 || 'TK_TIEN_AO', '') : '',
         ck11_nt: Number(ck11_nt),
         ma_ck12: toString(sale.maCk12, ''),
         ck12_nt: Number(ck12_nt),
@@ -1371,7 +1395,8 @@ export class SalesService {
         tien_thue: Number(toNumber(sale.tienThue, 0)),
         tk_thue: toString(sale.tkThueCo, ''),
         tk_cpbh: toString(sale.tkCpbh, ''),
-        ma_bp: toString(sale.department?.ma_bp || sale.branchCode, ''),
+        // ma_bp là bắt buộc - đã được validate ở trên
+        ma_bp: maBp,
         ma_the: maThe,
         // Chỉ thêm ma_lo nếu có giá trị (không rỗng)
         ...(maLo && maLo.trim() !== '' ? { ma_lo: maLo } : {}),
