@@ -65,6 +65,12 @@ export class FastApiInvoiceFlowService {
         return obj;
       };
 
+      // menard - TTM
+      // f3 - FBV
+      // chando - CDV
+      // labhair - LHV
+      // yaman - BTH
+
       // Loại bỏ các field không cần thiết khỏi payload trước khi gửi lên API
       // - product: không cần gửi lên salesInvoice API
       // - customer: không cần gửi lên salesInvoice API
