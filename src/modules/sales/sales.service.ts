@@ -336,9 +336,9 @@ export class SalesService {
             ...loyaltyProduct,
             // Map unit từ Loyalty API thành dvt
             dvt: loyaltyProduct.unit || existingProduct?.dvt || null,
-            // Giữ lại các field từ database nếu có
-            maVatTu: existingProduct?.maVatTu || loyaltyProduct.code || sale.itemCode,
-            maERP: existingProduct?.maERP || loyaltyProduct.code || sale.itemCode,
+            // Giữ lại các field từ database nếu có, chỉ dùng materialCode từ Loyalty API
+            maVatTu: existingProduct?.maVatTu || loyaltyProduct.materialCode || sale.itemCode,
+            maERP: existingProduct?.maERP || loyaltyProduct.materialCode || sale.itemCode,
           },
         };
       }
@@ -1364,7 +1364,7 @@ export class SalesService {
       }
 
       return {
-        ma_vt: toString(sale.itemCode || sale.product?.maVatTu, ''),
+        ma_vt: toString(sale.product?.maVatTu || ''),
         dvt: dvt,
         // so_serial: soSerial, // Tạm thời comment
         loai: loai,

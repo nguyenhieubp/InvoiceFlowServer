@@ -250,10 +250,46 @@ export class SyncService {
           const orderCashData = cashMapBySoCode.get(order.docCode) || [];
           const voucherData = orderCashData.filter((cash) => cash.fop_syscode === 'VOUCHER');
           
+          // Collect tất cả itemCodes từ order để fetch products từ Loyalty API
+          const orderItemCodes = Array.from(
+            new Set(
+              (order.sales || [])
+                .map((s) => s.itemCode)
+                .filter((code): code is string => !!code && code.trim() !== '')
+            )
+          );
+
+          // Fetch products từ Loyalty API để kiểm tra dvt (song song)
+          const productDvtMap = new Map<string, string>();
+          if (orderItemCodes.length > 0) {
+            await Promise.all(
+              orderItemCodes.map(async (itemCode) => {
+                try {
+                  const response = await this.httpService.axiosRef.get(
+                    `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+                    { headers: { accept: 'application/json' } },
+                  );
+                  const loyaltyProduct = response?.data?.data?.item || response?.data;
+                  if (loyaltyProduct?.unit) {
+                    productDvtMap.set(itemCode, loyaltyProduct.unit);
+                  }
+                } catch (error) {
+                  // Không có dvt từ Loyalty API
+                }
+              }),
+            );
+          }
+          
           // Xử lý từng sale trong order
           if (order.sales && order.sales.length > 0) {
             for (const saleItem of order.sales) {
               try {
+                // Kiểm tra dvt: bỏ qua sale không có dvt
+                const dvt = saleItem.dvt || productDvtMap.get(saleItem.itemCode || '');
+                if (!dvt || String(dvt).trim() === '') {
+                  this.logger.warn(`Bỏ qua sale ${order.docCode}/${saleItem.itemCode}: không có dvt`);
+                  continue;
+                }
                 // Kiểm tra xem sale đã tồn tại chưa (dựa trên docCode, itemCode)
                 const existingSale = await this.saleRepository.findOne({
                   where: {
