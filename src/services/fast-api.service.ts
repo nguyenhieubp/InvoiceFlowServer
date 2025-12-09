@@ -597,6 +597,92 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Gọi API stockTransfer (phiếu xuất/nhập kho)
+   */
+  async submitStockTransfer(stockTransferData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Log payload gửi lên API
+      this.logger.log('==================Stock Transfer API Request Payload:');
+      this.logger.log(JSON.stringify(stockTransferData, null, 2));
+      this.logger.log('==================End of Stock Transfer API Request Payload');
+
+      // Gọi API warehouseRelease với token
+      const endpoint = `${this.baseUrl}/warehouseRelease`;
+      this.logger.log(`Calling FastAPI endpoint: ${endpoint}`);
+      
+      const response = await firstValueFrom(
+        this.httpService.post(
+          endpoint,
+          stockTransferData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('Stock transfer submitted successfully');
+      this.logger.log('==================Stock Transfer API Response:');
+      this.logger.log(JSON.stringify(response.data, null, 2));
+      this.logger.log('==================End of Stock Transfer API Response');
+      return response.data;
+    } catch (error: any) {
+      // Log chi tiết lỗi
+      this.logger.error(`Error submitting stock transfer: ${error?.message || error}`);
+      if (error?.response) {
+        this.logger.error(`Response status: ${error.response.status}`);
+        this.logger.error(`Response data: ${JSON.stringify(error.response.data)}`);
+        this.logger.error(`Response headers: ${JSON.stringify(error.response.headers)}`);
+      }
+      if (error?.config) {
+        this.logger.error(`Request URL: ${error.config.url}`);
+        this.logger.error(`Request method: ${error.config.method}`);
+      }
+
+      // Nếu lỗi 401 (Unauthorized), refresh token và retry
+      if (error?.response?.status === 401) {
+        this.logger.log('Token expired, refreshing and retrying...');
+        const newToken = await this.login();
+        if (newToken) {
+          // Retry với token mới
+          try {
+            const endpoint = `${this.baseUrl}/warehouseRelease`;
+            const retryResponse = await firstValueFrom(
+              this.httpService.post(
+                endpoint,
+                stockTransferData,
+                {
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${newToken}`,
+                  },
+                },
+              ),
+            );
+            this.logger.log('Stock transfer submitted successfully after token refresh');
+            return retryResponse.data;
+          } catch (retryError: any) {
+            this.logger.error(
+              `Error submitting stock transfer after retry: ${retryError?.message || retryError}`,
+            );
+            throw retryError;
+          }
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  /**
    * Cleanup khi module bị destroy
    */
   onModuleDestroy() {

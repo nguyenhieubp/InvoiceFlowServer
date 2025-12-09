@@ -13,10 +13,20 @@ import { ZappyApiService } from '../../services/zappy-api.service';
 import { FastApiService } from '../../services/fast-api.service';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { Order } from '../../types/order.types';
+import { CreateStockTransferDto, StockTransferItem } from '../../dto/create-stock-transfer.dto';
 
 @Injectable()
 export class SalesService {
   private readonly logger = new Logger(SalesService.name);
+
+  /**
+   * Xử lý promotion code: cắt phần sau dấu "-" để lấy code hiển thị
+   */
+  private getPromotionDisplayCode(promCode: string | null | undefined): string | null {
+    if (!promCode) return null;
+    const parts = promCode.split('-');
+    return parts[0] || promCode;
+  }
 
   constructor(
     @InjectRepository(Sale)
@@ -62,8 +72,14 @@ export class SalesService {
 
     const [data, total] = await query.getManyAndCount();
 
+    // Thêm promotionDisplayCode vào mỗi sale
+    const enrichedData = data.map((sale) => ({
+      ...sale,
+      promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
+    }));
+
     return {
-      data,
+      data: enrichedData,
       total,
       page,
       limit,
@@ -93,11 +109,20 @@ export class SalesService {
           );
         }
 
+        // Thêm promotionDisplayCode vào các sales items
+        const enrichedOrders = filteredOrders.map((order) => ({
+          ...order,
+          sales: order.sales?.map((sale) => ({
+            ...sale,
+            promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
+          })) || [],
+        }));
+
         // Phân trang
-        const total = filteredOrders.length;
+        const total = enrichedOrders.length;
         const startIndex = (page - 1) * limit;
         const endIndex = startIndex + limit;
-        const paginatedOrders = filteredOrders.slice(startIndex, endIndex);
+        const paginatedOrders = enrichedOrders.slice(startIndex, endIndex);
 
         return {
           data: paginatedOrders,
@@ -154,10 +179,11 @@ export class SalesService {
       }
     });
     
-    // Enrich sales với product information
+    // Enrich sales với product information và promotionDisplayCode
     const enrichedSales = allSales.map((sale) => ({
       ...sale,
       product: sale.itemCode ? productMap.get(sale.itemCode) || null : null,
+      promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
     }));
 
     // Gộp theo docCode
@@ -409,6 +435,7 @@ export class SalesService {
       return {
         ...sale,
         promotion,
+        promotionDisplayCode: this.getPromotionDisplayCode(promCode),
       };
     });
 
@@ -1517,6 +1544,207 @@ export class SalesService {
       })}`);
       throw new Error(`Failed to build invoice data: ${error?.message || error}`);
     }
+  }
+
+  /**
+   * Tạo phiếu xuất kho từ STOCK_TRANSFER data
+   */
+  async createStockTransfer(createDto: CreateStockTransferDto): Promise<any> {
+    try {
+      // Group theo doccode để xử lý từng phiếu
+      const transferMap = new Map<string, StockTransferItem[]>();
+      
+      for (const item of createDto.data) {
+        if (!transferMap.has(item.doccode)) {
+          transferMap.set(item.doccode, []);
+        }
+        transferMap.get(item.doccode)!.push(item);
+      }
+
+      const results: Array<{
+        doccode: string;
+        success: boolean;
+        result?: any;
+        error?: string;
+      }> = [];
+
+      for (const [doccode, items] of transferMap.entries()) {
+        try {
+          // Lấy item đầu tiên để lấy thông tin chung
+          const firstItem = items[0];
+          
+          // Join với order nếu có so_code
+          let orderData: any = null;
+          if (firstItem.so_code) {
+            try {
+              orderData = await this.findByOrderCode(firstItem.so_code);
+            } catch (error) {
+              this.logger.warn(
+                `Không tìm thấy order với docCode ${firstItem.so_code} cho stock transfer ${doccode}`,
+              );
+            }
+          }
+
+          // Build FastAPI stock transfer data
+          const stockTransferData = await this.buildStockTransferData(items, orderData);
+
+          // Submit to FastAPI
+          const result = await this.fastApiService.submitStockTransfer(stockTransferData);
+
+          results.push({
+            doccode,
+            success: true,
+            result,
+          });
+        } catch (error: any) {
+          this.logger.error(
+            `Error creating stock transfer for ${doccode}: ${error?.message || error}`,
+          );
+          results.push({
+            doccode,
+            success: false,
+            error: error?.message || 'Unknown error',
+          });
+        }
+      }
+
+      return {
+        success: true,
+        results,
+        total: results.length,
+        successCount: results.filter((r) => r.success).length,
+        failedCount: results.filter((r) => !r.success).length,
+      };
+    } catch (error: any) {
+      this.logger.error(`Error creating stock transfers: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Build FastAPI stock transfer data từ STOCK_TRANSFER items
+   */
+  private async buildStockTransferData(
+    items: StockTransferItem[],
+    orderData: any,
+  ): Promise<any> {
+    const firstItem = items[0];
+
+    // Lấy ma_dvcs từ order hoặc branch_code
+    let maDvcs = '';
+    if (orderData) {
+      const firstSale = orderData.sales?.[0];
+      maDvcs =
+        firstSale?.department?.ma_dvcs ||
+        firstSale?.department?.ma_dvcs_ht ||
+        orderData.customer?.brand ||
+        orderData.branchCode ||
+        '';
+    }
+    if (!maDvcs) {
+      maDvcs = firstItem.branch_code || '';
+    }
+
+    // Lấy ma_kh từ order
+    const maKh = orderData?.customer?.code || '';
+
+    // Map iotype sang ma_nx (mã nhập xuất)
+    // iotype: 'O' = xuất, 'I' = nhập
+    // ma_nx: có thể là '1111' cho xuất, '1112' cho nhập (cần xác nhận với FastAPI)
+    const getMaNx = (iotype: string): string => {
+      if (iotype === 'O') {
+        return '1111'; // Xuất nội bộ
+      } else if (iotype === 'I') {
+        return '1112'; // Nhập nội bộ
+      }
+      return '1111'; // Default
+    };
+
+    // Build detail items
+    const detail = await Promise.all(
+      items.map(async (item, index) => {
+        // Lookup product để lấy dvt
+        let dvt = 'Cái'; // Default
+        try {
+          const product = await this.productItemRepository.findOne({
+            where: { maERP: item.item_code },
+          });
+          if (product?.dvt) {
+            dvt = product.dvt;
+          } else {
+            // Try to get from Loyalty API
+            try {
+              const response = await this.httpService.axiosRef.get(
+                `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(item.item_code)}`,
+                { headers: { accept: 'application/json' } },
+              );
+              const loyaltyProduct = response?.data?.data?.item || response?.data;
+              if (loyaltyProduct?.unit) {
+                dvt = loyaltyProduct.unit;
+              }
+            } catch (error) {
+              this.logger.warn(
+                `Không lấy được dvt từ Loyalty API cho item ${item.item_code}`,
+              );
+            }
+          }
+        } catch (error) {
+          this.logger.warn(`Không tìm thấy product cho item ${item.item_code}`);
+        }
+
+        return {
+          ma_vt: item.item_code,
+          dvt: dvt,
+          so_serial: item.batchserial || null,
+          ma_kho: item.stock_code,
+          so_luong: Math.abs(item.qty), // Lấy giá trị tuyệt đối
+          gia_nt: 0, // Stock transfer thường không có giá
+          tien_nt: 0, // Stock transfer thường không có tiền
+          ma_lo: item.batchserial || null,
+          px_gia_dd: 0, // Mặc định 0
+          ma_nx: getMaNx(item.iotype),
+          ma_vv: null,
+          ma_bp: orderData?.sales?.[0]?.department?.ma_bp || item.branch_code || null,
+          so_lsx: null,
+          ma_sp: null,
+          ma_hd: null,
+          ma_phi: null,
+          ma_ku: null,
+          ma_phi_hh: null,
+          ma_phi_ttlk: null,
+          tien_hh_nt: 0,
+          tien_ttlk_nt: 0,
+        };
+      }),
+    );
+
+    // Format date
+    const formatDateISO = (date: Date | string): string => {
+      const d = typeof date === 'string' ? new Date(date) : date;
+      return d.toISOString();
+    };
+
+    const transDate = new Date(firstItem.transdate);
+    const ngayCt = formatDateISO(transDate);
+    const ngayLct = formatDateISO(transDate);
+
+    // Lấy ma_nx từ item đầu tiên (tất cả items trong cùng 1 phiếu nên có cùng iotype)
+    const maNx = getMaNx(firstItem.iotype);
+
+    return {
+      action: 0, // Thêm action field giống như salesInvoice
+      ma_dvcs: maDvcs,
+      ma_kh: maKh,
+      ong_ba: orderData?.customer?.name || null,
+      ma_gd: '2', // Mã giao dịch: 2 - Xuất nội bộ
+      ma_nx: maNx, // Thêm ma_nx vào header
+      ngay_ct: ngayCt,
+      so_ct: firstItem.doccode,
+      ma_nt: 'VND',
+      ty_gia: 1.0,
+      dien_giai: firstItem.doc_desc || `Phiếu ${firstItem.iotype === 'O' ? 'xuất' : 'nhập'} kho ${firstItem.doccode}`,
+      detail: detail,
+    };
   }
 }
 

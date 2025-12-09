@@ -1,5 +1,6 @@
 import { Controller, Get, Query, Param, Post, Body, BadRequestException } from '@nestjs/common';
 import { SalesService } from './sales.service';
+import type { CreateStockTransferDto } from '../../dto/create-stock-transfer.dto';
 
 @Controller('sales')
 export class SalesController {
@@ -117,6 +118,14 @@ export class SalesController {
       failureCount,
       results,
     };
+  }
+
+  @Post('stock-transfer')
+  async createStockTransfer(@Body() createDto: CreateStockTransferDto) {
+    if (!createDto.data || !Array.isArray(createDto.data) || createDto.data.length === 0) {
+      throw new BadRequestException('Dữ liệu stock transfer không hợp lệ');
+    }
+    return this.salesService.createStockTransfer(createDto);
   }
 }
 
