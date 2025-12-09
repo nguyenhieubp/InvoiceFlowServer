@@ -415,12 +415,21 @@ export class SyncService {
       );
 
       // Tự động tạo hóa đơn cho tất cả các đơn hàng vừa đồng bộ
-      const docCodes = Array.from(new Set(orders.map(o => o.docCode)));
+      // Lấy docCodes từ database (chỉ các đơn hàng thực sự có sales được lưu)
+      // để tránh lỗi khi order không có sales nào được lưu (do filter dvt)
+      const savedDocCodes = await this.saleRepository
+        .createQueryBuilder('sale')
+        .select('DISTINCT sale.docCode', 'docCode')
+        .where('sale.isProcessed = :isProcessed', { isProcessed: false })
+        .getRawMany();
+      
+      const docCodes = savedDocCodes.map((item: any) => item.docCode).filter((code: string) => code);
+      
       let invoiceSuccessCount = 0;
       let invoiceFailureCount = 0;
       const invoiceErrors: string[] = [];
 
-      this.logger.log(`Bắt đầu tự động tạo hóa đơn cho ${docCodes.length} đơn hàng...`);
+      this.logger.log(`Bắt đầu tự động tạo hóa đơn cho ${docCodes.length} đơn hàng (có sales trong DB)...`);
       
       for (const docCode of docCodes) {
           try {

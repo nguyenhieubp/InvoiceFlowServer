@@ -277,6 +277,78 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Gọi API warehouseRelease (Phiếu xuất kho)
+   */
+  async submitWarehouseRelease(warehouseData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Log payload gửi lên API
+      this.logger.log('==================Warehouse Release API Request Payload:');
+      this.logger.log(JSON.stringify(warehouseData, null, 2));
+      this.logger.log('==================End of Warehouse Release API Request Payload');
+
+      // Gọi API warehouseRelease với token
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/warehouseRelease`,
+          warehouseData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('Warehouse release submitted successfully');
+      this.logger.log('==================Warehouse Release API Response:');
+      this.logger.log(JSON.stringify(response.data, null, 2));
+      this.logger.log('==================End of Warehouse Release API Response');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`Error submitting warehouse release: ${error?.message || error}`);
+
+      // Nếu lỗi 401 (Unauthorized), refresh token và retry
+      if (error?.response?.status === 401) {
+        this.logger.log('Token expired, refreshing and retrying warehouse release API...');
+        const newToken = await this.login();
+        if (newToken) {
+          try {
+            const retryResponse = await firstValueFrom(
+              this.httpService.post(
+                `${this.baseUrl}/warehouseRelease`,
+                warehouseData,
+                {
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${newToken}`,
+                  },
+                },
+              ),
+            );
+            this.logger.log('Warehouse release submitted successfully (after retry)');
+            this.logger.log('==================Warehouse Release API Response (after retry):');
+            this.logger.log(JSON.stringify(retryResponse.data, null, 2));
+            this.logger.log('==================End of Warehouse Release API Response (after retry)');
+            return retryResponse.data;
+          } catch (retryError) {
+            this.logger.error(`Retry warehouse release API failed: ${retryError}`);
+            throw retryError;
+          }
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  /**
    * Tạo hoặc cập nhật vật tư trong Fast API
    * 2.2/ Danh mục vật tư
    * @param itemData - Thông tin vật tư (ma_vt và ten_vt là required)

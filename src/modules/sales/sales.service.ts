@@ -7,6 +7,7 @@ import { Customer } from '../../entities/customer.entity';
 import { ProductItem } from '../../entities/product-item.entity';
 import { Invoice } from '../../entities/invoice.entity';
 import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
+import { WarehouseRelease } from '../../entities/warehouse-release.entity';
 import { InvoicePrintService } from '../../services/invoice-print.service';
 import { InvoiceService } from '../../services/invoice.service';
 import { ZappyApiService } from '../../services/zappy-api.service';
@@ -28,6 +29,87 @@ export class SalesService {
     return parts[0] || promCode;
   }
 
+  /**
+   * Lấy prefix từ ordertype để tính mã kho
+   * - "L" cho: "02. Làm dịch vụ", "04. Đổi DV", "08. Tách thẻ", "Đổi thẻ KEEP->Thẻ DV"
+   * - "B" cho: "01.Thường", "03. Đổi điểm", "05. Tặng sinh nhật", "06. Đầu tư", "07. Bán tài khoản", "9. Sàn TMDT", "Đổi vỏ"
+   */
+  private getOrderTypePrefix(ordertypeName: string | null | undefined): string | null {
+    if (!ordertypeName) return null;
+
+    const normalized = String(ordertypeName).trim();
+
+    // Kho hàng làm (prefix L)
+    const orderTypeLNames = [
+      '02. Làm dịch vụ',
+      '04. Đổi DV',
+      '08. Tách thẻ',
+      'Đổi thẻ KEEP->Thẻ DV',
+      'LAM_DV',
+      'DOI_VO_LAY_DV',
+      'KEEP_TO_SVC',
+      'LAM_THE_DV',
+      'SUA_THE_DV',
+      'DOI_THE_DV',
+      'LAM_DV_LE',
+      'LAM_THE_KEEP',
+      'NOI_THE_KEEP',
+      'RENAME_CARD',
+    ];
+
+    // Kho hàng bán (prefix B)
+    const orderTypeBNames = [
+      '01.Thường',
+      '01. Thường',
+      '03. Đổi điểm',
+      '05. Tặng sinh nhật',
+      '06. Đầu tư',
+      '07. Bán tài khoản',
+      '9. Sàn TMDT',
+      'Đổi vỏ',
+      'NORMAL',
+      'KM_TRA_DL',
+      'BIRTHDAY_PROM',
+      'BP_TO_ITEM',
+      'BAN_ECOIN',
+      'SAN_TMDT',
+      'SO_DL',
+      'SO_HTDT_HB',
+      'SO_HTDT_HK',
+      'SO_HTDT_HL_CB',
+      'SO_HTDT_HL_HB',
+      'SO_HTDT_HL_KM',
+      'SO_HTDT_HT',
+      'ZERO_CTY',
+      'ZERO_SHOP',
+    ];
+
+    if (orderTypeLNames.includes(normalized)) {
+      return 'L';
+    }
+
+    if (orderTypeBNames.includes(normalized)) {
+      return 'B';
+    }
+
+    return null;
+  }
+
+  /**
+   * Tính mã kho từ ordertype + ma_bp (bộ phận)
+   * Format: prefix + ma_bp (ví dụ: "L" + "MH10" = "LMH10", "B" + "MH10" = "BMH10")
+   */
+  private calculateMaKho(
+    ordertype: string | null | undefined,
+    maBp: string | null | undefined
+  ): string | null {
+    const prefix = this.getOrderTypePrefix(ordertype);
+    if (!prefix || !maBp) {
+      return null;
+    }
+    return prefix + maBp;
+  }
+
   constructor(
     @InjectRepository(Sale)
     private saleRepository: Repository<Sale>,
@@ -39,6 +121,8 @@ export class SalesService {
     private invoiceRepository: Repository<Invoice>,
     @InjectRepository(FastApiInvoice)
     private fastApiInvoiceRepository: Repository<FastApiInvoice>,
+    @InjectRepository(WarehouseRelease)
+    private warehouseReleaseRepository: Repository<WarehouseRelease>,
     private invoicePrintService: InvoicePrintService,
     private invoiceService: InvoiceService,
     private httpService: HttpService,
@@ -371,11 +455,18 @@ export class SalesService {
       }
     }
 
-    // Enrich sales với department information
-    const enrichedSalesWithDepartment = enrichedSalesWithLoyalty.map((sale) => ({
-      ...sale,
-      department: sale.branchCode ? departmentMap.get(sale.branchCode) || null : null,
-    }));
+    // Enrich sales với department information và tính maKho
+    const enrichedSalesWithDepartment = enrichedSalesWithLoyalty.map((sale) => {
+      const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
+      const maBp = department?.ma_bp || sale.branchCode || null;
+      const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBp);
+      
+      return {
+        ...sale,
+        department: department,
+        maKho: calculatedMaKho || sale.maKho || sale.branchCode || null,
+      };
+    });
 
     // Tính tổng doanh thu của đơn hàng
     const totalRevenue = sales.reduce((sum, sale) => sum + Number(sale.revenue), 0);
@@ -571,6 +662,62 @@ export class SalesService {
       }
     } catch (error: any) {
       this.logger.error(`Error saving FastApiInvoice for ${data.docCode}: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lưu phiếu xuất kho vào bảng warehouse_releases
+   */
+  private async saveWarehouseRelease(data: {
+    docCode: string;
+    maDvcs?: string;
+    maKh?: string;
+    tenKh?: string;
+    ngayCt?: Date;
+    status: number;
+    message?: string;
+    guid?: string | null;
+    fastApiResponse?: string;
+  }): Promise<WarehouseRelease> {
+    try {
+      // Kiểm tra xem đã có chưa
+      const existing = await this.warehouseReleaseRepository.findOne({
+        where: { docCode: data.docCode },
+      });
+
+      if (existing) {
+        // Cập nhật record hiện có
+        existing.status = data.status;
+        existing.message = data.message || existing.message;
+        existing.guid = data.guid || existing.guid;
+        existing.fastApiResponse = data.fastApiResponse || existing.fastApiResponse;
+        if (data.maDvcs) existing.maDvcs = data.maDvcs;
+        if (data.maKh) existing.maKh = data.maKh;
+        if (data.tenKh) existing.tenKh = data.tenKh;
+        if (data.ngayCt) existing.ngayCt = data.ngayCt;
+        
+        const saved = await this.warehouseReleaseRepository.save(existing);
+        return Array.isArray(saved) ? saved[0] : saved;
+      } else {
+        // Tạo mới
+        const warehouseRelease = this.warehouseReleaseRepository.create({
+          docCode: data.docCode,
+          maDvcs: data.maDvcs ?? null,
+          maKh: data.maKh ?? null,
+          tenKh: data.tenKh ?? null,
+          ngayCt: data.ngayCt ?? new Date(),
+          status: data.status,
+          message: data.message ?? null,
+          guid: data.guid ?? null,
+          fastApiResponse: data.fastApiResponse ?? null,
+        } as Partial<WarehouseRelease>);
+        
+        const saved = await this.warehouseReleaseRepository.save(warehouseRelease);
+        return Array.isArray(saved) ? saved[0] : saved;
+      }
+    } catch (error: any) {
+      this.logger.error(`Error saving WarehouseRelease for ${data.docCode}: ${error?.message || error}`);
       throw error;
     }
   }
@@ -1249,10 +1396,98 @@ export class SalesService {
 
       this.logger.log(`Invoice created successfully for order ${docCode}`);
 
+      // Tạo phiếu xuất kho sau khi tạo invoice thành công
+      let warehouseReleaseResult: any = null;
+      try {
+        this.logger.log(`[WarehouseRelease] Building warehouse release data for order ${docCode}`);
+        const warehouseReleasePayload = this.buildWarehouseReleaseData(orderData, invoiceData);
+        this.logger.log(`[WarehouseRelease] Warehouse release payload to Fast API: ${JSON.stringify(warehouseReleasePayload, null, 2)}`);
+        warehouseReleaseResult = await this.fastApiService.submitWarehouseRelease(warehouseReleasePayload);
+        
+        // Check response từ Fast API - nếu status === 0 thì coi là lỗi
+        const isWarehouseSuccess = Array.isArray(warehouseReleaseResult) 
+          ? warehouseReleaseResult.every((item: any) => item.status !== 0)
+          : (warehouseReleaseResult?.status !== 0 && warehouseReleaseResult?.status !== undefined);
+
+        const warehouseStatus = Array.isArray(warehouseReleaseResult) && warehouseReleaseResult.length > 0 
+          ? warehouseReleaseResult[0].status 
+          : warehouseReleaseResult?.status ?? 0;
+        const warehouseMessage = Array.isArray(warehouseReleaseResult) && warehouseReleaseResult.length > 0
+          ? warehouseReleaseResult[0].message || warehouseReleaseResult[0].error || 'Tạo phiếu xuất kho thất bại'
+          : warehouseReleaseResult?.message || warehouseReleaseResult?.error || 'Tạo phiếu xuất kho thất bại';
+        const warehouseGuid = Array.isArray(warehouseReleaseResult) && warehouseReleaseResult.length > 0
+          ? (Array.isArray(warehouseReleaseResult[0].guid) ? warehouseReleaseResult[0].guid[0] : warehouseReleaseResult[0].guid)
+          : warehouseReleaseResult?.guid;
+
+
+        // Data để lưu vào database
+        const warehouseReleaseDbData = {
+          docCode,
+          maDvcs: warehouseReleasePayload.ma_dvcs,
+          maKh: warehouseReleasePayload.ma_kh,
+          tenKh: orderData.customer?.name || warehouseReleasePayload.ong_ba || '',
+          ngayCt: warehouseReleasePayload.ngay_ct ? new Date(warehouseReleasePayload.ngay_ct) : new Date(),
+          status: warehouseStatus,
+          message: warehouseMessage,
+          guid: warehouseGuid || null,
+          fastApiResponse: JSON.stringify(warehouseReleaseResult),
+        };
+
+        // Lưu vào bảng warehouse_releases
+        await this.saveWarehouseRelease(warehouseReleaseDbData);
+
+        if (isWarehouseSuccess) {
+          this.logger.log(`Warehouse release created successfully for order ${docCode}`);
+        } else {
+          this.logger.warn(`Warehouse release failed for order ${docCode}: ${warehouseMessage}`);
+        }
+      } catch (warehouseError: any) {
+        // Lấy thông báo lỗi chính xác từ Fast API response
+        let errorMessage = 'Tạo phiếu xuất kho thất bại';
+        
+        if (warehouseError?.response?.data) {
+          const errorData = warehouseError.response.data;
+          if (Array.isArray(errorData) && errorData.length > 0) {
+            errorMessage = errorData[0].message || errorData[0].error || errorMessage;
+          } else if (errorData.message) {
+            errorMessage = errorData.message;
+          } else if (errorData.error) {
+            errorMessage = errorData.error;
+          } else if (typeof errorData === 'string') {
+            errorMessage = errorData;
+          }
+        } else if (warehouseError?.message) {
+          errorMessage = warehouseError.message;
+        }
+
+        // Lưu vào bảng warehouse_releases với status = 0 (thất bại)
+        try {
+          const warehouseReleasePayloadForError = this.buildWarehouseReleaseData(orderData, invoiceData);
+          const warehouseReleaseDbDataForError = {
+            docCode,
+            maDvcs: warehouseReleasePayloadForError.ma_dvcs,
+            maKh: warehouseReleasePayloadForError.ma_kh,
+            tenKh: orderData.customer?.name || warehouseReleasePayloadForError.ong_ba || '',
+            ngayCt: warehouseReleasePayloadForError.ngay_ct ? new Date(warehouseReleasePayloadForError.ngay_ct) : new Date(),
+            status: 0,
+            message: errorMessage,
+            guid: null,
+            fastApiResponse: JSON.stringify(warehouseError?.response?.data || warehouseError),
+          };
+          await this.saveWarehouseRelease(warehouseReleaseDbDataForError);
+        } catch (saveError) {
+          this.logger.error(`Failed to save warehouse release error for order ${docCode}: ${saveError}`);
+        }
+
+        // Log lỗi nhưng không throw để không ảnh hưởng đến kết quả tạo invoice
+        this.logger.error(`Failed to create warehouse release for order ${docCode}: ${errorMessage}`);
+      }
+
       return {
         success: true,
         message: `Tạo hóa đơn ${docCode} thành công`,
         result,
+        warehouseRelease: warehouseReleaseResult,
       };
     } catch (error: any) {
       this.logger.error(`Error creating invoice for order ${docCode}: ${error?.message || error}`);
@@ -1368,9 +1603,11 @@ export class SalesService {
       // Nếu không có thì dùng 'Cái' làm mặc định (Fast API yêu cầu field này phải có giá trị)
       const dvt = toString(sale.dvt || sale.product?.dvt || sale.product?.unit, 'Cái');
       
-      // Lấy maKho từ chính sale item, nếu không có thì lấy từ branchCode của chính sale item đó
-      // Fast API yêu cầu field này phải có giá trị
-      const maKho = toString(sale.maKho || sale.branchCode, '');
+      // Tính mã kho từ ordertype + ma_bp (bộ phận)
+      // Nếu không tính được thì fallback về sale.maKho hoặc branchCode
+      const maBpForMaKho = sale.department?.ma_bp || sale.branchCode || orderData.branchCode || '';
+      const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBpForMaKho);
+      const maKho = toString(calculatedMaKho || sale.maKho || sale.branchCode, '');
       
       // Debug: Log maLo value từ sale
       if (index === 0) {
@@ -1785,7 +2022,145 @@ export class SalesService {
       so_ct: firstItem.doccode,
       ma_nt: 'VND',
       ty_gia: 1.0,
-      dien_giai: firstItem.doc_desc || `Phiếu ${firstItem.iotype === 'O' ? 'xuất' : 'nhập'} kho ${firstItem.doccode}`,
+      dien_giai: firstItem.doc_desc || null,
+      detail: detail,
+    };
+  }
+
+  /**
+   * Build warehouse release data cho Fast API
+   */
+  private buildWarehouseReleaseData(orderData: any, invoiceData: any): any {
+    const toString = (value: any, defaultValue: string = ''): string => {
+      if (value === null || value === undefined) return defaultValue;
+      return String(value);
+    };
+
+    const toNumber = (value: any, defaultValue: number = 0): number => {
+      if (value === null || value === undefined || value === '') {
+        return defaultValue;
+      }
+      const num = Number(value);
+      return isNaN(num) ? defaultValue : num;
+    };
+
+    // Format ngày theo ISO 8601
+    const formatDateISO = (date: Date): string => {
+      if (isNaN(date.getTime())) {
+        throw new Error('Invalid date');
+      }
+      return date.toISOString();
+    };
+
+    // Lấy thông tin từ orderData
+    const firstSale = orderData.sales?.[0];
+    if (!firstSale) {
+      throw new Error('Order has no sales items');
+    }
+
+    // Lấy ma_dvcs từ department hoặc invoiceData
+    const maDvcs = invoiceData.ma_dvcs 
+      || firstSale?.department?.ma_dvcs 
+      || firstSale?.department?.ma_dvcs_ht
+      || orderData.customer?.brand 
+      || orderData.branchCode 
+      || '';
+
+    // Lấy ma_kh từ orderData
+    const maKh = orderData.customer?.code || invoiceData.ma_kh || '';
+
+    // Format ngày
+    let docDate: Date;
+    if (orderData.docDate instanceof Date) {
+      docDate = orderData.docDate;
+    } else if (typeof orderData.docDate === 'string') {
+      docDate = new Date(orderData.docDate);
+      if (isNaN(docDate.getTime())) {
+        docDate = new Date();
+      }
+    } else {
+      docDate = new Date();
+    }
+
+    const ngayCt = formatDateISO(docDate);
+
+    // Map iotype sang ma_nx: "O" (Out) -> "1111" (Xuất nội bộ), "I" (In) -> "1112" (Nhập nội bộ)
+    const getMaNx = (iotype: string | null | undefined): string => {
+      if (iotype === 'O') {
+        return '1111'; // Xuất nội bộ
+      } else if (iotype === 'I') {
+        return '1112'; // Nhập nội bộ
+      }
+      return '1111'; // Default: Xuất nội bộ
+    };
+
+    // Build detail items từ sales
+    const detail = orderData.sales.map((sale: any, index: number) => {
+      // Lấy dvt từ sale hoặc product
+      let dvt = sale.dvt || sale.product?.dvt || sale.product?.unit || 'Cái';
+      
+      // Tính mã kho từ ordertype + ma_bp (bộ phận)
+      // Nếu không tính được thì fallback về sale.maKho hoặc branchCode
+      const maBpForMaKho = sale.department?.ma_bp || sale.branchCode || orderData.branchCode || '';
+      const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBpForMaKho);
+      const maKho = calculatedMaKho || sale.maKho || sale.branchCode || orderData.branchCode || '';
+      
+      // Xác định iotype dựa trên qty: âm = nhập (I), dương = xuất (O)
+      // Warehouse release thường là xuất kho, nhưng nếu qty âm thì là nhập
+      const qtyValue = toNumber(sale.qty, 0);
+      const iotype = qtyValue < 0 ? 'I' : 'O'; // Âm = nhập, dương = xuất
+      
+      // Lấy so_luong (lấy giá trị tuyệt đối)
+      const soLuong = Math.abs(qtyValue);
+      
+      // Lấy ma_lo từ sale
+      const maLo = sale.maLo || sale.batchserial || null;
+      
+      // Lấy so_serial từ sale
+      const soSerial = sale.soSerial || sale.serial || sale.batchserial || null;
+      
+      // Lấy ma_bp từ sale hoặc department
+      const maBp = sale.maBp 
+        || sale.department?.ma_bp 
+        || sale.branchCode 
+        || orderData.branchCode 
+        || null;
+
+      return {
+        ma_vt: toString(sale.product?.maVatTu || sale.itemCode, ''),
+        dvt: toString(dvt, 'Cái'),
+        so_serial: soSerial ? toString(soSerial, '') : null,
+        ma_kho: toString(maKho, ''),
+        so_luong: soLuong,
+        gia_nt: 0, // Warehouse release thường không có giá
+        tien_nt: 0, // Warehouse release thường không có tiền
+        ma_lo: maLo ? toString(maLo, '') : null,
+        px_gia_dd: 0, // Mặc định 0
+        ma_nx: getMaNx(iotype), // Xác định dựa trên qty: âm = nhập (1112), dương = xuất (1111)
+        ma_vv: null,
+        ma_bp: maBp ? toString(maBp, '') : null,
+        so_lsx: null,
+        ma_sp: null,
+        ma_hd: null,
+        ma_phi: null,
+        ma_ku: null,
+        ma_phi_hh: null,
+        ma_phi_ttlk: null,
+        tien_hh_nt: 0,
+        tien_ttlk_nt: 0,
+      };
+    });
+
+    return {
+      ma_dvcs: toString(maDvcs, ''),
+      ma_kh: toString(maKh, ''),
+      ong_ba: orderData.customer?.name || null,
+      ma_gd: '2', // Mã giao dịch: 2 - Xuất nội bộ
+      ngay_ct: ngayCt,
+      so_ct: toString(orderData.docCode, ''),
+      ma_nt: 'VND',
+      ty_gia: 1,
+      dien_giai: `Xuất kho cho đơn hàng ${orderData.docCode}`,
       detail: detail,
     };
   }
