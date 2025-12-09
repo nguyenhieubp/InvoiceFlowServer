@@ -110,6 +110,20 @@ export class SalesService {
     return prefix + maBp;
   }
 
+  /**
+   * Xác định nên dùng ma_lo hay so_serial dựa trên producttype
+   * V (Voucher), S (Serial) → dùng so_serial
+   * I (Item), B (Batch), M (Material) → dùng ma_lo
+   */
+  private shouldUseBatch(producttype: string | null | undefined): boolean {
+    if (!producttype) {
+      return false; // Mặc định dùng serial nếu không có producttype
+    }
+    const type = String(producttype).toUpperCase().trim();
+    // I (Item), B (Batch), M (Material) → dùng ma_lo
+    return type === 'I' || type === 'B' || type === 'M';
+  }
+
   constructor(
     @InjectRepository(Sale)
     private saleRepository: Repository<Sale>,
@@ -193,13 +207,80 @@ export class SalesService {
           );
         }
 
-        // Thêm promotionDisplayCode vào các sales items
+        // Fetch departments để tính maKho
+        const branchCodes = Array.from(
+          new Set(
+            filteredOrders
+              .flatMap((order) => order.sales || [])
+              .map((sale) => sale.branchCode)
+              .filter((code): code is string => !!code && code.trim() !== '')
+          )
+        );
+
+        const departmentMap = new Map<string, any>();
+        for (const branchCode of branchCodes) {
+          try {
+            const response = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+              { headers: { accept: 'application/json' } },
+            );
+            const department = response?.data?.data?.items?.[0];
+            if (department) {
+              departmentMap.set(branchCode, department);
+            }
+          } catch (error) {
+            this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+          }
+        }
+
+        // Fetch products từ Loyalty API để lấy producttype
+        const itemCodes = Array.from(
+          new Set(
+            filteredOrders
+              .flatMap((order) => order.sales || [])
+              .map((sale) => sale.itemCode)
+              .filter((code): code is string => !!code && code.trim() !== '')
+          )
+        );
+
+        const loyaltyProductMap = new Map<string, any>();
+        for (const itemCode of itemCodes) {
+          try {
+            const response = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+              { headers: { accept: 'application/json' } },
+            );
+            const loyaltyProduct = response?.data?.data?.item || response?.data;
+            if (loyaltyProduct) {
+              loyaltyProductMap.set(itemCode, loyaltyProduct);
+            }
+          } catch (error) {
+            this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
+          }
+        }
+
+        // Thêm promotionDisplayCode, maKho và producttype vào các sales items
         const enrichedOrders = filteredOrders.map((order) => ({
           ...order,
-          sales: order.sales?.map((sale) => ({
-            ...sale,
-            promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
-          })) || [],
+          sales: order.sales?.map((sale) => {
+            const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
+            const maBp = department?.ma_bp || sale.branchCode || null;
+            const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBp);
+            const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
+            
+            return {
+              ...sale,
+              promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
+              department: department,
+              maKho: calculatedMaKho || sale.maKho || sale.branchCode || null,
+              // Giữ lại producttype từ sale, nếu không có thì lấy từ Loyalty API
+              producttype: sale.producttype || loyaltyProduct?.producttype || loyaltyProduct?.productType || null,
+              product: loyaltyProduct ? {
+                ...loyaltyProduct,
+                producttype: sale.producttype || loyaltyProduct.producttype || loyaltyProduct.productType || null,
+              } : (sale.product || null),
+            };
+          }) || [],
         }));
 
         // Phân trang
@@ -263,12 +344,81 @@ export class SalesService {
       }
     });
     
-    // Enrich sales với product information và promotionDisplayCode
-    const enrichedSales = allSales.map((sale) => ({
-      ...sale,
-      product: sale.itemCode ? productMap.get(sale.itemCode) || null : null,
-      promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
-    }));
+    // Fetch products từ Loyalty API để lấy producttype
+    const loyaltyProductMap = new Map<string, any>();
+    for (const itemCode of itemCodes) {
+      try {
+        const response = await this.httpService.axiosRef.get(
+          `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+          { headers: { accept: 'application/json' } },
+        );
+        const loyaltyProduct = response?.data?.data?.item || response?.data;
+        if (loyaltyProduct) {
+          loyaltyProductMap.set(itemCode, loyaltyProduct);
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
+      }
+    }
+
+    // Enrich sales với product information, promotionDisplayCode và producttype
+    const enrichedSales = allSales.map((sale) => {
+      const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
+      const existingProduct = sale.itemCode ? productMap.get(sale.itemCode) || null : null;
+      
+      return {
+        ...sale,
+        // Giữ lại producttype từ sale, nếu không có thì lấy từ Loyalty API
+        producttype: sale.producttype || loyaltyProduct?.producttype || loyaltyProduct?.productType || null,
+        product: loyaltyProduct ? {
+          ...existingProduct,
+          ...loyaltyProduct,
+          producttype: sale.producttype || loyaltyProduct.producttype || loyaltyProduct.productType || null,
+        } : (existingProduct ? {
+          ...existingProduct,
+          producttype: sale.producttype || null,
+        } : null),
+        promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
+      };
+    });
+
+    // Fetch departments để lấy ma_bp và tính maKho
+    const branchCodes = Array.from(
+      new Set(
+        allSales
+          .map((sale) => sale.branchCode)
+          .filter((code): code is string => !!code && code.trim() !== '')
+      )
+    );
+
+    const departmentMap = new Map<string, any>();
+    for (const branchCode of branchCodes) {
+      try {
+        const response = await this.httpService.axiosRef.get(
+          `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+          { headers: { accept: 'application/json' } },
+        );
+        const department = response?.data?.data?.items?.[0];
+        if (department) {
+          departmentMap.set(branchCode, department);
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+      }
+    }
+
+    // Enrich sales với department information và tính maKho
+    const enrichedSalesWithDepartment = enrichedSales.map((sale) => {
+      const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
+      const maBp = department?.ma_bp || sale.branchCode || null;
+      const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBp);
+      
+      return {
+        ...sale,
+        department: department,
+        maKho: calculatedMaKho || sale.maKho || sale.branchCode || null,
+      };
+    });
 
     // Gộp theo docCode
     const orderMap = new Map<string, {
@@ -284,7 +434,7 @@ export class SalesService {
       sales: any[];
     }>();
 
-    for (const sale of enrichedSales) {
+    for (const sale of enrichedSalesWithDepartment) {
       const docCode = sale.docCode;
       
       if (!orderMap.has(docCode)) {
@@ -415,6 +565,8 @@ export class SalesService {
       if (loyaltyProduct) {
         return {
           ...sale,
+          // Giữ lại producttype từ sale, nếu không có thì lấy từ Loyalty API
+          producttype: sale.producttype || loyaltyProduct.producttype || loyaltyProduct.productType || sale.producttype,
           product: {
             ...existingProduct,
             ...loyaltyProduct,
@@ -1614,9 +1766,45 @@ export class SalesService {
         this.logger.debug(`[BuildInvoice] sale.maLo for item ${sale.itemCode}: "${sale.maLo || ''}"`);
       }
       
-      const maLo = toString(sale.serial ||  '');
+      // Lấy producttype trực tiếp từ sale (từ API get_daily_sale) hoặc từ product
+      const producttype = sale.producttype || sale.product?.producttype || sale.product?.productType || null;
+      const useBatch = this.shouldUseBatch(producttype);
+      
+      // Lấy giá trị serial từ sale (tất cả đều lấy từ field "serial")
+      const serialValue = toString(sale.serial || '', '');
+      
+      // Xác định ma_lo và so_serial dựa trên producttype
+      let maLo: string | null = null;
+      let soSerial: string | null = null;
+      
+      if (useBatch) {
+        // I (Item), B (Batch), M (Material) → dùng ma_lo với giá trị serial
+        if (serialValue && serialValue.trim() !== '') {
+          const type = String(producttype).toUpperCase().trim();
+          if (type === 'I') {
+            // Nếu producttype là "I", cắt lấy 4 ký tự cuối
+            maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
+          } else {
+            // B (Batch), M (Material) → giữ nguyên toàn bộ serial
+            maLo = serialValue;
+          }
+        } else {
+          maLo = null;
+        }
+        soSerial = null;
+        if (index === 0) {
+          this.logger.debug(`[BuildInvoice] Item ${sale.itemCode}: producttype=${producttype} → Item/Batch/Material → ma_lo="${maLo || ''}", so_serial=null`);
+        }
+      } else {
+        // V (Voucher), S (Serial) → dùng so_serial với giá trị serial
+        maLo = null;
+        soSerial = serialValue && serialValue.trim() !== '' ? serialValue : null;
+        if (index === 0) {
+          this.logger.debug(`[BuildInvoice] Item ${sale.itemCode}: producttype=${producttype || 'N/A'} → Voucher/Serial → ma_lo=null, so_serial="${soSerial || ''}"`);
+        }
+      }
+      
       const maThe = toString(sale.maThe || sale.mvc_serial, '');
-      const soSerial = toString(sale.serial || sale.soSerial, '');
       
       // Extract chỉ phần số từ ordertype (ví dụ: "01.Thường" -> "01", "02. Làm dịch vụ" -> "02")
       let loaiGd = '01';
@@ -1646,7 +1834,6 @@ export class SalesService {
       return {
         ma_vt: toString(sale.product?.maVatTu || ''),
         dvt: dvt,
-        // so_serial: soSerial, // Tạm thời comment
         loai: loai,
         ma_ctkm_th: toString(sale.maCtkmTangHang, ''),
         ma_kho: maKho,
@@ -1717,8 +1904,11 @@ export class SalesService {
         // ma_bp là bắt buộc - đã được validate ở trên
         ma_bp: maBp,
         ma_the: maThe,
-        // Chỉ thêm ma_lo nếu có giá trị (không rỗng)
-        ...(maLo && maLo.trim() !== '' ? { ma_lo: maLo } : {}),
+        // Chỉ thêm ma_lo hoặc so_serial vào payload (không gửi cả hai)
+        // Nếu có so_serial thì không gửi ma_lo, nếu có ma_lo thì không gửi so_serial
+        ...(soSerial && soSerial.trim() !== '' 
+          ? { so_serial: soSerial } 
+          : (maLo && maLo.trim() !== '' ? { ma_lo: maLo } : {})),
         loai_gd: loaiGd,
         ma_combo: toString(sale.maCombo, ''),
         id_goc: toString(sale.idGoc, ''),
@@ -1943,44 +2133,65 @@ export class SalesService {
     // Build detail items
     const detail = await Promise.all(
       items.map(async (item, index) => {
-        // Lookup product để lấy dvt
+        // Lookup product để lấy dvt và producttype
+        // Lấy producttype từ Loyalty API (stockTransData không có producttype)
         let dvt = 'Cái'; // Default
+        let producttype: string | null = null;
+        
         try {
           const product = await this.productItemRepository.findOne({
             where: { maERP: item.item_code },
           });
           if (product?.dvt) {
             dvt = product.dvt;
-          } else {
-            // Try to get from Loyalty API
-            try {
-              const response = await this.httpService.axiosRef.get(
-                `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(item.item_code)}`,
-                { headers: { accept: 'application/json' } },
-              );
-              const loyaltyProduct = response?.data?.data?.item || response?.data;
-              if (loyaltyProduct?.unit) {
-                dvt = loyaltyProduct.unit;
-              }
-            } catch (error) {
-              this.logger.warn(
-                `Không lấy được dvt từ Loyalty API cho item ${item.item_code}`,
-              );
+          }
+          // Try to get from Loyalty API (chỉ để lấy dvt, không lấy producttype nữa)
+          try {
+            const response = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(item.item_code)}`,
+              { headers: { accept: 'application/json' } },
+            );
+            const loyaltyProduct = response?.data?.data?.item || response?.data;
+            if (loyaltyProduct?.unit) {
+              dvt = loyaltyProduct.unit;
             }
+            // Chỉ lấy producttype từ Loyalty API nếu chưa có từ item
+            if (!producttype && (loyaltyProduct?.producttype || loyaltyProduct?.productType)) {
+              producttype = loyaltyProduct.producttype || loyaltyProduct.productType;
+            }
+          } catch (error) {
+            this.logger.warn(
+              `Không lấy được dvt từ Loyalty API cho item ${item.item_code}`,
+            );
           }
         } catch (error) {
           this.logger.warn(`Không tìm thấy product cho item ${item.item_code}`);
         }
 
+        // Xác định ma_lo và so_serial dựa trên producttype
+        const useBatch = this.shouldUseBatch(producttype);
+        let maLo: string | null = null;
+        let soSerial: string | null = null;
+        
+        if (useBatch) {
+          // Dùng lô (Batch/Material) → chỉ set ma_lo, không set so_serial
+          maLo = item.batchserial || null;
+          soSerial = null;
+        } else {
+          // Dùng serial (Serial/Item/Voucher) → chỉ set so_serial, không set ma_lo
+          maLo = null;
+          soSerial = item.batchserial || null;
+        }
+
         return {
           ma_vt: item.item_code,
           dvt: dvt,
-          so_serial: item.batchserial || null,
+          so_serial: soSerial,
           ma_kho: item.stock_code,
           so_luong: Math.abs(item.qty), // Lấy giá trị tuyệt đối
           gia_nt: 0, // Stock transfer thường không có giá
           tien_nt: 0, // Stock transfer thường không có tiền
-          ma_lo: item.batchserial || null,
+          ma_lo: maLo,
           px_gia_dd: 0, // Mặc định 0
           ma_nx: getMaNx(item.iotype),
           ma_vv: null,
@@ -2113,11 +2324,38 @@ export class SalesService {
       // Lấy so_luong (lấy giá trị tuyệt đối)
       const soLuong = Math.abs(qtyValue);
       
-      // Lấy ma_lo từ sale
-      const maLo = sale.maLo || sale.batchserial || null;
+      // Lấy producttype trực tiếp từ sale (từ API get_daily_sale) hoặc từ product
+      const producttype = sale.producttype || sale.product?.producttype || sale.product?.productType || null;
+      const useBatch = this.shouldUseBatch(producttype);
       
-      // Lấy so_serial từ sale
-      const soSerial = sale.soSerial || sale.serial || sale.batchserial || null;
+      // Lấy giá trị serial từ sale (tất cả đều lấy từ field "serial")
+      const serialValue = sale.serial || null;
+      
+      // Xác định ma_lo và so_serial dựa trên producttype
+      let maLo: string | null = null;
+      let soSerial: string | null = null;
+      
+      if (useBatch) {
+        // I (Item), B (Batch), M (Material) → dùng ma_lo với giá trị serial
+        if (serialValue) {
+          const serialStr = toString(serialValue, '');
+          const type = String(producttype).toUpperCase().trim();
+          if (type === 'I') {
+            // Nếu producttype là "I", cắt lấy 4 ký tự cuối
+            maLo = serialStr.length >= 4 ? serialStr.slice(-4) : serialStr;
+          } else {
+            // B (Batch), M (Material) → giữ nguyên toàn bộ serial
+            maLo = serialStr;
+          }
+        } else {
+          maLo = null;
+        }
+        soSerial = null;
+      } else {
+        // V (Voucher), S (Serial) → dùng so_serial với giá trị serial
+        maLo = null;
+        soSerial = serialValue ? toString(serialValue, '') : null;
+      }
       
       // Lấy ma_bp từ sale hoặc department
       const maBp = sale.maBp 

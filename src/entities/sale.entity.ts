@@ -108,6 +108,9 @@ export class Sale {
   dvt?: string; // Đơn vị tính
 
   @Column({ nullable: true })
+  producttype?: string; // Product type: S (Serial), I (Item), V (Voucher), B (Batch), M (Material)
+
+  @Column({ nullable: true })
   loai?: string; // Loại
 
   @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })

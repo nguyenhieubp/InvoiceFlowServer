@@ -12,6 +12,21 @@ import { SalesService } from '../modules/sales/sales.service';
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
 
+  /**
+   * Helper function để validate integer value
+   * Chuyển NaN, undefined, null thành undefined
+   */
+  private validateInteger(value: any): number | undefined {
+    if (value === null || value === undefined) {
+      return undefined;
+    }
+    const num = Number(value);
+    if (isNaN(num) || !isFinite(num)) {
+      return undefined;
+    }
+    return Math.floor(num);
+  }
+
   constructor(
     @InjectRepository(Customer)
     private customerRepository: Repository<Customer>,
@@ -320,6 +335,7 @@ export class SyncService {
                   existingSale.ordertype = saleItem.ordertype || existingSale.ordertype;
                   existingSale.branchCode = saleItem.branchCode || existingSale.branchCode;
                   existingSale.promCode = saleItem.promCode || existingSale.promCode;
+                  existingSale.producttype = saleItem.producttype !== undefined ? saleItem.producttype : existingSale.producttype;
                   existingSale.serial = saleItem.serial !== undefined ? saleItem.serial : existingSale.serial;
                   existingSale.soSerial = saleItem.serial !== undefined ? saleItem.serial : existingSale.soSerial;
                   existingSale.disc_amt = saleItem.disc_amt || existingSale.disc_amt;
@@ -328,7 +344,8 @@ export class SyncService {
                   existingSale.chietKhauMuaHangGiamGia = saleItem.chietKhauMuaHangGiamGia !== undefined ? saleItem.chietKhauMuaHangGiamGia : existingSale.chietKhauMuaHangGiamGia;
                   existingSale.paid_by_voucher_ecode_ecoin_bp = saleItem.paid_by_voucher_ecode_ecoin_bp || existingSale.paid_by_voucher_ecode_ecoin_bp;
                   existingSale.maCa = saleItem.shift_code || existingSale.maCa;
-                  existingSale.saleperson_id = saleItem.saleperson_id || existingSale.saleperson_id;
+                  const validatedSalepersonId = this.validateInteger(saleItem.saleperson_id);
+                  existingSale.saleperson_id = validatedSalepersonId !== undefined ? validatedSalepersonId : existingSale.saleperson_id;
                   existingSale.partnerCode = saleItem.partnerCode || existingSale.partnerCode;
                   existingSale.partner_name = saleItem.partner_name || existingSale.partner_name;
                   existingSale.order_source = saleItem.order_source || existingSale.order_source;
@@ -367,6 +384,7 @@ export class SyncService {
                     tienHang: saleItem.tienHang || saleItem.linetotal || saleItem.revenue || 0,
                     giaBan: saleItem.giaBan || 0,
                     promCode: saleItem.promCode,
+                    producttype: saleItem.producttype,
                     serial: saleItem.serial,
                     soSerial: saleItem.serial,
                     disc_amt: saleItem.disc_amt,
@@ -375,7 +393,7 @@ export class SyncService {
                     chietKhauMuaHangGiamGia: saleItem.chietKhauMuaHangGiamGia,
                     paid_by_voucher_ecode_ecoin_bp: saleItem.paid_by_voucher_ecode_ecoin_bp,
                     maCa: saleItem.shift_code,
-                    saleperson_id: saleItem.saleperson_id,
+                    saleperson_id: this.validateInteger(saleItem.saleperson_id),
                     partner_name: saleItem.partner_name,
                     order_source: saleItem.order_source,
                     // Lưu mvc_serial vào maThe
@@ -642,23 +660,23 @@ export class SyncService {
           if (saleData.catcode3 !== undefined) saleDataToCreate.catcode3 = saleData.catcode3;
           if (saleData.ck_tm !== undefined && saleData.ck_tm !== null) saleDataToCreate.ck_tm = saleData.ck_tm;
           if (saleData.ck_dly !== undefined && saleData.ck_dly !== null) saleDataToCreate.ck_dly = saleData.ck_dly;
-          if (saleData.docid !== undefined) saleDataToCreate.docid = saleData.docid;
+          if (saleData.docid !== undefined) saleDataToCreate.docid = this.validateInteger(saleData.docid);
           if (saleData.serial !== undefined && saleData.serial !== null) saleDataToCreate.serial = saleData.serial;
           if (saleData.cm_code !== undefined && saleData.cm_code !== null) saleDataToCreate.cm_code = saleData.cm_code;
-          if (saleData.line_id !== undefined) saleDataToCreate.line_id = saleData.line_id;
+          if (saleData.line_id !== undefined) saleDataToCreate.line_id = this.validateInteger(saleData.line_id);
           if (saleData.disc_amt !== undefined) saleDataToCreate.disc_amt = saleData.disc_amt;
           if (saleData.docmonth !== undefined) saleDataToCreate.docmonth = saleData.docmonth;
           if (saleData.itemcost !== undefined) saleDataToCreate.itemcost = saleData.itemcost;
           if (saleData.linetotal !== undefined) saleDataToCreate.linetotal = saleData.linetotal;
           if (saleData.totalcost !== undefined) saleDataToCreate.totalcost = saleData.totalcost;
-          if (saleData.crm_emp_id !== undefined) saleDataToCreate.crm_emp_id = saleData.crm_emp_id;
+          if (saleData.crm_emp_id !== undefined) saleDataToCreate.crm_emp_id = this.validateInteger(saleData.crm_emp_id);
           if (saleData.doctype_name !== undefined) saleDataToCreate.doctype_name = saleData.doctype_name;
           if (saleData.order_source !== undefined && saleData.order_source !== null) saleDataToCreate.order_source = saleData.order_source;
           if (saleData.partner_name !== undefined) saleDataToCreate.partner_name = saleData.partner_name;
-          if (saleData.crm_branch_id !== undefined) saleDataToCreate.crm_branch_id = saleData.crm_branch_id;
+          if (saleData.crm_branch_id !== undefined) saleDataToCreate.crm_branch_id = this.validateInteger(saleData.crm_branch_id);
           if (saleData.grade_discamt !== undefined) saleDataToCreate.grade_discamt = saleData.grade_discamt;
           if (saleData.revenue_wsale !== undefined) saleDataToCreate.revenue_wsale = saleData.revenue_wsale;
-          if (saleData.saleperson_id !== undefined) saleDataToCreate.saleperson_id = saleData.saleperson_id;
+          if (saleData.saleperson_id !== undefined) saleDataToCreate.saleperson_id = this.validateInteger(saleData.saleperson_id);
           if (saleData.revenue_retail !== undefined) saleDataToCreate.revenue_retail = saleData.revenue_retail;
           if (saleData.paid_by_voucher_ecode_ecoin_bp !== undefined) saleDataToCreate.paid_by_voucher_ecode_ecoin_bp = saleData.paid_by_voucher_ecode_ecoin_bp;
 

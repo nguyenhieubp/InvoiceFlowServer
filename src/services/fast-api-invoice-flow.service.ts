@@ -45,6 +45,7 @@ export class FastApiInvoiceFlowService {
     this.logger.log(`[Flow] Creating sales invoice ${invoiceData.so_ct}...`);
     try {
       // Helper function để loại bỏ các field null, undefined, hoặc empty string
+      // Nhưng giữ lại ma_lo và so_serial (có thể là null nhưng vẫn cần gửi lên API)
       const removeEmptyFields = (obj: any): any => {
         if (obj === null || obj === undefined) {
           return obj;
@@ -56,7 +57,10 @@ export class FastApiInvoiceFlowService {
           const cleaned: any = {};
           for (const [key, value] of Object.entries(obj)) {
             // Giữ lại các giá trị: 0, false, empty array, date objects
-            if (value !== null && value !== undefined && value !== '') {
+            // Đặc biệt: giữ lại ma_lo và so_serial ngay cả khi null hoặc empty
+            const shouldKeep = value !== null && value !== undefined && value !== '' 
+              || key === 'ma_lo' || key === 'so_serial';
+            if (shouldKeep) {
               cleaned[key] = removeEmptyFields(value);
             }
           }
@@ -97,8 +101,18 @@ export class FastApiInvoiceFlowService {
         loai_gd: invoiceData.loai_gd,
         detail: invoiceData.detail?.map((item: any) => {
           // Loại bỏ product và các field không cần thiết khỏi mỗi detail item
+          // Nhưng giữ lại ma_lo và so_serial (có thể là null nhưng vẫn cần giữ)
           const { product, ...cleanItem } = item;
-          return cleanItem;
+          // Đảm bảo ma_lo và so_serial được giữ lại (ngay cả khi null)
+          const result: any = { ...cleanItem };
+          // Nếu có ma_lo hoặc so_serial trong item gốc, giữ lại (kể cả null)
+          if ('ma_lo' in item) {
+            result.ma_lo = item.ma_lo;
+          }
+          if ('so_serial' in item) {
+            result.so_serial = item.so_serial;
+          }
+          return result;
         }) || [],
         cbdetail: invoiceData.cbdetail ?? null,
       };
