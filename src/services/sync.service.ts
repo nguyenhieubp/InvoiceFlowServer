@@ -274,8 +274,9 @@ export class SyncService {
             )
           );
 
-          // Fetch products từ Loyalty API để kiểm tra dvt (song song)
+          // Fetch products từ Loyalty API để kiểm tra dvt và productType (song song)
           const productDvtMap = new Map<string, string>();
+          const productTypeMap = new Map<string, string>();
           if (orderItemCodes.length > 0) {
             await Promise.all(
               orderItemCodes.map(async (itemCode) => {
@@ -288,8 +289,12 @@ export class SyncService {
                   if (loyaltyProduct?.unit) {
                     productDvtMap.set(itemCode, loyaltyProduct.unit);
                   }
+                  // Lưu productType từ Loyalty API
+                  if (loyaltyProduct?.productType || loyaltyProduct?.producttype) {
+                    productTypeMap.set(itemCode, loyaltyProduct.productType || loyaltyProduct.producttype);
+                  }
                 } catch (error) {
-                  // Không có dvt từ Loyalty API
+                  // Không có dvt hoặc productType từ Loyalty API
                 }
               }),
             );
@@ -352,9 +357,13 @@ export class SyncService {
                   existingSale.ordertype = saleItem.ordertype || existingSale.ordertype;
                   existingSale.branchCode = saleItem.branchCode || existingSale.branchCode;
                   existingSale.promCode = saleItem.promCode || existingSale.promCode;
-                  existingSale.producttype = saleItem.producttype !== undefined ? saleItem.producttype : existingSale.producttype;
                   existingSale.serial = saleItem.serial !== undefined ? saleItem.serial : existingSale.serial;
                   existingSale.soSerial = saleItem.serial !== undefined ? saleItem.serial : existingSale.soSerial;
+                  // Cập nhật productType từ Loyalty API
+                  const productType = productTypeMap.get(saleItem.itemCode || '');
+                  if (productType) {
+                    existingSale.productType = productType;
+                  }
                   existingSale.disc_amt = saleItem.disc_amt || existingSale.disc_amt;
                   existingSale.grade_discamt = saleItem.grade_discamt || existingSale.grade_discamt;
                   existingSale.other_discamt = saleItem.other_discamt !== undefined ? saleItem.other_discamt : existingSale.other_discamt;
@@ -385,6 +394,8 @@ export class SyncService {
                   await this.saleRepository.save(existingSale);
         } else {
                   // Tạo sale mới
+                  // Lấy productType từ Loyalty API
+                  const productType = productTypeMap.get(saleItem.itemCode || '');
                   const newSale = this.saleRepository.create({
                     docCode: order.docCode,
                     docDate: new Date(order.docDate),
@@ -398,10 +409,10 @@ export class SyncService {
                     qty: saleItem.qty || 0,
                     revenue: saleItem.revenue || 0,
                     linetotal: saleItem.linetotal || saleItem.revenue || 0,
+                    productType: productType || undefined,
                     tienHang: saleItem.tienHang || saleItem.linetotal || saleItem.revenue || 0,
                     giaBan: saleItem.giaBan || 0,
                     promCode: saleItem.promCode,
-                    producttype: saleItem.producttype,
                     serial: saleItem.serial,
                     soSerial: saleItem.serial,
                     disc_amt: saleItem.disc_amt,

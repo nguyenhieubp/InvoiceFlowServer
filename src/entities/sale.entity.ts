@@ -108,7 +108,7 @@ export class Sale {
   dvt?: string; // Đơn vị tính
 
   @Column({ nullable: true })
-  producttype?: string; // Product type: S (Serial), I (Item), V (Voucher), B (Batch), M (Material)
+  productType?: string; // Product type từ Loyalty API (VOUC, SKIN, TPCN, GIFT, ...)
 
   @Column({ nullable: true })
   loai?: string; // Loại
