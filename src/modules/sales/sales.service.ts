@@ -1125,11 +1125,54 @@ export class SalesService {
       })}`);
 
       // Gọi API tạo đơn hàng
-      const result = await this.fastApiInvoiceFlowService.executeFullInvoiceFlow({
-        ...invoiceData,
-        customer: orderData.customer,
-        ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-      });
+      let result: any;
+      try {
+        result = await this.fastApiInvoiceFlowService.executeFullInvoiceFlow({
+          ...invoiceData,
+          customer: orderData.customer,
+          ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+        });
+      } catch (error: any) {
+        // Lấy thông báo lỗi chính xác từ Fast API response
+        let errorMessage = 'Tạo hóa đơn thất bại';
+        
+        if (error?.response?.data) {
+          // Fast API trả về lỗi trong response.data
+          const errorData = error.response.data;
+          if (Array.isArray(errorData) && errorData.length > 0) {
+            errorMessage = errorData[0].message || errorData[0].error || errorMessage;
+          } else if (errorData.message) {
+            errorMessage = errorData.message;
+          } else if (errorData.error) {
+            errorMessage = errorData.error;
+          } else if (typeof errorData === 'string') {
+            errorMessage = errorData;
+          }
+        } else if (error?.message) {
+          errorMessage = error.message;
+        }
+        
+        // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
+        await this.saveFastApiInvoice({
+          docCode,
+          maDvcs: invoiceData.ma_dvcs,
+          maKh: invoiceData.ma_kh,
+          tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+          ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
+          status: 0,
+          message: errorMessage,
+          guid: null,
+          fastApiResponse: JSON.stringify(error?.response?.data || error),
+        });
+        
+        this.logger.error(`Invoice creation failed for order ${docCode}: ${errorMessage}`);
+        
+        return {
+          success: false,
+          message: errorMessage,
+          result: error?.response?.data || error,
+        };
+      }
 
       // Check response từ Fast API - nếu status === 0 thì coi là lỗi
       const isSuccess = Array.isArray(result) 
@@ -1141,8 +1184,8 @@ export class SalesService {
         ? result[0].status 
         : result?.status ?? 0;
       const responseMessage = Array.isArray(result) && result.length > 0
-        ? result[0].message || 'Tạo hóa đơn thất bại'
-        : result?.message || 'Tạo hóa đơn thất bại';
+        ? result[0].message || result[0].error || 'Tạo hóa đơn thất bại'
+        : result?.message || result?.error || 'Tạo hóa đơn thất bại';
       const responseGuid = Array.isArray(result) && result.length > 0
         ? (Array.isArray(result[0].guid) ? result[0].guid[0] : result[0].guid)
         : result?.guid;
