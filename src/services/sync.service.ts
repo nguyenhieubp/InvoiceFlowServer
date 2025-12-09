@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
 import { Customer } from '../entities/customer.entity';
 import { Sale } from '../entities/sale.entity';
@@ -305,14 +305,31 @@ export class SyncService {
                   this.logger.warn(`Bỏ qua sale ${order.docCode}/${saleItem.itemCode}: không có dvt`);
                   continue;
                 }
-                // Kiểm tra xem sale đã tồn tại chưa (dựa trên docCode, itemCode)
-                const existingSale = await this.saleRepository.findOne({
-                  where: {
-                    docCode: order.docCode,
-                    itemCode: saleItem.itemCode,
-                    customer: { id: customer.id },
-                  },
-                });
+                // Kiểm tra xem sale đã tồn tại chưa (dựa trên docCode, itemCode, và serial)
+                // Nếu có serial, tìm chính xác theo serial; nếu không có serial, tìm theo docCode + itemCode
+                let existingSale;
+                
+                if (saleItem.serial && saleItem.serial.trim() !== '') {
+                  // Nếu có serial, tìm chính xác theo docCode + itemCode + serial
+                  existingSale = await this.saleRepository.findOne({
+                    where: {
+                      docCode: order.docCode,
+                      itemCode: saleItem.itemCode,
+                      serial: saleItem.serial,
+                      customer: { id: customer.id },
+                    },
+                  });
+                } else {
+                  // Nếu không có serial, tìm theo docCode + itemCode + serial IS NULL
+                  existingSale = await this.saleRepository.findOne({
+                    where: {
+                      docCode: order.docCode,
+                      itemCode: saleItem.itemCode,
+                      serial: IsNull(),
+                      customer: { id: customer.id },
+                    },
+                  });
+                }
                 
                 // Enrich voucher data từ get_daily_cash
                 let voucherRefno: string | undefined;

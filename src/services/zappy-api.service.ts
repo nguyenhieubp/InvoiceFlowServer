@@ -55,8 +55,16 @@ export class ZappyApiService {
         return [];
       }
 
+      // Chỉ lấy các dòng có doctype là "SALE_ORDER", bỏ qua các loại khác (SALE_RETURN, etc.)
+      const saleOrdersOnly = rawData.filter((item) => item.doctype === 'SALE_ORDER');
+      
+      if (saleOrdersOnly.length === 0) {
+        this.logger.warn(`No SALE_ORDER data found for date ${date} (filtered from ${rawData.length} total items)`);
+        return [];
+      }
+
       // Transform dữ liệu từ Zappy format sang Order format
-      return this.transformZappySalesToOrders(rawData);
+      return this.transformZappySalesToOrders(saleOrdersOnly);
     } catch (error: any) {
       this.logger.error(`Error fetching daily sales from Zappy API: ${error?.message || error}`);
       throw error;
