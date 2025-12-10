@@ -316,7 +316,7 @@ export class SalesService {
           }
         }
 
-        // Thêm promotionDisplayCode, maKho và producttype vào các sales items
+        // Thêm promotionDisplayCode, maKho, maCtkmTangHang và producttype vào các sales items
         const enrichedOrders = filteredOrders.map((order) => ({
           ...order,
           sales: order.sales?.map((sale) => {
@@ -325,11 +325,25 @@ export class SalesService {
             const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBp);
             const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
             
+            // Tính toán maCtkmTangHang: nếu là hàng tặng (giaBan = 0 và tienHang = 0 và revenue = 0)
+            const tienHang = sale.tienHang || sale.linetotal || sale.revenue || 0;
+            const qty = sale.qty || 0;
+            let giaBan = sale.giaBan || 0;
+            if (giaBan === 0 && tienHang != null && qty > 0) {
+              giaBan = tienHang / qty;
+            }
+            const revenue = sale.revenue || 0;
+            const isTangHang = giaBan === 0 && tienHang === 0 && revenue === 0;
+            const maCtkmTangHang = isTangHang 
+              ? (this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null)
+              : null;
+            
             return {
               ...sale,
               promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
               department: department,
               maKho: calculatedMaKho || sale.maKho || sale.branchCode || null,
+              maCtkmTangHang: maCtkmTangHang,
               // Lấy producttype từ Loyalty API (không còn trong database)
               producttype: loyaltyProduct?.producttype || loyaltyProduct?.productType || null,
               product: loyaltyProduct ? {
@@ -1794,11 +1808,24 @@ export class SalesService {
       if (!maBp || maBp.trim() === '') {
       }
 
+      // Xác định hàng tặng: giaBan = 0 và tienHang = 0
+      const isTangHang = giaBan === 0 && tienHang === 0;
+      
+      // Nếu là hàng tặng, set ma_ctkm_th từ promCode hoặc promotionDisplayCode
+      // Nếu không phải hàng tặng, dùng giá trị từ sale.maCtkmTangHang (nếu có)
+      const maCtkmTangHang = isTangHang 
+        ? toString(sale.promotionDisplayCode || sale.promCode, '')
+        : toString(sale.maCtkmTangHang, '');
+      
+      // Nếu là hàng tặng, không set ma_ck01 (Mã CTKM mua hàng giảm giá)
+      // Nếu không phải hàng tặng, set ma_ck01 từ promCode như cũ
+      const maCk01 = isTangHang ? '' : (sale.promCode ? sale.promCode : '');
+
       return {
         ma_vt: toString(sale.product?.maVatTu || ''),
         dvt: dvt,
         loai: loai,
-        ma_ctkm_th: toString(sale.maCtkmTangHang, ''),
+        ma_ctkm_th: maCtkmTangHang,
         ma_kho: maKho,
         so_luong: Number(qty),
         gia_ban: Number(giaBan),
@@ -1809,7 +1836,7 @@ export class SalesService {
         dong_thuoc_goi: toString(sale.dongThuocGoi, ''),
         trang_thai: toString(sale.trangThai, ''),
         barcode: toString(sale.barcode, ''),
-        ma_ck01: sale.promCode ? sale.promCode : '',
+        ma_ck01: maCk01,
         ck01_nt: Number(ck01_nt),
         ma_ck02: toString(sale.ckTheoChinhSach, ''),
         ck02_nt: Number(ck02_nt),
