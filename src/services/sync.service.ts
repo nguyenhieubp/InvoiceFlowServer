@@ -175,7 +175,10 @@ export class SyncService {
         try {
           const response = await this.httpService.axiosRef.get(
             `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-            { headers: { accept: 'application/json' } },
+            { 
+              headers: { accept: 'application/json' },
+              timeout: 5000, // 5 seconds timeout
+            },
           );
           const department = response?.data?.data?.items?.[0];
           if (department?.company) {
@@ -275,7 +278,10 @@ export class SyncService {
                 try {
                   const response = await this.httpService.axiosRef.get(
                     `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-                    { headers: { accept: 'application/json' } },
+                    { 
+                      headers: { accept: 'application/json' },
+                      timeout: 5000, // 5 seconds timeout
+                    },
                   );
                   const loyaltyProduct = response?.data?.data?.item || response?.data;
                   if (loyaltyProduct?.unit) {
@@ -286,7 +292,7 @@ export class SyncService {
                     productTypeMap.set(itemCode, loyaltyProduct.productType || loyaltyProduct.producttype);
                   }
                 } catch (error) {
-                  // Không có dvt hoặc productType từ Loyalty API
+                  // Không có dvt hoặc productType từ Loyalty API - bỏ qua lỗi
                 }
               }),
             );
@@ -359,10 +365,13 @@ export class SyncService {
                   const savedSale = await this.saleRepository.save(newSale);
                   salesCount++;
               } catch (saleError: any) {
-                const errorMsg = `Lỗi khi lưu sale ${order.docCode}/${saleItem.itemCode}: ${saleError?.message || saleError}`;
+                const errorMsg = `Lỗi khi lưu sale ${order.docCode}/${saleItem.itemCode} (promCode: ${saleItem.promCode || 'null'}, serial: ${saleItem.serial || 'null'}): ${saleError?.message || saleError}`;
                 this.logger.error(errorMsg);
+                if (saleError?.stack) {
+                  this.logger.error(`Stack trace: ${saleError.stack}`);
+                }
                 errors.push(errorMsg);
-      }
+              }
             }
           }
         } catch (orderError: any) {
