@@ -308,13 +308,8 @@ export class SyncService {
 
                 // Lấy productType từ Loyalty API
                 const productType = productTypeMap.get(saleItem.itemCode || '');
-                // Lấy dvt từ Loyalty API nếu không có
-                const dvt = saleItem.dvt || productDvtMap.get(saleItem.itemCode || '') || null;
-                
-                // Bỏ qua sale không có dvt
-                if (!dvt || String(dvt).trim() === '') {
-                  continue;
-                }
+                // Lấy dvt từ Loyalty API nếu không có, mặc định là 'Cái'
+                const dvt = saleItem.dvt || productDvtMap.get(saleItem.itemCode || '') || 'Cái';
                 
                 // Luôn tạo sale mới - TRUYỀN MẤY LƯU NẤY (không check duplicate, lưu tất cả)
                 const newSale = this.saleRepository.create({
