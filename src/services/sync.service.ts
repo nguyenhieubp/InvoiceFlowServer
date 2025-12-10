@@ -300,38 +300,11 @@ export class SyncService {
             );
           }
           
-          // Xử lý từng sale trong order
+          // Xử lý từng sale trong order - TRUYỀN MẤY LƯU NẤY (lưu tất cả các dòng từ Zappy API)
           if (order.sales && order.sales.length > 0) {
+            this.logger.log(`Order ${order.docCode} có ${order.sales.length} sale items, bắt đầu lưu tất cả`);
             for (const saleItem of order.sales) {
               try {
-                // Kiểm tra dvt: bỏ qua sale không có dvt
-                const dvt = saleItem.dvt || productDvtMap.get(saleItem.itemCode || '');
-                if (!dvt || String(dvt).trim() === '') {
-                  this.logger.warn(`Bỏ qua sale ${order.docCode}/${saleItem.itemCode}: không có dvt`);
-                  continue;
-                }
-                // Kiểm tra xem sale đã tồn tại chưa (dựa trên docCode, itemCode, và serial)
-                // Nếu có serial, tìm chính xác theo serial; nếu không có serial, luôn tạo mới (không tìm existingSale)
-                let existingSale: Sale | null = null;
-                
-                if (saleItem.serial && saleItem.serial.trim() !== '') {
-                  // Nếu có serial, tìm chính xác theo docCode + itemCode + serial
-                  existingSale = await this.saleRepository.findOne({
-                    where: {
-                      docCode: order.docCode,
-                      itemCode: saleItem.itemCode,
-                      serial: saleItem.serial,
-                      customer: { id: customer.id },
-                    },
-                  });
-                  if (existingSale) {
-                    this.logger.debug(`Tìm thấy existingSale: ${order.docCode}/${saleItem.itemCode}/${saleItem.serial}`);
-                  }
-                } else {
-                  // Nếu không có serial, không tìm existingSale - luôn tạo mới để cho phép nhiều sales trùng nhau
-                  this.logger.debug(`Sale không có serial - sẽ tạo mới: ${order.docCode}/${saleItem.itemCode}`);
-                }
-                
                 // Enrich voucher data từ get_daily_cash
                 let voucherRefno: string | undefined;
                 let voucherAmount: number | undefined;
@@ -342,59 +315,13 @@ export class SyncService {
                   voucherAmount = firstVoucher.total_in || 0;
                 }
 
-                if (existingSale) {
-                  // Cập nhật sale đã tồn tại
-                  existingSale.qty = saleItem.qty || existingSale.qty;
-                  existingSale.revenue = saleItem.revenue || existingSale.revenue;
-                  existingSale.linetotal = saleItem.linetotal || existingSale.linetotal;
-                  existingSale.tienHang = saleItem.tienHang || existingSale.tienHang;
-                  existingSale.giaBan = saleItem.giaBan || existingSale.giaBan;
-                  existingSale.itemName = saleItem.itemName || existingSale.itemName;
-                  existingSale.ordertype = saleItem.ordertype || existingSale.ordertype;
-                  existingSale.branchCode = saleItem.branchCode || existingSale.branchCode;
-                  existingSale.promCode = saleItem.promCode || existingSale.promCode;
-                  existingSale.serial = saleItem.serial !== undefined ? saleItem.serial : existingSale.serial;
-                  existingSale.soSerial = saleItem.serial !== undefined ? saleItem.serial : existingSale.soSerial;
-                  // Cập nhật productType từ Loyalty API
-                  const productType = productTypeMap.get(saleItem.itemCode || '');
-                  if (productType) {
-                    existingSale.productType = productType;
-                  }
-                  existingSale.disc_amt = saleItem.disc_amt || existingSale.disc_amt;
-                  existingSale.grade_discamt = saleItem.grade_discamt || existingSale.grade_discamt;
-                  existingSale.other_discamt = saleItem.other_discamt !== undefined ? saleItem.other_discamt : existingSale.other_discamt;
-                  existingSale.chietKhauMuaHangGiamGia = saleItem.chietKhauMuaHangGiamGia !== undefined ? saleItem.chietKhauMuaHangGiamGia : existingSale.chietKhauMuaHangGiamGia;
-                  existingSale.paid_by_voucher_ecode_ecoin_bp = saleItem.paid_by_voucher_ecode_ecoin_bp || existingSale.paid_by_voucher_ecode_ecoin_bp;
-                  existingSale.maCa = saleItem.shift_code || existingSale.maCa;
-                  const validatedSalepersonId = this.validateInteger(saleItem.saleperson_id);
-                  existingSale.saleperson_id = validatedSalepersonId !== undefined ? validatedSalepersonId : existingSale.saleperson_id;
-                  existingSale.partnerCode = saleItem.partnerCode || existingSale.partnerCode;
-                  existingSale.partner_name = saleItem.partner_name || existingSale.partner_name;
-                  existingSale.order_source = saleItem.order_source || existingSale.order_source;
-                  // Lưu mvc_serial vào maThe
-                  existingSale.maThe = saleItem.mvc_serial !== undefined ? saleItem.mvc_serial : existingSale.maThe;
-                  // Category fields
-                  existingSale.cat1 = saleItem.cat1 !== undefined ? saleItem.cat1 : existingSale.cat1;
-                  existingSale.cat2 = saleItem.cat2 !== undefined ? saleItem.cat2 : existingSale.cat2;
-                  existingSale.cat3 = saleItem.cat3 !== undefined ? saleItem.cat3 : existingSale.cat3;
-                  existingSale.catcode1 = saleItem.catcode1 !== undefined ? saleItem.catcode1 : existingSale.catcode1;
-                  existingSale.catcode2 = saleItem.catcode2 !== undefined ? saleItem.catcode2 : existingSale.catcode2;
-                  existingSale.catcode3 = saleItem.catcode3 !== undefined ? saleItem.catcode3 : existingSale.catcode3;
-                  // Enrich voucher data
-                  if (voucherRefno) {
-                    existingSale.voucherDp1 = voucherRefno;
-                  }
-                  if (voucherAmount !== undefined && voucherAmount > 0) {
-                    existingSale.thanhToanVoucher = voucherAmount;
-                  }
-                  await this.saleRepository.save(existingSale);
-                  this.logger.debug(`Đã cập nhật existingSale: ${order.docCode}/${saleItem.itemCode}/${saleItem.serial || 'NO_SERIAL'}`);
-        } else {
-                  // Tạo sale mới
-                  // Lấy productType từ Loyalty API
-                  const productType = productTypeMap.get(saleItem.itemCode || '');
-                  this.logger.debug(`Tạo sale mới: ${order.docCode}/${saleItem.itemCode}/${saleItem.serial || 'NO_SERIAL'}`);
-                  const newSale = this.saleRepository.create({
+                // Luôn tạo sale mới - TRUYỀN MẤY LƯU NẤY (không check duplicate, lưu tất cả)
+                // Lấy productType từ Loyalty API
+                const productType = productTypeMap.get(saleItem.itemCode || '');
+                // Lấy dvt từ Loyalty API nếu không có
+                const dvt = saleItem.dvt || productDvtMap.get(saleItem.itemCode || '') || null;
+                this.logger.debug(`Đang lưu sale: ${order.docCode}/${saleItem.itemCode}, promCode: ${saleItem.promCode || 'null'}, serial: ${saleItem.serial || 'null'}`);
+                const newSale = this.saleRepository.create({
                     docCode: order.docCode,
                     docDate: new Date(order.docDate),
                     branchCode: order.branchCode,
@@ -413,6 +340,7 @@ export class SyncService {
                     promCode: saleItem.promCode,
                     serial: saleItem.serial,
                     soSerial: saleItem.serial,
+                    dvt: dvt, // Dvt từ Loyalty API nếu có
                     disc_amt: saleItem.disc_amt,
                     grade_discamt: saleItem.grade_discamt,
                     other_discamt: saleItem.other_discamt,
@@ -437,10 +365,9 @@ export class SyncService {
                     customer: customer,
                     isProcessed: false,
                   } as Partial<Sale>);
-                  await this.saleRepository.save(newSale);
-                  this.logger.debug(`Đã lưu sale mới với ID: ${newSale.id} - ${order.docCode}/${saleItem.itemCode}/${saleItem.serial || 'NO_SERIAL'}`);
+                  const savedSale = await this.saleRepository.save(newSale);
                   salesCount++;
-                }
+                  this.logger.debug(`Đã lưu thành công sale: ${order.docCode}/${saleItem.itemCode}, promCode: ${saleItem.promCode || 'null'}, id: ${savedSale.id}`);
               } catch (saleError: any) {
                 const errorMsg = `Lỗi khi lưu sale ${order.docCode}/${saleItem.itemCode}: ${saleError?.message || saleError}`;
                 this.logger.error(errorMsg);
