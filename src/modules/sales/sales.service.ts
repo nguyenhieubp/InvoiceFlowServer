@@ -110,17 +110,22 @@ export class SalesService {
   }
 
   /**
-   * Xác định nên dùng ma_lo hay so_serial dựa trên productType từ Loyalty API
-   * VOUC → dùng so_serial
-   * SKIN, TPCN, GIFT → dùng ma_lo
+   * Xác định nên dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
+   * trackSerial: true → dùng so_serial
+   * trackBatch: true → dùng ma_lo
+   * Nếu cả hai đều true → ưu tiên trackBatch (dùng ma_lo)
    */
-  private shouldUseBatchFromProductType(productType: string | null | undefined): boolean {
-    if (!productType) {
-      return false; // Mặc định dùng serial nếu không có productType
+  private shouldUseBatch(trackBatch: boolean | null | undefined, trackSerial: boolean | null | undefined): boolean {
+    // Nếu trackBatch = true → dùng ma_lo (ưu tiên)
+    if (trackBatch === true) {
+      return true;
     }
-    const type = String(productType).toUpperCase().trim();
-    // SKIN, TPCN, GIFT → dùng ma_lo
-    return type === 'SKIN' || type === 'TPCN' || type === 'GIFT';
+    // Nếu trackSerial = true và trackBatch = false → dùng so_serial
+    if (trackSerial === true && trackBatch === false) {
+      return false;
+    }
+    // Mặc định: nếu không có thông tin → dùng so_serial
+    return false;
   }
 
   constructor(
@@ -1631,33 +1636,33 @@ export class SalesService {
         this.logger.debug(`[BuildInvoice] sale.maLo for item ${sale.itemCode}: "${sale.maLo || ''}"`);
       }
       
-      // Lấy productType từ database trước (đã được lưu khi sync), nếu không có thì lấy từ product object
-      // Nếu ma_vt (materialCode) khác itemCode, cần fetch lại product bằng materialCode để lấy đúng productType
-      let productTypeFromLoyalty = sale.productType || sale.product?.productType || sale.product?.producttype;
+      // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
+      // Nếu ma_vt (materialCode) khác itemCode, cần fetch lại product bằng materialCode
       const materialCode = sale.product?.maVatTu || sale.product?.materialCode || sale.itemCode;
+      let trackSerial: boolean | null = null;
+      let trackBatch: boolean | null = null;
+      let productTypeFromLoyalty: string | null = null;
       
-      // Nếu materialCode khác itemCode, luôn fetch lại bằng materialCode để lấy đúng productType
-      // (vì productType của materialCode có thể khác với productType của itemCode)
-      if (materialCode && materialCode !== sale.itemCode) {
-        try {
-          const response = await this.httpService.axiosRef.get(
-            `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(materialCode)}`,
-            { headers: { accept: 'application/json' } },
-          );
-          const loyaltyProductByMaterialCode = response?.data?.data?.item || response?.data;
-          if (loyaltyProductByMaterialCode) {
-            // Ưu tiên productType từ materialCode (vì đây là mã vật tư thực tế được gửi lên)
-            productTypeFromLoyalty = loyaltyProductByMaterialCode.productType || loyaltyProductByMaterialCode.producttype || productTypeFromLoyalty;
-            // Update sale.product với productType từ materialCode
-            if (sale.product) {
-              sale.product.productType = productTypeFromLoyalty;
-              sale.product.producttype = productTypeFromLoyalty;
-            }
-            this.logger.log(`[BuildInvoice] Fetched productType from materialCode ${materialCode}: ${productTypeFromLoyalty} (itemCode was: ${sale.itemCode})`);
+      // Luôn fetch từ Loyalty API để lấy trackSerial và trackBatch
+      try {
+        const response = await this.httpService.axiosRef.get(
+          `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(materialCode)}`,
+          { headers: { accept: 'application/json' } },
+        );
+        const loyaltyProduct = response?.data?.data?.item || response?.data;
+        if (loyaltyProduct) {
+          trackSerial = loyaltyProduct.trackSerial === true;
+          trackBatch = loyaltyProduct.trackBatch === true;
+          productTypeFromLoyalty = loyaltyProduct.productType || loyaltyProduct.producttype || null;
+          // Update sale.product với thông tin từ Loyalty API
+          if (sale.product) {
+            sale.product.productType = productTypeFromLoyalty;
+            sale.product.producttype = productTypeFromLoyalty;
           }
-        } catch (error) {
-          this.logger.warn(`Failed to fetch product by materialCode ${materialCode} from Loyalty API: ${error}`);
+          this.logger.log(`[BuildInvoice] Fetched from materialCode ${materialCode}: trackSerial=${trackSerial}, trackBatch=${trackBatch}, productType=${productTypeFromLoyalty || 'N/A'} (itemCode was: ${sale.itemCode})`);
         }
+      } catch (error) {
+        this.logger.warn(`Failed to fetch product by materialCode ${materialCode} from Loyalty API: ${error}`);
       }
       
       const productTypeUpper = productTypeFromLoyalty ? String(productTypeFromLoyalty).toUpperCase().trim() : null;
@@ -1665,55 +1670,54 @@ export class SalesService {
       // Lấy giá trị serial từ sale (tất cả đều lấy từ field "serial")
       const serialValue = toString(sale.serial || '', '');
       
-      // Debug: Log productType và serial để kiểm tra
-      this.logger.log(`[BuildInvoice] Item ${sale.itemCode} (materialCode: ${materialCode}): serial="${serialValue}", productTypeFromLoyalty="${productTypeFromLoyalty || 'N/A'}", productTypeUpper="${productTypeUpper || 'N/A'}", sale.product=${JSON.stringify(sale.product ? { productType: sale.product.productType, producttype: sale.product.producttype, materialCode: sale.product.materialCode || sale.product.maVatTu } : 'null')}`);
+      // Debug: Log trackSerial, trackBatch và serial để kiểm tra
+      this.logger.log(`[BuildInvoice] Item ${sale.itemCode} (materialCode: ${materialCode}): serial="${serialValue}", trackSerial=${trackSerial}, trackBatch=${trackBatch}, productType="${productTypeFromLoyalty || 'N/A'}"`);
       
-      // Xác định có dùng ma_lo hay so_serial dựa trên productType từ Loyalty API
-      // VOUC → dùng so_serial (không dùng ma_lo)
-      // SKIN, TPCN → dùng ma_lo
-      const useBatch = this.shouldUseBatchFromProductType(productTypeFromLoyalty);
+      // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
+      const useBatch = this.shouldUseBatch(trackBatch, trackSerial);
       
-      // Xác định ma_lo và so_serial dựa trên productType
+      // Xác định ma_lo và so_serial dựa trên trackSerial và trackBatch
       let maLo: string | null = null;
       let soSerial: string | null = null;
       
       if (useBatch) {
-        // SKIN, TPCN, GIFT → dùng ma_lo với giá trị serial
+        // trackBatch = true → dùng ma_lo với giá trị serial
         if (serialValue && serialValue.trim() !== '') {
+          // Vẫn cần productType để quyết định cắt bao nhiêu ký tự
           if (productTypeUpper === 'TPCN') {
             // Nếu productType là "TPCN", cắt lấy 8 ký tự cuối
             maLo = serialValue.length >= 8 ? serialValue.slice(-8) : serialValue;
-            this.logger.log(`[BuildInvoice] Item ${sale.itemCode}: TPCN → cắt 8 ký tự cuối: "${serialValue}" → "${maLo}"`);
+            this.logger.log(`[BuildInvoice] Item ${sale.itemCode}: trackBatch=true, TPCN → cắt 8 ký tự cuối: "${serialValue}" → "${maLo}"`);
           } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
             // Nếu productType là "SKIN" hoặc "GIFT", cắt lấy 4 ký tự cuối
             maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
-            this.logger.log(`[BuildInvoice] Item ${sale.itemCode}: ${productTypeUpper} → cắt 4 ký tự cuối: "${serialValue}" → "${maLo}"`);
+            this.logger.log(`[BuildInvoice] Item ${sale.itemCode}: trackBatch=true, ${productTypeUpper} → cắt 4 ký tự cuối: "${serialValue}" → "${maLo}"`);
           } else {
-            // Các trường hợp khác (nếu có) → giữ nguyên toàn bộ serial
+            // Các trường hợp khác → giữ nguyên toàn bộ serial
             maLo = serialValue;
-            this.logger.log(`[BuildInvoice] Item ${sale.itemCode}: productType=${productTypeUpper} (không phải SKIN/TPCN/GIFT) → giữ nguyên: "${maLo}"`);
+            this.logger.log(`[BuildInvoice] Item ${sale.itemCode}: trackBatch=true, productType=${productTypeUpper || 'N/A'} → giữ nguyên: "${maLo}"`);
           }
         } else {
           maLo = null;
-          this.logger.warn(`[BuildInvoice] Item ${sale.itemCode}: ${productTypeUpper} (SKIN/TPCN/GIFT) nhưng không có serial, ma_lo=null`);
+          this.logger.warn(`[BuildInvoice] Item ${sale.itemCode}: trackBatch=true nhưng không có serial, ma_lo=null`);
         }
         soSerial = null;
       } else {
-        // VOUC hoặc không có productType → dùng so_serial với giá trị serial
+        // trackSerial = true và trackBatch = false → dùng so_serial với giá trị serial
         maLo = null;
         soSerial = serialValue && serialValue.trim() !== '' ? serialValue : null;
-        this.logger.log(`[BuildInvoice] Item ${sale.itemCode}: productType=${productTypeFromLoyalty || 'N/A'} → VOUC/Other → ma_lo=null, so_serial="${soSerial || ''}"`);
+        this.logger.log(`[BuildInvoice] Item ${sale.itemCode}: trackSerial=${trackSerial}, trackBatch=${trackBatch} → ma_lo=null, so_serial="${soSerial || ''}"`);
       }
       
       // Log kết quả cuối cùng
-      this.logger.log(`[BuildInvoice] Item ${sale.itemCode} (materialCode: ${materialCode}): FINAL → productType="${productTypeFromLoyalty || 'N/A'}", serial="${serialValue || 'N/A'}", ma_lo=${maLo ? `"${maLo}"` : 'null'}, so_serial=${soSerial ? `"${soSerial}"` : 'null'}, useBatch=${useBatch}`);
+      this.logger.log(`[BuildInvoice] Item ${sale.itemCode} (materialCode: ${materialCode}): FINAL → trackSerial=${trackSerial}, trackBatch=${trackBatch}, productType="${productTypeFromLoyalty || 'N/A'}", serial="${serialValue || 'N/A'}", ma_lo=${maLo ? `"${maLo}"` : 'null'}, so_serial=${soSerial ? `"${soSerial}"` : 'null'}, useBatch=${useBatch}`);
       
-      // Cảnh báo nếu không có serial nhưng productType yêu cầu
+      // Cảnh báo nếu không có serial nhưng trackSerial/trackBatch yêu cầu
       if (!serialValue || serialValue.trim() === '') {
         if (useBatch) {
-          this.logger.warn(`[BuildInvoice] Item ${sale.itemCode}: productType=${productTypeFromLoyalty} (SKIN/TPCN) nhưng không có serial → không gửi ma_lo`);
-        } else if (productTypeFromLoyalty === 'VOUC') {
-          this.logger.warn(`[BuildInvoice] Item ${sale.itemCode}: productType=VOUC nhưng không có serial → không gửi so_serial`);
+          this.logger.warn(`[BuildInvoice] Item ${sale.itemCode}: trackBatch=true nhưng không có serial → không gửi ma_lo`);
+        } else if (trackSerial) {
+          this.logger.warn(`[BuildInvoice] Item ${sale.itemCode}: trackSerial=true nhưng không có serial → không gửi so_serial`);
         }
       }
       
@@ -2055,10 +2059,10 @@ export class SalesService {
     // Build detail items
     const detail = await Promise.all(
       items.map(async (item, index) => {
-        // Lookup product để lấy dvt và producttype
-        // Lấy producttype và productType từ Loyalty API (stockTransData không có producttype)
+        // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
         let dvt = 'Cái'; // Default
-        let producttype: string | null = null;
+        let trackSerial: boolean | null = null;
+        let trackBatch: boolean | null = null;
         let productTypeFromLoyalty: string | null = null;
         
         try {
@@ -2068,48 +2072,48 @@ export class SalesService {
           if (product?.dvt) {
             dvt = product.dvt;
           }
-          // Try to get from Loyalty API để lấy dvt, producttype và productType
+          // Fetch từ Loyalty API để lấy dvt, trackSerial, trackBatch và productType
           try {
             const response = await this.httpService.axiosRef.get(
               `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(item.item_code)}`,
               { headers: { accept: 'application/json' } },
             );
             const loyaltyProduct = response?.data?.data?.item || response?.data;
-            if (loyaltyProduct?.unit) {
-              dvt = loyaltyProduct.unit;
+            if (loyaltyProduct) {
+              if (loyaltyProduct?.unit) {
+                dvt = loyaltyProduct.unit;
+              }
+              trackSerial = loyaltyProduct.trackSerial === true;
+              trackBatch = loyaltyProduct.trackBatch === true;
+              productTypeFromLoyalty = loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
             }
-            // Lấy producttype và productType từ Loyalty API
-            producttype = loyaltyProduct?.producttype || loyaltyProduct?.productType || producttype;
-            productTypeFromLoyalty = loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
           } catch (error) {
             this.logger.warn(
-              `Không lấy được dvt từ Loyalty API cho item ${item.item_code}`,
+              `Không lấy được dữ liệu từ Loyalty API cho item ${item.item_code}`,
             );
           }
         } catch (error) {
           this.logger.warn(`Không tìm thấy product cho item ${item.item_code}`);
         }
 
-        // Xác định ma_lo và so_serial dựa trên productType từ Loyalty API (bỏ logic cũ dựa trên producttype I/B/M/V/S)
         const productTypeUpper = productTypeFromLoyalty ? String(productTypeFromLoyalty).toUpperCase().trim() : null;
         
-        // Debug log để kiểm tra productType
+        // Debug log để kiểm tra trackSerial và trackBatch
         if (index === 0) {
-          this.logger.debug(`[BuildStockTransfer] Item ${item.item_code}: productTypeFromLoyalty=${productTypeFromLoyalty || 'N/A'}, productTypeUpper=${productTypeUpper || 'N/A'}`);
+          this.logger.debug(`[BuildStockTransfer] Item ${item.item_code}: trackSerial=${trackSerial}, trackBatch=${trackBatch}, productType=${productTypeFromLoyalty || 'N/A'}`);
         }
         
-        // Xác định có dùng ma_lo hay so_serial dựa trên productType từ Loyalty API
-        // VOUC → dùng so_serial (không dùng ma_lo)
-        // SKIN, TPCN → dùng ma_lo
-        const useBatch = this.shouldUseBatchFromProductType(productTypeFromLoyalty);
+        // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
+        const useBatch = this.shouldUseBatch(trackBatch, trackSerial);
         
         let maLo: string | null = null;
         let soSerial: string | null = null;
         
         if (useBatch) {
-          // SKIN, TPCN, GIFT → dùng ma_lo với giá trị batchserial
+          // trackBatch = true → dùng ma_lo với giá trị batchserial
           const batchSerial = item.batchserial || null;
           if (batchSerial) {
+            // Vẫn cần productType để quyết định cắt bao nhiêu ký tự
             if (productTypeUpper === 'TPCN') {
               // Nếu productType là "TPCN", cắt lấy 8 ký tự cuối
               maLo = batchSerial.length >= 8 ? batchSerial.slice(-8) : batchSerial;
@@ -2117,7 +2121,7 @@ export class SalesService {
               // Nếu productType là "SKIN" hoặc "GIFT", cắt lấy 4 ký tự cuối
               maLo = batchSerial.length >= 4 ? batchSerial.slice(-4) : batchSerial;
             } else {
-              // Các trường hợp khác (nếu có) → giữ nguyên toàn bộ
+              // Các trường hợp khác → giữ nguyên toàn bộ
               maLo = batchSerial;
             }
           } else {
@@ -2125,7 +2129,7 @@ export class SalesService {
           }
           soSerial = null;
         } else {
-          // VOUC hoặc không có productType → dùng so_serial, không set ma_lo
+          // trackSerial = true và trackBatch = false → dùng so_serial, không set ma_lo
           maLo = null;
           soSerial = item.batchserial || null;
         }
