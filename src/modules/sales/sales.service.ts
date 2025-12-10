@@ -1818,8 +1818,10 @@ export class SalesService {
         // ma_ck04: Thanh toán coupon
         ma_ck04: (ck04_nt > 0 || sale.thanhToanCoupon) ? toString(sale.maCk04 || 'COUPON', '') : '',
         ck04_nt: Number(ck04_nt),
-        // ma_ck05: Thanh toán voucher - Tính toán giống frontend
-        ma_ck05: (ck05_nt > 0 || sale.thanhToanVoucher) ? (maCk05Value || toString(sale.maCk05 || 'VOUCHER', '')) : '',
+        // ma_ck05: Thanh toán voucher - Chỉ gán khi ck05_nt > 0
+        ...(ck05_nt > 0 ? {
+          ma_ck05: maCk05Value || toString(sale.maCk05 || 'VOUCHER', ''),
+        } : {}),
         ck05_nt: Number(ck05_nt),
         // Voucher DP1 - Tạm thời không gửi, sẽ thay logic khác sau
         ma_ck06: null, // Không gửi voucherDp1 nữa
