@@ -31,7 +31,7 @@ export class SalesService {
   /**
    * Tính và trả về ma_ck05 (Thanh toán voucher) dựa trên logic giống frontend
    * @param sale - Sale object
-   * @returns Chuỗi các nhãn cách nhau bằng dấu cách (ví dụ: "FBV TT VCDV" hoặc "VCHB" cho menard), hoặc null nếu không thỏa điều kiện
+   * @returns Chuỗi các nhãn cách nhau bằng dấu cách (ví dụ: "VCDV" hoặc "VCHB"), hoặc null nếu không thỏa điều kiện
    */
   private calculateMaCk05(sale: any): string | null {
     if (!sale) return null;
@@ -41,7 +41,6 @@ export class SalesService {
     const linetotalValue = sale.linetotal ?? sale.tienHang ?? 0;
     const cat1Value = sale.cat1 || sale.catcode1 || sale.product?.cat1 || sale.product?.catcode1 || '';
     const itemCodeValue = sale.itemCode || '';
-    const brand = sale.customer?.brand || sale.product?.brand?.code || sale.product?.brand?.name || '';
 
     // Nếu revenue = 0 và linetotal = 0 → không gắn nhãn
     if (revenueValue === 0 && linetotalValue === 0) {
@@ -56,15 +55,6 @@ export class SalesService {
     // Tập hợp các nhãn sẽ hiển thị
     const labels: string[] = [];
 
-    // Kiểm tra brand: nếu là "menard" thì chỉ hiển thị VCHB/VCDV, không có FBV TT
-    const isMenard = brand.toLowerCase() === 'menard';
-
-    if (!isMenard) {
-      // FBV và TT luôn hiển thị nếu có paid_by_voucher > 0 (trừ menard)
-      labels.push('FBV');
-      labels.push('TT');
-    }
-
     // VCHB: Nếu cat1 = "CHANDO" hoặc itemcode bắt đầu bằng "S" hoặc "H"
     if (cat1Value === 'CHANDO' || itemCodeValue.toUpperCase().startsWith('S') || itemCodeValue.toUpperCase().startsWith('H')) {
       labels.push('VCHB');
@@ -75,7 +65,8 @@ export class SalesService {
       labels.push('VCDV');
     }
 
-    // Trả về chuỗi các nhãn cách nhau bằng dấu cách
+    // Nếu không có nhãn nào thỏa điều kiện, mặc định trả về null
+    // (có thể hiển thị cả hai nếu thỏa cả hai điều kiện)
     return labels.length > 0 ? labels.join(' ') : null;
   }
 
