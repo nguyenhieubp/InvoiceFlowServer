@@ -14,6 +14,7 @@ import { FastApiService } from '../../services/fast-api.service';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { Order } from '../../types/order.types';
 import { CreateStockTransferDto, StockTransferItem } from '../../dto/create-stock-transfer.dto';
+import { calculateVCType } from '../../utils/product.utils';
 
 @Injectable()
 export class SalesService {
@@ -29,9 +30,9 @@ export class SalesService {
   }
 
   /**
-   * Tính và trả về ma_ck05 (Thanh toán voucher) dựa trên logic giống frontend
+   * Tính và trả về ma_ck05 (Thanh toán voucher) dựa trên productType và trackInventory
    * @param sale - Sale object
-   * @returns Chuỗi các nhãn cách nhau bằng dấu cách (ví dụ: "VCDV" hoặc "VCHB"), hoặc null nếu không thỏa điều kiện
+   * @returns Loại VC: "VCDV" | "VCBH" | "VCKM" | null
    */
   private calculateMaCk05(sale: any): string | null {
     if (!sale) return null;
@@ -39,18 +40,31 @@ export class SalesService {
     const paidByVoucher = sale.paid_by_voucher_ecode_ecoin_bp ?? 0;
     const revenueValue = sale.revenue ?? 0;
     const linetotalValue = sale.linetotal ?? sale.tienHang ?? 0;
-    const cat1Value = sale.cat1 || sale.catcode1 || sale.product?.cat1 || sale.product?.catcode1 || '';
-    const itemCodeValue = sale.itemCode || '';
 
     // Nếu revenue = 0 và linetotal = 0 → không gắn nhãn
     if (revenueValue === 0 && linetotalValue === 0) {
       return null;
     }
 
-    // Nếu không có paid_by_voucher → không gắn nhãn
+    // Lấy productType và trackInventory từ sale hoặc product
+    const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
+    const trackInventory = sale.trackInventory ?? sale.product?.trackInventory ?? null;
+
+    // Sử dụng logic VC mới dựa trên productType và trackInventory
+    const vcType = calculateVCType(productType, trackInventory);
+
+    // Nếu có VC type từ logic mới, trả về ngay (không cần kiểm tra paid_by_voucher)
+    if (vcType) {
+      return vcType;
+    }
+
+    // Fallback: Logic cũ dựa trên cat1 và itemCode (chỉ khi có paid_by_voucher)
     if (paidByVoucher <= 0) {
       return null;
     }
+
+    const cat1Value = sale.cat1 || sale.catcode1 || sale.product?.cat1 || sale.product?.catcode1 || '';
+    const itemCodeValue = sale.itemCode || '';
 
     // Tập hợp các nhãn sẽ hiển thị
     const labels: string[] = [];
@@ -66,7 +80,6 @@ export class SalesService {
     }
 
     // Nếu không có nhãn nào thỏa điều kiện, mặc định trả về null
-    // (có thể hiển thị cả hai nếu thỏa cả hai điều kiện)
     return labels.length > 0 ? labels.join(' ') : null;
   }
 
@@ -1689,9 +1702,10 @@ export class SalesService {
       const materialCode = sale.product?.maVatTu || sale.product?.materialCode || sale.itemCode;
       let trackSerial: boolean | null = null;
       let trackBatch: boolean | null = null;
+      let trackInventory: boolean | null = null;
       let productTypeFromLoyalty: string | null = null;
       
-      // Luôn fetch từ Loyalty API để lấy trackSerial và trackBatch
+      // Luôn fetch từ Loyalty API để lấy trackSerial, trackBatch, trackInventory và productType
       try {
         const response = await this.httpService.axiosRef.get(
           `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(materialCode)}`,
@@ -1701,13 +1715,18 @@ export class SalesService {
         if (loyaltyProduct) {
           trackSerial = loyaltyProduct.trackSerial === true;
           trackBatch = loyaltyProduct.trackBatch === true;
+          trackInventory = loyaltyProduct.trackInventory === true;
           productTypeFromLoyalty = loyaltyProduct.productType || loyaltyProduct.producttype || null;
+          // Update sale với thông tin từ Loyalty API
+          sale.productType = productTypeFromLoyalty;
+          sale.trackInventory = trackInventory;
           // Update sale.product với thông tin từ Loyalty API
           if (sale.product) {
             sale.product.productType = productTypeFromLoyalty;
             sale.product.producttype = productTypeFromLoyalty;
+            sale.product.trackInventory = trackInventory;
           }
-          this.logger.log(`[BuildInvoice] Fetched from materialCode ${materialCode}: trackSerial=${trackSerial}, trackBatch=${trackBatch}, productType=${productTypeFromLoyalty || 'N/A'} (itemCode was: ${sale.itemCode})`);
+          this.logger.log(`[BuildInvoice] Fetched from materialCode ${materialCode}: trackSerial=${trackSerial}, trackBatch=${trackBatch}, trackInventory=${trackInventory}, productType=${productTypeFromLoyalty || 'N/A'} (itemCode was: ${sale.itemCode})`);
         }
       } catch (error) {
         this.logger.warn(`Failed to fetch product by materialCode ${materialCode} from Loyalty API: ${error}`);
