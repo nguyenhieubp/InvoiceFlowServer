@@ -29,6 +29,57 @@ export class SalesService {
   }
 
   /**
+   * Tính và trả về ma_ck05 (Thanh toán voucher) dựa trên logic giống frontend
+   * @param sale - Sale object
+   * @returns Chuỗi các nhãn cách nhau bằng dấu cách (ví dụ: "FBV TT VCDV" hoặc "VCHB" cho menard), hoặc null nếu không thỏa điều kiện
+   */
+  private calculateMaCk05(sale: any): string | null {
+    if (!sale) return null;
+
+    const paidByVoucher = sale.paid_by_voucher_ecode_ecoin_bp ?? 0;
+    const revenueValue = sale.revenue ?? 0;
+    const linetotalValue = sale.linetotal ?? sale.tienHang ?? 0;
+    const cat1Value = sale.cat1 || sale.catcode1 || sale.product?.cat1 || sale.product?.catcode1 || '';
+    const itemCodeValue = sale.itemCode || '';
+    const brand = sale.customer?.brand || sale.product?.brand?.code || sale.product?.brand?.name || '';
+
+    // Nếu revenue = 0 và linetotal = 0 → không gắn nhãn
+    if (revenueValue === 0 && linetotalValue === 0) {
+      return null;
+    }
+
+    // Nếu không có paid_by_voucher → không gắn nhãn
+    if (paidByVoucher <= 0) {
+      return null;
+    }
+
+    // Tập hợp các nhãn sẽ hiển thị
+    const labels: string[] = [];
+
+    // Kiểm tra brand: nếu là "menard" thì chỉ hiển thị VCHB/VCDV, không có FBV TT
+    const isMenard = brand.toLowerCase() === 'menard';
+
+    if (!isMenard) {
+      // FBV và TT luôn hiển thị nếu có paid_by_voucher > 0 (trừ menard)
+      labels.push('FBV');
+      labels.push('TT');
+    }
+
+    // VCHB: Nếu cat1 = "CHANDO" hoặc itemcode bắt đầu bằng "S" hoặc "H"
+    if (cat1Value === 'CHANDO' || itemCodeValue.toUpperCase().startsWith('S') || itemCodeValue.toUpperCase().startsWith('H')) {
+      labels.push('VCHB');
+    }
+
+    // VCDV: Nếu cat1 = "FACIALBAR" hoặc itemcode bắt đầu bằng "F" hoặc "V"
+    if (cat1Value === 'FACIALBAR' || itemCodeValue.toUpperCase().startsWith('F') || itemCodeValue.toUpperCase().startsWith('V')) {
+      labels.push('VCDV');
+    }
+
+    // Trả về chuỗi các nhãn cách nhau bằng dấu cách
+    return labels.length > 0 ? labels.join(' ') : null;
+  }
+
+  /**
    * Lấy prefix từ ordertype để tính mã kho
    * - "L" cho: "02. Làm dịch vụ", "04. Đổi DV", "08. Tách thẻ", "Đổi thẻ KEEP->Thẻ DV"
    * - "B" cho: "01.Thường", "03. Đổi điểm", "05. Tặng sinh nhật", "06. Đầu tư", "07. Bán tài khoản", "9. Sàn TMDT", "Đổi vỏ"
@@ -1592,6 +1643,12 @@ export class SalesService {
       const ck04_nt = toNumber(sale.chietKhauThanhToanCoupon || sale.chietKhau09, 0);
       // ma_ck05: Thanh toán voucher
       const ck05_nt = toNumber(sale.chietKhauThanhToanVoucher || sale.paid_by_voucher_ecode_ecoin_bp, 0);
+      // Tính ma_ck05 giống frontend - truyền customer từ orderData nếu sale chưa có
+      const saleWithCustomer = {
+        ...sale,
+        customer: sale.customer || orderData.customer,
+      };
+      const maCk05Value = this.calculateMaCk05(saleWithCustomer);
       const ck06_nt = toNumber(sale.chietKhauVoucherDp1, 0);
       const ck07_nt = toNumber(sale.chietKhauVoucherDp2, 0);
       const ck08_nt = toNumber(sale.chietKhauVoucherDp3, 0);
@@ -1772,11 +1829,12 @@ export class SalesService {
         // ma_ck04: Thanh toán coupon
         ma_ck04: (ck04_nt > 0 || sale.thanhToanCoupon) ? toString(sale.maCk04 || 'COUPON', '') : '',
         ck04_nt: Number(ck04_nt),
-        // ma_ck05: Thanh toán voucher
-        ma_ck05: (ck05_nt > 0 || sale.thanhToanVoucher) ? toString(sale.maCk05 || 'VOUCHER', '') : '',
+        // ma_ck05: Thanh toán voucher - Tính toán giống frontend
+        ma_ck05: (ck05_nt > 0 || sale.thanhToanVoucher) ? (maCk05Value || toString(sale.maCk05 || 'VOUCHER', '')) : '',
         ck05_nt: Number(ck05_nt),
-        ma_ck06: sale.voucherDp1 ? 'VOUCHER_DP1' : '',
-        ck06_nt: Number(ck06_nt),
+        // Voucher DP1 - Tạm thời không gửi, sẽ thay logic khác sau
+        ma_ck06: null, // Không gửi voucherDp1 nữa
+        ck06_nt: 0, // Không gửi chietKhauVoucherDp1 nữa
         ma_ck07: sale.voucherDp2 ? 'VOUCHER_DP2' : '',
         ck07_nt: Number(ck07_nt),
         ma_ck08: sale.voucherDp3 ? 'VOUCHER_DP3' : '',

@@ -311,8 +311,8 @@ export class SyncService {
                   continue;
                 }
                 // Kiểm tra xem sale đã tồn tại chưa (dựa trên docCode, itemCode, và serial)
-                // Nếu có serial, tìm chính xác theo serial; nếu không có serial, tìm theo docCode + itemCode
-                let existingSale;
+                // Nếu có serial, tìm chính xác theo serial; nếu không có serial, luôn tạo mới (không tìm existingSale)
+                let existingSale: Sale | null = null;
                 
                 if (saleItem.serial && saleItem.serial.trim() !== '') {
                   // Nếu có serial, tìm chính xác theo docCode + itemCode + serial
@@ -324,16 +324,12 @@ export class SyncService {
                       customer: { id: customer.id },
                     },
                   });
+                  if (existingSale) {
+                    this.logger.debug(`Tìm thấy existingSale: ${order.docCode}/${saleItem.itemCode}/${saleItem.serial}`);
+                  }
                 } else {
-                  // Nếu không có serial, tìm theo docCode + itemCode + serial IS NULL
-                  existingSale = await this.saleRepository.findOne({
-                    where: {
-                      docCode: order.docCode,
-                      itemCode: saleItem.itemCode,
-                      serial: IsNull(),
-                      customer: { id: customer.id },
-                    },
-                  });
+                  // Nếu không có serial, không tìm existingSale - luôn tạo mới để cho phép nhiều sales trùng nhau
+                  this.logger.debug(`Sale không có serial - sẽ tạo mới: ${order.docCode}/${saleItem.itemCode}`);
                 }
                 
                 // Enrich voucher data từ get_daily_cash
@@ -392,10 +388,12 @@ export class SyncService {
                     existingSale.thanhToanVoucher = voucherAmount;
                   }
                   await this.saleRepository.save(existingSale);
+                  this.logger.debug(`Đã cập nhật existingSale: ${order.docCode}/${saleItem.itemCode}/${saleItem.serial || 'NO_SERIAL'}`);
         } else {
                   // Tạo sale mới
                   // Lấy productType từ Loyalty API
                   const productType = productTypeMap.get(saleItem.itemCode || '');
+                  this.logger.debug(`Tạo sale mới: ${order.docCode}/${saleItem.itemCode}/${saleItem.serial || 'NO_SERIAL'}`);
                   const newSale = this.saleRepository.create({
                     docCode: order.docCode,
                     docDate: new Date(order.docDate),
@@ -440,6 +438,7 @@ export class SyncService {
                     isProcessed: false,
                   } as Partial<Sale>);
                   await this.saleRepository.save(newSale);
+                  this.logger.debug(`Đã lưu sale mới với ID: ${newSale.id} - ${order.docCode}/${saleItem.itemCode}/${saleItem.serial || 'NO_SERIAL'}`);
                   salesCount++;
                 }
               } catch (saleError: any) {
