@@ -55,14 +55,14 @@ export class SalesService {
     // Tập hợp các nhãn sẽ hiển thị
     const labels: string[] = [];
 
-    // VCHB: Nếu cat1 = "CHANDO" hoặc itemcode bắt đầu bằng "S" hoặc "H"
+    // VCDV: Nếu cat1 = "CHANDO" hoặc itemcode bắt đầu bằng "S" hoặc "H"
     if (cat1Value === 'CHANDO' || itemCodeValue.toUpperCase().startsWith('S') || itemCodeValue.toUpperCase().startsWith('H')) {
-      labels.push('VCHB');
+      labels.push('VCDV');
     }
 
-    // VCDV: Nếu cat1 = "FACIALBAR" hoặc itemcode bắt đầu bằng "F" hoặc "V"
+    // VCHB: Nếu cat1 = "FACIALBAR" hoặc itemcode bắt đầu bằng "F" hoặc "V"
     if (cat1Value === 'FACIALBAR' || itemCodeValue.toUpperCase().startsWith('F') || itemCodeValue.toUpperCase().startsWith('V')) {
-      labels.push('VCDV');
+      labels.push('VCHB');
     }
 
     // Nếu không có nhãn nào thỏa điều kiện, mặc định trả về null
