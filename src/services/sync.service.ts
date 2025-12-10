@@ -49,7 +49,6 @@ export class SyncService {
     errors?: string[];
     invoiceErrors?: string[];
   }> {
-    this.logger.log(`Bắt đầu đồng bộ dữ liệu từ Zappy API cho tất cả nhãn hàng cho ngày ${date}`);
     const brands = ['f3', 'labhair', 'yaman', 'menard']; // Các brand có Zappy API
     const allErrors: string[] = [];
     let totalOrdersCount = 0;
@@ -79,11 +78,6 @@ export class SyncService {
         allErrors.push(errorMsg);
       }
     }
-
-    this.logger.log(
-      `Hoàn thành đồng bộ tất cả nhãn hàng cho ngày ${date}: ${totalOrdersCount} orders, ${totalSalesCount} sales mới, ${totalCustomersCount} customers mới. ` +
-      `Hóa đơn Fast API: ${totalInvoiceSuccessCount} thành công, ${totalInvoiceFailureCount} thất bại.`,
-    );
 
     return {
       success: allErrors.length === 0,
@@ -127,7 +121,6 @@ export class SyncService {
     errors?: string[];
     invoiceErrors?: string[];
   }> {
-    this.logger.log(`Bắt đầu đồng bộ dữ liệu từ Zappy API cho ngày ${date}${brand ? ` (brand: ${brand})` : ''}`);
 
     try {
       // Lấy dữ liệu từ Zappy API với brand cụ thể
@@ -137,7 +130,6 @@ export class SyncService {
       let cashData: any[] = [];
       try {
         cashData = await this.zappyApiService.getDailyCash(date, brand);
-        this.logger.log(`Fetched ${cashData.length} cash records for date ${date}${brand ? ` (brand: ${brand})` : ''}`);
       } catch (error) {
         this.logger.warn(`Failed to fetch daily cash data: ${error}`);
       }
@@ -302,7 +294,6 @@ export class SyncService {
           
           // Xử lý từng sale trong order - TRUYỀN MẤY LƯU NẤY (lưu tất cả các dòng từ Zappy API)
           if (order.sales && order.sales.length > 0) {
-            this.logger.log(`Order ${order.docCode} có ${order.sales.length} sale items, bắt đầu lưu tất cả`);
             for (const saleItem of order.sales) {
               try {
                 // Enrich voucher data từ get_daily_cash
@@ -315,12 +306,17 @@ export class SyncService {
                   voucherAmount = firstVoucher.total_in || 0;
                 }
 
-                // Luôn tạo sale mới - TRUYỀN MẤY LƯU NẤY (không check duplicate, lưu tất cả)
                 // Lấy productType từ Loyalty API
                 const productType = productTypeMap.get(saleItem.itemCode || '');
                 // Lấy dvt từ Loyalty API nếu không có
                 const dvt = saleItem.dvt || productDvtMap.get(saleItem.itemCode || '') || null;
-                this.logger.debug(`Đang lưu sale: ${order.docCode}/${saleItem.itemCode}, promCode: ${saleItem.promCode || 'null'}, serial: ${saleItem.serial || 'null'}`);
+                
+                // Bỏ qua sale không có dvt
+                if (!dvt || String(dvt).trim() === '') {
+                  continue;
+                }
+                
+                // Luôn tạo sale mới - TRUYỀN MẤY LƯU NẤY (không check duplicate, lưu tất cả)
                 const newSale = this.saleRepository.create({
                     docCode: order.docCode,
                     docDate: new Date(order.docDate),
@@ -367,7 +363,6 @@ export class SyncService {
                   } as Partial<Sale>);
                   const savedSale = await this.saleRepository.save(newSale);
                   salesCount++;
-                  this.logger.debug(`Đã lưu thành công sale: ${order.docCode}/${saleItem.itemCode}, promCode: ${saleItem.promCode || 'null'}, id: ${savedSale.id}`);
               } catch (saleError: any) {
                 const errorMsg = `Lỗi khi lưu sale ${order.docCode}/${saleItem.itemCode}: ${saleError?.message || saleError}`;
                 this.logger.error(errorMsg);
@@ -382,9 +377,6 @@ export class SyncService {
         }
       }
 
-      this.logger.log(
-        `Hoàn thành đồng bộ: ${orders.length} orders, ${salesCount} sales mới, ${customersCount} customers mới`,
-      );
 
       // Tự động tạo hóa đơn cho tất cả các đơn hàng vừa đồng bộ
       // Lấy docCodes từ database (chỉ các đơn hàng thực sự có sales được lưu)
@@ -401,15 +393,12 @@ export class SyncService {
       let invoiceFailureCount = 0;
       const invoiceErrors: string[] = [];
 
-      this.logger.log(`Bắt đầu tự động tạo hóa đơn cho ${docCodes.length} đơn hàng (có sales trong DB)...`);
       
       for (const docCode of docCodes) {
           try {
-          this.logger.log(`Đang tạo hóa đơn cho đơn hàng: ${docCode}`);
           const result = await this.salesService.createInvoiceViaFastApi(docCode);
           if (result.success) {
             invoiceSuccessCount++;
-            this.logger.log(`✓ Tạo hóa đơn thành công cho đơn hàng: ${docCode}`);
           } else {
             invoiceFailureCount++;
             const errorMsg = `Tạo hóa đơn thất bại cho ${docCode}: ${result.message || 'Unknown error'}`;
@@ -424,9 +413,6 @@ export class SyncService {
         }
       }
 
-      this.logger.log(
-        `Hoàn thành tự động tạo hóa đơn: ${invoiceSuccessCount} thành công, ${invoiceFailureCount} thất bại`,
-      );
 
       return {
         success: errors.length === 0,
@@ -637,14 +623,8 @@ export class SyncService {
           const sale = this.saleRepository.create(saleDataToCreate);
           await this.saleRepository.save(sale);
           salesCreated++;
-          this.logger.debug(
-            `Đã tạo sale: ${saleData.doccode}/${saleData.itemcode} - qty: ${saleData.qty}, revenue: ${saleData.revenue}`,
-          );
         } else {
           salesSkipped++;
-          this.logger.debug(
-            `Bỏ qua sale (đã tồn tại): ${saleData.doccode}/${saleData.itemcode} - qty: ${saleData.qty}, revenue: ${saleData.revenue}`,
-          );
         }
       } catch (error) {
         salesError++;
@@ -656,9 +636,6 @@ export class SyncService {
     }
     
     if (sales.length > 0) {
-      this.logger.log(
-        `Customer ${personalInfo.code}: Tổng ${sales.length} sales - Đã tạo: ${salesCreated}, Bỏ qua: ${salesSkipped}, Lỗi: ${salesError}`,
-      );
     }
   }
 }

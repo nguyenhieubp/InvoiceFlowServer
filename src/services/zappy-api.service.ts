@@ -41,7 +41,6 @@ export class ZappyApiService {
     try {
       const baseUrl = this.getBaseUrlForBrand(brand);
       const url = `${baseUrl}/get_daily_sale?P_DATE=${date}`;
-      this.logger.log(`Fetching daily sales from Zappy API (brand: ${brand || 'default'}): ${url}`);
 
       const response = await firstValueFrom(
         this.httpService.get(url, {
@@ -86,7 +85,6 @@ export class ZappyApiService {
         ? 'get_daily_cashio' 
         : 'get_daily_cash';
       const url = `${baseUrl}/${endpoint}?P_DATE=${date}`;
-      this.logger.log(`Fetching daily cash from Zappy API (brand: ${brand || 'default'}): ${url}`);
 
       const response = await firstValueFrom(
         this.httpService.get(url, {

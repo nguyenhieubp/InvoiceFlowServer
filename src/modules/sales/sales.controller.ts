@@ -12,26 +12,15 @@ export class SalesController {
     @Query('processed') processed?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-    @Query('groupBy') groupBy?: string,
     @Query('date') date?: string, // Format: DDMMMYYYY (ví dụ: 04DEC2025)
   ) {
-    // Nếu groupBy=order thì trả về danh sách đơn hàng (gộp theo docCode)
-    if (groupBy === 'order') {
-      return this.salesService.findAllOrders({
-        brand,
-        isProcessed: processed === 'true' ? true : processed === 'false' ? false : undefined,
-        page: page ? parseInt(page) : 1,
-        limit: limit ? parseInt(limit) : 50,
-        date, // Pass date parameter
-      });
-    }
-    
-    // Mặc định trả về danh sách sales
-    return this.salesService.findAll({
+    // Luôn trả về danh sách đơn hàng (gộp theo docCode) với dữ liệu cơ bản
+    return this.salesService.findAllOrders({
       brand,
       isProcessed: processed === 'true' ? true : processed === 'false' ? false : undefined,
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 50,
+      date, // Pass date parameter
     });
   }
 

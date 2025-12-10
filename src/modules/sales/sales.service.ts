@@ -358,136 +358,133 @@ export class SalesService {
       } catch (error: any) {
         this.logger.error(`Error fetching orders from Zappy API: ${error?.message || error}`);
         // Fallback to database if Zappy API fails
-        this.logger.warn('Falling back to database query');
       }
     }
 
-    // Lấy tất cả sales với filter
+    // Lấy tất cả sales với filter - CHỈ LẤY BASIC DATA, KHÔNG ENRICH (tối ưu performance)
     let query = this.saleRepository
       .createQueryBuilder('sale')
-      .leftJoinAndSelect('sale.customer', 'customer')
       .orderBy('sale.docDate', 'DESC')
       .addOrderBy('sale.docCode', 'ASC');
 
-    if (brand) {
-      query = query.andWhere('customer.brand = :brand', { brand });
+    // Đếm tổng số sale items trước (để có total cho pagination)
+    const countQuery = this.saleRepository
+      .createQueryBuilder('sale')
+      .select('COUNT(sale.id)', 'count');
+    
+    if (isProcessed !== undefined) {
+      countQuery.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
     }
+    
+    if (brand) {
+      countQuery
+        .leftJoin('sale.customer', 'customer')
+        .andWhere('customer.brand = :brand', { brand });
+    }
+    
+    if (date) {
+      // Parse date string format: DDMMMYYYY (ví dụ: 04DEC2025)
+      const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+      if (dateMatch) {
+        const [, day, monthStr, year] = dateMatch;
+        const monthMap: { [key: string]: number } = {
+          JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+          JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+        };
+        const month = monthMap[monthStr.toUpperCase()];
+        if (month !== undefined) {
+          const dateObj = new Date(parseInt(year), month, parseInt(day));
+          const startOfDay = new Date(dateObj);
+          startOfDay.setHours(0, 0, 0, 0);
+          const endOfDay = new Date(dateObj);
+          endOfDay.setHours(23, 59, 59, 999);
+          countQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+            dateFrom: startOfDay,
+            dateTo: endOfDay,
+          });
+        }
+      }
+    }
+    
+    const totalResult = await countQuery.getRawOne();
+    const totalSaleItems = parseInt(totalResult?.count || '0', 10);
+
+    // Chỉ select các field cơ bản cần thiết
+    query = query.select([
+      'sale.docCode',
+      'sale.docDate',
+      'sale.branchCode',
+      'sale.docSourceType',
+      'sale.revenue',
+      'sale.qty',
+      'sale.isProcessed',
+      'sale.partnerCode', // Để lấy customer code
+    ]);
 
     if (isProcessed !== undefined) {
       query = query.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
     }
 
-    const allSales = await query.getMany();
-    
-    // Lấy tất cả itemCode unique từ sales
-    const itemCodes = Array.from(
-      new Set(
-        allSales
-          .map((sale) => sale.itemCode)
-          .filter((code): code is string => !!code && code.trim() !== '')
-      )
-    );
-    
-    // Load tất cả products một lần
-    const products = itemCodes.length > 0
-      ? await this.productItemRepository.find({
-          where: { maERP: In(itemCodes) },
-        })
-      : [];
-    
-    // Tạo map để lookup nhanh
-    const productMap = new Map<string, ProductItem>();
-    products.forEach((product) => {
-      if (product.maERP) {
-        productMap.set(product.maERP, product);
-      }
-    });
-    
-    // Fetch products từ Loyalty API để lấy producttype
-    const loyaltyProductMap = new Map<string, any>();
-    for (const itemCode of itemCodes) {
-      try {
-        const response = await this.httpService.axiosRef.get(
-          `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-          { headers: { accept: 'application/json' } },
-        );
-        const loyaltyProduct = response?.data?.data?.item || response?.data;
-        if (loyaltyProduct) {
-          loyaltyProductMap.set(itemCode, loyaltyProduct);
+    // Nếu có brand filter, cần join với customer (nhưng chỉ lấy partnerCode)
+    if (brand) {
+      query = query
+        .leftJoin('sale.customer', 'customer')
+        .andWhere('customer.brand = :brand', { brand })
+        .addSelect('customer.code', 'customer_code')
+        .addSelect('customer.brand', 'customer_brand');
+    } else {
+      query = query
+        .leftJoin('sale.customer', 'customer')
+        .addSelect('customer.code', 'customer_code')
+        .addSelect('customer.brand', 'customer_brand');
+    }
+
+    // Thêm date filter vào query chính
+    if (date) {
+      const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+      if (dateMatch) {
+        const [, day, monthStr, year] = dateMatch;
+        const monthMap: { [key: string]: number } = {
+          JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+          JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+        };
+        const month = monthMap[monthStr.toUpperCase()];
+        if (month !== undefined) {
+          const dateObj = new Date(parseInt(year), month, parseInt(day));
+          const startOfDay = new Date(dateObj);
+          startOfDay.setHours(0, 0, 0, 0);
+          const endOfDay = new Date(dateObj);
+          endOfDay.setHours(23, 59, 59, 999);
+          query.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+            dateFrom: startOfDay,
+            dateTo: endOfDay,
+          });
         }
-      } catch (error) {
-        this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
       }
     }
 
-    // Enrich sales với product information, promotionDisplayCode và producttype
-    const enrichedSales = allSales.map((sale) => {
-      const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
-      const existingProduct = sale.itemCode ? productMap.get(sale.itemCode) || null : null;
-      
-      return {
-        ...sale,
-        // Lấy producttype từ Loyalty API (không còn trong database)
-        producttype: loyaltyProduct?.producttype || loyaltyProduct?.productType || null,
-        product: loyaltyProduct ? {
-          ...existingProduct,
-          ...loyaltyProduct,
-          producttype: loyaltyProduct.producttype || loyaltyProduct.productType || null,
-          // Đảm bảo productType từ Loyalty API được giữ lại
-          productType: loyaltyProduct.productType || loyaltyProduct.producttype || null,
-        } : (existingProduct ? {
-          ...existingProduct,
-          producttype: null,
-        } : null),
-        promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
-      };
-    });
+    // Tối ưu: Query với LIMIT lớn hơn một chút để đảm bảo có đủ orders
+    // Ước tính: mỗi order có khoảng 2-3 sale items, nên lấy thêm 50% để đảm bảo
+    const estimatedLimit = Math.ceil(limit * 1.5);
+    const queryStartIndex = (page - 1) * limit;
+    query = query
+      .orderBy('sale.docDate', 'DESC')
+      .addOrderBy('sale.docCode', 'ASC')
+      .skip(queryStartIndex)
+      .take(estimatedLimit);
 
-    // Fetch departments để lấy ma_bp và tính maKho
-    const branchCodes = Array.from(
-      new Set(
-        allSales
-          .map((sale) => sale.branchCode)
-          .filter((code): code is string => !!code && code.trim() !== '')
-      )
-    );
+    const allSales = await query.getRawMany();
 
-    const departmentMap = new Map<string, any>();
-    for (const branchCode of branchCodes) {
-      try {
-        const response = await this.httpService.axiosRef.get(
-          `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-          { headers: { accept: 'application/json' } },
-        );
-        const department = response?.data?.data?.items?.[0];
-        if (department) {
-          departmentMap.set(branchCode, department);
-        }
-      } catch (error) {
-        this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
-      }
-    }
-
-    // Enrich sales với department information và tính maKho
-    const enrichedSalesWithDepartment = enrichedSales.map((sale) => {
-      const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
-      const maBp = department?.ma_bp || sale.branchCode || null;
-      const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBp);
-      
-      return {
-        ...sale,
-        department: department,
-        maKho: calculatedMaKho || sale.maKho || sale.branchCode || null,
-      };
-    });
-
-    // Gộp theo docCode
+    // Gộp theo docCode - chỉ trả về data cơ bản
     const orderMap = new Map<string, {
       docCode: string;
       docDate: Date;
       branchCode: string;
       docSourceType: string;
-      customer: any;
+      customer: {
+        code: string | null;
+        brand?: string | null;
+      } | null;
       totalRevenue: number;
       totalQty: number;
       totalItems: number;
@@ -495,32 +492,35 @@ export class SalesService {
       sales: any[];
     }>();
 
-    for (const sale of enrichedSalesWithDepartment) {
-      const docCode = sale.docCode;
+    // Đã đếm totalSaleItems từ count query ở trên
+    for (const sale of allSales) {
+      const docCode = sale.sale_docCode;
       
       if (!orderMap.has(docCode)) {
         orderMap.set(docCode, {
-          docCode: sale.docCode,
-          docDate: sale.docDate,
-          branchCode: sale.branchCode,
-          docSourceType: sale.docSourceType,
-          customer: sale.customer,
+          docCode: sale.sale_docCode,
+          docDate: sale.sale_docDate,
+          branchCode: sale.sale_branchCode,
+          docSourceType: sale.sale_docSourceType,
+          customer: sale.customer_code ? {
+            code: sale.customer_code,
+            brand: sale.customer_brand || null,
+          } : null,
           totalRevenue: 0,
           totalQty: 0,
           totalItems: 0,
-          isProcessed: sale.isProcessed,
-          sales: [],
+          isProcessed: sale.sale_isProcessed,
+          sales: [], // Empty sales array cho minimal view
         });
       }
 
       const order = orderMap.get(docCode)!;
-      order.totalRevenue += Number(sale.revenue);
-      order.totalQty += Number(sale.qty);
+      order.totalRevenue += Number(sale.sale_revenue || 0);
+      order.totalQty += Number(sale.sale_qty || 0);
       order.totalItems += 1;
-      order.sales.push(sale);
       
       // Nếu có ít nhất 1 sale chưa xử lý thì đơn hàng chưa xử lý
-      if (!sale.isProcessed) {
+      if (!sale.sale_isProcessed) {
         order.isProcessed = false;
       }
     }
@@ -530,15 +530,38 @@ export class SalesService {
       return new Date(b.docDate).getTime() - new Date(a.docDate).getTime();
     });
 
-    // Phân trang
-    const total = orders.length;
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedOrders = orders.slice(startIndex, endIndex);
+    // Phân trang - total là số sale items (rows), không phải số orders
+    const total = totalSaleItems; // Tổng số sale items (rows)
+    const paginationStartIndex = (page - 1) * limit;
+    const paginationEndIndex = paginationStartIndex + limit;
+    
+    // Tính toán số orders cần lấy dựa trên số rows
+    // Mỗi order có thể có nhiều sale items, nên cần lấy đủ orders để có đủ rows
+    let currentRowCount = 0;
+    const paginatedOrders: typeof orders = [];
+    
+    for (const order of orders) {
+      if (currentRowCount >= paginationEndIndex) break;
+      
+      // Nếu order này có sale items, thêm vào
+      if (order.totalItems > 0) {
+        // Nếu chưa đủ rows, thêm order này
+        if (currentRowCount + order.totalItems > paginationStartIndex) {
+          paginatedOrders.push(order);
+        }
+        currentRowCount += order.totalItems;
+      } else {
+        // Nếu order không có sale items, vẫn thêm 1 row
+        if (currentRowCount >= paginationStartIndex && currentRowCount < paginationEndIndex) {
+          paginatedOrders.push(order);
+        }
+        currentRowCount += 1;
+      }
+    }
 
     return {
       data: paginatedOrders,
-      total,
+      total, // Tổng số sale items (rows)
       page,
       limit,
       totalPages: Math.ceil(total / limit),
@@ -1106,7 +1129,6 @@ export class SalesService {
     customersCount: number;
     errors?: string[];
   }> {
-    this.logger.log(`Bắt đầu đồng bộ dữ liệu từ Zappy API cho ngày ${date}`);
 
     try {
       // Lấy dữ liệu từ Zappy API
@@ -1116,9 +1138,7 @@ export class SalesService {
       let cashData: any[] = [];
       try {
         cashData = await this.zappyApiService.getDailyCash(date);
-        this.logger.log(`Fetched ${cashData.length} cash records for date ${date}`);
       } catch (error) {
-        this.logger.warn(`Failed to fetch daily cash data: ${error}`);
       }
 
       // Tạo map cash data theo so_code để dễ lookup
@@ -1368,9 +1388,6 @@ export class SalesService {
         }
       }
 
-      this.logger.log(
-        `Hoàn thành đồng bộ: ${orders.length} orders, ${salesCount} sales mới, ${customersCount} customers mới`,
-      );
 
       return {
         success: errors.length === 0,
@@ -1390,7 +1407,6 @@ export class SalesService {
    * Tạo hóa đơn qua Fast API từ đơn hàng
    */
   async createInvoiceViaFastApi(docCode: string, forceRetry: boolean = false): Promise<any> {
-    this.logger.log(`Creating invoice via Fast API for order ${docCode}${forceRetry ? ' (force retry)' : ''}`);
 
     try {
       // Kiểm tra xem đơn hàng đã có trong bảng kê hóa đơn chưa (đã tạo thành công)
@@ -1401,7 +1417,6 @@ export class SalesService {
         });
 
         if (existingInvoice && existingInvoice.status === 1) {
-          this.logger.log(`Order ${docCode} already exists in invoice list with success status, skipping creation`);
           return {
             success: true,
             message: `Đơn hàng ${docCode} đã được tạo hóa đơn thành công trước đó`,
@@ -1418,23 +1433,9 @@ export class SalesService {
         throw new NotFoundException(`Order ${docCode} not found or has no sales`);
       }
 
-      this.logger.debug(`Order data retrieved: ${JSON.stringify({
-        docCode: orderData.docCode,
-        docDate: orderData.docDate,
-        salesCount: orderData.sales?.length,
-        firstSaleBranchCode: orderData.sales[0]?.branchCode,
-        firstSaleDepartment: orderData.sales[0]?.department ? 'exists' : 'missing',
-      })}`);
 
       // Build invoice data
       const invoiceData = await this.buildFastApiInvoiceData(orderData);
-
-      this.logger.debug(`Invoice data built: ${JSON.stringify({
-        ma_dvcs: invoiceData.ma_dvcs,
-        ma_kh: invoiceData.ma_kh,
-        so_ct: invoiceData.so_ct,
-        detailCount: invoiceData.detail?.length,
-      })}`);
 
       // Gọi API tạo đơn hàng
       let result: any;
@@ -1527,7 +1528,6 @@ export class SalesService {
         );
         
         if (isDuplicateError) {
-          this.logger.warn(`Order ${docCode} appears to already exist in Fast API (duplicate key error). Treating as already processed.`);
           // Cập nhật status thành 1 (thành công) vì có thể đã tồn tại trong Fast API
           await this.saveFastApiInvoice({
             docCode,
@@ -1559,7 +1559,6 @@ export class SalesService {
       // Đánh dấu đơn hàng là đã xử lý
       await this.markOrderAsProcessed(docCode);
 
-      this.logger.log(`Invoice created successfully for order ${docCode}`);
 
       return {
         success: true,
@@ -1602,11 +1601,9 @@ export class SalesService {
       } else if (typeof orderData.docDate === 'string') {
         docDate = new Date(orderData.docDate);
         if (isNaN(docDate.getTime())) {
-          this.logger.warn(`Invalid docDate string: ${orderData.docDate}, using current date`);
           docDate = new Date();
         }
       } else {
-        this.logger.warn(`docDate is missing or invalid, using current date`);
         docDate = new Date();
       }
 
@@ -1694,7 +1691,6 @@ export class SalesService {
       
       // Debug: Log maLo value từ sale
       if (index === 0) {
-        this.logger.debug(`[BuildInvoice] sale.maLo for item ${sale.itemCode}: "${sale.maLo || ''}"`);
       }
       
       // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
@@ -1726,10 +1722,8 @@ export class SalesService {
             sale.product.producttype = productTypeFromLoyalty;
             sale.product.trackInventory = trackInventory;
           }
-          this.logger.log(`[BuildInvoice] Fetched from materialCode ${materialCode}: trackSerial=${trackSerial}, trackBatch=${trackBatch}, trackInventory=${trackInventory}, productType=${productTypeFromLoyalty || 'N/A'} (itemCode was: ${sale.itemCode})`);
         }
       } catch (error) {
-        this.logger.warn(`Failed to fetch product by materialCode ${materialCode} from Loyalty API: ${error}`);
       }
       
       const productTypeUpper = productTypeFromLoyalty ? String(productTypeFromLoyalty).toUpperCase().trim() : null;
@@ -1738,7 +1732,6 @@ export class SalesService {
       const serialValue = toString(sale.serial || '', '');
       
       // Debug: Log trackSerial, trackBatch và serial để kiểm tra
-      this.logger.log(`[BuildInvoice] Item ${sale.itemCode} (materialCode: ${materialCode}): serial="${serialValue}", trackSerial=${trackSerial}, trackBatch=${trackBatch}, productType="${productTypeFromLoyalty || 'N/A'}"`);
       
       // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
       const useBatch = this.shouldUseBatch(trackBatch, trackSerial);
@@ -1754,37 +1747,29 @@ export class SalesService {
           if (productTypeUpper === 'TPCN') {
             // Nếu productType là "TPCN", cắt lấy 8 ký tự cuối
             maLo = serialValue.length >= 8 ? serialValue.slice(-8) : serialValue;
-            this.logger.log(`[BuildInvoice] Item ${sale.itemCode}: trackBatch=true, TPCN → cắt 8 ký tự cuối: "${serialValue}" → "${maLo}"`);
           } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
             // Nếu productType là "SKIN" hoặc "GIFT", cắt lấy 4 ký tự cuối
             maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
-            this.logger.log(`[BuildInvoice] Item ${sale.itemCode}: trackBatch=true, ${productTypeUpper} → cắt 4 ký tự cuối: "${serialValue}" → "${maLo}"`);
           } else {
             // Các trường hợp khác → giữ nguyên toàn bộ serial
             maLo = serialValue;
-            this.logger.log(`[BuildInvoice] Item ${sale.itemCode}: trackBatch=true, productType=${productTypeUpper || 'N/A'} → giữ nguyên: "${maLo}"`);
           }
         } else {
           maLo = null;
-          this.logger.warn(`[BuildInvoice] Item ${sale.itemCode}: trackBatch=true nhưng không có serial, ma_lo=null`);
         }
         soSerial = null;
       } else {
         // trackSerial = true và trackBatch = false → dùng so_serial với giá trị serial
         maLo = null;
         soSerial = serialValue && serialValue.trim() !== '' ? serialValue : null;
-        this.logger.log(`[BuildInvoice] Item ${sale.itemCode}: trackSerial=${trackSerial}, trackBatch=${trackBatch} → ma_lo=null, so_serial="${soSerial || ''}"`);
       }
       
       // Log kết quả cuối cùng
-      this.logger.log(`[BuildInvoice] Item ${sale.itemCode} (materialCode: ${materialCode}): FINAL → trackSerial=${trackSerial}, trackBatch=${trackBatch}, productType="${productTypeFromLoyalty || 'N/A'}", serial="${serialValue || 'N/A'}", ma_lo=${maLo ? `"${maLo}"` : 'null'}, so_serial=${soSerial ? `"${soSerial}"` : 'null'}, useBatch=${useBatch}`);
       
       // Cảnh báo nếu không có serial nhưng trackSerial/trackBatch yêu cầu
       if (!serialValue || serialValue.trim() === '') {
         if (useBatch) {
-          this.logger.warn(`[BuildInvoice] Item ${sale.itemCode}: trackBatch=true nhưng không có serial → không gửi ma_lo`);
         } else if (trackSerial) {
-          this.logger.warn(`[BuildInvoice] Item ${sale.itemCode}: trackSerial=true nhưng không có serial → không gửi so_serial`);
         }
       }
       
@@ -1807,12 +1792,6 @@ export class SalesService {
       
       // Validate ma_bp - nếu vẫn empty thì log warning
       if (!maBp || maBp.trim() === '') {
-        this.logger.warn(
-          `[BuildInvoice] Warning: ma_bp is empty for sale ${sale.itemCode} in order ${orderData.docCode}. ` +
-          `department.ma_bp: ${sale.department?.ma_bp || 'N/A'}, ` +
-          `sale.branchCode: ${sale.branchCode || 'N/A'}, ` +
-          `orderData.branchCode: ${orderData.branchCode || 'N/A'}`
-        );
       }
 
       return {
@@ -1908,11 +1887,6 @@ export class SalesService {
       };
     }));
     
-    // Debug: Log payload của detail item đầu tiên để kiểm tra ma_lo
-    if (detail.length > 0) {
-      const firstDetail = detail[0];
-      this.logger.log(`[BuildInvoice] First detail item payload: ma_lo=${firstDetail.ma_lo ? `"${firstDetail.ma_lo}"` : 'undefined'}, so_serial=${firstDetail.so_serial ? `"${firstDetail.so_serial}"` : 'undefined'}, ma_vt="${firstDetail.ma_vt || ''}"`);
-    }
 
       // Validate sales array
       if (!orderData.sales || orderData.sales.length === 0) {
@@ -2043,9 +2017,6 @@ export class SalesService {
             try {
               orderData = await this.findByOrderCode(firstItem.so_code);
             } catch (error) {
-              this.logger.warn(
-                `Không tìm thấy order với docCode ${firstItem.so_code} cho stock transfer ${doccode}`,
-              );
             }
           }
 
@@ -2156,19 +2127,14 @@ export class SalesService {
               productTypeFromLoyalty = loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
             }
           } catch (error) {
-            this.logger.warn(
-              `Không lấy được dữ liệu từ Loyalty API cho item ${item.item_code}`,
-            );
           }
         } catch (error) {
-          this.logger.warn(`Không tìm thấy product cho item ${item.item_code}`);
         }
 
         const productTypeUpper = productTypeFromLoyalty ? String(productTypeFromLoyalty).toUpperCase().trim() : null;
         
         // Debug log để kiểm tra trackSerial và trackBatch
         if (index === 0) {
-          this.logger.debug(`[BuildStockTransfer] Item ${item.item_code}: trackSerial=${trackSerial}, trackBatch=${trackBatch}, productType=${productTypeFromLoyalty || 'N/A'}`);
         }
         
         // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
