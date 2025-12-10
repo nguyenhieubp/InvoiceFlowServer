@@ -302,6 +302,17 @@ export class SyncService {
           if (order.sales && order.sales.length > 0) {
             for (const saleItem of order.sales) {
               try {
+                // Lấy productType từ Loyalty API
+                const productType = productTypeMap.get(saleItem.itemCode || '');
+                // Lấy dvt từ saleItem hoặc từ Loyalty API, không gán mặc định
+                const dvt = saleItem.dvt || productDvtMap.get(saleItem.itemCode || '') || undefined;
+                
+                // Bỏ qua sale item không có dvt - không lưu vào database
+                if (!dvt || dvt.trim() === '') {
+                  this.logger.warn(`Bỏ qua sale item ${order.docCode}/${saleItem.itemCode} vì không có đơn vị tính (dvt)`);
+                  continue;
+                }
+
                 // Enrich voucher data từ get_daily_cash
                 let voucherRefno: string | undefined;
                 let voucherAmount: number | undefined;
@@ -311,11 +322,6 @@ export class SyncService {
                   voucherRefno = firstVoucher.refno;
                   voucherAmount = firstVoucher.total_in || 0;
                 }
-
-                // Lấy productType từ Loyalty API
-                const productType = productTypeMap.get(saleItem.itemCode || '');
-                // Lấy dvt từ Loyalty API nếu không có, mặc định là 'Cái'
-                const dvt = saleItem.dvt || productDvtMap.get(saleItem.itemCode || '') || 'Cái';
                 
                 // Luôn tạo sale mới - TRUYỀN MẤY LƯU NẤY (không check duplicate, lưu tất cả)
                 const newSale = this.saleRepository.create({
@@ -337,7 +343,7 @@ export class SyncService {
                     promCode: saleItem.promCode,
                     serial: saleItem.serial,
                     soSerial: saleItem.serial,
-                    dvt: dvt, // Dvt từ Loyalty API nếu có
+                    dvt: dvt, // Dvt từ saleItem hoặc Loyalty API, không gán mặc định
                     disc_amt: saleItem.disc_amt,
                     grade_discamt: saleItem.grade_discamt,
                     other_discamt: saleItem.other_discamt,
