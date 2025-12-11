@@ -165,6 +165,50 @@ export class SalesService {
   }
 
   /**
+   * Tính VIP type dựa trên quy tắc:
+   * - Nếu productType == "DIVU" → "VIP DV MAT"
+   * - Nếu productType == "VOUC" → "VIP VC MP"
+   * - Nếu materialCode bắt đầu bằng "E." hoặc "VC" có trong code hoặc (trackInventory == False và trackSerial == True) → "VIP VC MP"
+   * - Ngược lại → "VIP MP"
+   */
+  private calculateVipType(
+    productType: string | null | undefined,
+    materialCode: string | null | undefined,
+    code: string | null | undefined,
+    trackInventory: boolean | null | undefined,
+    trackSerial: boolean | null | undefined,
+  ): string {
+    // Nếu productType == "DIVU"
+    if (productType === 'DIVU') {
+      return 'VIP DV MAT';
+    }
+    
+    // Nếu productType == "VOUC" → "VIP VC MP"
+    if (productType === 'VOUC') {
+      return 'VIP VC MP';
+    }
+    
+    // Nếu materialCode bắt đầu bằng "E." hoặc "VC" có trong code hoặc (trackInventory == False và trackSerial == True)
+    const materialCodeStr = materialCode || '';
+    const codeStr = code || '';
+    // Kiểm tra "VC" trong materialCode, code, hoặc itemCode (không phân biệt hoa thường)
+    const hasVC = 
+      materialCodeStr.toUpperCase().includes('VC') ||
+      codeStr.toUpperCase().includes('VC');
+    
+    if (
+      materialCodeStr.startsWith('E.') ||
+      hasVC ||
+      (trackInventory === false && trackSerial === true)
+    ) {
+      return 'VIP VC MP';
+    }
+    
+    // Ngược lại
+    return 'VIP MP';
+  }
+
+  /**
    * Xác định nên dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
    * trackSerial: true → dùng so_serial
    * trackBatch: true → dùng ma_lo
@@ -462,6 +506,10 @@ export class SalesService {
       'sale.qty',
       'sale.isProcessed',
       'sale.partnerCode', // Để lấy customer code
+      'sale.itemCode',
+      'sale.grade_discamt',
+      'sale.muaHangCkVip', // Thêm muaHangCkVip để frontend hiển thị
+      'sale.chietKhauMuaHangCkVip',
     ]);
 
     if (isProcessed !== undefined) {
@@ -1726,17 +1774,53 @@ export class SalesService {
       const ck01_nt = toNumber(sale.other_discamt || sale.chietKhauMuaHangGiamGia, 0);
       const ck02_nt = toNumber(sale.chietKhauCkTheoChinhSach, 0);
       const ck03_nt = toNumber(sale.chietKhauMuaHangCkVip || sale.grade_discamt, 0);
+      
+      // Tính VIP type nếu có chiết khấu VIP
+      let maCk03 = sale.muaHangCkVip || '';
+      if (ck03_nt > 0 && !maCk03) {
+        // Nếu chưa có muaHangCkVip, tính dựa trên product info
+        const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
+        const materialCode = sale.product?.maVatTu || sale.product?.materialCode || sale.itemCode || null;
+        const code = sale.itemCode || null;
+        const trackInventory = sale.trackInventory ?? sale.product?.trackInventory ?? null;
+        const trackSerial = sale.trackSerial ?? sale.product?.trackSerial ?? null;
+        maCk03 = this.calculateVipType(productType, materialCode, code, trackInventory, trackSerial);
+      }
       // ma_ck04: Thanh toán coupon
       const ck04_nt = toNumber(sale.chietKhauThanhToanCoupon || sale.chietKhau09, 0);
-      // ma_ck05: Thanh toán voucher
-      const ck05_nt = toNumber(sale.chietKhauThanhToanVoucher || sale.paid_by_voucher_ecode_ecoin_bp, 0);
+      // ma_ck15: Voucher DP1 dự phòng - Ưu tiên kiểm tra trước
+      let ck15_nt_voucherDp1 = toNumber(sale.chietKhauVoucherDp1, 0);
+      const paidByVoucher = toNumber(sale.chietKhauThanhToanVoucher || sale.paid_by_voucher_ecode_ecoin_bp, 0);
+      
+      // Kiểm tra các điều kiện để xác định voucher dự phòng
+      const pkgCode = (sale as any).pkg_code || (sale as any).pkgCode || null;
+      const promCode = sale.promCode || sale.prom_code || null;
+      const soSource = sale.order_source || (sale as any).so_source || null;
+      const productType = sale.productType || sale.producttype || sale.product?.productType || sale.product?.producttype || null;
+      
+      const isShopee = soSource && String(soSource).toUpperCase() === 'SHOPEE';
+      const hasPkgCode = pkgCode && pkgCode.trim() !== '';
+      const hasPromCode = promCode && promCode.trim() !== '';
+      
+      // Fallback: Nếu chietKhauVoucherDp1 = 0 nhưng thỏa điều kiện voucher dự phòng
+      // → Đây là dữ liệu cũ chưa sync, coi là voucher dự phòng
+      if (ck15_nt_voucherDp1 === 0 && paidByVoucher > 0) {
+        const isVoucherDuPhong = isShopee || (hasPromCode && !hasPkgCode);
+        if (isVoucherDuPhong) {
+          ck15_nt_voucherDp1 = paidByVoucher;
+        }
+      }
+      
+      // ma_ck05: Thanh toán voucher chính
+      // Chỉ map vào ck05_nt nếu không có voucher dự phòng (ck15_nt_voucherDp1 = 0)
+      const ck05_nt = ck15_nt_voucherDp1 > 0 ? 0 : paidByVoucher;
       // Tính ma_ck05 giống frontend - truyền customer từ orderData nếu sale chưa có
       const saleWithCustomer = {
         ...sale,
         customer: sale.customer || orderData.customer,
       };
       const maCk05Value = this.calculateMaCk05(saleWithCustomer);
-      const ck06_nt = toNumber(sale.chietKhauVoucherDp1, 0);
+      const ck06_nt = 0; // Dự phòng 1 - không sử dụng
       const ck07_nt = toNumber(sale.chietKhauVoucherDp2, 0);
       const ck08_nt = toNumber(sale.chietKhauVoucherDp3, 0);
       // Các chiết khấu từ 09-22 mặc định là 0
@@ -1747,7 +1831,7 @@ export class SalesService {
       const ck12_nt = toNumber(sale.chietKhau12, 0);
       const ck13_nt = toNumber(sale.chietKhau13, 0);
       const ck14_nt = toNumber(sale.chietKhau14, 0);
-      const ck15_nt = toNumber(sale.chietKhau15, 0);
+      const ck15_nt = ck15_nt_voucherDp1 > 0 ? ck15_nt_voucherDp1 : toNumber(sale.chietKhau15, 0);
       const ck16_nt = toNumber(sale.chietKhau16, 0);
       const ck17_nt = toNumber(sale.chietKhau17, 0);
       const ck18_nt = toNumber(sale.chietKhau18, 0);
@@ -1912,19 +1996,18 @@ export class SalesService {
         ck01_nt: Number(ck01_nt),
         ma_ck02: toString(sale.ckTheoChinhSach, ''),
         ck02_nt: Number(ck02_nt),
-        ma_ck03: toString(sale.muaHangCkVip, ''),
+        ma_ck03: toString(maCk03, ''),
         ck03_nt: Number(ck03_nt),
         // ma_ck04: Thanh toán coupon
         ma_ck04: (ck04_nt > 0 || sale.thanhToanCoupon) ? toString(sale.maCk04 || 'COUPON', '') : '',
         ck04_nt: Number(ck04_nt),
-        // ma_ck05: Thanh toán voucher - Chỉ gán khi ck05_nt > 0
+        // ma_ck05: Thanh toán voucher chính - Chỉ gán khi ck05_nt > 0
         ...(ck05_nt > 0 ? {
           ma_ck05: maCk05Value || toString(sale.maCk05 || 'VOUCHER', ''),
         } : {}),
         ck05_nt: Number(ck05_nt),
-        // Voucher DP1 - Tạm thời không gửi, sẽ thay logic khác sau
-        ma_ck06: null, // Không gửi voucherDp1 nữa
-        ck06_nt: 0, // Không gửi chietKhauVoucherDp1 nữa
+        // ma_ck06: Dự phòng 1 - không sử dụng
+        ck06_nt: Number(ck06_nt),
         ma_ck07: sale.voucherDp2 ? 'VOUCHER_DP2' : '',
         ck07_nt: Number(ck07_nt),
         ma_ck08: sale.voucherDp3 ? 'VOUCHER_DP3' : '',
@@ -1944,7 +2027,12 @@ export class SalesService {
         ck13_nt: Number(ck13_nt),
         ma_ck14: toString(sale.maCk14, ''),
         ck14_nt: Number(ck14_nt),
-        ma_ck15: toString(sale.maCk15, ''),
+        // ma_ck15: Voucher DP1 dự phòng - Gửi khi có chietKhauVoucherDp1 > 0
+        ...(ck15_nt_voucherDp1 > 0 ? {
+          ma_ck15: 'VC CTKM SÀN',
+        } : {
+          ma_ck15: toString(sale.maCk15, ''),
+        }),
         ck15_nt: Number(ck15_nt),
         ma_ck16: toString(sale.maCk16, ''),
         ck16_nt: Number(ck16_nt),

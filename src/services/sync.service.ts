@@ -269,9 +269,12 @@ export class SyncService {
             )
           );
 
-          // Fetch products từ Loyalty API để kiểm tra dvt và productType (song song)
+          // Fetch products từ Loyalty API để kiểm tra dvt, productType, materialCode, trackInventory, trackSerial (song song)
           const productDvtMap = new Map<string, string>();
           const productTypeMap = new Map<string, string>();
+          const productMaterialCodeMap = new Map<string, string>();
+          const productTrackInventoryMap = new Map<string, boolean>();
+          const productTrackSerialMap = new Map<string, boolean>();
           if (orderItemCodes.length > 0) {
             await Promise.all(
               orderItemCodes.map(async (itemCode) => {
@@ -291,8 +294,19 @@ export class SyncService {
                   if (loyaltyProduct?.productType || loyaltyProduct?.producttype) {
                     productTypeMap.set(itemCode, loyaltyProduct.productType || loyaltyProduct.producttype);
                   }
+                  // Lưu materialCode từ Loyalty API
+                  if (loyaltyProduct?.materialCode) {
+                    productMaterialCodeMap.set(itemCode, loyaltyProduct.materialCode);
+                  }
+                  // Lưu trackInventory và trackSerial từ Loyalty API
+                  if (loyaltyProduct?.trackInventory !== undefined) {
+                    productTrackInventoryMap.set(itemCode, loyaltyProduct.trackInventory === true);
+                  }
+                  if (loyaltyProduct?.trackSerial !== undefined) {
+                    productTrackSerialMap.set(itemCode, loyaltyProduct.trackSerial === true);
+                  }
                 } catch (error) {
-                  // Không có dvt hoặc productType từ Loyalty API - bỏ qua lỗi
+                  // Không có dữ liệu từ Loyalty API - bỏ qua lỗi
                 }
               }),
             );
@@ -313,6 +327,39 @@ export class SyncService {
                   continue;
                 }
 
+                // Tính VIP type nếu có chiết khấu VIP
+                let muaHangCkVip: string | undefined = undefined;
+                if (saleItem.grade_discamt && saleItem.grade_discamt > 0) {
+                  const materialCode = productMaterialCodeMap.get(saleItem.itemCode || '');
+                  const trackInventory = productTrackInventoryMap.get(saleItem.itemCode || '');
+                  const trackSerial = productTrackSerialMap.get(saleItem.itemCode || '');
+                  
+                  // Tính VIP type dựa trên quy tắc
+                  if (productType === 'DIVU') {
+                    muaHangCkVip = 'VIP DV MAT';
+                  } else if (productType === 'VOUC') {
+                    // Nếu productType == "VOUC" → "VIP VC MP"
+                    muaHangCkVip = 'VIP VC MP';
+                  } else {
+                    const materialCodeStr = materialCode || '';
+                    const codeStr = saleItem.itemCode || '';
+                    // Kiểm tra "VC" trong materialCode, code, hoặc itemCode (không phân biệt hoa thường)
+                    const hasVC = 
+                      materialCodeStr.toUpperCase().includes('VC') ||
+                      codeStr.toUpperCase().includes('VC');
+                    
+                    if (
+                      materialCodeStr.startsWith('E.') ||
+                      hasVC ||
+                      (trackInventory === false && trackSerial === true)
+                    ) {
+                      muaHangCkVip = 'VIP VC MP';
+                    } else {
+                      muaHangCkVip = 'VIP MP';
+                    }
+                  }
+                }
+
                 // Enrich voucher data từ get_daily_cash
                 let voucherRefno: string | undefined;
                 let voucherAmount: number | undefined;
@@ -321,6 +368,47 @@ export class SyncService {
                   const firstVoucher = voucherData[0];
                   voucherRefno = firstVoucher.refno;
                   voucherAmount = firstVoucher.total_in || 0;
+                }
+                
+                // Phân biệt voucher chính và voucher dự phòng
+                // Quy tắc:
+                // 1. Nếu pkg_code có giá trị → voucher chính
+                // 2. Nếu so_source = "SHOPEE" → voucher dự phòng
+                // 3. Nếu prom_code có giá trị và pkg_code trống → voucher dự phòng
+                // 4. Các trường hợp khác → voucher chính
+                const pkgCode = saleItem.pkg_code || saleItem.pkgCode || null;
+                const promCode = saleItem.promCode || saleItem.prom_code || null;
+                const vPaid = saleItem.paid_by_voucher_ecode_ecoin_bp || 0;
+                const soSource = saleItem.order_source || saleItem.so_source || null;
+                
+                // Kiểm tra điều kiện voucher dự phòng
+                const isShopee = soSource && String(soSource).toUpperCase() === 'SHOPEE';
+                const hasPkgCode = pkgCode && pkgCode.trim() !== '';
+                const hasPromCode = promCode && promCode.trim() !== '';
+                
+                // Voucher dự phòng nếu:
+                // - Là SHOPEE, HOẶC
+                // - Có prom_code và không có pkg_code
+                const isVoucherDuPhong = isShopee || (hasPromCode && !hasPkgCode);
+                
+                // Voucher chính nếu không phải voucher dự phòng
+                const isVoucherChinh = !isVoucherDuPhong;
+                
+                // Lưu vào đúng trường
+                let paidByVoucherChinh: number | undefined = undefined;
+                let chietKhauVoucherDp1: number | undefined = undefined;
+                let voucherDp1Code: string | undefined = undefined;
+                
+                if (isVoucherChinh && vPaid > 0) {
+                  // Voucher chính: lưu vào paid_by_voucher_ecode_ecoin_bp
+                  paidByVoucherChinh = vPaid;
+                } else if (isVoucherDuPhong && vPaid > 0) {
+                  // Voucher dự phòng: lưu vào chietKhauVoucherDp1 và voucherDp1
+                  chietKhauVoucherDp1 = vPaid;
+                  voucherDp1Code = promCode; // Lưu prom_code vào voucherDp1
+                } else if (vPaid > 0) {
+                  // Trường hợp khác: giữ nguyên logic cũ (lưu vào paid_by_voucher_ecode_ecoin_bp)
+                  paidByVoucherChinh = vPaid;
                 }
                 
                 // Luôn tạo sale mới - TRUYỀN MẤY LƯU NẤY (không check duplicate, lưu tất cả)
@@ -348,7 +436,13 @@ export class SyncService {
                     grade_discamt: saleItem.grade_discamt,
                     other_discamt: saleItem.other_discamt,
                     chietKhauMuaHangGiamGia: saleItem.chietKhauMuaHangGiamGia,
-                    paid_by_voucher_ecode_ecoin_bp: saleItem.paid_by_voucher_ecode_ecoin_bp,
+                    // Tính VIP type dựa trên quy tắc từ Loyalty API
+                    muaHangCkVip: muaHangCkVip,
+                    chietKhauMuaHangCkVip: saleItem.grade_discamt && saleItem.grade_discamt > 0 ? saleItem.grade_discamt : undefined,
+                    // Phân biệt voucher chính và voucher dự phòng
+                    paid_by_voucher_ecode_ecoin_bp: paidByVoucherChinh,
+                    chietKhauVoucherDp1: chietKhauVoucherDp1,
+                    voucherDp1: voucherDp1Code || voucherRefno, // Ưu tiên prom_code, nếu không có thì dùng voucherRefno từ get_daily_cash
                     maCa: saleItem.shift_code,
                     saleperson_id: this.validateInteger(saleItem.saleperson_id),
                     partner_name: saleItem.partner_name,
@@ -362,8 +456,7 @@ export class SyncService {
                     catcode1: saleItem.catcode1,
                     catcode2: saleItem.catcode2,
                     catcode3: saleItem.catcode3,
-                    // Enrich voucher data từ get_daily_cash
-                    voucherDp1: voucherRefno,
+                    // Enrich voucher data từ get_daily_cash (nếu chưa có voucherDp1)
                     thanhToanVoucher: voucherAmount && voucherAmount > 0 ? voucherAmount : undefined,
                     customer: customer,
                     isProcessed: false,
