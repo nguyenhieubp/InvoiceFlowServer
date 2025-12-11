@@ -32,7 +32,7 @@ export class SalesService {
   /**
    * Tính và trả về ma_ck05 (Thanh toán voucher) dựa trên productType và trackInventory
    * @param sale - Sale object
-   * @returns Loại VC: "VCDV" | "VCBH" | "VCKM" | null
+   * @returns Loại VC: "VCDV" | "VCHB" | "VCKM" | null
    */
   private calculateMaCk05(sale: any): string | null {
     if (!sale) return null;
@@ -1947,6 +1947,13 @@ export class SalesService {
         }
         return String(value);
       };
+      
+      // Helper function để giới hạn độ dài string theo spec
+      const limitString = (value: string, maxLength: number): string => {
+        if (!value) return '';
+        const str = String(value);
+        return str.length > maxLength ? str.substring(0, maxLength) : str;
+      };
 
       // Mỗi sale item xử lý riêng, không dùng giá trị mặc định chung
       // Lấy dvt từ chính sale item hoặc từ product của nó (đã được fetch từ Loyalty API với unit)
@@ -2122,101 +2129,162 @@ export class SalesService {
       const maCk01 = isTangHang ? '' : (sale.promCode ? sale.promCode : '');
 
       return {
-        ma_vt: toString(sale.product?.maVatTu || ''),
-        dvt: dvt,
-        loai: loai,
-        ma_ctkm_th: maCtkmTangHang,
-        ma_kho: maKho,
+        // ma_vt: Mã vật tư (String, max 16 ký tự) - Bắt buộc
+        ma_vt: limitString(toString(sale.product?.maVatTu || sale.itemCode || ''), 16),
+        // dvt: Đơn vị tính (String, max 32 ký tự) - Bắt buộc
+        dvt: limitString(dvt, 32),
+        // loai: Loại (String, max 2 ký tự) - 07-phí,lệ phí; 90-giảm thuế (mặc định rỗng)
+        loai: limitString(loai, 2),
+        // ma_ctkm_th: Mã ctkm tặng hàng (String, max 32 ký tự)
+        ma_ctkm_th: limitString(maCtkmTangHang, 32),
+        // ma_kho: Mã kho (String, max 16 ký tự) - Bắt buộc
+        ma_kho: limitString(maKho, 16),
+        // so_luong: Số lượng (Decimal)
         so_luong: Number(qty),
+        // gia_ban: Giá bán (Decimal)
         gia_ban: Number(giaBan),
+        // tien_hang: Tiền hàng (Decimal)
         tien_hang: Number(tienHang),
+        // is_reward_line: is_reward_line (Int)
         is_reward_line: sale.isRewardLine ? 1 : 0,
+        // is_bundle_reward_line: is_bundle_reward_line (Int)
         is_bundle_reward_line: sale.isBundleRewardLine ? 1 : 0,
+        // km_yn: Khuyến mãi (Int)
         km_yn: sale.promCode ? 1 : 0,
-        dong_thuoc_goi: toString(sale.dongThuocGoi, ''),
-        trang_thai: toString(sale.trangThai, ''),
-        barcode: toString(sale.barcode, ''),
-        ma_ck01: maCk01,
+        // dong_thuoc_goi: dong_thuoc_goi (String, max 32 ký tự)
+        dong_thuoc_goi: limitString(toString(sale.dongThuocGoi, ''), 32),
+        // trang_thai: trang_thai (String, max 32 ký tự)
+        trang_thai: limitString(toString(sale.trangThai, ''), 32),
+        // barcode: Barcode (String, max 32 ký tự)
+        barcode: limitString(toString(sale.barcode, ''), 32),
+        // ma_ck01: Mã ctkm mua hàng giảm giá (String, max 32 ký tự)
+        ma_ck01: limitString(maCk01, 32),
+        // ck01_nt: Tiền (Decimal)
         ck01_nt: Number(ck01_nt),
-        ma_ck02: toString(sale.ckTheoChinhSach, ''),
+        // ma_ck02: Mã ck theo chính sách (String, max 32 ký tự)
+        ma_ck02: limitString(toString(sale.ckTheoChinhSach, ''), 32),
+        // ck02_nt: Tiền (Decimal)
         ck02_nt: Number(ck02_nt),
-        ma_ck03: toString(maCk03, ''),
+        // ma_ck03: Mua hàng ck vip (String, max 32 ký tự)
+        ma_ck03: limitString(toString(maCk03, ''), 32),
+        // ck03_nt: Tiền (Decimal)
         ck03_nt: Number(ck03_nt),
-        // ma_ck04: Thanh toán coupon
-        ma_ck04: (ck04_nt > 0 || sale.thanhToanCoupon) ? toString(sale.maCk04 || 'COUPON', '') : '',
+        // ma_ck04: Thanh toán coupon (String, max 32 ký tự)
+        ma_ck04: limitString((ck04_nt > 0 || sale.thanhToanCoupon) ? toString(sale.maCk04 || 'COUPON', '') : '', 32),
+        // ck04_nt: Tiền (Decimal)
         ck04_nt: Number(ck04_nt),
-        // ma_ck05: Thanh toán voucher chính - Chỉ gán khi ck05_nt > 0
+        // ma_ck05: Thanh toán voucher (String, max 32 ký tự)
         ...(ck05_nt > 0 ? {
-          ma_ck05: maCk05Value || toString(sale.maCk05 || 'VOUCHER', ''),
+          ma_ck05: limitString(maCk05Value || toString(sale.maCk05 || 'VOUCHER', ''), 32),
         } : {}),
+        // ck05_nt: Tiền (Decimal)
         ck05_nt: Number(ck05_nt),
-        // ma_ck06: Dự phòng 1 - không sử dụng
+        // ma_ck06: Dự phòng 1 (String, max 32 ký tự) - không sử dụng
+        ma_ck06: '',
+        // ck06_nt: Tiền (Decimal)
         ck06_nt: Number(ck06_nt),
-        ma_ck07: sale.voucherDp2 ? 'VOUCHER_DP2' : '',
+        // ma_ck07: Dự phòng 2 (String, max 32 ký tự)
+        ma_ck07: limitString(sale.voucherDp2 ? 'VOUCHER_DP2' : '', 32),
+        // ck07_nt: Tiền (Decimal)
         ck07_nt: Number(ck07_nt),
-        ma_ck08: sale.voucherDp3 ? 'VOUCHER_DP3' : '',
+        // ma_ck08: Dự phòng 3 (String, max 32 ký tự)
+        ma_ck08: limitString(sale.voucherDp3 ? 'VOUCHER_DP3' : '', 32),
+        // ck08_nt: Tiền (Decimal)
         ck08_nt: Number(ck08_nt),
-        // ma_ck09: Chiết khấu hãng
-        ma_ck09: toString(sale.maCk09, ''),
+        // ma_ck09: Chiết khấu hãng (String, max 32 ký tự)
+        ma_ck09: limitString(toString(sale.maCk09, ''), 32),
+        // ck09_nt: Tiền (Decimal)
         ck09_nt: Number(ck09_nt),
-        // ma_ck10: Thưởng bằng hàng
-        ma_ck10: toString(sale.maCk10, ''),
+        // ma_ck10: Thưởng bằng hàng (String, max 32 ký tự)
+        ma_ck10: limitString(toString(sale.maCk10, ''), 32),
+        // ck10_nt: Tiền (Decimal)
         ck10_nt: Number(ck10_nt),
-        // ma_ck11: Thanh toán TK tiền ảo
-        ma_ck11: (ck11_nt > 0 || sale.thanhToanTkTienAo) ? toString(sale.maCk11 || 'TK_TIEN_AO', '') : '',
+        // ma_ck11: Thanh toán TK tiền ảo (String, max 32 ký tự)
+        ma_ck11: limitString((ck11_nt > 0 || sale.thanhToanTkTienAo) ? toString(sale.maCk11 || 'TK_TIEN_AO', '') : '', 32),
+        // ck11_nt: Tiền (Decimal)
         ck11_nt: Number(ck11_nt),
-        ma_ck12: toString(sale.maCk12, ''),
+        // ma_ck12: CK thêm 1 (String, max 32 ký tự)
+        ma_ck12: limitString(toString(sale.maCk12, ''), 32),
+        // ck12_nt: Tiền (Decimal)
         ck12_nt: Number(ck12_nt),
-        ma_ck13: toString(sale.maCk13, ''),
+        // ma_ck13: CK thêm 2 (String, max 32 ký tự)
+        ma_ck13: limitString(toString(sale.maCk13, ''), 32),
+        // ck13_nt: Tiền (Decimal)
         ck13_nt: Number(ck13_nt),
-        ma_ck14: toString(sale.maCk14, ''),
+        // ma_ck14: CK thêm 3 (String, max 32 ký tự)
+        ma_ck14: limitString(toString(sale.maCk14, ''), 32),
+        // ck14_nt: Tiền (Decimal)
         ck14_nt: Number(ck14_nt),
-        // ma_ck15: Voucher DP1 dự phòng - Gửi khi có chietKhauVoucherDp1 > 0
-        ...(ck15_nt_voucherDp1 > 0 ? {
-          ma_ck15: 'VC CTKM SÀN',
-        } : {
-          ma_ck15: toString(sale.maCk15, ''),
-        }),
+        // ma_ck15: Voucher DP1 (String, max 32 ký tự)
+        ma_ck15: limitString(ck15_nt_voucherDp1 > 0 ? 'VC CTKM SÀN' : toString(sale.maCk15, ''), 32),
+        // ck15_nt: Tiền (Decimal)
         ck15_nt: Number(ck15_nt),
-        ma_ck16: toString(sale.maCk16, ''),
+        // ma_ck16: Voucher DP2 (String, max 32 ký tự)
+        ma_ck16: limitString(toString(sale.maCk16, ''), 32),
+        // ck16_nt: Tiền (Decimal)
         ck16_nt: Number(ck16_nt),
-        ma_ck17: toString(sale.maCk17, ''),
+        // ma_ck17: Voucher DP3 (String, max 32 ký tự)
+        ma_ck17: limitString(toString(sale.maCk17, ''), 32),
+        // ck17_nt: Tiền (Decimal)
         ck17_nt: Number(ck17_nt),
-        ma_ck18: toString(sale.maCk18, ''),
+        // ma_ck18: Voucher DP4 (String, max 32 ký tự)
+        ma_ck18: limitString(toString(sale.maCk18, ''), 32),
+        // ck18_nt: Tiền (Decimal)
         ck18_nt: Number(ck18_nt),
-        ma_ck19: toString(sale.maCk19, ''),
+        // ma_ck19: Voucher DP5 (String, max 32 ký tự)
+        ma_ck19: limitString(toString(sale.maCk19, ''), 32),
+        // ck19_nt: Tiền (Decimal)
         ck19_nt: Number(ck19_nt),
-        ma_ck20: toString(sale.maCk20, ''),
+        // ma_ck20: Voucher DP6 (String, max 32 ký tự)
+        ma_ck20: limitString(toString(sale.maCk20, ''), 32),
+        // ck20_nt: Tiền (Decimal)
         ck20_nt: Number(ck20_nt),
-        ma_ck21: toString(sale.maCk21, ''),
+        // ma_ck21: Voucher DP7 (String, max 32 ký tự)
+        ma_ck21: limitString(toString(sale.maCk21, ''), 32),
+        // ck21_nt: Tiền (Decimal)
         ck21_nt: Number(ck21_nt),
-        ma_ck22: toString(sale.maCk22, ''),
+        // ma_ck22: Voucher DP8 (String, max 32 ký tự)
+        ma_ck22: limitString(toString(sale.maCk22, ''), 32),
+        // ck22_nt: Tiền (Decimal)
         ck22_nt: Number(ck22_nt),
+        // dt_tg_nt: Tiền trợ giá (Decimal)
         dt_tg_nt: Number(toNumber(sale.dtTgNt, 0)),
-        ma_thue: toString(sale.maThue, '10'),
+        // ma_thue: Mã thuế (String, max 8 ký tự) - Bắt buộc
+        ma_thue: limitString(toString(sale.maThue, '10'), 8),
+        // thue_suat: Thuế suất (Decimal)
         thue_suat: Number(toNumber(sale.thueSuat, 0)),
+        // tien_thue: Tiền thuế (Decimal)
         tien_thue: Number(toNumber(sale.tienThue, 0)),
-        tk_thue: toString(sale.tkThueCo, ''),
-        tk_cpbh: toString(sale.tkCpbh, ''),
-        // ma_bp là bắt buộc - đã được validate ở trên
-        ma_bp: maBp,
-        ma_the: maThe,
+        // tk_thue: Tài khoản thuế (String, max 16 ký tự)
+        tk_thue: limitString(toString(sale.tkThueCo, ''), 16),
+        // tk_cpbh: Tài khoản chiết khấu km (String, max 16 ký tự)
+        tk_cpbh: limitString(toString(sale.tkCpbh, ''), 16),
+        // ma_bp: Mã bộ phận (String, max 8 ký tự) - Bắt buộc
+        ma_bp: limitString(maBp, 8),
+        // ma_the: Mã thẻ (String, max 256 ký tự)
+        ma_the: limitString(maThe, 256),
+        // ma_lo: Mã lô (String, max 16 ký tự)
+        // so_serial: Số serial (String, max 64 ký tự)
         // Chỉ thêm ma_lo hoặc so_serial vào payload (không gửi cả hai, và chỉ gửi khi có giá trị)
-        // Logic: Dựa trên productType từ Loyalty API
-        // - VOUC → dùng so_serial (nếu có serial)
-        // - SKIN, TPCN → dùng ma_lo (nếu có serial, cắt theo productType)
-        // - Không có serial → không gửi cả hai
         ...(soSerial && soSerial.trim() !== '' 
-          ? { so_serial: soSerial } 
-          : (maLo && maLo.trim() !== '' ? { ma_lo: maLo } : {})),
-        loai_gd: loaiGd,
-        ma_combo: toString(sale.maCombo, ''),
-        id_goc: toString(sale.idGoc, ''),
-        id_goc_ct: toString(sale.idGocCt, ''),
+          ? { so_serial: limitString(soSerial, 64) } 
+          : (maLo && maLo.trim() !== '' ? { ma_lo: limitString(maLo, 16) } : {})),
+        // loai_gd: Loại giao dịch (String, max 2 ký tự) - Bắt buộc
+        loai_gd: limitString(loaiGd, 2),
+        // ma_combo: mã combo (String, max 16 ký tự)
+        ma_combo: limitString(toString(sale.maCombo, ''), 16),
+        // id_goc: ID phiếu gốc (String, max 70 ký tự)
+        id_goc: limitString(toString(sale.idGoc, ''), 70),
+        // id_goc_ct: Số ct phiếu gốc (String, max 16 ký tự)
+        id_goc_ct: limitString(toString(sale.idGocCt, ''), 16),
+        // id_goc_so: Dòng phiếu gốc (Int)
         id_goc_so: Number(toNumber(sale.idGocSo, 0)),
-        dong: index + 1, // Số thứ tự dòng
+        // dong: Dòng của phiếu (Int) - Bắt buộc, bắt đầu từ 1
+        dong: index + 1,
+        // id_goc_ngay: Ngày phiếu gốc (DateTime)
         id_goc_ngay: sale.idGocNgay ? formatDateISO(new Date(sale.idGocNgay)) : formatDateISO(new Date()),
-        id_goc_dv: sale.idGocDv || null,
+        // id_goc_dv: Đơn vị phiếu gốc (String, max 8 ký tự)
+        id_goc_dv: limitString(toString(sale.idGocDv, ''), 8),
       };
     }));
     

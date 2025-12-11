@@ -7,12 +7,12 @@
  * Tính loại VC dựa trên productType và trackInventory
  * @param productType - Loại sản phẩm (DIVU, GIFT, ...)
  * @param trackInventory - Có theo dõi tồn kho hay không
- * @returns Loại VC: "VCDV" | "VCBH" | "VCKM" | null
+ * @returns Loại VC: "VCDV" | "VCHB" | "VCKM" | null
  */
 export function calculateVCType(
   productType: string | null | undefined,
   trackInventory: boolean | null | undefined,
-): 'VCDV' | 'VCBH' | 'VCKM' | null {
+): 'VCDV' | 'VCHB' | 'VCKM' | null {
   // Normalize productType
   const normalizedProductType = productType ? String(productType).trim().toUpperCase() : null;
 
@@ -26,10 +26,10 @@ export function calculateVCType(
     return 'VCKM';
   }
 
-  // VCBH: productType != "DIVU" && productType != "GIFT" && trackInventory = true
+  // VCHB: productType != "DIVU" && productType != "GIFT" && trackInventory = true
   if (normalizedProductType && normalizedProductType !== 'DIVU' && normalizedProductType !== 'GIFT') {
     if (trackInventory === true) {
-      return 'VCBH';
+      return 'VCHB';
     }
   }
 
