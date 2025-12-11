@@ -248,8 +248,9 @@ export class SalesService {
     page?: number;
     limit?: number;
     date?: string; // Format: DDMMMYYYY (ví dụ: 04DEC2025)
+    search?: string; // Search query để tìm theo docCode, customer name, code, mobile
   }) {
-    const { brand, isProcessed, page = 1, limit = 50, date } = options;
+    const { brand, isProcessed, page = 1, limit = 50, date, search } = options;
 
     // Nếu có date parameter, lấy dữ liệu từ Zappy API
     if (date) {
@@ -261,6 +262,18 @@ export class SalesService {
         if (brand) {
           filteredOrders = orders.filter(
             (order) => order.customer.brand?.toLowerCase() === brand.toLowerCase()
+          );
+        }
+        
+        // Filter by search query nếu có
+        if (search && search.trim() !== '') {
+          const searchLower = search.trim().toLowerCase();
+          filteredOrders = filteredOrders.filter(
+            (order) =>
+              order.docCode.toLowerCase().includes(searchLower) ||
+              (order.customer?.name && order.customer.name.toLowerCase().includes(searchLower)) ||
+              (order.customer?.code && order.customer.code.toLowerCase().includes(searchLower)) ||
+              (order.customer?.mobile && order.customer.mobile.toLowerCase().includes(searchLower))
           );
         }
 
@@ -390,10 +403,20 @@ export class SalesService {
       countQuery.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
     }
     
+    // Luôn join với customer để có thể search
+    countQuery.leftJoin('sale.customer', 'customer');
+    
     if (brand) {
-      countQuery
-        .leftJoin('sale.customer', 'customer')
-        .andWhere('customer.brand = :brand', { brand });
+      countQuery.andWhere('customer.brand = :brand', { brand });
+    }
+    
+    // Thêm search query filter
+    if (search && search.trim() !== '') {
+      const searchPattern = `%${search.trim().toLowerCase()}%`;
+      countQuery.andWhere(
+        '(LOWER(sale.docCode) LIKE :search OR LOWER(customer.name) LIKE :search OR LOWER(customer.code) LIKE :search OR LOWER(customer.mobile) LIKE :search)',
+        { search: searchPattern }
+      );
     }
     
     if (date) {
@@ -439,19 +462,30 @@ export class SalesService {
       query = query.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
     }
 
-    // Nếu có brand filter, cần join với customer (nhưng chỉ lấy partnerCode)
-    if (brand) {
-      query = query
-        .leftJoin('sale.customer', 'customer')
-        .andWhere('customer.brand = :brand', { brand })
-        .addSelect('customer.code', 'customer_code')
-        .addSelect('customer.brand', 'customer_brand');
-    } else {
-      query = query
-        .leftJoin('sale.customer', 'customer')
-        .addSelect('customer.code', 'customer_code')
-        .addSelect('customer.brand', 'customer_brand');
+    // Luôn join với customer để có thể search và lấy thông tin customer
+    if (!query.expressionMap.joinAttributes.find(j => j.alias.name === 'customer')) {
+      query = query.leftJoin('sale.customer', 'customer');
     }
+    
+    if (brand) {
+      query = query.andWhere('customer.brand = :brand', { brand });
+    }
+    
+    // Thêm search query filter
+    if (search && search.trim() !== '') {
+      const searchPattern = `%${search.trim().toLowerCase()}%`;
+      query = query.andWhere(
+        '(LOWER(sale.docCode) LIKE :search OR LOWER(customer.name) LIKE :search OR LOWER(customer.code) LIKE :search OR LOWER(customer.mobile) LIKE :search)',
+        { search: searchPattern }
+      );
+    }
+    
+    // Luôn select customer fields
+    query = query
+      .addSelect('customer.code', 'customer_code')
+      .addSelect('customer.brand', 'customer_brand')
+      .addSelect('customer.name', 'customer_name')
+      .addSelect('customer.mobile', 'customer_mobile');
 
     // Thêm date filter vào query chính
     if (date) {
@@ -519,6 +553,8 @@ export class SalesService {
           customer: sale.customer_code ? {
             code: sale.customer_code,
             brand: sale.customer_brand || null,
+            name: sale.customer_name || null,
+            mobile: sale.customer_mobile || null,
           } : null,
           totalRevenue: 0,
           totalQty: 0,

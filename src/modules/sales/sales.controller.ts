@@ -13,6 +13,7 @@ export class SalesController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('date') date?: string, // Format: DDMMMYYYY (ví dụ: 04DEC2025)
+    @Query('search') search?: string, // Search query để tìm theo docCode, customer name, code, mobile
   ) {
     // Luôn trả về danh sách đơn hàng (gộp theo docCode) với dữ liệu cơ bản
     return this.salesService.findAllOrders({
@@ -21,6 +22,7 @@ export class SalesController {
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 50,
       date, // Pass date parameter
+      search, // Pass search parameter
     });
   }
 
