@@ -84,6 +84,80 @@ export class SalesService {
   }
 
   /**
+   * Quy đổi prom_code sang ma_ctkm_th cho trường hợp tặng sản phẩm
+   * Quy tắc: PRMN.020255-R510ECOM → 2510MN.TANGSP
+   * - Từ "PRMN.020255": lấy 2 ký tự cuối của phần trước dấu chấm → "MN"
+   * - Từ "R510ECOM": parse số (5→25, 10→10) → "2510"
+   * - Kết hợp: "2510MN.TANGSP"
+   */
+  private convertPromCodeToTangSp(promCode: string | null | undefined): string | null {
+    if (!promCode || promCode.trim() === '') return null;
+    
+    const parts = promCode.split('-');
+    if (parts.length < 2) return null;
+    
+    const part1 = parts[0].trim(); // "PRMN.020255"
+    const part2 = parts[1].trim(); // "R510ECOM"
+    
+    // Lấy 2 ký tự cuối của phần trước dấu chấm từ part1
+    const dotIndex = part1.indexOf('.');
+    let mnPart = '';
+    if (dotIndex > 0) {
+      const beforeDot = part1.substring(0, dotIndex); // "PRMN"
+      if (beforeDot.length >= 2) {
+        mnPart = beforeDot.substring(beforeDot.length - 2); // "MN"
+      }
+    }
+    
+    // Parse số từ part2: R510ECOM → tìm số 5 và 10
+    // Quy tắc: 5 → 25, 10 → 10
+    // Cần tìm "10" trước (2 chữ số), sau đó tìm "5" (1 chữ số)
+    const numbers: string[] = [];
+    const part2Upper = part2.toUpperCase();
+    
+    // Tìm tất cả số "10" trước (2 chữ số)
+    let searchIndex = 0;
+    while (searchIndex < part2Upper.length - 1) {
+      const foundIndex = part2Upper.indexOf('10', searchIndex);
+      if (foundIndex >= 0) {
+        numbers.push('10');
+        searchIndex = foundIndex + 2;
+      } else {
+        break;
+      }
+    }
+    
+    // Tìm tất cả số "5" (1 chữ số, nhưng không phải là phần của "10")
+    searchIndex = 0;
+    while (searchIndex < part2Upper.length) {
+      if (part2Upper[searchIndex] === '5') {
+        // Kiểm tra xem có phải là phần của "10" không (trước đó là "1" hoặc sau đó là "0")
+        const isPartOf10 = 
+          (searchIndex > 0 && part2Upper[searchIndex - 1] === '1') ||
+          (searchIndex < part2Upper.length - 1 && part2Upper[searchIndex + 1] === '0');
+        if (!isPartOf10) {
+          numbers.push('25'); // 5 → 25
+        }
+      }
+      searchIndex++;
+    }
+    
+    // Sắp xếp: 25 trước, 10 sau
+    const sortedNumbers = numbers.sort((a, b) => {
+      if (a === '25' && b === '10') return -1;
+      if (a === '10' && b === '25') return 1;
+      return 0;
+    });
+    
+    // Kết hợp: số + MN + .TANGSP
+    if (sortedNumbers.length > 0 && mnPart) {
+      return `${sortedNumbers.join('')}${mnPart}.TANGSP`;
+    }
+    
+    return null;
+  }
+
+  /**
    * Lấy prefix từ ordertype để tính mã kho
    * - "L" cho: "02. Làm dịch vụ", "04. Đổi DV", "08. Tách thẻ", "Đổi thẻ KEEP->Thẻ DV"
    * - "B" cho: "01.Thường", "03. Đổi điểm", "05. Tặng sinh nhật", "06. Đầu tư", "07. Bán tài khoản", "9. Sàn TMDT", "Đổi vỏ"
@@ -395,9 +469,26 @@ export class SalesService {
             }
             const revenue = sale.revenue || 0;
             const isTangHang = giaBan === 0 && tienHang === 0 && revenue === 0;
-            const maCtkmTangHang = isTangHang 
-              ? (this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null)
-              : null;
+            
+            // Quy tắc: Nếu ordertype_name = "06. Đầu tư" và là hàng tặng → ma_ctkm_th = "TT DAU TU"
+            let maCtkmTangHang: string | null = null;
+            if (isTangHang) {
+              const ordertypeName = sale.ordertype || '';
+              if (ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư')) {
+                maCtkmTangHang = 'TT DAU TU';
+              } else if (
+                (ordertypeName.includes('01.Thường') || ordertypeName.includes('01. Thường')) ||
+                (ordertypeName.includes('07. Bán tài khoản') || ordertypeName.includes('07.Bán tài khoản')) ||
+                (ordertypeName.includes('9. Sàn TMDT') || ordertypeName.includes('9.Sàn TMDT'))
+              ) {
+                // Quy đổi prom_code sang TANGSP
+                const tangSpCode = this.convertPromCodeToTangSp(sale.promCode);
+                maCtkmTangHang = tangSpCode || this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
+              } else {
+                // Các trường hợp khác: dùng promCode nếu có
+                maCtkmTangHang = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
+              }
+            }
             
             return {
               ...sale,
@@ -1913,25 +2004,46 @@ export class SalesService {
       if (useBatch) {
         // trackBatch = true → dùng ma_lo với giá trị serial
         if (serialValue && serialValue.trim() !== '') {
-          // Vẫn cần productType để quyết định cắt bao nhiêu ký tự
-          if (productTypeUpper === 'TPCN') {
-            // Nếu productType là "TPCN", cắt lấy 8 ký tự cuối
-            maLo = serialValue.length >= 8 ? serialValue.slice(-8) : serialValue;
-          } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
-            // Nếu productType là "SKIN" hoặc "GIFT", cắt lấy 4 ký tự cuối
-            maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
+          // Kiểm tra nếu serial có dạng "XXX_YYYY" (có dấu gạch dưới), lấy phần sau dấu gạch dưới
+          const underscoreIndex = serialValue.indexOf('_');
+          if (underscoreIndex > 0 && underscoreIndex < serialValue.length - 1) {
+            // Lấy phần sau dấu gạch dưới
+            maLo = serialValue.substring(underscoreIndex + 1);
           } else {
-            // Các trường hợp khác → giữ nguyên toàn bộ serial
-            maLo = serialValue;
+            // Vẫn cần productType để quyết định cắt bao nhiêu ký tự
+            if (productTypeUpper === 'TPCN') {
+              // Nếu productType là "TPCN", cắt lấy 8 ký tự cuối
+              maLo = serialValue.length >= 8 ? serialValue.slice(-8) : serialValue;
+            } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
+              // Nếu productType là "SKIN" hoặc "GIFT", cắt lấy 4 ký tự cuối
+              maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
+            } else {
+              // Các trường hợp khác → lấy 4 ký tự cuối (mặc định)
+              maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
+            }
           }
         } else {
           maLo = null;
         }
         soSerial = null;
       } else {
-        // trackSerial = true và trackBatch = false → dùng so_serial với giá trị serial
-        maLo = null;
-        soSerial = serialValue && serialValue.trim() !== '' ? serialValue : null;
+        // trackSerial = true và trackBatch = false
+        // Nhưng vẫn cần kiểm tra xem có cần ma_lo không (nếu serial có dạng "XXX_YYYY")
+        if (serialValue && serialValue.trim() !== '') {
+          const underscoreIndex = serialValue.indexOf('_');
+          if (underscoreIndex > 0 && underscoreIndex < serialValue.length - 1) {
+            // Nếu serial có dạng "XXX_YYYY", dùng ma_lo với phần sau dấu gạch dưới
+            maLo = serialValue.substring(underscoreIndex + 1);
+            soSerial = null;
+          } else {
+            // Nếu không có dấu gạch dưới, dùng so_serial
+            maLo = null;
+            soSerial = serialValue;
+          }
+        } else {
+          maLo = null;
+          soSerial = null;
+        }
       }
       
       // Log kết quả cuối cùng
@@ -1967,11 +2079,34 @@ export class SalesService {
       // Xác định hàng tặng: giaBan = 0 và tienHang = 0
       const isTangHang = giaBan === 0 && tienHang === 0;
       
-      // Nếu là hàng tặng, set ma_ctkm_th từ promCode hoặc promotionDisplayCode
-      // Nếu không phải hàng tặng, dùng giá trị từ sale.maCtkmTangHang (nếu có)
-      const maCtkmTangHang = isTangHang 
-        ? toString(sale.promotionDisplayCode || sale.promCode, '')
-        : toString(sale.maCtkmTangHang, '');
+      // Tính toán ma_ctkm_th
+      let maCtkmTangHang: string = '';
+      if (isTangHang) {
+        // Nếu đã có maCtkmTangHang từ findAllOrders (đã tính sẵn), dùng nó
+        if (sale.maCtkmTangHang) {
+          maCtkmTangHang = toString(sale.maCtkmTangHang, '');
+        } else {
+          // Nếu chưa có, tính toán lại
+          const ordertypeName = sale.ordertype || '';
+          if (ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư')) {
+            maCtkmTangHang = 'TT DAU TU';
+          } else if (
+            (ordertypeName.includes('01.Thường') || ordertypeName.includes('01. Thường')) ||
+            (ordertypeName.includes('07. Bán tài khoản') || ordertypeName.includes('07.Bán tài khoản')) ||
+            (ordertypeName.includes('9. Sàn TMDT') || ordertypeName.includes('9.Sàn TMDT'))
+          ) {
+            // Quy đổi prom_code sang TANGSP
+            const tangSpCode = this.convertPromCodeToTangSp(sale.promCode);
+            maCtkmTangHang = tangSpCode || toString(sale.promotionDisplayCode || sale.promCode, '');
+          } else {
+            // Các trường hợp khác: dùng promCode nếu có
+            maCtkmTangHang = toString(sale.promotionDisplayCode || sale.promCode, '');
+          }
+        }
+      } else {
+        // Nếu không phải hàng tặng, dùng giá trị từ sale.maCtkmTangHang (nếu có)
+        maCtkmTangHang = toString(sale.maCtkmTangHang, '');
+      }
       
       // Nếu là hàng tặng, không set ma_ck01 (Mã CTKM mua hàng giảm giá)
       // Nếu không phải hàng tặng, set ma_ck01 từ promCode như cũ
