@@ -762,25 +762,34 @@ export class SalesService {
     
     // Tính toán số orders cần lấy dựa trên số rows
     // Mỗi order có thể có nhiều sale items, nên cần lấy đủ orders để có đủ rows
+    // Nhưng phải đảm bảo tổng số rows không vượt quá limit
     let currentRowCount = 0;
     const paginatedOrders: typeof orders = [];
     
     for (const order of orders) {
-      if (currentRowCount >= paginationEndIndex) break;
+      // Tính số rows của order này
+      const orderRowCount = order.totalItems > 0 ? order.totalItems : 1;
       
-      // Nếu order này có sale items, thêm vào
-      if (order.totalItems > 0) {
-        // Nếu chưa đủ rows, thêm order này
-        if (currentRowCount + order.totalItems > paginationStartIndex) {
-          paginatedOrders.push(order);
-        }
-        currentRowCount += order.totalItems;
-      } else {
-        // Nếu order không có sale items, vẫn thêm 1 row
-        if (currentRowCount >= paginationStartIndex && currentRowCount < paginationEndIndex) {
-          paginatedOrders.push(order);
-        }
-        currentRowCount += 1;
+      // Nếu đã đủ rows cho trang này, dừng lại
+      if (currentRowCount >= paginationEndIndex) {
+        break;
+      }
+      
+      // Kiểm tra xem order này có nằm trong phạm vi pagination không
+      // Order được thêm nếu có ít nhất 1 row nằm trong phạm vi [paginationStartIndex, paginationEndIndex)
+      const orderStartRow = currentRowCount;
+      const orderEndRow = currentRowCount + orderRowCount;
+      
+      // Nếu order này có overlap với phạm vi pagination, thêm vào
+      if (orderEndRow > paginationStartIndex && orderStartRow < paginationEndIndex) {
+        paginatedOrders.push(order);
+      }
+      
+      currentRowCount += orderRowCount;
+      
+      // Nếu đã đủ rows cho trang này sau khi thêm order này, dừng lại
+      if (currentRowCount >= paginationEndIndex) {
+        break;
       }
     }
 
