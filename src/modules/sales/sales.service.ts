@@ -248,12 +248,16 @@ export class SalesService {
     page?: number;
     limit?: number;
     date?: string; // Format: DDMMMYYYY (ví dụ: 04DEC2025)
+    dateFrom?: string; // Format: YYYY-MM-DD hoặc ISO string
+    dateTo?: string; // Format: YYYY-MM-DD hoặc ISO string
     search?: string; // Search query để tìm theo docCode, customer name, code, mobile
   }) {
-    const { brand, isProcessed, page = 1, limit = 50, date, search } = options;
+    const { brand, isProcessed, page = 1, limit = 50, date, dateFrom, dateTo, search } = options;
 
-    // Nếu có date parameter, lấy dữ liệu từ Zappy API
-    if (date) {
+    // Nếu có search query, luôn search trong database (không dùng Zappy API)
+    // Vì Zappy API chỉ lấy được một ngày, không hỗ trợ date range
+    // Nếu có date parameter và không có search, lấy dữ liệu từ Zappy API
+    if (date && !search) {
       try {
         const orders = await this.zappyApiService.getDailySales(date);
         
@@ -419,7 +423,9 @@ export class SalesService {
       );
     }
     
-    if (date) {
+    // Date filter cho count query (đã được xử lý ở phần query chính nếu có dateFrom/dateTo)
+    // Chỉ cần xử lý date (single day) ở đây nếu không có dateFrom/dateTo
+    if (!dateFrom && !dateTo && date) {
       // Parse date string format: DDMMMYYYY (ví dụ: 04DEC2025)
       const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
       if (dateMatch) {
@@ -488,7 +494,35 @@ export class SalesService {
       .addSelect('customer.mobile', 'customer_mobile');
 
     // Thêm date filter vào query chính
-    if (date) {
+    // Ưu tiên dateFrom/dateTo (date range), nếu không có thì dùng date (single day)
+    if (dateFrom || dateTo) {
+      // Date range filter
+      if (dateFrom && dateTo) {
+        const startDate = new Date(dateFrom);
+        startDate.setHours(0, 0, 0, 0);
+        const endDate = new Date(dateTo);
+        endDate.setHours(23, 59, 59, 999);
+        query.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+          dateFrom: startDate,
+          dateTo: endDate,
+        });
+        countQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+          dateFrom: startDate,
+          dateTo: endDate,
+        });
+      } else if (dateFrom) {
+        const startDate = new Date(dateFrom);
+        startDate.setHours(0, 0, 0, 0);
+        query.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
+        countQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
+      } else if (dateTo) {
+        const endDate = new Date(dateTo);
+        endDate.setHours(23, 59, 59, 999);
+        query.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
+        countQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
+      }
+    } else if (date) {
+      // Single date filter (format: DDMMMYYYY)
       const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
       if (dateMatch) {
         const [, day, monthStr, year] = dateMatch;
@@ -532,6 +566,8 @@ export class SalesService {
       customer: {
         code: string | null;
         brand?: string | null;
+        name?: string | null;
+        mobile?: string | null;
       } | null;
       totalRevenue: number;
       totalQty: number;

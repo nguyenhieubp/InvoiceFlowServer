@@ -13,6 +13,8 @@ export class SalesController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('date') date?: string, // Format: DDMMMYYYY (ví dụ: 04DEC2025)
+    @Query('dateFrom') dateFrom?: string, // Format: YYYY-MM-DD hoặc ISO string
+    @Query('dateTo') dateTo?: string, // Format: YYYY-MM-DD hoặc ISO string
     @Query('search') search?: string, // Search query để tìm theo docCode, customer name, code, mobile
   ) {
     // Luôn trả về danh sách đơn hàng (gộp theo docCode) với dữ liệu cơ bản
@@ -22,6 +24,8 @@ export class SalesController {
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 50,
       date, // Pass date parameter
+      dateFrom, // Pass dateFrom parameter
+      dateTo, // Pass dateTo parameter
       search, // Pass search parameter
     });
   }
