@@ -538,6 +538,15 @@ export class SyncService {
                   }
                 }
                 
+                // Set cục thuế mặc định cho F3
+                let cucThue: string | undefined = undefined;
+                const brandLower = (brand || '').toLowerCase().trim();
+                if (brandLower === 'f3') {
+                  cucThue = 'FBV';
+                }
+                
+                
+                
                 // Luôn tạo sale mới - TRUYỀN MẤY LƯU NẤY (không check duplicate, lưu tất cả)
                 const newSale = this.saleRepository.create({
                     docCode: order.docCode,
@@ -572,6 +581,8 @@ export class SyncService {
                     voucherDp1: voucherDp1Code || voucherRefno, // Ưu tiên prom_code, nếu không có thì dùng voucherRefno từ get_daily_cash
                     // Thanh toán TK tiền ảo (ECOIN)
                     chietKhauThanhToanTkTienAo: chietKhauThanhToanTkTienAo,
+                    // Cục thuế mặc định cho F3
+                    cucThue: cucThue,
                     maCa: saleItem.shift_code,
                     saleperson_id: this.validateInteger(saleItem.saleperson_id),
                     partner_name: saleItem.partner_name,
