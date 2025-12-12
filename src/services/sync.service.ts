@@ -60,8 +60,13 @@ export class SyncService {
     let totalInvoiceFailureCount = 0;
     const totalInvoiceErrors: string[] = [];
 
-    for (const brand of brands) {
+    // Delay giữa các brand để giảm tải (1 phút)
+    const delayBetweenBrands = 60000; // 60 seconds (1 minute)
+
+    for (let i = 0; i < brands.length; i++) {
+      const brand = brands[i];
       try {
+        this.logger.log(`Bắt đầu đồng bộ brand ${brand} (${i + 1}/${brands.length}) cho ngày ${date}`);
         const result = await this.syncBrand(brand, date);
         totalOrdersCount += result.ordersCount;
         totalSalesCount += result.salesCount;
@@ -74,10 +79,23 @@ export class SyncService {
         if (result.errors) {
           allErrors.push(...result.errors);
         }
+        this.logger.log(`Hoàn thành đồng bộ brand ${brand} cho ngày ${date}`);
+        
+        // Thêm delay trước khi đồng bộ brand tiếp theo (trừ brand cuối cùng)
+        if (i < brands.length - 1) {
+          this.logger.log(`Chờ ${delayBetweenBrands / 1000} giây trước khi đồng bộ brand tiếp theo...`);
+          await new Promise(resolve => setTimeout(resolve, delayBetweenBrands));
+        }
       } catch (error: any) {
         const errorMsg = `Lỗi khi đồng bộ ${brand} cho ngày ${date}: ${error?.message || error}`;
         this.logger.error(errorMsg);
         allErrors.push(errorMsg);
+        
+        // Vẫn thêm delay ngay cả khi có lỗi để tránh quá tải
+        if (i < brands.length - 1) {
+          this.logger.log(`Chờ ${delayBetweenBrands / 1000} giây trước khi đồng bộ brand tiếp theo...`);
+          await new Promise(resolve => setTimeout(resolve, delayBetweenBrands));
+        }
       }
     }
 
@@ -161,13 +179,21 @@ export class SyncService {
             return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
           };
 
-          // Lưu từng cashio record vào database (upsert: nếu đã có thì update, chưa có thì insert)
+          // Lưu từng cashio record vào database (chỉ insert nếu chưa có, skip nếu đã có)
+          let savedCount = 0;
+          let skippedCount = 0;
           for (const cash of cashData) {
             try {
-              // Tìm xem đã có record với api_id và code chưa
+              // Tìm xem đã có record với api_id chưa (api_id là unique từ API)
               const existingCashio = await this.dailyCashioRepository.findOne({
-                where: { api_id: cash.id, code: cash.code },
+                where: { api_id: cash.id },
               });
+
+              // Nếu đã có record với api_id này rồi → skip, không lưu nữa
+              if (existingCashio) {
+                skippedCount++;
+                continue;
+              }
 
               const parsedRefnoIdate = cash.refno_idate ? parseRefnoIdate(cash.refno_idate) : undefined;
               
@@ -190,19 +216,15 @@ export class SyncService {
                 brand: brand || undefined,
               };
 
-              if (existingCashio) {
-                // Update existing record
-                await this.dailyCashioRepository.update(existingCashio.id, cashioData);
-              } else {
-                // Insert new record
-                const newCashio = this.dailyCashioRepository.create(cashioData);
-                await this.dailyCashioRepository.save(newCashio);
-              }
+              // Insert new record
+              const newCashio = this.dailyCashioRepository.create(cashioData);
+              await this.dailyCashioRepository.save(newCashio);
+              savedCount++;
             } catch (cashioError: any) {
               this.logger.warn(`Failed to save cashio record ${cash.code}: ${cashioError?.message || cashioError}`);
             }
           }
-          this.logger.log(`[Sync] Đã lưu ${cashData.length} cashio records vào database`);
+          this.logger.log(`[Sync] Đã lưu ${savedCount} cashio records mới, bỏ qua ${skippedCount} records đã tồn tại (tổng ${cashData.length} records từ API)`);
         } catch (error: any) {
           this.logger.error(`Failed to save cashio data to database: ${error?.message || error}`);
         }
