@@ -399,6 +399,12 @@ export class Sale {
   @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
   paid_by_voucher_ecode_ecoin_bp?: number; // Paid by voucher/ecoin/BP
 
+  @Column({ nullable: true })
+  api_id?: number; // id từ Zappy API (có thể trùng giữa các dòng khác nhau)
+
+  @Column({ nullable: true, unique: true })
+  compositeKey?: string; // Composite key tổng hợp: docCode + itemCode + qty + giaBan + disc_amt + grade_discamt + other_discamt + revenue + promCode + serial + customerId + api_id
+
   @CreateDateColumn()
   createdAt: Date;
 

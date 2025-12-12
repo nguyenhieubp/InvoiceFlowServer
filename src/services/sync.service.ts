@@ -413,6 +413,15 @@ export class SyncService {
           if (order.sales && order.sales.length > 0) {
             for (const saleItem of order.sales) {
               try {
+                // Parse api_id từ saleItem.id
+                let apiId: number | undefined = undefined;
+                if (saleItem.id !== undefined && saleItem.id !== null && saleItem.id !== '') {
+                  const parsedId = typeof saleItem.id === 'string' ? parseInt(saleItem.id, 10) : Number(saleItem.id);
+                  if (!isNaN(parsedId) && parsedId > 0) {
+                    apiId = parsedId;
+                  }
+                }
+                
                 // Lấy productType từ Loyalty API
                 const productType = productTypeMap.get(saleItem.itemCode || '');
                 // Lấy dvt từ saleItem hoặc từ Loyalty API, không gán mặc định
@@ -540,15 +549,93 @@ export class SyncService {
                 
                 // Set cục thuế mặc định cho F3
                 let cucThue: string | undefined = undefined;
-                const brandLower = (brand || '').toLowerCase().trim();
-                if (brandLower === 'f3') {
+                const brandLowerForCucThue = (brand || '').toLowerCase().trim();
+                if (brandLowerForCucThue === 'f3') {
                   cucThue = 'FBV';
                 }
                 
+                // Tạo composite key từ TẤT CẢ các trường dữ liệu có khả năng khác nhau
+                // Composite key: docCode|itemCode|qty|giaBan|disc_amt|grade_discamt|other_discamt|revenue|promCode|serial|customerId|api_id
+                const giaBanValue = saleItem.giaBan || saleItem.price || 0;
+                const compositeKey = [
+                  order.docCode || '',
+                  saleItem.itemCode || '',
+                  (saleItem.qty || 0).toString(),
+                  giaBanValue.toString(),
+                  (saleItem.disc_amt || 0).toString(),
+                  (saleItem.grade_discamt || 0).toString(),
+                  (saleItem.other_discamt || 0).toString(),
+                  (saleItem.revenue || 0).toString(),
+                  saleItem.promCode || 'null',
+                  saleItem.serial || 'null',
+                  customer.id || '',
+                  apiId ? apiId.toString() : 'null',
+                ].join('|');
                 
+                // Check duplicate dựa trên compositeKey
+                const existingSale = await this.saleRepository.findOne({
+                  where: {
+                    compositeKey: compositeKey,
+                  },
+                });
                 
-                // Luôn tạo sale mới - TRUYỀN MẤY LƯU NẤY (không check duplicate, lưu tất cả)
+                // Nếu đã có sale với api_id + itemCode này, update; nếu chưa có, tạo mới
+                if (existingSale) {
+                  // Update sale đã tồn tại
+                  existingSale.docCode = order.docCode;
+                  existingSale.docDate = new Date(order.docDate);
+                  existingSale.branchCode = order.branchCode;
+                  existingSale.docSourceType = order.docSourceType;
+                  if (saleItem.ordertype !== undefined) existingSale.ordertype = saleItem.ordertype;
+                  if (saleItem.description !== undefined) existingSale.description = saleItem.description;
+                  if (saleItem.partnerCode !== undefined) existingSale.partnerCode = saleItem.partnerCode;
+                  existingSale.itemCode = saleItem.itemCode || '';
+                  existingSale.itemName = saleItem.itemName || '';
+                  existingSale.qty = saleItem.qty || 0;
+                  existingSale.revenue = saleItem.revenue || 0;
+                  existingSale.linetotal = saleItem.linetotal || saleItem.revenue || 0;
+                  existingSale.productType = productType || undefined;
+                  existingSale.tienHang = saleItem.tienHang || saleItem.linetotal || saleItem.revenue || 0;
+                  existingSale.giaBan = saleItem.giaBan || 0;
+                  if (saleItem.promCode !== undefined) existingSale.promCode = saleItem.promCode;
+                  existingSale.serial = saleItem.serial;
+                  existingSale.soSerial = saleItem.serial;
+                  existingSale.dvt = dvt;
+                  existingSale.disc_amt = saleItem.disc_amt;
+                  existingSale.grade_discamt = saleItem.grade_discamt;
+                  existingSale.other_discamt = saleItem.other_discamt;
+                  existingSale.chietKhauMuaHangGiamGia = saleItem.chietKhauMuaHangGiamGia;
+                  existingSale.muaHangCkVip = muaHangCkVip;
+                  existingSale.chietKhauMuaHangCkVip = saleItem.grade_discamt && saleItem.grade_discamt > 0 ? saleItem.grade_discamt : undefined;
+                  existingSale.paid_by_voucher_ecode_ecoin_bp = paidByVoucherChinh;
+                  existingSale.chietKhauVoucherDp1 = chietKhauVoucherDp1;
+                  existingSale.voucherDp1 = voucherDp1Code || voucherRefno;
+                  existingSale.chietKhauThanhToanTkTienAo = chietKhauThanhToanTkTienAo;
+                  existingSale.cucThue = cucThue;
+                  existingSale.maCa = saleItem.shift_code;
+                  existingSale.saleperson_id = this.validateInteger(saleItem.saleperson_id);
+                  existingSale.partner_name = saleItem.partner_name;
+                  existingSale.order_source = saleItem.order_source;
+                  existingSale.maThe = saleItem.mvc_serial;
+                  existingSale.cat1 = saleItem.cat1;
+                  existingSale.cat2 = saleItem.cat2;
+                  existingSale.cat3 = saleItem.cat3;
+                  existingSale.catcode1 = saleItem.catcode1;
+                  existingSale.catcode2 = saleItem.catcode2;
+                  existingSale.catcode3 = saleItem.catcode3;
+                  existingSale.thanhToanVoucher = voucherAmount && voucherAmount > 0 ? voucherAmount : undefined;
+                  existingSale.customer = customer;
+                  existingSale.compositeKey = compositeKey; // Update compositeKey
+                  
+                  await this.saleRepository.save(existingSale);
+                  salesCount++;
+                  continue; // Skip tạo mới, đã update rồi
+                }
+                
+                // Tạo sale mới (chỉ khi chưa có existingSale)
                 const newSale = this.saleRepository.create({
+                    api_id: apiId || null, // Lưu id từ Zappy API
+                    compositeKey: compositeKey, // Lưu compositeKey để check duplicate
                     docCode: order.docCode,
                     docDate: new Date(order.docDate),
                     branchCode: order.branchCode,
