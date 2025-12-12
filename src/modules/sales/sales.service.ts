@@ -710,10 +710,9 @@ export class SalesService {
       }
     }
 
-    // Tối ưu: Query với LIMIT lớn hơn để đảm bảo có đủ orders cho frontend paginate
-    // Ước tính: mỗi order có khoảng 2-3 sale items, nên lấy gấp 3 lần để đảm bảo có đủ rows
-    // Frontend sẽ paginate lại sau khi flatten, nên cần nhiều orders hơn
-    const estimatedLimit = limit * 3;
+    // Tối ưu: Query với LIMIT lớn hơn một chút để đảm bảo có đủ orders
+    // Ước tính: mỗi order có khoảng 2-3 sale items, nên lấy thêm 50% để đảm bảo
+    const estimatedLimit = Math.ceil(limit * 1.5);
     const queryStartIndex = (page - 1) * limit;
     query = query
       .orderBy('sale.docDate', 'DESC')
@@ -824,13 +823,46 @@ export class SalesService {
       };
     });
 
-    // Trả về tất cả orders đã lấy - frontend sẽ paginate lại sau khi flatten
-    // Backend chỉ cần lấy đủ orders để frontend có thể paginate đúng
-    // Total là số sale items (rows), không phải số orders
+    // Phân trang - total là số sale items (rows), không phải số orders
     const total = totalSaleItems; // Tổng số sale items (rows)
+    const paginationStartIndex = (page - 1) * limit;
+    const paginationEndIndex = paginationStartIndex + limit;
+    
+    // Tính toán số orders cần lấy dựa trên số rows
+    // Mỗi order có thể có nhiều sale items, nên cần lấy đủ orders để có đủ rows
+    // Nhưng phải đảm bảo tổng số rows không vượt quá limit
+    let currentRowCount = 0;
+    const paginatedOrders: typeof enrichedOrders = [];
+    
+    for (const order of enrichedOrders) {
+      // Tính số rows của order này
+      const orderRowCount = order.totalItems > 0 ? order.totalItems : 1;
+      
+      // Nếu đã đủ rows cho trang này, dừng lại
+      if (currentRowCount >= paginationEndIndex) {
+        break;
+      }
+      
+      // Kiểm tra xem order này có nằm trong phạm vi pagination không
+      // Order được thêm nếu có ít nhất 1 row nằm trong phạm vi [paginationStartIndex, paginationEndIndex)
+      const orderStartRow = currentRowCount;
+      const orderEndRow = currentRowCount + orderRowCount;
+      
+      // Nếu order này có overlap với phạm vi pagination, thêm vào
+      if (orderEndRow > paginationStartIndex && orderStartRow < paginationEndIndex) {
+        paginatedOrders.push(order);
+      }
+      
+      currentRowCount += orderRowCount;
+      
+      // Nếu đã đủ rows cho trang này sau khi thêm order này, dừng lại
+      if (currentRowCount >= paginationEndIndex) {
+        break;
+      }
+    }
 
     return {
-      data: enrichedOrders, // Trả về tất cả orders đã lấy, frontend sẽ paginate lại
+      data: paginatedOrders,
       total, // Tổng số sale items (rows)
       page,
       limit,
@@ -1011,10 +1043,8 @@ export class SalesService {
     for (const promCode of uniquePromCodes) {
       try {
         // Gọi Loyalty API theo externalCode = promCode
-        // Encode promCode để xử lý các ký tự đặc biệt như +, /, =, etc.
-        const encodedPromCode = encodeURIComponent(promCode);
         const response = await this.httpService.axiosRef.get(
-          `https://loyaltyapi.vmt.vn/promotions/item/external/${encodedPromCode}`,
+          `https://loyaltyapi.vmt.vn/promotions/item/external/${promCode}`,
           {
             headers: { accept: 'application/json' },
           },
