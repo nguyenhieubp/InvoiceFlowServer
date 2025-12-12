@@ -561,10 +561,30 @@ export class SalesService {
       );
     }
     
-    // Date filter cho count query (đã được xử lý ở phần query chính nếu có dateFrom/dateTo)
-    // Chỉ cần xử lý date (single day) ở đây nếu không có dateFrom/dateTo
-    if (!dateFrom && !dateTo && date) {
-      // Parse date string format: DDMMMYYYY (ví dụ: 04DEC2025)
+    // Date filter cho count query - PHẢI XỬ LÝ TRƯỚC KHI THỰC THI COUNT QUERY
+    // Ưu tiên dateFrom/dateTo (date range), nếu không có thì dùng date (single day)
+    if (dateFrom || dateTo) {
+      // Date range filter
+      if (dateFrom && dateTo) {
+        const startDate = new Date(dateFrom);
+        startDate.setHours(0, 0, 0, 0);
+        const endDate = new Date(dateTo);
+        endDate.setHours(23, 59, 59, 999);
+        countQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+          dateFrom: startDate,
+          dateTo: endDate,
+        });
+      } else if (dateFrom) {
+        const startDate = new Date(dateFrom);
+        startDate.setHours(0, 0, 0, 0);
+        countQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
+      } else if (dateTo) {
+        const endDate = new Date(dateTo);
+        endDate.setHours(23, 59, 59, 999);
+        countQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
+      }
+    } else if (date) {
+      // Single date filter (format: DDMMMYYYY)
       const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
       if (dateMatch) {
         const [, day, monthStr, year] = dateMatch;
