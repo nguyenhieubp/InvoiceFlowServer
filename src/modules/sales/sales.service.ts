@@ -94,8 +94,15 @@ export class SalesService {
     }
 
     // Với F3, thêm prefix "FBV TT" trước VC label
+    // Và chuyển tất cả VCHB hoặc VCHH thành VCHH
     if (brandLower === 'f3') {
-      return `FBV TT ${vcLabel}`;
+      // Chuyển VCHB thành VCHH
+      let finalVcLabel = vcLabel;
+      if (finalVcLabel.includes('VCHB')) {
+        finalVcLabel = finalVcLabel.replace(/VCHB/g, 'VCHH');
+      }
+      // Nếu có VCHH thì giữ nguyên (không cần thay thế)
+      return `FBV TT ${finalVcLabel}`;
     }
 
     return vcLabel;
