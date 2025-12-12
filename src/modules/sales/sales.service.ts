@@ -2177,6 +2177,10 @@ export class SalesService {
       // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
       const useBatch = this.shouldUseBatch(trackBatch, trackSerial);
       
+      // Lấy brand để phân biệt logic cho F3 (ma_lo)
+      const brandForMaLo = orderData.customer?.brand || orderData.brand || '';
+      const brandLowerForMaLo = (brandForMaLo || '').toLowerCase().trim();
+      
       // Xác định ma_lo và so_serial dựa trên trackSerial và trackBatch
       let maLo: string | null = null;
       let soSerial: string | null = null;
@@ -2184,22 +2188,27 @@ export class SalesService {
       if (useBatch) {
         // trackBatch = true → dùng ma_lo với giá trị serial
         if (serialValue && serialValue.trim() !== '') {
-          // Kiểm tra nếu serial có dạng "XXX_YYYY" (có dấu gạch dưới), lấy phần sau dấu gạch dưới
-          const underscoreIndex = serialValue.indexOf('_');
-          if (underscoreIndex > 0 && underscoreIndex < serialValue.length - 1) {
-            // Lấy phần sau dấu gạch dưới
-            maLo = serialValue.substring(underscoreIndex + 1);
+          // Với F3, lấy toàn bộ serial (không cắt, không xử lý)
+          if (brandLowerForMaLo === 'f3') {
+            maLo = serialValue;
           } else {
-            // Vẫn cần productType để quyết định cắt bao nhiêu ký tự
-            if (productTypeUpper === 'TPCN') {
-              // Nếu productType là "TPCN", cắt lấy 8 ký tự cuối
-              maLo = serialValue.length >= 8 ? serialValue.slice(-8) : serialValue;
-            } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
-              // Nếu productType là "SKIN" hoặc "GIFT", cắt lấy 4 ký tự cuối
-              maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
+            // Kiểm tra nếu serial có dạng "XXX_YYYY" (có dấu gạch dưới), lấy phần sau dấu gạch dưới
+            const underscoreIndex = serialValue.indexOf('_');
+            if (underscoreIndex > 0 && underscoreIndex < serialValue.length - 1) {
+              // Lấy phần sau dấu gạch dưới
+              maLo = serialValue.substring(underscoreIndex + 1);
             } else {
-              // Các trường hợp khác → lấy 4 ký tự cuối (mặc định)
-              maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
+              // Vẫn cần productType để quyết định cắt bao nhiêu ký tự
+              if (productTypeUpper === 'TPCN') {
+                // Nếu productType là "TPCN", cắt lấy 8 ký tự cuối
+                maLo = serialValue.length >= 8 ? serialValue.slice(-8) : serialValue;
+              } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
+                // Nếu productType là "SKIN" hoặc "GIFT", cắt lấy 4 ký tự cuối
+                maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
+              } else {
+                // Các trường hợp khác → lấy 4 ký tự cuối (mặc định)
+                maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
+              }
             }
           }
         } else {
