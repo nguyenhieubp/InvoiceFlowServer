@@ -109,6 +109,57 @@ export class SalesService {
   }
 
   /**
+   * Generate label cho "Thanh toán TK tiền ảo"
+   * Format: YYMM{brand_code}.TKDV (ví dụ: 2511MN.TKDV)
+   * - YY: 2 số cuối của năm từ docDate
+   * - MM: Tháng từ docDate (2 số)
+   * - {brand_code}: 2 ký tự cuối của brand code (từ ma_dvcs hoặc brand)
+   */
+  private generateTkTienAoLabel(orderData: any): string {
+    // Lấy ngày từ docDate của order
+    let docDate: Date;
+    if (orderData.docDate instanceof Date) {
+      docDate = orderData.docDate;
+    } else if (typeof orderData.docDate === 'string') {
+      docDate = new Date(orderData.docDate);
+      if (isNaN(docDate.getTime())) {
+        // Nếu không parse được, dùng ngày hiện tại
+        docDate = new Date();
+      }
+    } else {
+      // Fallback: dùng ngày hiện tại
+      docDate = new Date();
+    }
+    
+    const year = docDate.getFullYear();
+    const month = docDate.getMonth() + 1; // getMonth() trả về 0-11
+    
+    // Lấy 2 số cuối của năm
+    const yy = String(year).slice(-2);
+    // Format tháng thành 2 số (01, 02, ..., 12)
+    const mm = String(month).padStart(2, '0');
+    
+    // Lấy brand code từ ma_dvcs hoặc brand, lấy 2 ký tự cuối
+    let brandCode = '';
+    const firstSale = orderData.sales?.[0];
+    const maDvcs = firstSale?.department?.ma_dvcs 
+      || firstSale?.department?.ma_dvcs_ht
+      || orderData.customer?.brand 
+      || orderData.branchCode
+      || orderData.ma_dvcs
+      || '';
+    
+    if (maDvcs && String(maDvcs).length >= 2) {
+      brandCode = String(maDvcs).slice(-2).toUpperCase();
+    } else {
+      // Fallback: dùng "MN" nếu không có brand code
+      brandCode = 'MN';
+    }
+    
+    return `${yy}${mm}${brandCode}.TKDV`;
+  }
+
+  /**
    * Quy đổi prom_code sang ma_ctkm_th cho trường hợp tặng sản phẩm
    * Quy tắc: PRMN.020255-R510ECOM → 2510MN.TANGSP
    * - Từ "PRMN.020255": lấy 2 ký tự cuối của phần trước dấu chấm → "MN"
@@ -2398,7 +2449,13 @@ export class SalesService {
         // ck10_nt: Tiền (Decimal)
         ck10_nt: Number(ck10_nt),
         // ma_ck11: Thanh toán TK tiền ảo (String, max 32 ký tự)
-        ma_ck11: limitString((ck11_nt > 0 || sale.thanhToanTkTienAo) ? toString(sale.maCk11 || 'TK_TIEN_AO', '') : '', 32),
+        // Format: YYMM{brand_code}.TKDV (ví dụ: 2510MN.TKDV)
+        ma_ck11: limitString(
+          (ck11_nt > 0 || sale.thanhToanTkTienAo) 
+            ? toString(sale.maCk11 || this.generateTkTienAoLabel(orderData), '')
+            : '',
+          32
+        ),
         // ck11_nt: Tiền (Decimal)
         ck11_nt: Number(ck11_nt),
         // ma_ck12: CK thêm 1 (String, max 32 ký tự)
