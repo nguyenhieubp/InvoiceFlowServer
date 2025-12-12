@@ -427,32 +427,45 @@ export class SyncService {
                 // Tính VIP type nếu có chiết khấu VIP
                 let muaHangCkVip: string | undefined = undefined;
                 if (saleItem.grade_discamt && saleItem.grade_discamt > 0) {
-                  const materialCode = productMaterialCodeMap.get(saleItem.itemCode || '');
-                  const trackInventory = productTrackInventoryMap.get(saleItem.itemCode || '');
-                  const trackSerial = productTrackSerialMap.get(saleItem.itemCode || '');
+                  // Logic VIP khác nhau cho từng brand
+                  const brandLower = brand?.toLowerCase() || '';
                   
-                  // Tính VIP type dựa trên quy tắc
-                  if (productType === 'DIVU') {
-                    muaHangCkVip = 'VIP DV MAT';
-                  } else if (productType === 'VOUC') {
-                    // Nếu productType == "VOUC" → "VIP VC MP"
-                    muaHangCkVip = 'VIP VC MP';
+                  if (brandLower === 'f3') {
+                    // Logic cũ cho f3: DIVU → "FBV CKVIP DV", còn lại → "FBV CKVIP SP"
+                    if (productType === 'DIVU') {
+                      muaHangCkVip = 'FBV CKVIP DV';
+                    } else {
+                      muaHangCkVip = 'FBV CKVIP SP';
+                    }
                   } else {
-                    const materialCodeStr = materialCode || '';
-                    const codeStr = saleItem.itemCode || '';
-                    // Kiểm tra "VC" trong materialCode, code, hoặc itemCode (không phân biệt hoa thường)
-                    const hasVC = 
-                      materialCodeStr.toUpperCase().includes('VC') ||
-                      codeStr.toUpperCase().includes('VC');
+                    // Logic mới cho các brand khác (menard, labhair, yaman)
+                    const materialCode = productMaterialCodeMap.get(saleItem.itemCode || '');
+                    const trackInventory = productTrackInventoryMap.get(saleItem.itemCode || '');
+                    const trackSerial = productTrackSerialMap.get(saleItem.itemCode || '');
                     
-                    if (
-                      materialCodeStr.startsWith('E.') ||
-                      hasVC ||
-                      (trackInventory === false && trackSerial === true)
-                    ) {
+                    // Tính VIP type dựa trên quy tắc
+                    if (productType === 'DIVU') {
+                      muaHangCkVip = 'VIP DV MAT';
+                    } else if (productType === 'VOUC') {
+                      // Nếu productType == "VOUC" → "VIP VC MP"
                       muaHangCkVip = 'VIP VC MP';
                     } else {
-                      muaHangCkVip = 'VIP MP';
+                      const materialCodeStr = materialCode || '';
+                      const codeStr = saleItem.itemCode || '';
+                      // Kiểm tra "VC" trong materialCode, code, hoặc itemCode (không phân biệt hoa thường)
+                      const hasVC = 
+                        materialCodeStr.toUpperCase().includes('VC') ||
+                        codeStr.toUpperCase().includes('VC');
+                      
+                      if (
+                        materialCodeStr.startsWith('E.') ||
+                        hasVC ||
+                        (trackInventory === false && trackSerial === true)
+                      ) {
+                        muaHangCkVip = 'VIP VC MP';
+                      } else {
+                        muaHangCkVip = 'VIP MP';
+                      }
                     }
                   }
                 }

@@ -32,8 +32,8 @@ export class SalesService {
 
   /**
    * Tính và trả về ma_ck05 (Thanh toán voucher) dựa trên productType và trackInventory
-   * @param sale - Sale object
-   * @returns Loại VC: "VCDV" | "VCHB" | "VCKM" | null
+   * @param sale - Sale object (có thể có customer.brand)
+   * @returns Loại VC: "VCDV" | "VCHB" | "VCKM" | "FBV TT VCDV" | "FBV TT VCHB" | null
    */
   private calculateMaCk05(sale: any): string | null {
     if (!sale) return null;
@@ -47,6 +47,10 @@ export class SalesService {
       return null;
     }
 
+    // Lấy brand để phân biệt logic
+    const brand = sale.customer?.brand || '';
+    const brandLower = (brand || '').toLowerCase().trim();
+
     // Lấy productType và trackInventory từ sale hoặc product
     const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
     const trackInventory = sale.trackInventory ?? sale.product?.trackInventory ?? null;
@@ -54,34 +58,47 @@ export class SalesService {
     // Sử dụng logic VC mới dựa trên productType và trackInventory
     const vcType = calculateVCType(productType, trackInventory);
 
-    // Nếu có VC type từ logic mới, trả về ngay (không cần kiểm tra paid_by_voucher)
+    let vcLabel: string | null = null;
+
+    // Nếu có VC type từ logic mới, dùng nó
     if (vcType) {
-      return vcType;
+      vcLabel = vcType;
+    } else {
+      // Fallback: Logic cũ dựa trên cat1 và itemCode (chỉ khi có paid_by_voucher)
+      if (paidByVoucher <= 0) {
+        return null;
+      }
+
+      const cat1Value = sale.cat1 || sale.catcode1 || sale.product?.cat1 || sale.product?.catcode1 || '';
+      const itemCodeValue = sale.itemCode || '';
+
+      // Tập hợp các nhãn sẽ hiển thị
+      const labels: string[] = [];
+
+      // VCDV: Nếu cat1 = "CHANDO" hoặc itemcode bắt đầu bằng "S" hoặc "H"
+      if (cat1Value === 'CHANDO' || itemCodeValue.toUpperCase().startsWith('S') || itemCodeValue.toUpperCase().startsWith('H')) {
+        labels.push('VCDV');
+      }
+
+      // VCHB: Nếu cat1 = "FACIALBAR" hoặc itemcode bắt đầu bằng "F" hoặc "V"
+      if (cat1Value === 'FACIALBAR' || itemCodeValue.toUpperCase().startsWith('F') || itemCodeValue.toUpperCase().startsWith('V')) {
+        labels.push('VCHB');
+      }
+
+      vcLabel = labels.length > 0 ? labels.join(' ') : null;
     }
 
-    // Fallback: Logic cũ dựa trên cat1 và itemCode (chỉ khi có paid_by_voucher)
-    if (paidByVoucher <= 0) {
+    // Nếu không có label, trả về null
+    if (!vcLabel) {
       return null;
     }
 
-    const cat1Value = sale.cat1 || sale.catcode1 || sale.product?.cat1 || sale.product?.catcode1 || '';
-    const itemCodeValue = sale.itemCode || '';
-
-    // Tập hợp các nhãn sẽ hiển thị
-    const labels: string[] = [];
-
-    // VCDV: Nếu cat1 = "CHANDO" hoặc itemcode bắt đầu bằng "S" hoặc "H"
-    if (cat1Value === 'CHANDO' || itemCodeValue.toUpperCase().startsWith('S') || itemCodeValue.toUpperCase().startsWith('H')) {
-      labels.push('VCDV');
+    // Với F3, thêm prefix "FBV TT" trước VC label
+    if (brandLower === 'f3') {
+      return `FBV TT ${vcLabel}`;
     }
 
-    // VCHB: Nếu cat1 = "FACIALBAR" hoặc itemcode bắt đầu bằng "F" hoặc "V"
-    if (cat1Value === 'FACIALBAR' || itemCodeValue.toUpperCase().startsWith('F') || itemCodeValue.toUpperCase().startsWith('V')) {
-      labels.push('VCHB');
-    }
-
-    // Nếu không có nhãn nào thỏa điều kiện, mặc định trả về null
-    return labels.length > 0 ? labels.join(' ') : null;
+    return vcLabel;
   }
 
   /**
@@ -1071,6 +1088,7 @@ export class SalesService {
     }
 
     // Gắn promotion tương ứng vào từng dòng sale (chỉ để trả ra API, không lưu DB)
+    // Và tính lại muaHangCkVip nếu chưa có hoặc cần override cho f3
     const enrichedSalesWithPromotion = enrichedSalesWithDepartment.map((sale) => {
       const promCode = sale.promCode;
       const promotion =
@@ -1078,10 +1096,39 @@ export class SalesService {
           ? promotionsByCode[promCode]
           : null;
 
+      // Tính lại muaHangCkVip nếu cần (giống logic trong buildFastApiInvoiceData)
+      const ck03_nt = Number(sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0);
+      let muaHangCkVip = sale.muaHangCkVip || '';
+      
+      if (ck03_nt > 0) {
+        // Lấy brand từ customer
+        const brand = firstSale.customer?.brand || '';
+        const brandLower = (brand || '').toLowerCase().trim();
+        
+        // Nếu là f3, luôn tính lại theo logic cũ (override giá trị cũ nếu có)
+        if (brandLower === 'f3') {
+          const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
+          if (productType === 'DIVU') {
+            muaHangCkVip = 'FBV CKVIP DV';
+          } else {
+            muaHangCkVip = 'FBV CKVIP SP';
+          }
+        } else if (!muaHangCkVip) {
+          // Logic mới cho các brand khác - chỉ tính nếu chưa có
+          const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
+          const materialCode = sale.product?.maVatTu || sale.product?.materialCode || sale.itemCode || null;
+          const code = sale.itemCode || null;
+          const trackInventory = (sale as any).trackInventory ?? sale.product?.trackInventory ?? null;
+          const trackSerial = (sale as any).trackSerial ?? sale.product?.trackSerial ?? null;
+          muaHangCkVip = this.calculateVipType(productType, materialCode, code, trackInventory, trackSerial);
+        }
+      }
+
       return {
         ...sale,
         promotion,
         promotionDisplayCode: this.getPromotionDisplayCode(promCode),
+        muaHangCkVip: muaHangCkVip || sale.muaHangCkVip, // Override với giá trị tính lại nếu có
       };
     });
 
@@ -1965,15 +2012,30 @@ export class SalesService {
       const ck03_nt = toNumber(sale.chietKhauMuaHangCkVip || sale.grade_discamt, 0);
       
       // Tính VIP type nếu có chiết khấu VIP
+      // Lấy brand từ orderData để phân biệt logic VIP
+      const brand = orderData.customer?.brand || orderData.brand || '';
+      const brandLower = (brand || '').toLowerCase().trim();
+      
       let maCk03 = sale.muaHangCkVip || '';
-      if (ck03_nt > 0 && !maCk03) {
-        // Nếu chưa có muaHangCkVip, tính dựa trên product info
-        const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
-        const materialCode = sale.product?.maVatTu || sale.product?.materialCode || sale.itemCode || null;
-        const code = sale.itemCode || null;
-        const trackInventory = sale.trackInventory ?? sale.product?.trackInventory ?? null;
-        const trackSerial = sale.trackSerial ?? sale.product?.trackSerial ?? null;
-        maCk03 = this.calculateVipType(productType, materialCode, code, trackInventory, trackSerial);
+      if (ck03_nt > 0) {
+        // Nếu là f3, luôn tính lại theo logic cũ (override giá trị cũ nếu có)
+        if (brandLower === 'f3') {
+          // Logic cũ cho f3: DIVU → "FBV CKVIP DV", còn lại → "FBV CKVIP SP"
+          const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
+          if (productType === 'DIVU') {
+            maCk03 = 'FBV CKVIP DV';
+          } else {
+            maCk03 = 'FBV CKVIP SP';
+          }
+        } else if (!maCk03) {
+          // Logic mới cho các brand khác (menard, labhair, yaman) - chỉ tính nếu chưa có
+          const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
+          const materialCode = sale.product?.maVatTu || sale.product?.materialCode || sale.itemCode || null;
+          const code = sale.itemCode || null;
+          const trackInventory = sale.trackInventory ?? sale.product?.trackInventory ?? null;
+          const trackSerial = sale.trackSerial ?? sale.product?.trackSerial ?? null;
+          maCk03 = this.calculateVipType(productType, materialCode, code, trackInventory, trackSerial);
+        }
       }
       // ma_ck04: Thanh toán coupon
       const ck04_nt = toNumber(sale.chietKhauThanhToanCoupon || sale.chietKhau09, 0);
