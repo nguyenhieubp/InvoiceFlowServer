@@ -2053,18 +2053,36 @@ export class SalesService {
       const hasPkgCode = pkgCode && pkgCode.trim() !== '';
       const hasPromCode = promCode && promCode.trim() !== '';
       
+      // Xác định lại voucher dự phòng theo logic mới (để xử lý dữ liệu cũ đã sync với logic cũ)
+      let isVoucherDuPhong = false;
+      if (brandLower === 'f3') {
+        // Với F3: Chỉ khi so_source = "SHOPEE" mới là voucher dự phòng
+        isVoucherDuPhong = isShopee;
+      } else {
+        // Với các brand khác: SHOPEE hoặc (có prom_code và không có pkg_code)
+        isVoucherDuPhong = isShopee || (hasPromCode && !hasPkgCode);
+      }
+      
+      // Nếu có chietKhauVoucherDp1 > 0 nhưng theo logic mới không phải voucher dự phòng
+      // → Chuyển sang voucher chính (dữ liệu cũ đã sync với logic cũ)
+      // Lưu giá trị để chuyển sang voucher chính
+      let voucherAmountToMove = 0;
+      if (ck15_nt_voucherDp1 > 0 && !isVoucherDuPhong) {
+        voucherAmountToMove = ck15_nt_voucherDp1;
+        ck15_nt_voucherDp1 = 0;
+      }
+      
       // Fallback: Nếu chietKhauVoucherDp1 = 0 nhưng thỏa điều kiện voucher dự phòng
       // → Đây là dữ liệu cũ chưa sync, coi là voucher dự phòng
-      if (ck15_nt_voucherDp1 === 0 && paidByVoucher > 0) {
-        const isVoucherDuPhong = isShopee || (hasPromCode && !hasPkgCode);
-        if (isVoucherDuPhong) {
-          ck15_nt_voucherDp1 = paidByVoucher;
-        }
+      if (ck15_nt_voucherDp1 === 0 && paidByVoucher > 0 && isVoucherDuPhong) {
+        ck15_nt_voucherDp1 = paidByVoucher;
       }
       
       // ma_ck05: Thanh toán voucher chính
       // Chỉ map vào ck05_nt nếu không có voucher dự phòng (ck15_nt_voucherDp1 = 0)
-      const ck05_nt = ck15_nt_voucherDp1 > 0 ? 0 : paidByVoucher;
+      // Nếu có voucherAmountToMove (chuyển từ DP sang chính), dùng giá trị đó
+      // Nếu không, dùng paidByVoucher
+      const ck05_nt = ck15_nt_voucherDp1 > 0 ? 0 : (voucherAmountToMove > 0 ? voucherAmountToMove : paidByVoucher);
       // Tính ma_ck05 giống frontend - truyền customer từ orderData nếu sale chưa có
       const saleWithCustomer = {
         ...sale,
@@ -2389,7 +2407,13 @@ export class SalesService {
         // ck14_nt: Tiền (Decimal)
         ck14_nt: Number(ck14_nt),
         // ma_ck15: Voucher DP1 (String, max 32 ký tự)
-        ma_ck15: limitString(ck15_nt_voucherDp1 > 0 ? 'VC CTKM SÀN' : toString(sale.maCk15, ''), 32),
+        // Với F3, thêm prefix "FBV TT " trước "VC CTKM SÀN"
+        ma_ck15: limitString(
+          ck15_nt_voucherDp1 > 0 
+            ? (brandLower === 'f3' ? 'FBV TT VC CTKM SÀN' : 'VC CTKM SÀN')
+            : toString(sale.maCk15, ''),
+          32
+        ),
         // ck15_nt: Tiền (Decimal)
         ck15_nt: Number(ck15_nt),
         // ma_ck16: Voucher DP2 (String, max 32 ký tự)

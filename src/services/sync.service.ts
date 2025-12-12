@@ -300,6 +300,14 @@ export class SyncService {
         return brandMap[companyUpper] || company.toLowerCase();
       };
 
+      // Batch query tất cả customers trước để tránh N+1 query
+      const customerCodes = Array.from(new Set(orders.map((o) => o.customer.code).filter((code): code is string => !!code)));
+      const existingCustomers = await this.customerRepository.find({
+        where: customerCodes.map((code) => ({ code })),
+      });
+      const customerMap = new Map<string, Customer>();
+      existingCustomers.forEach((c) => customerMap.set(c.code, c));
+
       // Xử lý từng order
       for (const order of orders) {
         try {
@@ -309,10 +317,8 @@ export class SyncService {
             ? mapCompanyToBrand(department.company)
             : order.customer.brand || '';
 
-          // Tìm hoặc tạo customer
-          let customer = await this.customerRepository.findOne({
-            where: { code: order.customer.code },
-          });
+          // Tìm customer từ map (đã query batch trước)
+          let customer = customerMap.get(order.customer.code);
 
           if (!customer) {
             const newCustomer = this.customerRepository.create({
@@ -331,6 +337,7 @@ export class SyncService {
               branch_code: order.customer.branch_code,
             } as Partial<Customer>);
             customer = await this.customerRepository.save(newCustomer);
+            customerMap.set(customer.code, customer); // Thêm vào map để dùng lại
             customersCount++;
           } else {
             // Cập nhật thông tin customer nếu cần
@@ -407,6 +414,55 @@ export class SyncService {
                 }
               }),
             );
+          }
+          
+          // Tạo tất cả compositeKeys trước để batch query check duplicate
+          const compositeKeysToCheck: string[] = [];
+          const saleItemDataMap = new Map<string, any>(); // Map compositeKey -> saleItem data
+          
+          if (order.sales && order.sales.length > 0) {
+            for (const saleItem of order.sales) {
+              // Parse api_id từ saleItem.id
+              let apiId: number | undefined = undefined;
+              if (saleItem.id !== undefined && saleItem.id !== null && saleItem.id !== '') {
+                const parsedId = typeof saleItem.id === 'string' ? parseInt(saleItem.id, 10) : Number(saleItem.id);
+                if (!isNaN(parsedId) && parsedId > 0) {
+                  apiId = parsedId;
+                }
+              }
+              
+              const giaBanValue = saleItem.giaBan || saleItem.price || 0;
+              const compositeKey = [
+                order.docCode || '',
+                saleItem.itemCode || '',
+                (saleItem.qty || 0).toString(),
+                giaBanValue.toString(),
+                (saleItem.disc_amt || 0).toString(),
+                (saleItem.grade_discamt || 0).toString(),
+                (saleItem.other_discamt || 0).toString(),
+                (saleItem.revenue || 0).toString(),
+                saleItem.promCode || 'null',
+                saleItem.serial || 'null',
+                customer.id || '',
+                apiId ? apiId.toString() : 'null',
+              ].join('|');
+              
+              compositeKeysToCheck.push(compositeKey);
+              saleItemDataMap.set(compositeKey, { saleItem, apiId });
+            }
+          }
+          
+          // Batch query tất cả existingSales dựa trên compositeKeys
+          const existingSalesMap = new Map<string, Sale>();
+          if (compositeKeysToCheck.length > 0) {
+            const existingSales = await this.saleRepository.find({
+              where: compositeKeysToCheck.map((key) => ({ compositeKey: key })),
+            });
+            existingSales.forEach((sale) => {
+              if (sale.compositeKey) {
+                existingSalesMap.set(sale.compositeKey, sale);
+              }
+            });
           }
           
           // Xử lý từng sale trong order - TRUYỀN MẤY LƯU NẤY (lưu tất cả các dòng từ Zappy API)
@@ -515,21 +571,27 @@ export class SyncService {
                 } else if (vPaid > 0) {
                   // Không có ECOIN → xử lý voucher như bình thường
                   // Phân biệt voucher chính và voucher dự phòng
-                  // Quy tắc:
-                  // 1. Nếu pkg_code có giá trị → voucher chính
-                  // 2. Nếu so_source = "SHOPEE" → voucher dự phòng
-                  // 3. Nếu prom_code có giá trị và pkg_code trống → voucher dự phòng
-                  // 4. Các trường hợp khác → voucher chính
                   
-                  // Kiểm tra điều kiện voucher dự phòng
+                  // Kiểm tra brand để áp dụng logic khác nhau
+                  const brandLower = brand?.toLowerCase() || '';
                   const isShopee = soSource && String(soSource).toUpperCase() === 'SHOPEE';
                   const hasPkgCode = pkgCode && pkgCode.trim() !== '';
                   const hasPromCode = promCode && promCode.trim() !== '';
                   
-                  // Voucher dự phòng nếu:
-                  // - Là SHOPEE, HOẶC
-                  // - Có prom_code và không có pkg_code
-                  const isVoucherDuPhong = isShopee || (hasPromCode && !hasPkgCode);
+                  let isVoucherDuPhong = false;
+                  
+                  if (brandLower === 'f3') {
+                    // Logic cho F3 (Facialbar):
+                    // - Chỉ khi so_source = "SHOPEE" → voucher dự phòng
+                    // - Tất cả các trường hợp khác (kể cả có prom_code và không có pkg_code) → voucher chính
+                    isVoucherDuPhong = isShopee;
+                  } else {
+                    // Logic cho các brand khác (menard, labhair, yaman):
+                    // - Nếu so_source = "SHOPEE" → voucher dự phòng
+                    // - Nếu có prom_code và không có pkg_code → voucher dự phòng
+                    // - Các trường hợp khác → voucher chính
+                    isVoucherDuPhong = isShopee || (hasPromCode && !hasPkgCode);
+                  }
                   
                   // Voucher chính nếu không phải voucher dự phòng
                   const isVoucherChinh = !isVoucherDuPhong;
@@ -572,12 +634,8 @@ export class SyncService {
                   apiId ? apiId.toString() : 'null',
                 ].join('|');
                 
-                // Check duplicate dựa trên compositeKey
-                const existingSale = await this.saleRepository.findOne({
-                  where: {
-                    compositeKey: compositeKey,
-                  },
-                });
+                // Check duplicate dựa trên compositeKey (đã query batch trước)
+                const existingSale = existingSalesMap.get(compositeKey);
                 
                 // Nếu đã có sale với api_id + itemCode này, update; nếu chưa có, tạo mới
                 if (existingSale) {
@@ -723,24 +781,31 @@ export class SyncService {
       let invoiceFailureCount = 0;
       const invoiceErrors: string[] = [];
 
-      
-      for (const docCode of docCodes) {
-          try {
-          const result = await this.salesService.createInvoiceViaFastApi(docCode);
-          if (result.success) {
-            invoiceSuccessCount++;
-          } else {
-            invoiceFailureCount++;
-            const errorMsg = `Tạo hóa đơn thất bại cho ${docCode}: ${result.message || 'Unknown error'}`;
-            invoiceErrors.push(errorMsg);
-            this.logger.warn(`✗ ${errorMsg}`);
-          }
-        } catch (error: any) {
-          invoiceFailureCount++;
-          const errorMsg = `Lỗi khi tạo hóa đơn cho đơn hàng ${docCode}: ${error?.message || error}`;
-          invoiceErrors.push(errorMsg);
-          this.logger.error(`✗ ${errorMsg}`);
-        }
+      // Tạo invoice song song (parallel) thay vì tuần tự để tăng tốc độ
+      // Giới hạn số lượng concurrent requests để tránh quá tải (batch size = 5)
+      const batchSize = 5;
+      for (let i = 0; i < docCodes.length; i += batchSize) {
+        const batch = docCodes.slice(i, i + batchSize);
+        await Promise.all(
+          batch.map(async (docCode) => {
+            try {
+              const result = await this.salesService.createInvoiceViaFastApi(docCode);
+              if (result.success) {
+                invoiceSuccessCount++;
+              } else {
+                invoiceFailureCount++;
+                const errorMsg = `Tạo hóa đơn thất bại cho ${docCode}: ${result.message || 'Unknown error'}`;
+                invoiceErrors.push(errorMsg);
+                this.logger.warn(`✗ ${errorMsg}`);
+              }
+            } catch (error: any) {
+              invoiceFailureCount++;
+              const errorMsg = `Lỗi khi tạo hóa đơn cho đơn hàng ${docCode}: ${error?.message || error}`;
+              invoiceErrors.push(errorMsg);
+              this.logger.error(`✗ ${errorMsg}`);
+            }
+          }),
+        );
       }
 
 
