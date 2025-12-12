@@ -7,6 +7,7 @@ import { Customer } from '../../entities/customer.entity';
 import { ProductItem } from '../../entities/product-item.entity';
 import { Invoice } from '../../entities/invoice.entity';
 import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
+import { DailyCashio } from '../../entities/daily-cashio.entity';
 import { InvoicePrintService } from '../../services/invoice-print.service';
 import { InvoiceService } from '../../services/invoice.service';
 import { ZappyApiService } from '../../services/zappy-api.service';
@@ -312,6 +313,8 @@ export class SalesService {
     private invoiceRepository: Repository<Invoice>,
     @InjectRepository(FastApiInvoice)
     private fastApiInvoiceRepository: Repository<FastApiInvoice>,
+    @InjectRepository(DailyCashio)
+    private dailyCashioRepository: Repository<DailyCashio>,
     private invoicePrintService: InvoicePrintService,
     private invoiceService: InvoiceService,
     private httpService: HttpService,
@@ -601,6 +604,9 @@ export class SalesService {
       'sale.grade_discamt',
       'sale.muaHangCkVip', // Thêm muaHangCkVip để frontend hiển thị
       'sale.chietKhauMuaHangCkVip',
+      'sale.chietKhauVoucherDp1', // Thêm chietKhauVoucherDp1 để frontend hiển thị voucher dự phòng
+      'sale.chietKhauThanhToanTkTienAo', // Thêm chietKhauThanhToanTkTienAo để frontend hiển thị ECOIN
+      'sale.paid_by_voucher_ecode_ecoin_bp', // Thêm paid_by_voucher_ecode_ecoin_bp để frontend check voucher
     ]);
 
     if (isProcessed !== undefined) {
@@ -755,6 +761,48 @@ export class SalesService {
       return new Date(b.docDate).getTime() - new Date(a.docDate).getTime();
     });
 
+    // Join với daily_cashio để lấy cashio data cho mỗi order
+    // Join dựa trên: cashio.so_code = sales.docCode HOẶC cashio.master_code = sales.docCode
+    const docCodes = orders.map(o => o.docCode);
+    const cashioMap = new Map<string, DailyCashio[]>();
+    if (docCodes.length > 0) {
+      const cashioRecords = await this.dailyCashioRepository
+        .createQueryBuilder('cashio')
+        .where('cashio.so_code IN (:...docCodes)', { docCodes })
+        .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
+        .getMany();
+      
+      // Group cashio records by docCode (so_code hoặc master_code match với docCode)
+      docCodes.forEach(docCode => {
+        const matchingCashios = cashioRecords.filter(c => 
+          c.so_code === docCode || c.master_code === docCode
+        );
+        if (matchingCashios.length > 0) {
+          cashioMap.set(docCode, matchingCashios);
+        }
+      });
+    }
+
+    // Enrich orders với cashio data
+    const enrichedOrders = orders.map(order => {
+      const cashioRecords = cashioMap.get(order.docCode) || [];
+      // Ưu tiên ECOIN, sau đó VOUCHER, sau đó các loại khác
+      const ecoinCashio = cashioRecords.find(c => c.fop_syscode === 'ECOIN');
+      const voucherCashio = cashioRecords.find(c => c.fop_syscode === 'VOUCHER');
+      const selectedCashio = ecoinCashio || voucherCashio || cashioRecords[0] || null;
+      
+      return {
+        ...order,
+        cashioData: cashioRecords.length > 0 ? cashioRecords : null,
+        cashioFopSyscode: selectedCashio?.fop_syscode || null,
+        cashioFopDescription: selectedCashio?.fop_description || null,
+        cashioCode: selectedCashio?.code || null,
+        cashioMasterCode: selectedCashio?.master_code || null,
+        cashioTotalIn: selectedCashio?.total_in || null,
+        cashioTotalOut: selectedCashio?.total_out || null,
+      };
+    });
+
     // Phân trang - total là số sale items (rows), không phải số orders
     const total = totalSaleItems; // Tổng số sale items (rows)
     const paginationStartIndex = (page - 1) * limit;
@@ -764,9 +812,9 @@ export class SalesService {
     // Mỗi order có thể có nhiều sale items, nên cần lấy đủ orders để có đủ rows
     // Nhưng phải đảm bảo tổng số rows không vượt quá limit
     let currentRowCount = 0;
-    const paginatedOrders: typeof orders = [];
+    const paginatedOrders: typeof enrichedOrders = [];
     
-    for (const order of orders) {
+    for (const order of enrichedOrders) {
       // Tính số rows của order này
       const orderRowCount = order.totalItems > 0 ? order.totalItems : 1;
       
@@ -826,6 +874,19 @@ export class SalesService {
     if (sales.length === 0) {
       throw new NotFoundException(`Order with docCode ${docCode} not found`);
     }
+
+    // Join với daily_cashio để lấy cashio data
+    // Join dựa trên: cashio.so_code = docCode HOẶC cashio.master_code = docCode
+    const cashioRecords = await this.dailyCashioRepository
+      .createQueryBuilder('cashio')
+      .where('cashio.so_code = :docCode', { docCode })
+      .orWhere('cashio.master_code = :docCode', { docCode })
+      .getMany();
+    
+    // Ưu tiên ECOIN, sau đó VOUCHER, sau đó các loại khác
+    const ecoinCashio = cashioRecords.find(c => c.fop_syscode === 'ECOIN');
+    const voucherCashio = cashioRecords.find(c => c.fop_syscode === 'VOUCHER');
+    const selectedCashio = ecoinCashio || voucherCashio || cashioRecords[0] || null;
 
     // Lấy tất cả itemCode unique từ sales
     const itemCodes = Array.from(
@@ -1015,6 +1076,14 @@ export class SalesService {
       totalItems: sales.length,
       sales: enrichedSalesWithPromotion,
       promotions: promotionsByCode,
+      // Cashio data từ join với daily_cashio
+      cashioData: cashioRecords.length > 0 ? cashioRecords : null,
+      cashioFopSyscode: selectedCashio?.fop_syscode || null,
+      cashioFopDescription: selectedCashio?.fop_description || null,
+      cashioCode: selectedCashio?.code || null,
+      cashioMasterCode: selectedCashio?.master_code || null,
+      cashioTotalIn: selectedCashio?.total_in || null,
+      cashioTotalOut: selectedCashio?.total_out || null,
     };
   }
 
@@ -1927,7 +1996,20 @@ export class SalesService {
       const ck09_nt = toNumber(sale.chietKhau09, 0);
       const ck10_nt = toNumber(sale.chietKhau10, 0);
       // ck11_nt: Thanh toán TK tiền ảo
-      const ck11_nt = toNumber(sale.chietKhauThanhToanTkTienAo || sale.chietKhau11, 0);
+      // Chỉ map ECOIN nếu sale item có v_paid > 0 (từ paid_by_voucher_ecode_ecoin_bp hoặc chietKhauThanhToanTkTienAo)
+      // Không map ECOIN cho items có v_paid = 0
+      let ck11_nt = toNumber(sale.chietKhauThanhToanTkTienAo || sale.chietKhau11, 0);
+      const vPaidForEcoin = toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0);
+      
+      // Chỉ lấy ECOIN từ cashioData nếu:
+      // 1. Đã có chietKhauThanhToanTkTienAo > 0 (đã được lưu trong sync), HOẶC
+      // 2. v_paid > 0 VÀ có ECOIN trong cashio
+      if (ck11_nt === 0 && vPaidForEcoin > 0 && orderData.cashioData && Array.isArray(orderData.cashioData)) {
+        const ecoinCashio = orderData.cashioData.find((c: any) => c.fop_syscode === 'ECOIN');
+        if (ecoinCashio && ecoinCashio.total_in) {
+          ck11_nt = toNumber(ecoinCashio.total_in, 0);
+        }
+      }
       const ck12_nt = toNumber(sale.chietKhau12, 0);
       const ck13_nt = toNumber(sale.chietKhau13, 0);
       const ck14_nt = toNumber(sale.chietKhau14, 0);

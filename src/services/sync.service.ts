@@ -4,8 +4,8 @@ import { Repository, IsNull } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
 import { Customer } from '../entities/customer.entity';
 import { Sale } from '../entities/sale.entity';
+import { DailyCashio } from '../entities/daily-cashio.entity';
 import { ZappyApiService } from './zappy-api.service';
-import { Order } from '../types/order.types';
 import { SalesService } from '../modules/sales/sales.service';
 
 @Injectable()
@@ -32,6 +32,8 @@ export class SyncService {
     private customerRepository: Repository<Customer>,
     @InjectRepository(Sale)
     private saleRepository: Repository<Sale>,
+    @InjectRepository(DailyCashio)
+    private dailyCashioRepository: Repository<DailyCashio>,
     private httpService: HttpService,
     private zappyApiService: ZappyApiService,
     @Inject(forwardRef(() => SalesService))
@@ -134,7 +136,79 @@ export class SyncService {
         this.logger.warn(`Failed to fetch daily cash data: ${error}`);
       }
 
-      // Tạo map cash data theo so_code để dễ lookup
+      // Lưu TẤT CẢ cashio records vào database
+      if (cashData.length > 0) {
+        try {
+          // Parse docdate từ string sang Date
+          const parseDocdate = (docdateStr: string): Date => {
+            // Format: "03-10-2025 10:30"
+            const parts = docdateStr.split(' ');
+            const datePart = parts[0]; // "03-10-2025"
+            const timePart = parts[1] || '00:00'; // "10:30"
+            const [day, month, year] = datePart.split('-');
+            const [hour, minute] = timePart.split(':');
+            return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+          };
+
+          const parseRefnoIdate = (refnoIdateStr: string): Date | null => {
+            if (!refnoIdateStr || refnoIdateStr === '00:00' || refnoIdateStr.includes('00:00')) {
+              return null;
+            }
+            // Format: "03-10-2025 00:00"
+            const parts = refnoIdateStr.split(' ');
+            const datePart = parts[0]; // "03-10-2025"
+            const [day, month, year] = datePart.split('-');
+            return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+          };
+
+          // Lưu từng cashio record vào database (upsert: nếu đã có thì update, chưa có thì insert)
+          for (const cash of cashData) {
+            try {
+              // Tìm xem đã có record với api_id và code chưa
+              const existingCashio = await this.dailyCashioRepository.findOne({
+                where: { api_id: cash.id, code: cash.code },
+              });
+
+              const parsedRefnoIdate = cash.refno_idate ? parseRefnoIdate(cash.refno_idate) : undefined;
+              
+              const cashioData: Partial<DailyCashio> = {
+                api_id: cash.id,
+                code: cash.code,
+                fop_syscode: cash.fop_syscode || undefined,
+                fop_description: cash.fop_description || undefined,
+                so_code: cash.so_code || '',
+                master_code: cash.master_code || undefined,
+                docdate: parseDocdate(cash.docdate),
+                branch_code: cash.branch_code || undefined,
+                partner_code: cash.partner_code || undefined,
+                partner_name: cash.partner_name || undefined,
+                refno: cash.refno || undefined,
+                refno_idate: parsedRefnoIdate || undefined,
+                total_in: cash.total_in ? Number(cash.total_in) : 0,
+                total_out: cash.total_out ? Number(cash.total_out) : 0,
+                sync_date: date,
+                brand: brand || undefined,
+              };
+
+              if (existingCashio) {
+                // Update existing record
+                await this.dailyCashioRepository.update(existingCashio.id, cashioData);
+              } else {
+                // Insert new record
+                const newCashio = this.dailyCashioRepository.create(cashioData);
+                await this.dailyCashioRepository.save(newCashio);
+              }
+            } catch (cashioError: any) {
+              this.logger.warn(`Failed to save cashio record ${cash.code}: ${cashioError?.message || cashioError}`);
+            }
+          }
+          this.logger.log(`[Sync] Đã lưu ${cashData.length} cashio records vào database`);
+        } catch (error: any) {
+          this.logger.error(`Failed to save cashio data to database: ${error?.message || error}`);
+        }
+      }
+
+      // Tạo map cash data theo so_code để dễ lookup (dùng cho enrich vào sale items)
       const cashMapBySoCode = new Map<string, any[]>();
       cashData.forEach((cash) => {
         const soCode = cash.so_code || cash.master_code;
@@ -143,7 +217,7 @@ export class SyncService {
             cashMapBySoCode.set(soCode, []);
           }
           cashMapBySoCode.get(soCode)!.push(cash);
-      }
+        }
       });
 
       if (orders.length === 0) {
@@ -256,9 +330,10 @@ export class SyncService {
             continue;
           }
 
-          // Lấy cash/voucher data cho order này
+          // Lấy cash/voucher/ECOIN data cho order này
           const orderCashData = cashMapBySoCode.get(order.docCode) || [];
           const voucherData = orderCashData.filter((cash) => cash.fop_syscode === 'VOUCHER');
+          const ecoinData = orderCashData.filter((cash) => cash.fop_syscode === 'ECOIN');
           
           // Collect tất cả itemCodes từ order để fetch products từ Loyalty API
           const orderItemCodes = Array.from(
@@ -360,7 +435,7 @@ export class SyncService {
                   }
                 }
 
-                // Enrich voucher data từ get_daily_cash
+                // Enrich voucher/ECOIN data từ get_daily_cash
                 let voucherRefno: string | undefined;
                 let voucherAmount: number | undefined;
                 if (voucherData.length > 0) {
@@ -370,45 +445,62 @@ export class SyncService {
                   voucherAmount = firstVoucher.total_in || 0;
                 }
                 
-                // Phân biệt voucher chính và voucher dự phòng
-                // Quy tắc:
-                // 1. Nếu pkg_code có giá trị → voucher chính
-                // 2. Nếu so_source = "SHOPEE" → voucher dự phòng
-                // 3. Nếu prom_code có giá trị và pkg_code trống → voucher dự phòng
-                // 4. Các trường hợp khác → voucher chính
+                // Kiểm tra ECOIN: Nếu có ECOIN trong cashio → v_paid là ECOIN, không phải voucher
+                const hasEcoin = ecoinData.length > 0;
+                let ecoinAmount: number | undefined = undefined;
+                if (hasEcoin) {
+                  // Lấy ECOIN đầu tiên (có thể có nhiều ECOIN)
+                  const firstEcoin = ecoinData[0];
+                  ecoinAmount = firstEcoin.total_in || 0;
+                }
+                
                 const pkgCode = saleItem.pkg_code || saleItem.pkgCode || null;
                 const promCode = saleItem.promCode || saleItem.prom_code || null;
                 const vPaid = saleItem.paid_by_voucher_ecode_ecoin_bp || 0;
                 const soSource = saleItem.order_source || saleItem.so_source || null;
                 
-                // Kiểm tra điều kiện voucher dự phòng
-                const isShopee = soSource && String(soSource).toUpperCase() === 'SHOPEE';
-                const hasPkgCode = pkgCode && pkgCode.trim() !== '';
-                const hasPromCode = promCode && promCode.trim() !== '';
-                
-                // Voucher dự phòng nếu:
-                // - Là SHOPEE, HOẶC
-                // - Có prom_code và không có pkg_code
-                const isVoucherDuPhong = isShopee || (hasPromCode && !hasPkgCode);
-                
-                // Voucher chính nếu không phải voucher dự phòng
-                const isVoucherChinh = !isVoucherDuPhong;
-                
                 // Lưu vào đúng trường
                 let paidByVoucherChinh: number | undefined = undefined;
                 let chietKhauVoucherDp1: number | undefined = undefined;
                 let voucherDp1Code: string | undefined = undefined;
+                let chietKhauThanhToanTkTienAo: number | undefined = undefined;
                 
-                if (isVoucherChinh && vPaid > 0) {
-                  // Voucher chính: lưu vào paid_by_voucher_ecode_ecoin_bp
-                  paidByVoucherChinh = vPaid;
-                } else if (isVoucherDuPhong && vPaid > 0) {
-                  // Voucher dự phòng: lưu vào chietKhauVoucherDp1 và voucherDp1
-                  chietKhauVoucherDp1 = vPaid;
-                  voucherDp1Code = promCode; // Lưu prom_code vào voucherDp1
+                // Nếu có ECOIN → lưu vào chietKhauThanhToanTkTienAo, không lưu vào voucher
+                if (hasEcoin && vPaid > 0) {
+                  chietKhauThanhToanTkTienAo = ecoinAmount && ecoinAmount > 0 ? ecoinAmount : vPaid;
                 } else if (vPaid > 0) {
-                  // Trường hợp khác: giữ nguyên logic cũ (lưu vào paid_by_voucher_ecode_ecoin_bp)
-                  paidByVoucherChinh = vPaid;
+                  // Không có ECOIN → xử lý voucher như bình thường
+                  // Phân biệt voucher chính và voucher dự phòng
+                  // Quy tắc:
+                  // 1. Nếu pkg_code có giá trị → voucher chính
+                  // 2. Nếu so_source = "SHOPEE" → voucher dự phòng
+                  // 3. Nếu prom_code có giá trị và pkg_code trống → voucher dự phòng
+                  // 4. Các trường hợp khác → voucher chính
+                  
+                  // Kiểm tra điều kiện voucher dự phòng
+                  const isShopee = soSource && String(soSource).toUpperCase() === 'SHOPEE';
+                  const hasPkgCode = pkgCode && pkgCode.trim() !== '';
+                  const hasPromCode = promCode && promCode.trim() !== '';
+                  
+                  // Voucher dự phòng nếu:
+                  // - Là SHOPEE, HOẶC
+                  // - Có prom_code và không có pkg_code
+                  const isVoucherDuPhong = isShopee || (hasPromCode && !hasPkgCode);
+                  
+                  // Voucher chính nếu không phải voucher dự phòng
+                  const isVoucherChinh = !isVoucherDuPhong;
+                  
+                  if (isVoucherChinh && vPaid > 0) {
+                    // Voucher chính: lưu vào paid_by_voucher_ecode_ecoin_bp
+                    paidByVoucherChinh = vPaid;
+                  } else if (isVoucherDuPhong && vPaid > 0) {
+                    // Voucher dự phòng: lưu vào chietKhauVoucherDp1 và voucherDp1
+                    chietKhauVoucherDp1 = vPaid;
+                    voucherDp1Code = promCode; // Lưu prom_code vào voucherDp1
+                  } else if (vPaid > 0) {
+                    // Trường hợp khác: giữ nguyên logic cũ (lưu vào paid_by_voucher_ecode_ecoin_bp)
+                    paidByVoucherChinh = vPaid;
+                  }
                 }
                 
                 // Luôn tạo sale mới - TRUYỀN MẤY LƯU NẤY (không check duplicate, lưu tất cả)
@@ -443,6 +535,8 @@ export class SyncService {
                     paid_by_voucher_ecode_ecoin_bp: paidByVoucherChinh,
                     chietKhauVoucherDp1: chietKhauVoucherDp1,
                     voucherDp1: voucherDp1Code || voucherRefno, // Ưu tiên prom_code, nếu không có thì dùng voucherRefno từ get_daily_cash
+                    // Thanh toán TK tiền ảo (ECOIN)
+                    chietKhauThanhToanTkTienAo: chietKhauThanhToanTkTienAo,
                     maCa: saleItem.shift_code,
                     saleperson_id: this.validateInteger(saleItem.saleperson_id),
                     partner_name: saleItem.partner_name,

@@ -8,10 +8,11 @@ import { ZappyApiService } from '../../services/zappy-api.service';
 import { SalesModule } from '../sales/sales.module';
 import { Customer } from '../../entities/customer.entity';
 import { Sale } from '../../entities/sale.entity';
+import { DailyCashio } from '../../entities/daily-cashio.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Customer, Sale]),
+    TypeOrmModule.forFeature([Customer, Sale, DailyCashio]),
     HttpModule,
     forwardRef(() => SalesModule),
   ],
