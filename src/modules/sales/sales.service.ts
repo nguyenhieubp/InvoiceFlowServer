@@ -109,11 +109,31 @@ export class SalesService {
   }
 
   /**
+   * Map brand name sang brand code
+   * menard → MN, f3 → FBV, chando → CDV, labhair → LHV, yaman → BTH
+   */
+  private mapBrandToCode(brand: string | null | undefined): string {
+    if (!brand) return 'MN'; // Default
+    
+    const brandLower = brand.toLowerCase().trim();
+    const brandMap: Record<string, string> = {
+      'menard': 'MN',
+      'f3': 'FBV',
+      'facialbar': 'FBV',
+      'chando': 'CDV',
+      'labhair': 'LHV',
+      'yaman': 'BTH',
+    };
+    
+    return brandMap[brandLower] || 'MN'; // Default to MN
+  }
+
+  /**
    * Generate label cho "Thanh toán TK tiền ảo"
    * Format: YYMM{brand_code}.TKDV (ví dụ: 2511MN.TKDV)
    * - YY: 2 số cuối của năm từ docDate
    * - MM: Tháng từ docDate (2 số)
-   * - {brand_code}: 2 ký tự cuối của brand code (từ ma_dvcs hoặc brand)
+   * - {brand_code}: Brand code từ customer.brand (MN, FBV, CDV, LHV, BTH)
    */
   private generateTkTienAoLabel(orderData: any): string {
     // Lấy ngày từ docDate của order
@@ -139,22 +159,13 @@ export class SalesService {
     // Format tháng thành 2 số (01, 02, ..., 12)
     const mm = String(month).padStart(2, '0');
     
-    // Lấy brand code từ ma_dvcs hoặc brand, lấy 2 ký tự cuối
-    let brandCode = '';
-    const firstSale = orderData.sales?.[0];
-    const maDvcs = firstSale?.department?.ma_dvcs 
-      || firstSale?.department?.ma_dvcs_ht
-      || orderData.customer?.brand 
-      || orderData.branchCode
-      || orderData.ma_dvcs
+    // Ưu tiên lấy brand code từ customer.brand
+    const brand = orderData.customer?.brand 
+      || orderData.sales?.[0]?.customer?.brand
       || '';
     
-    if (maDvcs && String(maDvcs).length >= 2) {
-      brandCode = String(maDvcs).slice(-2).toUpperCase();
-    } else {
-      // Fallback: dùng "MN" nếu không có brand code
-      brandCode = 'MN';
-    }
+    // Map brand name sang brand code (menard → MN, f3 → FBV, etc.)
+    const brandCode = this.mapBrandToCode(brand);
     
     return `${yy}${mm}${brandCode}.TKDV`;
   }
