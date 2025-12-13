@@ -772,63 +772,92 @@ export class SyncService {
       }
 
 
-      // Tự động tạo hóa đơn cho tất cả các đơn hàng vừa đồng bộ
-      // Lấy docCodes từ database (chỉ các đơn hàng thực sự có sales được lưu)
-      // để tránh lỗi khi order không có sales nào được lưu (do filter dvt)
+      // Tự động tạo hóa đơn cho tất cả các đơn hàng vừa đồng bộ (chạy ngầm ở background)
+      // Chỉ tạo invoice cho các đơn hàng trong ngày sync (từ orders vừa sync)
+      // Lấy docCodes từ các orders vừa sync, sau đó kiểm tra xem có sales được lưu không
+      const orderDocCodes = [...new Set(orders.map(order => order.docCode).filter((code: string) => code))];
+      
+      // Kiểm tra xem các đơn hàng này có sales được lưu trong database không
+      // (để tránh lỗi khi order không có sales nào được lưu do filter dvt)
       const savedDocCodes = await this.saleRepository
         .createQueryBuilder('sale')
         .select('DISTINCT sale.docCode', 'docCode')
-        .where('sale.isProcessed = :isProcessed', { isProcessed: false })
+        .where('sale.docCode IN (:...docCodes)', { docCodes: orderDocCodes })
+        .andWhere('sale.isProcessed = :isProcessed', { isProcessed: false })
         .getRawMany();
       
       const docCodes = savedDocCodes.map((item: any) => item.docCode).filter((code: string) => code);
       
-      let invoiceSuccessCount = 0;
-      let invoiceFailureCount = 0;
-      const invoiceErrors: string[] = [];
-
-      // Tạo invoice song song (parallel) thay vì tuần tự để tăng tốc độ
-      // Giới hạn số lượng concurrent requests để tránh quá tải (batch size = 5)
-      const batchSize = 5;
-      for (let i = 0; i < docCodes.length; i += batchSize) {
-        const batch = docCodes.slice(i, i + batchSize);
-        await Promise.all(
-          batch.map(async (docCode) => {
-            try {
-              const result = await this.salesService.createInvoiceViaFastApi(docCode);
-              if (result.success) {
-                invoiceSuccessCount++;
-              } else {
-                invoiceFailureCount++;
-                const errorMsg = `Tạo hóa đơn thất bại cho ${docCode}: ${result.message || 'Unknown error'}`;
-                invoiceErrors.push(errorMsg);
-                this.logger.warn(`✗ ${errorMsg}`);
-              }
-            } catch (error: any) {
-              invoiceFailureCount++;
-              const errorMsg = `Lỗi khi tạo hóa đơn cho đơn hàng ${docCode}: ${error?.message || error}`;
-              invoiceErrors.push(errorMsg);
-              this.logger.error(`✗ ${errorMsg}`);
-            }
-          }),
-        );
+      // Tạo invoice ở background (không await) để trả về response ngay
+      if (docCodes.length > 0) {
+        this.logger.log(`Bắt đầu tạo hóa đơn ngầm cho ${docCodes.length} đơn hàng...`);
+        
+        // Chạy ở background, không await
+        this.createInvoicesInBackground(docCodes, date).catch((error) => {
+          this.logger.error(`Lỗi khi tạo hóa đơn ngầm: ${error?.message || error}`);
+        });
       }
 
-
+      // Trả về response ngay sau khi đồng bộ sale xong (không đợi tạo invoice)
       return {
         success: errors.length === 0,
-        message: `Đồng bộ thành công ${orders.length} đơn hàng cho ngày ${date}. Tự động tạo hóa đơn: ${invoiceSuccessCount} thành công, ${invoiceFailureCount} thất bại`,
+        message: `Đồng bộ thành công ${orders.length} đơn hàng cho ngày ${date}. Đang tạo hóa đơn ngầm cho ${docCodes.length} đơn hàng...`,
         ordersCount: orders.length,
         salesCount,
         customersCount,
-        invoiceSuccessCount,
-        invoiceFailureCount,
         errors: errors.length > 0 ? errors : undefined,
-        invoiceErrors: invoiceErrors.length > 0 ? invoiceErrors : undefined,
-      };
+      } as any;
     } catch (error: any) {
       this.logger.error(`Lỗi khi đồng bộ từ Zappy API: ${error?.message || error}`);
       throw error;
+    }
+  }
+
+  /**
+   * Tạo hóa đơn ở background (không block response)
+   */
+  private async createInvoicesInBackground(docCodes: string[], date: string): Promise<void> {
+    let invoiceSuccessCount = 0;
+    let invoiceFailureCount = 0;
+    const invoiceErrors: string[] = [];
+
+    // Tạo invoice song song (parallel) thay vì tuần tự để tăng tốc độ
+    // Giới hạn số lượng concurrent requests để tránh quá tải (batch size = 5)
+    const batchSize = 5;
+    const totalBatches = Math.ceil(docCodes.length / batchSize);
+    
+    for (let i = 0; i < docCodes.length; i += batchSize) {
+      const batch = docCodes.slice(i, i + batchSize);
+      const batchNumber = Math.floor(i / batchSize) + 1;
+      this.logger.log(`[Background] Đang tạo hóa đơn batch ${batchNumber}/${totalBatches} (${batch.length} đơn hàng)...`);
+      
+      await Promise.all(
+        batch.map(async (docCode) => {
+          try {
+            const result = await this.salesService.createInvoiceViaFastApi(docCode);
+            if (result.success) {
+              invoiceSuccessCount++;
+            } else {
+              invoiceFailureCount++;
+              const errorMsg = `Tạo hóa đơn thất bại cho ${docCode}: ${result.message || 'Unknown error'}`;
+              invoiceErrors.push(errorMsg);
+              this.logger.warn(`[Background] ✗ ${errorMsg}`);
+            }
+          } catch (error: any) {
+            invoiceFailureCount++;
+            const errorMsg = `Lỗi khi tạo hóa đơn cho đơn hàng ${docCode}: ${error?.message || error}`;
+            invoiceErrors.push(errorMsg);
+            this.logger.error(`[Background] ✗ ${errorMsg}`);
+          }
+        }),
+      );
+      
+      this.logger.log(`[Background] Hoàn thành batch ${batchNumber}/${totalBatches}`);
+    }
+
+    this.logger.log(`[Background] Hoàn thành tạo hóa đơn: ${invoiceSuccessCount} thành công, ${invoiceFailureCount} thất bại cho ngày ${date}`);
+    if (invoiceErrors.length > 0) {
+      this.logger.warn(`[Background] Danh sách lỗi tạo hóa đơn:`, invoiceErrors);
     }
   }
 
