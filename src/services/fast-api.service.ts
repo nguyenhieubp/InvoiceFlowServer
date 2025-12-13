@@ -119,10 +119,10 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
         throw new Error('Không thể lấy token đăng nhập');
       }
 
-      // Log payload gửi lên API
-      this.logger.log('==================Sales Invoice API Request Payload:');
-      this.logger.log(JSON.stringify(invoiceData, null, 2));
-      this.logger.log('==================End of Sales Invoice API Request Payload');
+      // Log payload gửi lên API (đã tắt để giảm log)
+      // this.logger.log('==================Sales Invoice API Request Payload:');
+      // this.logger.log(JSON.stringify(invoiceData, null, 2));
+      // this.logger.log('==================End of Sales Invoice API Request Payload');
 
       // Gọi API salesInvoice với token
       const response = await firstValueFrom(
@@ -139,9 +139,9 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
       );
 
       this.logger.log('Sales invoice submitted successfully');
-      this.logger.log('==================Sales Invoice API Response:');
-      this.logger.log(JSON.stringify(response.data, null, 2));
-      this.logger.log('==================End of Sales Invoice API Response');
+      // this.logger.log('==================Sales Invoice API Response:');
+      // this.logger.log(JSON.stringify(response.data, null, 2));
+      // this.logger.log('==================End of Sales Invoice API Response');
       return response.data;
     } catch (error: any) {
       this.logger.error(`Error submitting sales invoice: ${error?.message || error}`);
@@ -166,9 +166,9 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
               ),
             );
             this.logger.log('Sales invoice submitted successfully (after retry)');
-            this.logger.log('==================Sales Invoice API Response (after retry):');
-            this.logger.log(JSON.stringify(retryResponse.data, null, 2));
-            this.logger.log('==================End of Sales Invoice API Response (after retry)');
+            // this.logger.log('==================Sales Invoice API Response (after retry):');
+            // this.logger.log(JSON.stringify(retryResponse.data, null, 2));
+            // this.logger.log('==================End of Sales Invoice API Response (after retry)');
             return retryResponse.data;
           } catch (retryError) {
             this.logger.error(`Retry failed: ${retryError}`);
@@ -436,7 +436,7 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
       );
 
       this.logger.log(`Lot ${lotData.ma_lo} for item ${lotData.ma_vt} created/updated successfully`);
-      this.logger.log(`==================Lot API Response: ${JSON.stringify(response.data)}`);
+      // this.logger.log(`==================Lot API Response: ${JSON.stringify(response.data)}`);
       return response.data;
     } catch (error: any) {
       this.logger.error(`Error creating/updating lot ${lotData.ma_lo} for item ${lotData.ma_vt}: ${error?.message || error}`);
@@ -538,7 +538,7 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
       );
 
       this.logger.log(`Site ${siteData.ma_kho} for ma_dvcs ${siteData.ma_dvcs} created/updated successfully`);
-      this.logger.log(`==================Site API Response: ${JSON.stringify(response.data)}`);
+      // this.logger.log(`==================Site API Response: ${JSON.stringify(response.data)}`);
       return response.data;
     } catch (error: any) {
       this.logger.error(`Error creating/updating site ${siteData.ma_kho} for ma_dvcs ${siteData.ma_dvcs}: ${error?.message || error}`);
@@ -569,7 +569,7 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
               ),
             );
             this.logger.log(`Site ${siteData.ma_kho} for ma_dvcs ${siteData.ma_dvcs} created/updated successfully (after retry)`);
-            this.logger.log(`==================Site API Response (after retry): ${JSON.stringify(retryResponse.data)}`);
+            // this.logger.log(`==================Site API Response (after retry): ${JSON.stringify(retryResponse.data)}`);
             return retryResponse.data;
           } catch (retryError) {
             this.logger.error(`Retry site API failed: ${retryError}`);
@@ -608,10 +608,10 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
         throw new Error('Không thể lấy token đăng nhập');
       }
 
-      // Log payload gửi lên API
-      this.logger.log('==================Stock Transfer API Request Payload:');
-      this.logger.log(JSON.stringify(stockTransferData, null, 2));
-      this.logger.log('==================End of Stock Transfer API Request Payload');
+      // Log payload gửi lên API (đã tắt để giảm log)
+      // this.logger.log('==================Stock Transfer API Request Payload:');
+      // this.logger.log(JSON.stringify(stockTransferData, null, 2));
+      // this.logger.log('==================End of Stock Transfer API Request Payload');
 
       // Gọi API warehouseRelease với token
       const endpoint = `${this.baseUrl}/warehouseRelease`;
@@ -631,9 +631,9 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
       );
 
       this.logger.log('Stock transfer submitted successfully');
-      this.logger.log('==================Stock Transfer API Response:');
-      this.logger.log(JSON.stringify(response.data, null, 2));
-      this.logger.log('==================End of Stock Transfer API Response');
+      // this.logger.log('==================Stock Transfer API Response:');
+      // this.logger.log(JSON.stringify(response.data, null, 2));
+      // this.logger.log('==================End of Stock Transfer API Response');
       return response.data;
     } catch (error: any) {
       // Log chi tiết lỗi

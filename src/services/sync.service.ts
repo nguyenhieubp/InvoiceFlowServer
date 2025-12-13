@@ -421,7 +421,8 @@ export class SyncService {
           const saleItemDataMap = new Map<string, any>(); // Map compositeKey -> saleItem data
           
           if (order.sales && order.sales.length > 0) {
-            for (const saleItem of order.sales) {
+            for (let index = 0; index < order.sales.length; index++) {
+              const saleItem = order.sales[index];
               // Parse api_id từ saleItem.id
               let apiId: number | undefined = undefined;
               if (saleItem.id !== undefined && saleItem.id !== null && saleItem.id !== '') {
@@ -432,6 +433,7 @@ export class SyncService {
               }
               
               const giaBanValue = saleItem.giaBan || saleItem.price || 0;
+              // Thêm index vào compositeKey để phân biệt các items giống nhau trong cùng order
               const compositeKey = [
                 order.docCode || '',
                 saleItem.itemCode || '',
@@ -445,10 +447,11 @@ export class SyncService {
                 saleItem.serial || 'null',
                 customer.id || '',
                 apiId ? apiId.toString() : 'null',
+                index.toString(), // Thêm index để phân biệt items giống nhau
               ].join('|');
               
               compositeKeysToCheck.push(compositeKey);
-              saleItemDataMap.set(compositeKey, { saleItem, apiId });
+              saleItemDataMap.set(compositeKey, { saleItem, apiId, index });
             }
           }
           
@@ -467,7 +470,8 @@ export class SyncService {
           
           // Xử lý từng sale trong order - TRUYỀN MẤY LƯU NẤY (lưu tất cả các dòng từ Zappy API)
           if (order.sales && order.sales.length > 0) {
-            for (const saleItem of order.sales) {
+            for (let index = 0; index < order.sales.length; index++) {
+              const saleItem = order.sales[index];
               try {
                 // Parse api_id từ saleItem.id
                 let apiId: number | undefined = undefined;
@@ -617,7 +621,8 @@ export class SyncService {
                 }
                 
                 // Tạo composite key từ TẤT CẢ các trường dữ liệu có khả năng khác nhau
-                // Composite key: docCode|itemCode|qty|giaBan|disc_amt|grade_discamt|other_discamt|revenue|promCode|serial|customerId|api_id
+                // Composite key: docCode|itemCode|qty|giaBan|disc_amt|grade_discamt|other_discamt|revenue|promCode|serial|customerId|api_id|index
+                // Thêm index để phân biệt các items giống nhau trong cùng order
                 const giaBanValue = saleItem.giaBan || saleItem.price || 0;
                 const compositeKey = [
                   order.docCode || '',
@@ -632,6 +637,7 @@ export class SyncService {
                   saleItem.serial || 'null',
                   customer.id || '',
                   apiId ? apiId.toString() : 'null',
+                  index.toString(), // Thêm index để phân biệt items giống nhau
                 ].join('|');
                 
                 // Check duplicate dựa trên compositeKey (đã query batch trước)
