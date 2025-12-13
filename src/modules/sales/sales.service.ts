@@ -1711,10 +1711,109 @@ export class SalesService {
           const orderCashData = cashMapBySoCode.get(order.docCode) || [];
           const voucherData = orderCashData.filter((cash) => cash.fop_syscode === 'VOUCHER');
           
-          // Xử lý từng sale trong order
+          // Collect tất cả itemCodes từ order để fetch products từ Loyalty API và check 404
+          // Đảm bảo trim ngay từ đầu để consistency
+          const orderItemCodes = Array.from(
+            new Set(
+              (order.sales || [])
+                .map((s) => s.itemCode?.trim())
+                .filter((code): code is string => !!code && code !== '')
+            )
+          );
+
+          // Fetch products từ Loyalty API để check sản phẩm không tồn tại (404)
+          // CHỈ bỏ qua khi có 404 error ở cả 2 endpoint, không phải khi response thành công nhưng không có data
+          const notFoundItemCodes = new Set<string>();
+          
+          if (orderItemCodes.length > 0) {
+            this.logger.log(`[SalesService] Đang check ${orderItemCodes.length} sản phẩm từ Loyalty API cho order ${order.docCode}...`);
+            await Promise.all(
+              orderItemCodes.map(async (trimmedItemCode) => {
+                let isNotFound = false;
+                
+                // Thử endpoint /products/code/ trước
+                try {
+                  const response = await this.httpService.axiosRef.get(
+                    `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(trimmedItemCode)}`,
+                    { 
+                      headers: { accept: 'application/json' },
+                      timeout: 5000,
+                    },
+                  );
+                  // Nếu response thành công (status 200), kiểm tra có data không
+                  const loyaltyProduct = response?.data?.data?.item || response?.data?.data || response?.data;
+                  // Nếu có data, sản phẩm tồn tại → return sớm, không cần check fallback
+                  if (loyaltyProduct) {
+                    return;
+                  }
+                  // Nếu response 200 nhưng không có data → thử fallback endpoint
+                  this.logger.warn(`[SalesService] Response 200 nhưng không có data tại /products/code/: ${trimmedItemCode}, thử /products/material-code/...`);
+                } catch (error: any) {
+                  // Nếu 404, thử fallback sang /products/material-code/
+                  if (error?.response?.status === 404) {
+                    this.logger.warn(`[SalesService] Sản phẩm không tồn tại tại /products/code/: ${trimmedItemCode} (404), thử /products/material-code/...`);
+                  } else {
+                    // Lỗi khác 404 - không coi là not found, có thể là network error
+                    this.logger.warn(`[SalesService] Lỗi khi fetch product ${trimmedItemCode} từ /products/code/: ${error?.message || error?.response?.status || 'Unknown error'}`);
+                    return; // Không phải 404, không check fallback
+                  }
+                }
+                
+                // Nếu đến đây, có nghĩa là:
+                // 1. /products/code/ trả về 200 nhưng không có data, HOẶC
+                // 2. /products/code/ trả về 404
+                // → Thử fallback endpoint
+                try {
+                  const fallbackResponse = await this.httpService.axiosRef.get(
+                    `https://loyaltyapi.vmt.vn/products/material-code/${encodeURIComponent(trimmedItemCode)}`,
+                    { 
+                      headers: { accept: 'application/json' },
+                      timeout: 5000,
+                    },
+                  );
+                  const loyaltyProduct = fallbackResponse?.data?.data?.item || fallbackResponse?.data?.data || fallbackResponse?.data;
+                  if (loyaltyProduct) {
+                    // Tìm thấy tại fallback endpoint
+                    this.logger.log(`[SalesService] Tìm thấy sản phẩm ${trimmedItemCode} tại /products/material-code/`);
+                    return;
+                  }
+                  // Nếu fallback response 200 nhưng không có data → coi là not found
+                  isNotFound = true;
+                  this.logger.warn(`[SalesService] Sản phẩm không tồn tại: ${trimmedItemCode} (Response 200 nhưng không có data tại cả /products/code/ và /products/material-code/) - Sẽ bỏ qua sale item này`);
+                } catch (fallbackError: any) {
+                  if (fallbackError?.response?.status === 404) {
+                    // Cả 2 endpoint đều 404 → sản phẩm không tồn tại
+                    isNotFound = true;
+                    this.logger.warn(`[SalesService] Sản phẩm không tồn tại: ${trimmedItemCode} (404 Not Found tại cả /products/code/ và /products/material-code/) - Sẽ bỏ qua sale item này`);
+                  } else {
+                    // Lỗi khác 404 - không coi là not found
+                    this.logger.warn(`[SalesService] Lỗi khi fetch product ${trimmedItemCode} từ /products/material-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`);
+                  }
+                }
+                
+                // Đánh dấu not found khi:
+                // 1. Cả 2 endpoint đều 404, HOẶC
+                // 2. Cả 2 endpoint đều trả về 200 nhưng không có data
+                if (isNotFound) {
+                  notFoundItemCodes.add(trimmedItemCode);
+                  this.logger.log(`[SalesService] Đã thêm ${trimmedItemCode} vào danh sách bỏ qua (notFoundItemCodes size: ${notFoundItemCodes.size})`);
+                }
+              }),
+            );
+            this.logger.log(`[SalesService] Hoàn thành check sản phẩm. Tổng số sản phẩm không tồn tại: ${notFoundItemCodes.size}`);
+          }
+
+          // Xử lý từng sale trong order - BỎ QUA các items có sản phẩm không tồn tại (404)
           if (order.sales && order.sales.length > 0) {
             for (const saleItem of order.sales) {
               try {
+                // Bỏ qua sale item nếu sản phẩm không tồn tại trong Loyalty API (404)
+                const itemCode = saleItem.itemCode?.trim();
+                if (itemCode && notFoundItemCodes.has(itemCode)) {
+                  this.logger.warn(`[SalesService] Bỏ qua sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - Sản phẩm không tồn tại trong Loyalty API`);
+                  continue;
+                }
+                
                 // Kiểm tra xem sale đã tồn tại chưa (dựa trên docCode, itemCode)
                 const existingSale = await this.saleRepository.findOne({
                   where: {
