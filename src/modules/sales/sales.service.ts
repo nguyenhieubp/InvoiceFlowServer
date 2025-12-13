@@ -49,7 +49,11 @@ export class SalesService {
 
     // Lấy brand để phân biệt logic
     const brand = sale.customer?.brand || '';
-    const brandLower = (brand || '').toLowerCase().trim();
+    let brandLower = (brand || '').toLowerCase().trim();
+    // Normalize: "facialbar" → "f3"
+    if (brandLower === 'facialbar') {
+      brandLower = 'f3';
+    }
 
     // Lấy productType và trackInventory từ sale hoặc product
     const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
@@ -1172,7 +1176,11 @@ export class SalesService {
       if (ck03_nt > 0) {
         // Lấy brand từ customer
         const brand = firstSale.customer?.brand || '';
-        const brandLower = (brand || '').toLowerCase().trim();
+        let brandLower = (brand || '').toLowerCase().trim();
+        // Normalize: "facialbar" → "f3"
+        if (brandLower === 'facialbar') {
+          brandLower = 'f3';
+        }
         
         // Nếu là f3, luôn tính lại theo logic cũ (override giá trị cũ nếu có)
         if (brandLower === 'f3') {
@@ -2083,7 +2091,11 @@ export class SalesService {
       // Tính VIP type nếu có chiết khấu VIP
       // Lấy brand từ orderData để phân biệt logic VIP
       const brand = orderData.customer?.brand || orderData.brand || '';
-      const brandLower = (brand || '').toLowerCase().trim();
+      let brandLower = (brand || '').toLowerCase().trim();
+      // Normalize: "facialbar" → "f3"
+      if (brandLower === 'facialbar') {
+        brandLower = 'f3';
+      }
       
       let maCk03 = sale.muaHangCkVip || '';
       if (ck03_nt > 0) {
@@ -2266,7 +2278,11 @@ export class SalesService {
       
       // Lấy brand để phân biệt logic cho F3 (ma_lo)
       const brandForMaLo = orderData.customer?.brand || orderData.brand || '';
-      const brandLowerForMaLo = (brandForMaLo || '').toLowerCase().trim();
+      let brandLowerForMaLo = (brandForMaLo || '').toLowerCase().trim();
+      // Normalize: "facialbar" → "f3"
+      if (brandLowerForMaLo === 'facialbar') {
+        brandLowerForMaLo = 'f3';
+      }
       
       // Xác định ma_lo và so_serial dựa trên trackSerial và trackBatch
       let maLo: string | null = null;
@@ -2353,7 +2369,14 @@ export class SalesService {
       }
 
       // Xác định hàng tặng: giaBan = 0 và tienHang = 0
-      const isTangHang = giaBan === 0 && tienHang === 0;
+      // Với F3: Nếu có promCode → là "mua hàng giảm giá" (giảm 100%), không phải "tặng hàng"
+      const salePromCode = sale.promCode && sale.promCode.trim() !== '';
+      let isTangHang = giaBan === 0 && tienHang === 0;
+      
+      // Với F3: Nếu có promCode thì không coi là hàng tặng, mà là mua hàng giảm giá
+      if (brandLower === 'f3' && salePromCode) {
+        isTangHang = false;
+      }
       
       // Tính toán ma_ctkm_th
       let maCtkmTangHang: string = '';
@@ -2386,6 +2409,7 @@ export class SalesService {
       
       // Nếu là hàng tặng, không set ma_ck01 (Mã CTKM mua hàng giảm giá)
       // Nếu không phải hàng tặng, set ma_ck01 từ promCode như cũ
+      // Với F3: Nếu có promCode và giaBan = 0 && tienHang = 0 → là mua hàng giảm giá (giảm 100%)
       const maCk01 = isTangHang ? '' : (sale.promCode ? sale.promCode : '');
 
       return {
