@@ -382,6 +382,9 @@ export class SyncService {
           if (orderItemCodes.length > 0) {
             await Promise.all(
               orderItemCodes.map(async (itemCode) => {
+                let loyaltyProduct: any = null;
+                
+                // Thử endpoint /products/code/ trước
                 try {
                   const response = await this.httpService.axiosRef.get(
                     `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
@@ -390,7 +393,35 @@ export class SyncService {
                       timeout: 5000, // 5 seconds timeout
                     },
                   );
-                  const loyaltyProduct = response?.data?.data?.item || response?.data;
+                  loyaltyProduct = response?.data?.data?.item || response?.data?.data || response?.data;
+                } catch (error: any) {
+                  // Nếu 404, thử fallback sang /products/material-code/
+                  if (error?.response?.status === 404) {
+                    this.logger.warn(`[Loyalty API] Sản phẩm không tồn tại tại /products/code/: ${itemCode} (404), thử /products/material-code/...`);
+                    try {
+                      const fallbackResponse = await this.httpService.axiosRef.get(
+                        `https://loyaltyapi.vmt.vn/products/material-code/${encodeURIComponent(itemCode)}`,
+                        { 
+                          headers: { accept: 'application/json' },
+                          timeout: 5000,
+                        },
+                      );
+                      loyaltyProduct = fallbackResponse?.data?.data?.item || fallbackResponse?.data?.data || fallbackResponse?.data;
+                      this.logger.log(`[Loyalty API] Tìm thấy sản phẩm ${itemCode} tại /products/material-code/`);
+                    } catch (fallbackError: any) {
+                      if (fallbackError?.response?.status === 404) {
+                        this.logger.warn(`[Loyalty API] Sản phẩm không tồn tại: ${itemCode} (404 Not Found tại cả /products/code/ và /products/material-code/)`);
+                      } else {
+                        this.logger.warn(`[Loyalty API] Lỗi khi fetch product ${itemCode} từ /products/material-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`);
+                      }
+                    }
+                  } else {
+                    this.logger.warn(`[Loyalty API] Lỗi khi fetch product ${itemCode} từ /products/code/: ${error?.message || error?.response?.status || 'Unknown error'}`);
+                  }
+                }
+                
+                // Nếu có dữ liệu từ Loyalty API, lưu vào maps
+                if (loyaltyProduct) {
                   if (loyaltyProduct?.unit) {
                     productDvtMap.set(itemCode, loyaltyProduct.unit);
                   }
@@ -409,8 +440,6 @@ export class SyncService {
                   if (loyaltyProduct?.trackSerial !== undefined) {
                     productTrackSerialMap.set(itemCode, loyaltyProduct.trackSerial === true);
                   }
-                } catch (error) {
-                  // Không có dữ liệu từ Loyalty API - bỏ qua lỗi
                 }
               }),
             );
@@ -484,14 +513,8 @@ export class SyncService {
                 
                 // Lấy productType từ Loyalty API
                 const productType = productTypeMap.get(saleItem.itemCode || '');
-                // Lấy dvt từ saleItem hoặc từ Loyalty API, không gán mặc định
-                const dvt = saleItem.dvt || productDvtMap.get(saleItem.itemCode || '') || undefined;
-                
-                // Bỏ qua sale item không có dvt - không lưu vào database
-                if (!dvt || dvt.trim() === '') {
-                  this.logger.warn(`Bỏ qua sale item ${order.docCode}/${saleItem.itemCode} vì không có đơn vị tính (dvt)`);
-                  continue;
-                }
+                // Lấy dvt từ saleItem hoặc từ Loyalty API, nếu không có thì mặc định là "cái"
+                const dvt = saleItem.dvt || productDvtMap.get(saleItem.itemCode || '') || 'cái';
 
                 // Tính VIP type nếu có chiết khấu VIP
                 let muaHangCkVip: string | undefined = undefined;
@@ -718,7 +741,7 @@ export class SyncService {
                     promCode: saleItem.promCode,
                     serial: saleItem.serial,
                     soSerial: saleItem.serial,
-                    dvt: dvt, // Dvt từ saleItem hoặc Loyalty API, không gán mặc định
+                    dvt: dvt, // Dvt từ saleItem hoặc Loyalty API, mặc định là "cái" nếu không có
                     disc_amt: saleItem.disc_amt,
                     grade_discamt: saleItem.grade_discamt,
                     other_discamt: saleItem.other_discamt,
