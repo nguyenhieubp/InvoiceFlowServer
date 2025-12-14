@@ -2511,6 +2511,11 @@ export class SalesService {
       // Với F3: Nếu có promCode và giaBan = 0 && tienHang = 0 → là mua hàng giảm giá (giảm 100%)
       const maCk01 = isTangHang ? '' : (sale.promCode ? sale.promCode : '');
 
+      // Kiểm tra có mã số thẻ (maThe) không - nếu có thì km_yn = 0
+      const hasMaThe = sale.maThe && sale.maThe.trim() !== '';
+      // Kiểm tra nếu ma_ctkm_th = "TT DAU TU" thì cũng không set km_yn = 1
+      const isTTDauTu = maCtkmTangHang && maCtkmTangHang.trim() === 'TT DAU TU';
+
       return {
         // ma_vt: Mã vật tư (String, max 16 ký tự) - Bắt buộc
         ma_vt: limitString(toString(sale.product?.maVatTu || sale.itemCode || ''), 16),
@@ -2532,8 +2537,9 @@ export class SalesService {
         is_reward_line: sale.isRewardLine ? 1 : 0,
         // is_bundle_reward_line: is_bundle_reward_line (Int)
         is_bundle_reward_line: sale.isBundleRewardLine ? 1 : 0,
-        // km_yn: Khuyến mãi (Int)
-        km_yn: sale.promCode ? 1 : 0,
+        // km_yn: Khuyến mãi (Int) - = 1 khi là hàng tặng (giaBan = 0 && tienHang = 0) hoặc có promCode
+        // Nếu có mã số thẻ (maThe) hoặc ma_ctkm_th = "TT DAU TU" thì km_yn = 0
+        km_yn: (hasMaThe || isTTDauTu) ? 0 : ((isTangHang || sale.promCode) ? 1 : 0),
         // dong_thuoc_goi: dong_thuoc_goi (String, max 32 ký tự)
         dong_thuoc_goi: limitString(toString(sale.dongThuocGoi, ''), 32),
         // trang_thai: trang_thai (String, max 32 ký tự)
