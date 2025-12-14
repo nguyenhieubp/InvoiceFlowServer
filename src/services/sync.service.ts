@@ -391,7 +391,7 @@ export class SyncService {
                 let loyaltyProduct: any = null;
                 let isNotFound = false;
                 
-                // Thử endpoint /products/code/ trước
+                // Fetch product từ Loyalty API endpoint /products/code/
                 try {
                   const response = await this.httpService.axiosRef.get(
                     `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(trimmedItemCode)}`,
@@ -400,60 +400,29 @@ export class SyncService {
                       timeout: 5000, // 5 seconds timeout
                     },
                   );
-                  // Nếu response thành công (status 200), kiểm tra có data không
+                  // Xử lý response: /products/code/ trả về {message, data: {item: {...}}}
                   loyaltyProduct = response?.data?.data?.item || response?.data?.data || response?.data;
-                  // Nếu có data, sản phẩm tồn tại → return sớm, không cần check fallback
-                  if (loyaltyProduct) {
+                  // Nếu có data hợp lệ, sản phẩm tồn tại
+                  if (loyaltyProduct && (loyaltyProduct.id || loyaltyProduct.code)) {
+                    this.logger.log(`[Loyalty API] Tìm thấy sản phẩm ${trimmedItemCode} tại /products/code/`);
                     return;
                   }
-                  // Nếu response 200 nhưng không có data → thử fallback endpoint
-                  this.logger.warn(`[Loyalty API] Response 200 nhưng không có data tại /products/code/: ${trimmedItemCode}, thử /products/material-code/...`);
+                  // Nếu response 200 nhưng không có data hợp lệ → coi là not found
+                  isNotFound = true;
+                  this.logger.warn(`[Loyalty API] Sản phẩm không tồn tại: ${trimmedItemCode} (Response 200 nhưng không có data hợp lệ) - Sẽ bỏ qua sale item này`);
                 } catch (error: any) {
-                  // Nếu 404, thử fallback sang /products/material-code/
                   if (error?.response?.status === 404) {
-                    this.logger.warn(`[Loyalty API] Sản phẩm không tồn tại tại /products/code/: ${trimmedItemCode} (404), thử /products/material-code/...`);
+                    // 404 → sản phẩm không tồn tại
+                    isNotFound = true;
+                    this.logger.warn(`[Loyalty API] Sản phẩm không tồn tại: ${trimmedItemCode} (404 Not Found) - Sẽ bỏ qua sale item này`);
                   } else {
                     // Lỗi khác 404 - không coi là not found, có thể là network error
                     this.logger.warn(`[Loyalty API] Lỗi khi fetch product ${trimmedItemCode} từ /products/code/: ${error?.message || error?.response?.status || 'Unknown error'}`);
-                    return; // Không phải 404, không check fallback
+                    return; // Không phải 404, không đánh dấu not found
                   }
                 }
                 
-                // Nếu đến đây, có nghĩa là:
-                // 1. /products/code/ trả về 200 nhưng không có data, HOẶC
-                // 2. /products/code/ trả về 404
-                // → Thử fallback endpoint
-                try {
-                  const fallbackResponse = await this.httpService.axiosRef.get(
-                    `https://loyaltyapi.vmt.vn/products/material-code/${encodeURIComponent(trimmedItemCode)}`,
-                    { 
-                      headers: { accept: 'application/json' },
-                      timeout: 5000,
-                    },
-                  );
-                  loyaltyProduct = fallbackResponse?.data?.data?.item || fallbackResponse?.data?.data || fallbackResponse?.data;
-                  if (loyaltyProduct) {
-                    // Tìm thấy tại fallback endpoint
-                    this.logger.log(`[Loyalty API] Tìm thấy sản phẩm ${trimmedItemCode} tại /products/material-code/`);
-                    return;
-                  }
-                  // Nếu fallback response 200 nhưng không có data → coi là not found
-                  isNotFound = true;
-                  this.logger.warn(`[Loyalty API] Sản phẩm không tồn tại: ${trimmedItemCode} (Response 200 nhưng không có data tại cả /products/code/ và /products/material-code/) - Sẽ bỏ qua sale item này`);
-                } catch (fallbackError: any) {
-                  if (fallbackError?.response?.status === 404) {
-                    // Cả 2 endpoint đều 404 → sản phẩm không tồn tại
-                    isNotFound = true;
-                    this.logger.warn(`[Loyalty API] Sản phẩm không tồn tại: ${trimmedItemCode} (404 Not Found tại cả /products/code/ và /products/material-code/) - Sẽ bỏ qua sale item này`);
-                  } else {
-                    // Lỗi khác 404 - không coi là not found
-                    this.logger.warn(`[Loyalty API] Lỗi khi fetch product ${trimmedItemCode} từ /products/material-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`);
-                  }
-                }
-                
-                // Đánh dấu not found khi:
-                // 1. Cả 2 endpoint đều 404, HOẶC
-                // 2. Cả 2 endpoint đều trả về 200 nhưng không có data
+                // Đánh dấu not found khi 404 hoặc response 200 nhưng không có data hợp lệ
                 if (isNotFound) {
                   notFoundItemCodes.add(trimmedItemCode);
                   this.logger.log(`[Sync] Đã thêm ${trimmedItemCode} vào danh sách bỏ qua (notFoundItemCodes size: ${notFoundItemCodes.size})`);

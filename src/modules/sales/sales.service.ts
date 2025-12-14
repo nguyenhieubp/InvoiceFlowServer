@@ -2477,6 +2477,16 @@ export class SalesService {
         isTangHang = false;
       }
       
+      // Các ordertype dịch vụ không được coi là hàng tặng (không set km_yn = 1)
+      const ordertypeName = sale.ordertype || '';
+      const isDichVu = ordertypeName.includes('02. Làm dịch vụ') || 
+                       ordertypeName.includes('04. Đổi DV') ||
+                       ordertypeName.includes('08. Tách thẻ') ||
+                       ordertypeName.includes('Đổi thẻ KEEP->Thẻ DV');
+      if (isDichVu) {
+        isTangHang = false;
+      }
+      
       // Tính toán ma_ctkm_th
       let maCtkmTangHang: string = '';
       if (isTangHang) {
