@@ -41,9 +41,6 @@ export class SalesController {
     @Query('partnerCode') partnerCode?: string,
     @Query('faceStatus') faceStatus?: 'yes' | 'no',
   ) {
-    if (!date) {
-      throw new BadRequestException('Tham số date là bắt buộc (YYYY-MM-DD hoặc DDMMMYYYY)');
-    }
     return this.salesService.getAllGiaiTrinhFaceId({
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 10,
