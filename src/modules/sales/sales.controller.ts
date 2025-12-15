@@ -35,11 +35,17 @@ export class SalesController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('date') date?: string,
+    @Query('orderCode') orderCode?: string,
+    @Query('partnerCode') partnerCode?: string,
+    @Query('faceStatus') faceStatus?: 'yes' | 'no',
   ) {
     return this.salesService.getAllGiaiTrinhFaceId({
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 10,
       date,
+      orderCode,
+      partnerCode,
+      faceStatus,
     });
   }
 
