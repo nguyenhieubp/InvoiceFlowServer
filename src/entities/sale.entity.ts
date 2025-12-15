@@ -66,6 +66,9 @@ export class Sale {
   @Column({ nullable: true })
   invoiceKey: string; // Key của hóa đơn đã in
 
+  @Column({ default: true })
+  statusAsys: boolean; // Trạng thái đồng bộ: true = đồng bộ thành công, false = sản phẩm không tồn tại trong Loyalty API (404)
+
   // ========== CÁC TRƯỜNG BẮT BUỘC (*) ==========
   @Column({ nullable: true })
   kyHieu?: string; // Ký hiệu

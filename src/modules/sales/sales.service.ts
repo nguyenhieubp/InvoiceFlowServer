@@ -1844,15 +1844,18 @@ export class SalesService {
             this.logger.log(`[SalesService] Hoàn thành check sản phẩm. Tổng số sản phẩm không tồn tại: ${notFoundItemCodes.size}`);
           }
 
-          // Xử lý từng sale trong order - BỎ QUA các items có sản phẩm không tồn tại (404)
+          // Xử lý từng sale trong order - LƯU TẤT CẢ, đánh dấu statusAsys = false nếu sản phẩm không tồn tại (404)
           if (order.sales && order.sales.length > 0) {
             for (const saleItem of order.sales) {
               try {
-                // Bỏ qua sale item nếu sản phẩm không tồn tại trong Loyalty API (404)
+                // Kiểm tra xem sản phẩm có tồn tại trong Loyalty API không
                 const itemCode = saleItem.itemCode?.trim();
-                if (itemCode && notFoundItemCodes.has(itemCode)) {
-                  this.logger.warn(`[SalesService] Bỏ qua sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - Sản phẩm không tồn tại trong Loyalty API`);
-                  continue;
+                const isNotFound = itemCode && notFoundItemCodes.has(itemCode);
+                // Set statusAsys: false nếu không tồn tại (404), true nếu tồn tại
+                const statusAsys = !isNotFound;
+                
+                if (isNotFound) {
+                  this.logger.warn(`[SalesService] Sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - Sản phẩm không tồn tại trong Loyalty API (404), sẽ lưu với statusAsys = false`);
                 }
                 
                 // Kiểm tra xem sale đã tồn tại chưa (dựa trên docCode, itemCode)
@@ -1913,6 +1916,7 @@ export class SalesService {
                   if (voucherAmount !== undefined && voucherAmount > 0) {
                     existingSale.thanhToanVoucher = voucherAmount;
                   }
+                  existingSale.statusAsys = statusAsys; // Update statusAsys
                   await this.saleRepository.save(existingSale);
                 } else {
                   // Tạo sale mới
@@ -1957,6 +1961,7 @@ export class SalesService {
                     thanhToanVoucher: voucherAmount && voucherAmount > 0 ? voucherAmount : undefined,
                     customer: customer,
                     isProcessed: false,
+                    statusAsys: statusAsys, // Set statusAsys: true nếu sản phẩm tồn tại, false nếu 404
                   } as Partial<Sale>);
                   await this.saleRepository.save(newSale);
                   salesCount++;
