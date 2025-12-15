@@ -10,7 +10,6 @@ export class SalesController {
   async findAll(
     @Query('brand') brand?: string,
     @Query('processed') processed?: string,
-    @Query('statusAsys') statusAsys?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('date') date?: string, // Format: DDMMMYYYY (ví dụ: 04DEC2025)
@@ -22,7 +21,6 @@ export class SalesController {
     return this.salesService.findAllOrders({
       brand,
       isProcessed: processed === 'true' ? true : processed === 'false' ? false : undefined,
-      statusAsys: statusAsys === 'true' ? true : statusAsys === 'false' ? false : undefined,
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 50,
       date, // Pass date parameter
@@ -37,17 +35,11 @@ export class SalesController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('date') date?: string,
-    @Query('orderCode') orderCode?: string,
-    @Query('partnerCode') partnerCode?: string,
-    @Query('faceStatus') faceStatus?: 'yes' | 'no',
   ) {
     return this.salesService.getAllGiaiTrinhFaceId({
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 10,
       date,
-      orderCode,
-      partnerCode,
-      faceStatus,
     });
   }
 
