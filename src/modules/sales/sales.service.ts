@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
@@ -8,6 +8,7 @@ import { ProductItem } from '../../entities/product-item.entity';
 import { Invoice } from '../../entities/invoice.entity';
 import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
+import { CheckFaceId } from '../../entities/check-face-id.entity';
 import { InvoicePrintService } from '../../services/invoice-print.service';
 import { InvoiceService } from '../../services/invoice.service';
 import { ZappyApiService } from '../../services/zappy-api.service';
@@ -118,7 +119,7 @@ export class SalesService {
    */
   private mapBrandToCode(brand: string | null | undefined): string {
     if (!brand) return 'MN'; // Default
-    
+
     const brandLower = brand.toLowerCase().trim();
     const brandMap: Record<string, string> = {
       'menard': 'MN',
@@ -128,7 +129,7 @@ export class SalesService {
       'labhair': 'LHV',
       'yaman': 'BTH',
     };
-    
+
     return brandMap[brandLower] || 'MN'; // Default to MN
   }
 
@@ -154,23 +155,23 @@ export class SalesService {
       // Fallback: dùng ngày hiện tại
       docDate = new Date();
     }
-    
+
     const year = docDate.getFullYear();
     const month = docDate.getMonth() + 1; // getMonth() trả về 0-11
-    
+
     // Lấy 2 số cuối của năm
     const yy = String(year).slice(-2);
     // Format tháng thành 2 số (01, 02, ..., 12)
     const mm = String(month).padStart(2, '0');
-    
+
     // Ưu tiên lấy brand code từ customer.brand
-    const brand = orderData.customer?.brand 
+    const brand = orderData.customer?.brand
       || orderData.sales?.[0]?.customer?.brand
       || '';
-    
+
     // Map brand name sang brand code (menard → MN, f3 → FBV, etc.)
     const brandCode = this.mapBrandToCode(brand);
-    
+
     return `${yy}${mm}${brandCode}.TKDV`;
   }
 
@@ -183,13 +184,13 @@ export class SalesService {
    */
   private convertPromCodeToTangSp(promCode: string | null | undefined): string | null {
     if (!promCode || promCode.trim() === '') return null;
-    
+
     const parts = promCode.split('-');
     if (parts.length < 2) return null;
-    
+
     const part1 = parts[0].trim(); // "PRMN.020255"
     const part2 = parts[1].trim(); // "R510ECOM"
-    
+
     // Lấy 2 ký tự cuối của phần trước dấu chấm từ part1
     const dotIndex = part1.indexOf('.');
     let mnPart = '';
@@ -199,13 +200,13 @@ export class SalesService {
         mnPart = beforeDot.substring(beforeDot.length - 2); // "MN"
       }
     }
-    
+
     // Parse số từ part2: R510ECOM → tìm số 5 và 10
     // Quy tắc: 5 → 25, 10 → 10
     // Cần tìm "10" trước (2 chữ số), sau đó tìm "5" (1 chữ số)
     const numbers: string[] = [];
     const part2Upper = part2.toUpperCase();
-    
+
     // Tìm tất cả số "10" trước (2 chữ số)
     let searchIndex = 0;
     while (searchIndex < part2Upper.length - 1) {
@@ -217,13 +218,13 @@ export class SalesService {
         break;
       }
     }
-    
+
     // Tìm tất cả số "5" (1 chữ số, nhưng không phải là phần của "10")
     searchIndex = 0;
     while (searchIndex < part2Upper.length) {
       if (part2Upper[searchIndex] === '5') {
         // Kiểm tra xem có phải là phần của "10" không (trước đó là "1" hoặc sau đó là "0")
-        const isPartOf10 = 
+        const isPartOf10 =
           (searchIndex > 0 && part2Upper[searchIndex - 1] === '1') ||
           (searchIndex < part2Upper.length - 1 && part2Upper[searchIndex + 1] === '0');
         if (!isPartOf10) {
@@ -232,19 +233,19 @@ export class SalesService {
       }
       searchIndex++;
     }
-    
+
     // Sắp xếp: 25 trước, 10 sau
     const sortedNumbers = numbers.sort((a, b) => {
       if (a === '25' && b === '10') return -1;
       if (a === '10' && b === '25') return 1;
       return 0;
     });
-    
+
     // Kết hợp: số + MN + .TANGSP
     if (sortedNumbers.length > 0 && mnPart) {
       return `${sortedNumbers.join('')}${mnPart}.TANGSP`;
     }
-    
+
     return null;
   }
 
@@ -347,20 +348,20 @@ export class SalesService {
     if (productType === 'DIVU') {
       return 'VIP DV MAT';
     }
-    
+
     // Nếu productType == "VOUC" → "VIP VC MP"
     if (productType === 'VOUC') {
       return 'VIP VC MP';
     }
-    
+
     // Nếu materialCode bắt đầu bằng "E." hoặc "VC" có trong code hoặc (trackInventory == False và trackSerial == True)
     const materialCodeStr = materialCode || '';
     const codeStr = code || '';
     // Kiểm tra "VC" trong materialCode, code, hoặc itemCode (không phân biệt hoa thường)
-    const hasVC = 
+    const hasVC =
       materialCodeStr.toUpperCase().includes('VC') ||
       codeStr.toUpperCase().includes('VC');
-    
+
     if (
       materialCodeStr.startsWith('E.') ||
       hasVC ||
@@ -368,7 +369,7 @@ export class SalesService {
     ) {
       return 'VIP VC MP';
     }
-    
+
     // Ngược lại
     return 'VIP MP';
   }
@@ -405,13 +406,15 @@ export class SalesService {
     private fastApiInvoiceRepository: Repository<FastApiInvoice>,
     @InjectRepository(DailyCashio)
     private dailyCashioRepository: Repository<DailyCashio>,
+    @InjectRepository(CheckFaceId)
+    private checkFaceIdRepository: Repository<CheckFaceId>,
     private invoicePrintService: InvoicePrintService,
     private invoiceService: InvoiceService,
     private httpService: HttpService,
     private zappyApiService: ZappyApiService,
     private fastApiService: FastApiService,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
-  ) {}
+  ) { }
 
   async findAll(options: {
     brand?: string;
@@ -471,7 +474,7 @@ export class SalesService {
     if (date && !search) {
       try {
         const orders = await this.zappyApiService.getDailySales(date);
-        
+
         // Filter by brand nếu có
         let filteredOrders = orders;
         if (brand) {
@@ -479,7 +482,7 @@ export class SalesService {
             (order) => order.customer.brand?.toLowerCase() === brand.toLowerCase()
           );
         }
-        
+
         // Filter by search query nếu có
         if (search && search.trim() !== '') {
           const searchLower = search.trim().toLowerCase();
@@ -552,7 +555,7 @@ export class SalesService {
             const maBp = department?.ma_bp || sale.branchCode || null;
             const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBp);
             const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
-            
+
             // Tính toán maCtkmTangHang: nếu là hàng tặng (giaBan = 0 và tienHang = 0 và revenue = 0)
             const tienHang = sale.tienHang || sale.linetotal || sale.revenue || 0;
             const qty = sale.qty || 0;
@@ -562,7 +565,7 @@ export class SalesService {
             }
             const revenue = sale.revenue || 0;
             const isTangHang = giaBan === 0 && tienHang === 0 && revenue === 0;
-            
+
             // Quy tắc: Nếu ordertype_name = "06. Đầu tư" và là hàng tặng → ma_ctkm_th = "TT DAU TU"
             let maCtkmTangHang: string | null = null;
             if (isTangHang) {
@@ -582,7 +585,7 @@ export class SalesService {
                 maCtkmTangHang = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
               }
             }
-            
+
             return {
               ...sale,
               promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
@@ -607,26 +610,26 @@ export class SalesService {
         enrichedOrders.forEach(order => {
           totalRows += (order.sales && order.sales.length > 0) ? order.sales.length : (order.totalItems > 0 ? order.totalItems : 1);
         });
-        
+
         const paginationStartIndex = (page - 1) * limit;
         const paginationEndIndex = paginationStartIndex + limit;
-        
+
         // Paginate orders dựa trên số rows
         let currentRowCount = 0;
         const paginatedOrders: typeof enrichedOrders = [];
-        
+
         for (const order of enrichedOrders) {
           const orderRowCount = (order.sales && order.sales.length > 0) ? order.sales.length : (order.totalItems > 0 ? order.totalItems : 1);
           const orderStartRow = currentRowCount;
           const orderEndRow = currentRowCount + orderRowCount;
-          
+
           // Nếu order này có overlap với phạm vi pagination, thêm vào
           if (orderEndRow > paginationStartIndex && orderStartRow < paginationEndIndex) {
             paginatedOrders.push(order);
           }
-          
+
           currentRowCount += orderRowCount;
-          
+
           // Nếu đã vượt quá phạm vi pagination, dừng lại
           if (currentRowCount >= paginationEndIndex) {
             break;
@@ -656,18 +659,18 @@ export class SalesService {
     const countQuery = this.saleRepository
       .createQueryBuilder('sale')
       .select('COUNT(sale.id)', 'count');
-    
+
     if (isProcessed !== undefined) {
       countQuery.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
     }
-    
+
     // Luôn join với customer để có thể search
     countQuery.leftJoin('sale.customer', 'customer');
-    
+
     if (brand) {
       countQuery.andWhere('customer.brand = :brand', { brand });
     }
-    
+
     // Thêm search query filter
     if (search && search.trim() !== '') {
       const searchPattern = `%${search.trim().toLowerCase()}%`;
@@ -676,7 +679,7 @@ export class SalesService {
         { search: searchPattern }
       );
     }
-    
+
     // Date filter cho count query - PHẢI XỬ LÝ TRƯỚC KHI THỰC THI COUNT QUERY
     // Ưu tiên dateFrom/dateTo (date range), nếu không có thì dùng date (single day)
     if (dateFrom || dateTo) {
@@ -722,7 +725,7 @@ export class SalesService {
         }
       }
     }
-    
+
     const totalResult = await countQuery.getRawOne();
     const totalSaleItems = parseInt(totalResult?.count || '0', 10);
 
@@ -753,11 +756,11 @@ export class SalesService {
     if (!query.expressionMap.joinAttributes.find(j => j.alias.name === 'customer')) {
       query = query.leftJoin('sale.customer', 'customer');
     }
-    
+
     if (brand) {
       query = query.andWhere('customer.brand = :brand', { brand });
     }
-    
+
     // Thêm search query filter
     if (search && search.trim() !== '') {
       const searchPattern = `%${search.trim().toLowerCase()}%`;
@@ -766,7 +769,7 @@ export class SalesService {
         { search: searchPattern }
       );
     }
-    
+
     // Luôn select customer fields
     query = query
       .addSelect('customer.code', 'customer_code')
@@ -831,7 +834,7 @@ export class SalesService {
     // Nhưng phải giới hạn để tránh lấy quá nhiều
     const estimatedSalesNeeded = Math.ceil(limit * 2); // Ước tính 2x limit để đảm bảo có đủ
     const queryStartIndex = (page - 1) * limit;
-    
+
     query = query
       .orderBy('sale.docDate', 'DESC')
       .addOrderBy('sale.docCode', 'ASC')
@@ -862,7 +865,7 @@ export class SalesService {
     // Đã đếm totalSaleItems từ count query ở trên
     for (const sale of allSales) {
       const docCode = sale.sale_docCode;
-      
+
       if (!orderMap.has(docCode)) {
         orderMap.set(docCode, {
           docCode: sale.sale_docCode,
@@ -887,7 +890,7 @@ export class SalesService {
       order.totalRevenue += Number(sale.sale_revenue || 0);
       order.totalQty += Number(sale.sale_qty || 0);
       order.totalItems += 1;
-      
+
       // Nếu có ít nhất 1 sale chưa xử lý thì đơn hàng chưa xử lý
       if (!sale.sale_isProcessed) {
         order.isProcessed = false;
@@ -909,10 +912,10 @@ export class SalesService {
         .where('cashio.so_code IN (:...docCodes)', { docCodes })
         .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
         .getMany();
-      
+
       // Group cashio records by docCode (so_code hoặc master_code match với docCode)
       docCodes.forEach(docCode => {
-        const matchingCashios = cashioRecords.filter(c => 
+        const matchingCashios = cashioRecords.filter(c =>
           c.so_code === docCode || c.master_code === docCode
         );
         if (matchingCashios.length > 0) {
@@ -928,7 +931,7 @@ export class SalesService {
       const ecoinCashio = cashioRecords.find(c => c.fop_syscode === 'ECOIN');
       const voucherCashio = cashioRecords.find(c => c.fop_syscode === 'VOUCHER');
       const selectedCashio = ecoinCashio || voucherCashio || cashioRecords[0] || null;
-      
+
       return {
         ...order,
         cashioData: cashioRecords.length > 0 ? cashioRecords : null,
@@ -945,33 +948,33 @@ export class SalesService {
     const total = totalSaleItems; // Tổng số sale items (rows)
     const paginationStartIndex = (page - 1) * limit;
     const paginationEndIndex = paginationStartIndex + limit;
-    
+
     // Tính toán số orders cần lấy dựa trên số rows
     // Mỗi order có thể có nhiều sale items, nên cần lấy đủ orders để có đủ rows
     // Nhưng phải đảm bảo tổng số rows không vượt quá limit
     let currentRowCount = 0;
     const paginatedOrders: typeof enrichedOrders = [];
-    
+
     for (const order of enrichedOrders) {
       // Tính số rows của order này
       const orderRowCount = order.totalItems > 0 ? order.totalItems : 1;
-      
+
       // Kiểm tra xem order này có nằm trong phạm vi pagination không
       // Order được thêm nếu có ít nhất 1 row nằm trong phạm vi [paginationStartIndex, paginationEndIndex)
       const orderStartRow = currentRowCount;
       const orderEndRow = currentRowCount + orderRowCount;
-      
+
       // Nếu order này có overlap với phạm vi pagination, thêm vào
       if (orderEndRow > paginationStartIndex && orderStartRow < paginationEndIndex) {
         // Tính số rows còn lại cần lấy
         const remainingRowsNeeded = paginationEndIndex - Math.max(currentRowCount, paginationStartIndex);
-        
+
         // Nếu order này có nhiều sale items hơn số rows còn lại cần lấy, cần giới hạn
         if (orderRowCount > remainingRowsNeeded && order.sales && order.sales.length > 0) {
           // Tính index bắt đầu và kết thúc của sale items cần lấy trong order này
           const startOffset = Math.max(0, paginationStartIndex - currentRowCount);
           const endOffset = startOffset + remainingRowsNeeded;
-          
+
           // Tạo order mới với sales đã được giới hạn
           const limitedOrder = {
             ...order,
@@ -983,9 +986,9 @@ export class SalesService {
           paginatedOrders.push(order);
         }
       }
-      
+
       currentRowCount += orderRowCount;
-      
+
       // Nếu đã vượt quá phạm vi pagination, dừng lại
       if (currentRowCount >= paginationEndIndex) {
         break;
@@ -1033,7 +1036,7 @@ export class SalesService {
       .where('cashio.so_code = :docCode', { docCode })
       .orWhere('cashio.master_code = :docCode', { docCode })
       .getMany();
-    
+
     // Ưu tiên ECOIN, sau đó VOUCHER, sau đó các loại khác
     const ecoinCashio = cashioRecords.find(c => c.fop_syscode === 'ECOIN');
     const voucherCashio = cashioRecords.find(c => c.fop_syscode === 'VOUCHER');
@@ -1047,14 +1050,14 @@ export class SalesService {
           .filter((code): code is string => !!code && code.trim() !== '')
       )
     );
-    
+
     // Load tất cả products một lần
     const products = itemCodes.length > 0
       ? await this.productItemRepository.find({
-          where: { maERP: In(itemCodes) },
-        })
+        where: { maERP: In(itemCodes) },
+      })
       : [];
-    
+
     // Tạo map để lookup nhanh
     const productMap = new Map<string, ProductItem>();
     products.forEach((product) => {
@@ -1062,7 +1065,7 @@ export class SalesService {
         productMap.set(product.maERP, product);
       }
     });
-    
+
     // Enrich sales với product information từ database
     const enrichedSales = sales.map((sale) => ({
       ...sale,
@@ -1090,7 +1093,7 @@ export class SalesService {
     const enrichedSalesWithLoyalty = enrichedSales.map((sale) => {
       const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
       const existingProduct = sale.product;
-      
+
       // Nếu có product từ Loyalty API, merge thông tin (ưu tiên dvt từ Loyalty API)
       if (loyaltyProduct) {
         return {
@@ -1112,7 +1115,7 @@ export class SalesService {
           },
         };
       }
-      
+
       return sale;
     });
 
@@ -1146,7 +1149,7 @@ export class SalesService {
       const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
       const maBp = department?.ma_bp || sale.branchCode || null;
       const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBp);
-      
+
       return {
         ...sale,
         department: department,
@@ -1189,8 +1192,7 @@ export class SalesService {
         };
       } catch (error) {
         this.logger.error(
-          `Lỗi khi lấy promotion cho promCode ${promCode}: ${
-            (error as any)?.message || error
+          `Lỗi khi lấy promotion cho promCode ${promCode}: ${(error as any)?.message || error
           }`,
         );
         // Nếu không tìm thấy promotion, lưu null để không ảnh hưởng đến flow
@@ -1213,7 +1215,7 @@ export class SalesService {
       // Tính lại muaHangCkVip nếu cần (giống logic trong buildFastApiInvoiceData)
       const ck03_nt = Number(sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0);
       let muaHangCkVip = sale.muaHangCkVip || '';
-      
+
       if (ck03_nt > 0) {
         // Lấy brand từ customer
         const brand = firstSale.customer?.brand || '';
@@ -1222,7 +1224,7 @@ export class SalesService {
         if (brandLower === 'facialbar') {
           brandLower = 'f3';
         }
-        
+
         // Nếu là f3, luôn tính lại theo logic cũ (override giá trị cũ nếu có)
         if (brandLower === 'f3') {
           const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
@@ -1274,13 +1276,13 @@ export class SalesService {
 
   async printOrder(docCode: string): Promise<any> {
     const orderData = await this.findByOrderCode(docCode);
-    
+
     // In hóa đơn
     const printResult = await this.invoicePrintService.printInvoiceFromOrder(orderData);
-    
+
     // Tạo và lưu invoice vào database
     const invoice = await this.createInvoiceFromOrder(orderData, printResult);
-    
+
     // Đánh dấu tất cả các sale trong đơn hàng là đã xử lý
     // Đảm bảo luôn được gọi ngay cả khi có lỗi ở trên
     try {
@@ -1289,7 +1291,7 @@ export class SalesService {
       // Log lỗi nhưng không throw để không ảnh hưởng đến response
       console.error(`Lỗi khi đánh dấu đơn hàng ${docCode} là đã xử lý:`, error);
     }
-    
+
     return {
       success: true,
       message: `In hóa đơn ${docCode} thành công`,
@@ -1368,7 +1370,7 @@ export class SalesService {
         if (data.maKh) existing.maKh = data.maKh;
         if (data.tenKh) existing.tenKh = data.tenKh;
         if (data.ngayCt) existing.ngayCt = data.ngayCt;
-        
+
         const saved = await this.fastApiInvoiceRepository.save(existing);
         return Array.isArray(saved) ? saved[0] : saved;
       } else {
@@ -1384,7 +1386,7 @@ export class SalesService {
           guid: data.guid ?? null,
           fastApiResponse: data.fastApiResponse ?? null,
         } as Partial<FastApiInvoice>);
-        
+
         const saved = await this.fastApiInvoiceRepository.save(fastApiInvoice);
         return Array.isArray(saved) ? saved[0] : saved;
       }
@@ -1443,7 +1445,7 @@ export class SalesService {
         try {
           if (invoice.printResponse) {
             const printResponse = JSON.parse(invoice.printResponse);
-            
+
             // Tìm trong Message (là JSON string chứa array)
             if (printResponse.Message) {
               try {
@@ -1469,7 +1471,7 @@ export class SalesService {
                 // Message không phải JSON string, bỏ qua
               }
             }
-            
+
             // Thử tìm trong Data nếu có
             if (!docCode && printResponse.Data && Array.isArray(printResponse.Data) && printResponse.Data.length > 0) {
               const data = printResponse.Data[0];
@@ -1518,7 +1520,7 @@ export class SalesService {
       where: { key: orderData.docCode },
       relations: ['items'],
     });
-    
+
     if (existingInvoice) {
       // Cập nhật invoice đã tồn tại
       existingInvoice.isPrinted = true;
@@ -1578,7 +1580,7 @@ export class SalesService {
     const month = (invoiceDate.getMonth() + 1).toString().padStart(2, '0');
     const year = invoiceDate.getFullYear();
     const invoiceDateStr = `${day}/${month}/${year}`;
-    
+
     // Tạo invoice DTO
     const invoiceDto = {
       key: orderData.docCode, // Sử dụng docCode làm key
@@ -1621,7 +1623,7 @@ export class SalesService {
     try {
       // Lấy dữ liệu từ Zappy API
       const orders = await this.zappyApiService.getDailySales(date);
-      
+
       // Lấy dữ liệu cash/voucher từ get_daily_cash để enrich
       let cashData: any[] = [];
       try {
@@ -1751,7 +1753,7 @@ export class SalesService {
           // Lấy cash/voucher data cho order này
           const orderCashData = cashMapBySoCode.get(order.docCode) || [];
           const voucherData = orderCashData.filter((cash) => cash.fop_syscode === 'VOUCHER');
-          
+
           // Collect tất cả itemCodes từ order để fetch products từ Loyalty API và check 404
           // Đảm bảo trim ngay từ đầu để consistency
           const orderItemCodes = Array.from(
@@ -1765,18 +1767,18 @@ export class SalesService {
           // Fetch products từ Loyalty API để check sản phẩm không tồn tại (404)
           // CHỈ bỏ qua khi có 404 error ở cả 2 endpoint, không phải khi response thành công nhưng không có data
           const notFoundItemCodes = new Set<string>();
-          
+
           if (orderItemCodes.length > 0) {
             this.logger.log(`[SalesService] Đang check ${orderItemCodes.length} sản phẩm từ Loyalty API cho order ${order.docCode}...`);
             await Promise.all(
               orderItemCodes.map(async (trimmedItemCode) => {
                 let isNotFound = false;
-                
+
                 // Thử endpoint /products/code/ trước
                 try {
                   const response = await this.httpService.axiosRef.get(
                     `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(trimmedItemCode)}`,
-                    { 
+                    {
                       headers: { accept: 'application/json' },
                       timeout: 5000,
                     },
@@ -1799,7 +1801,7 @@ export class SalesService {
                     return; // Không phải 404, không check fallback
                   }
                 }
-                
+
                 // Nếu đến đây, có nghĩa là:
                 // 1. /products/code/ trả về 200 nhưng không có data, HOẶC
                 // 2. /products/code/ trả về 404
@@ -1807,7 +1809,7 @@ export class SalesService {
                 try {
                   const fallbackResponse = await this.httpService.axiosRef.get(
                     `https://loyaltyapi.vmt.vn/products/material-code/${encodeURIComponent(trimmedItemCode)}`,
-                    { 
+                    {
                       headers: { accept: 'application/json' },
                       timeout: 5000,
                     },
@@ -1831,7 +1833,7 @@ export class SalesService {
                     this.logger.warn(`[SalesService] Lỗi khi fetch product ${trimmedItemCode} từ /products/material-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`);
                   }
                 }
-                
+
                 // Đánh dấu not found khi:
                 // 1. Cả 2 endpoint đều 404, HOẶC
                 // 2. Cả 2 endpoint đều trả về 200 nhưng không có data
@@ -1853,11 +1855,11 @@ export class SalesService {
                 const isNotFound = itemCode && notFoundItemCodes.has(itemCode);
                 // Set statusAsys: false nếu không tồn tại (404), true nếu tồn tại
                 const statusAsys = !isNotFound;
-                
+
                 if (isNotFound) {
                   this.logger.warn(`[SalesService] Sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - Sản phẩm không tồn tại trong Loyalty API (404), sẽ lưu với statusAsys = false`);
                 }
-                
+
                 // Kiểm tra xem sale đã tồn tại chưa (dựa trên docCode, itemCode)
                 const existingSale = await this.saleRepository.findOne({
                   where: {
@@ -1866,7 +1868,7 @@ export class SalesService {
                     customer: { id: customer.id },
                   },
                 });
-                
+
                 // Enrich voucher data từ get_daily_cash
                 let voucherRefno: string | undefined;
                 let voucherAmount: number | undefined;
@@ -2040,7 +2042,7 @@ export class SalesService {
       } catch (error: any) {
         // Lấy thông báo lỗi chính xác từ Fast API response
         let errorMessage = 'Tạo hóa đơn thất bại';
-        
+
         if (error?.response?.data) {
           // Fast API trả về lỗi trong response.data
           const errorData = error.response.data;
@@ -2056,7 +2058,7 @@ export class SalesService {
         } else if (error?.message) {
           errorMessage = error.message;
         }
-        
+
         // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
         await this.saveFastApiInvoice({
           docCode,
@@ -2069,9 +2071,9 @@ export class SalesService {
           guid: null,
           fastApiResponse: JSON.stringify(error?.response?.data || error),
         });
-        
+
         this.logger.error(`Invoice creation failed for order ${docCode}: ${errorMessage}`);
-        
+
         return {
           success: false,
           message: errorMessage,
@@ -2080,13 +2082,13 @@ export class SalesService {
       }
 
       // Check response từ Fast API - nếu status === 0 thì coi là lỗi
-      const isSuccess = Array.isArray(result) 
+      const isSuccess = Array.isArray(result)
         ? result.every((item: any) => item.status !== 0)
         : (result?.status !== 0 && result?.status !== undefined);
 
       // Lấy thông tin từ response
-      const responseStatus = Array.isArray(result) && result.length > 0 
-        ? result[0].status 
+      const responseStatus = Array.isArray(result) && result.length > 0
+        ? result[0].status
         : result?.status ?? 0;
       const responseMessage = Array.isArray(result) && result.length > 0
         ? result[0].message || result[0].error || 'Tạo hóa đơn thất bại'
@@ -2111,14 +2113,14 @@ export class SalesService {
       if (!isSuccess) {
         // Có lỗi từ Fast API
         this.logger.error(`Invoice creation failed for order ${docCode}: ${responseMessage}`);
-        
+
         // Kiểm tra nếu là lỗi duplicate key - có thể đơn hàng đã tồn tại trong Fast API
         const isDuplicateError = responseMessage && (
           responseMessage.toLowerCase().includes('duplicate') ||
           responseMessage.toLowerCase().includes('primary key constraint') ||
           responseMessage.toLowerCase().includes('pk_d81')
         );
-        
+
         if (isDuplicateError) {
           // Cập nhật status thành 1 (thành công) vì có thể đã tồn tại trong Fast API
           await this.saveFastApiInvoice({
@@ -2132,7 +2134,7 @@ export class SalesService {
             guid: responseGuid || null,
             fastApiResponse: JSON.stringify(result),
           });
-          
+
           return {
             success: true,
             message: `Đơn hàng ${docCode} đã tồn tại trong Fast API (có thể đã được tạo trước đó)`,
@@ -2140,7 +2142,7 @@ export class SalesService {
             alreadyExists: true,
           };
         }
-        
+
         return {
           success: false,
           message: responseMessage,
@@ -2160,7 +2162,7 @@ export class SalesService {
     } catch (error: any) {
       this.logger.error(`Error creating invoice for order ${docCode}: ${error?.message || error}`);
       this.logger.error(`Error stack: ${error?.stack || 'No stack trace'}`);
-      
+
       throw error;
     }
   }
@@ -2208,543 +2210,543 @@ export class SalesService {
       const ngayCt = formatDateISO(docDate);
       const ngayLct = formatDateISO(docDate);
 
-    // Lọc bỏ các sale item không có dvt trước khi xử lý
-    const salesWithDvt = (orderData.sales || []).filter((sale: any) => {
-      const dvt = sale.dvt || sale.product?.dvt || sale.product?.unit;
-      return dvt && String(dvt).trim() !== '';
-    });
+      // Lọc bỏ các sale item không có dvt trước khi xử lý
+      const salesWithDvt = (orderData.sales || []).filter((sale: any) => {
+        const dvt = sale.dvt || sale.product?.dvt || sale.product?.unit;
+        return dvt && String(dvt).trim() !== '';
+      });
 
-    // Nếu không còn sale item nào có dvt, throw error để bỏ qua order này
-    if (salesWithDvt.length === 0) {
-      throw new Error(`Đơn hàng ${orderData.docCode} không có sale item nào có đơn vị tính (dvt), bỏ qua không đồng bộ`);
-    }
-
-    // Xử lý từng sale với index để tính dong
-    const detail = await Promise.all(salesWithDvt.map(async (sale: any, index: number) => {
-      const tienHang = toNumber(sale.tienHang || sale.linetotal || sale.revenue, 0);
-      const qty = toNumber(sale.qty, 0);
-      let giaBan = toNumber(sale.giaBan, 0);
-      if (tienHang > 0 && qty > 0) {
-        giaBan = tienHang / qty;
+      // Nếu không còn sale item nào có dvt, throw error để bỏ qua order này
+      if (salesWithDvt.length === 0) {
+        throw new Error(`Đơn hàng ${orderData.docCode} không có sale item nào có đơn vị tính (dvt), bỏ qua không đồng bộ`);
       }
 
-      // Tính toán các chiết khấu
-      const ck01_nt = toNumber(sale.other_discamt || sale.chietKhauMuaHangGiamGia, 0);
-      const ck02_nt = toNumber(sale.chietKhauCkTheoChinhSach, 0);
-      const ck03_nt = toNumber(sale.chietKhauMuaHangCkVip || sale.grade_discamt, 0);
-      
-      // Tính VIP type nếu có chiết khấu VIP
-      // Lấy brand từ orderData để phân biệt logic VIP
-      const brand = orderData.customer?.brand || orderData.brand || '';
-      let brandLower = (brand || '').toLowerCase().trim();
-      // Normalize: "facialbar" → "f3"
-      if (brandLower === 'facialbar') {
-        brandLower = 'f3';
-      }
-      
-      let maCk03 = sale.muaHangCkVip || '';
-      if (ck03_nt > 0) {
-        // Nếu là f3, luôn tính lại theo logic cũ (override giá trị cũ nếu có)
+      // Xử lý từng sale với index để tính dong
+      const detail = await Promise.all(salesWithDvt.map(async (sale: any, index: number) => {
+        const tienHang = toNumber(sale.tienHang || sale.linetotal || sale.revenue, 0);
+        const qty = toNumber(sale.qty, 0);
+        let giaBan = toNumber(sale.giaBan, 0);
+        if (tienHang > 0 && qty > 0) {
+          giaBan = tienHang / qty;
+        }
+
+        // Tính toán các chiết khấu
+        const ck01_nt = toNumber(sale.other_discamt || sale.chietKhauMuaHangGiamGia, 0);
+        const ck02_nt = toNumber(sale.chietKhauCkTheoChinhSach, 0);
+        const ck03_nt = toNumber(sale.chietKhauMuaHangCkVip || sale.grade_discamt, 0);
+
+        // Tính VIP type nếu có chiết khấu VIP
+        // Lấy brand từ orderData để phân biệt logic VIP
+        const brand = orderData.customer?.brand || orderData.brand || '';
+        let brandLower = (brand || '').toLowerCase().trim();
+        // Normalize: "facialbar" → "f3"
+        if (brandLower === 'facialbar') {
+          brandLower = 'f3';
+        }
+
+        let maCk03 = sale.muaHangCkVip || '';
+        if (ck03_nt > 0) {
+          // Nếu là f3, luôn tính lại theo logic cũ (override giá trị cũ nếu có)
+          if (brandLower === 'f3') {
+            // Logic cũ cho f3: DIVU → "FBV CKVIP DV", còn lại → "FBV CKVIP SP"
+            const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
+            if (productType === 'DIVU') {
+              maCk03 = 'FBV CKVIP DV';
+            } else {
+              maCk03 = 'FBV CKVIP SP';
+            }
+          } else if (!maCk03) {
+            // Logic mới cho các brand khác (menard, labhair, yaman) - chỉ tính nếu chưa có
+            const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
+            const materialCode = sale.product?.maVatTu || sale.product?.materialCode || sale.itemCode || null;
+            const code = sale.itemCode || null;
+            const trackInventory = sale.trackInventory ?? sale.product?.trackInventory ?? null;
+            const trackSerial = sale.trackSerial ?? sale.product?.trackSerial ?? null;
+            maCk03 = this.calculateVipType(productType, materialCode, code, trackInventory, trackSerial);
+          }
+        }
+        // ma_ck04: Thanh toán coupon
+        const ck04_nt = toNumber(sale.chietKhauThanhToanCoupon || sale.chietKhau09, 0);
+        // ma_ck15: Voucher DP1 dự phòng - Ưu tiên kiểm tra trước
+        let ck15_nt_voucherDp1 = toNumber(sale.chietKhauVoucherDp1, 0);
+        const paidByVoucher = toNumber(sale.chietKhauThanhToanVoucher || sale.paid_by_voucher_ecode_ecoin_bp, 0);
+
+        // Kiểm tra các điều kiện để xác định voucher dự phòng
+        const pkgCode = (sale as any).pkg_code || (sale as any).pkgCode || null;
+        const promCode = sale.promCode || sale.prom_code || null;
+        const soSource = sale.order_source || (sale as any).so_source || null;
+        const productType = sale.productType || sale.producttype || sale.product?.productType || sale.product?.producttype || null;
+
+        const isShopee = soSource && String(soSource).toUpperCase() === 'SHOPEE';
+        const hasPkgCode = pkgCode && pkgCode.trim() !== '';
+        const hasPromCode = promCode && promCode.trim() !== '';
+
+        // Xác định lại voucher dự phòng theo logic mới (để xử lý dữ liệu cũ đã sync với logic cũ)
+        let isVoucherDuPhong = false;
         if (brandLower === 'f3') {
-          // Logic cũ cho f3: DIVU → "FBV CKVIP DV", còn lại → "FBV CKVIP SP"
-          const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
-          if (productType === 'DIVU') {
-            maCk03 = 'FBV CKVIP DV';
-          } else {
-            maCk03 = 'FBV CKVIP SP';
-          }
-        } else if (!maCk03) {
-          // Logic mới cho các brand khác (menard, labhair, yaman) - chỉ tính nếu chưa có
-          const productType = sale.productType || sale.product?.productType || sale.product?.producttype || null;
-          const materialCode = sale.product?.maVatTu || sale.product?.materialCode || sale.itemCode || null;
-          const code = sale.itemCode || null;
-          const trackInventory = sale.trackInventory ?? sale.product?.trackInventory ?? null;
-          const trackSerial = sale.trackSerial ?? sale.product?.trackSerial ?? null;
-          maCk03 = this.calculateVipType(productType, materialCode, code, trackInventory, trackSerial);
+          // Với F3: Chỉ khi so_source = "SHOPEE" mới là voucher dự phòng
+          isVoucherDuPhong = isShopee;
+        } else {
+          // Với các brand khác: SHOPEE hoặc (có prom_code và không có pkg_code)
+          isVoucherDuPhong = isShopee || (hasPromCode && !hasPkgCode);
         }
-      }
-      // ma_ck04: Thanh toán coupon
-      const ck04_nt = toNumber(sale.chietKhauThanhToanCoupon || sale.chietKhau09, 0);
-      // ma_ck15: Voucher DP1 dự phòng - Ưu tiên kiểm tra trước
-      let ck15_nt_voucherDp1 = toNumber(sale.chietKhauVoucherDp1, 0);
-      const paidByVoucher = toNumber(sale.chietKhauThanhToanVoucher || sale.paid_by_voucher_ecode_ecoin_bp, 0);
-      
-      // Kiểm tra các điều kiện để xác định voucher dự phòng
-      const pkgCode = (sale as any).pkg_code || (sale as any).pkgCode || null;
-      const promCode = sale.promCode || sale.prom_code || null;
-      const soSource = sale.order_source || (sale as any).so_source || null;
-      const productType = sale.productType || sale.producttype || sale.product?.productType || sale.product?.producttype || null;
-      
-      const isShopee = soSource && String(soSource).toUpperCase() === 'SHOPEE';
-      const hasPkgCode = pkgCode && pkgCode.trim() !== '';
-      const hasPromCode = promCode && promCode.trim() !== '';
-      
-      // Xác định lại voucher dự phòng theo logic mới (để xử lý dữ liệu cũ đã sync với logic cũ)
-      let isVoucherDuPhong = false;
-      if (brandLower === 'f3') {
-        // Với F3: Chỉ khi so_source = "SHOPEE" mới là voucher dự phòng
-        isVoucherDuPhong = isShopee;
-      } else {
-        // Với các brand khác: SHOPEE hoặc (có prom_code và không có pkg_code)
-        isVoucherDuPhong = isShopee || (hasPromCode && !hasPkgCode);
-      }
-      
-      // Nếu có chietKhauVoucherDp1 > 0 nhưng theo logic mới không phải voucher dự phòng
-      // → Chuyển sang voucher chính (dữ liệu cũ đã sync với logic cũ)
-      // Lưu giá trị để chuyển sang voucher chính
-      let voucherAmountToMove = 0;
-      if (ck15_nt_voucherDp1 > 0 && !isVoucherDuPhong) {
-        voucherAmountToMove = ck15_nt_voucherDp1;
-        ck15_nt_voucherDp1 = 0;
-      }
-      
-      // Fallback: Nếu chietKhauVoucherDp1 = 0 nhưng thỏa điều kiện voucher dự phòng
-      // → Đây là dữ liệu cũ chưa sync, coi là voucher dự phòng
-      if (ck15_nt_voucherDp1 === 0 && paidByVoucher > 0 && isVoucherDuPhong) {
-        ck15_nt_voucherDp1 = paidByVoucher;
-      }
-      
-      // ma_ck05: Thanh toán voucher chính
-      // Chỉ map vào ck05_nt nếu không có voucher dự phòng (ck15_nt_voucherDp1 = 0)
-      // Nếu có voucherAmountToMove (chuyển từ DP sang chính), dùng giá trị đó
-      // Nếu không, dùng paidByVoucher
-      const ck05_nt = ck15_nt_voucherDp1 > 0 ? 0 : (voucherAmountToMove > 0 ? voucherAmountToMove : paidByVoucher);
-      // Tính ma_ck05 giống frontend - truyền customer từ orderData nếu sale chưa có
-      const saleWithCustomer = {
-        ...sale,
-        customer: sale.customer || orderData.customer,
-      };
-      const maCk05Value = this.calculateMaCk05(saleWithCustomer);
-      const ck06_nt = 0; // Dự phòng 1 - không sử dụng
-      const ck07_nt = toNumber(sale.chietKhauVoucherDp2, 0);
-      const ck08_nt = toNumber(sale.chietKhauVoucherDp3, 0);
-      // Các chiết khấu từ 09-22 mặc định là 0
-      const ck09_nt = toNumber(sale.chietKhau09, 0);
-      const ck10_nt = toNumber(sale.chietKhau10, 0);
-      // ck11_nt: Thanh toán TK tiền ảo
-      // Chỉ map ECOIN nếu sale item có v_paid > 0 (từ paid_by_voucher_ecode_ecoin_bp hoặc chietKhauThanhToanTkTienAo)
-      // Không map ECOIN cho items có v_paid = 0
-      let ck11_nt = toNumber(sale.chietKhauThanhToanTkTienAo || sale.chietKhau11, 0);
-      const vPaidForEcoin = toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0);
-      
-      // Chỉ lấy ECOIN từ cashioData nếu:
-      // 1. Đã có chietKhauThanhToanTkTienAo > 0 (đã được lưu trong sync), HOẶC
-      // 2. v_paid > 0 VÀ có ECOIN trong cashio
-      if (ck11_nt === 0 && vPaidForEcoin > 0 && orderData.cashioData && Array.isArray(orderData.cashioData)) {
-        const ecoinCashio = orderData.cashioData.find((c: any) => c.fop_syscode === 'ECOIN');
-        if (ecoinCashio && ecoinCashio.total_in) {
-          ck11_nt = toNumber(ecoinCashio.total_in, 0);
-        }
-      }
-      const ck12_nt = toNumber(sale.chietKhau12, 0);
-      const ck13_nt = toNumber(sale.chietKhau13, 0);
-      const ck14_nt = toNumber(sale.chietKhau14, 0);
-      const ck15_nt = ck15_nt_voucherDp1 > 0 ? ck15_nt_voucherDp1 : toNumber(sale.chietKhau15, 0);
-      const ck16_nt = toNumber(sale.chietKhau16, 0);
-      const ck17_nt = toNumber(sale.chietKhau17, 0);
-      const ck18_nt = toNumber(sale.chietKhau18, 0);
-      const ck19_nt = toNumber(sale.chietKhau19, 0);
-      const ck20_nt = toNumber(sale.chietKhau20, 0);
-      const ck21_nt = toNumber(sale.chietKhau21, 0);
-      const ck22_nt = toNumber(sale.chietKhau22, 0);
 
-      // Helper function để đảm bảo giá trị luôn là string, không phải null/undefined
-      const toString = (value: any, defaultValue: string = ''): string => {
-        if (value === null || value === undefined || value === '') {
-          return defaultValue;
+        // Nếu có chietKhauVoucherDp1 > 0 nhưng theo logic mới không phải voucher dự phòng
+        // → Chuyển sang voucher chính (dữ liệu cũ đã sync với logic cũ)
+        // Lưu giá trị để chuyển sang voucher chính
+        let voucherAmountToMove = 0;
+        if (ck15_nt_voucherDp1 > 0 && !isVoucherDuPhong) {
+          voucherAmountToMove = ck15_nt_voucherDp1;
+          ck15_nt_voucherDp1 = 0;
         }
-        return String(value);
-      };
-      
-      // Helper function để giới hạn độ dài string theo spec
-      const limitString = (value: string, maxLength: number): string => {
-        if (!value) return '';
-        const str = String(value);
-        return str.length > maxLength ? str.substring(0, maxLength) : str;
-      };
 
-      // Mỗi sale item xử lý riêng, không dùng giá trị mặc định chung
-      // Lấy dvt từ chính sale item hoặc từ product của nó (đã được fetch từ Loyalty API với unit)
-      // Nếu không có thì dùng 'Cái' làm mặc định (Fast API yêu cầu field này phải có giá trị)
-      const dvt = toString(sale.dvt || sale.product?.dvt || sale.product?.unit, 'Cái');
-      
-      // Tính mã kho từ ordertype + ma_bp (bộ phận)
-      // Nếu không tính được thì fallback về sale.maKho hoặc branchCode
-      const maBpForMaKho = sale.department?.ma_bp || sale.branchCode || orderData.branchCode || '';
-      const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBpForMaKho);
-      const maKho = toString(calculatedMaKho || sale.maKho || sale.branchCode, '');
-      
-      // Debug: Log maLo value từ sale
-      if (index === 0) {
-      }
-      
-      // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
-      // Nếu ma_vt (materialCode) khác itemCode, cần fetch lại product bằng materialCode
-      const materialCode = sale.product?.maVatTu || sale.product?.materialCode || sale.itemCode;
-      let trackSerial: boolean | null = null;
-      let trackBatch: boolean | null = null;
-      let trackInventory: boolean | null = null;
-      let productTypeFromLoyalty: string | null = null;
-      
-      // Luôn fetch từ Loyalty API để lấy trackSerial, trackBatch, trackInventory và productType
-      try {
-        const response = await this.httpService.axiosRef.get(
-          `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(materialCode)}`,
-          { headers: { accept: 'application/json' } },
-        );
-        const loyaltyProduct = response?.data?.data?.item || response?.data;
-        if (loyaltyProduct) {
-          trackSerial = loyaltyProduct.trackSerial === true;
-          trackBatch = loyaltyProduct.trackBatch === true;
-          trackInventory = loyaltyProduct.trackInventory === true;
-          productTypeFromLoyalty = loyaltyProduct.productType || loyaltyProduct.producttype || null;
-          // Update sale với thông tin từ Loyalty API
-          sale.productType = productTypeFromLoyalty;
-          sale.trackInventory = trackInventory;
-          // Update sale.product với thông tin từ Loyalty API
-          if (sale.product) {
-            sale.product.productType = productTypeFromLoyalty;
-            sale.product.producttype = productTypeFromLoyalty;
-            sale.product.trackInventory = trackInventory;
+        // Fallback: Nếu chietKhauVoucherDp1 = 0 nhưng thỏa điều kiện voucher dự phòng
+        // → Đây là dữ liệu cũ chưa sync, coi là voucher dự phòng
+        if (ck15_nt_voucherDp1 === 0 && paidByVoucher > 0 && isVoucherDuPhong) {
+          ck15_nt_voucherDp1 = paidByVoucher;
+        }
+
+        // ma_ck05: Thanh toán voucher chính
+        // Chỉ map vào ck05_nt nếu không có voucher dự phòng (ck15_nt_voucherDp1 = 0)
+        // Nếu có voucherAmountToMove (chuyển từ DP sang chính), dùng giá trị đó
+        // Nếu không, dùng paidByVoucher
+        const ck05_nt = ck15_nt_voucherDp1 > 0 ? 0 : (voucherAmountToMove > 0 ? voucherAmountToMove : paidByVoucher);
+        // Tính ma_ck05 giống frontend - truyền customer từ orderData nếu sale chưa có
+        const saleWithCustomer = {
+          ...sale,
+          customer: sale.customer || orderData.customer,
+        };
+        const maCk05Value = this.calculateMaCk05(saleWithCustomer);
+        const ck06_nt = 0; // Dự phòng 1 - không sử dụng
+        const ck07_nt = toNumber(sale.chietKhauVoucherDp2, 0);
+        const ck08_nt = toNumber(sale.chietKhauVoucherDp3, 0);
+        // Các chiết khấu từ 09-22 mặc định là 0
+        const ck09_nt = toNumber(sale.chietKhau09, 0);
+        const ck10_nt = toNumber(sale.chietKhau10, 0);
+        // ck11_nt: Thanh toán TK tiền ảo
+        // Chỉ map ECOIN nếu sale item có v_paid > 0 (từ paid_by_voucher_ecode_ecoin_bp hoặc chietKhauThanhToanTkTienAo)
+        // Không map ECOIN cho items có v_paid = 0
+        let ck11_nt = toNumber(sale.chietKhauThanhToanTkTienAo || sale.chietKhau11, 0);
+        const vPaidForEcoin = toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0);
+
+        // Chỉ lấy ECOIN từ cashioData nếu:
+        // 1. Đã có chietKhauThanhToanTkTienAo > 0 (đã được lưu trong sync), HOẶC
+        // 2. v_paid > 0 VÀ có ECOIN trong cashio
+        if (ck11_nt === 0 && vPaidForEcoin > 0 && orderData.cashioData && Array.isArray(orderData.cashioData)) {
+          const ecoinCashio = orderData.cashioData.find((c: any) => c.fop_syscode === 'ECOIN');
+          if (ecoinCashio && ecoinCashio.total_in) {
+            ck11_nt = toNumber(ecoinCashio.total_in, 0);
           }
         }
-      } catch (error) {
-      }
-      
-      const productTypeUpper = productTypeFromLoyalty ? String(productTypeFromLoyalty).toUpperCase().trim() : null;
-      
-      // Lấy giá trị serial từ sale (tất cả đều lấy từ field "serial")
-      const serialValue = toString(sale.serial || '', '');
-      
-      // Debug: Log trackSerial, trackBatch và serial để kiểm tra
-      
-      // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
-      const useBatch = this.shouldUseBatch(trackBatch, trackSerial);
-      
-      // Lấy brand để phân biệt logic cho F3 (ma_lo)
-      const brandForMaLo = orderData.customer?.brand || orderData.brand || '';
-      let brandLowerForMaLo = (brandForMaLo || '').toLowerCase().trim();
-      // Normalize: "facialbar" → "f3"
-      if (brandLowerForMaLo === 'facialbar') {
-        brandLowerForMaLo = 'f3';
-      }
-      
-      // Xác định ma_lo và so_serial dựa trên trackSerial và trackBatch
-      let maLo: string | null = null;
-      let soSerial: string | null = null;
-      
-      if (useBatch) {
-        // trackBatch = true → dùng ma_lo với giá trị serial
-        if (serialValue && serialValue.trim() !== '') {
-          // Với F3, lấy toàn bộ serial (không cắt, không xử lý)
-          if (brandLowerForMaLo === 'f3') {
-            maLo = serialValue;
+        const ck12_nt = toNumber(sale.chietKhau12, 0);
+        const ck13_nt = toNumber(sale.chietKhau13, 0);
+        const ck14_nt = toNumber(sale.chietKhau14, 0);
+        const ck15_nt = ck15_nt_voucherDp1 > 0 ? ck15_nt_voucherDp1 : toNumber(sale.chietKhau15, 0);
+        const ck16_nt = toNumber(sale.chietKhau16, 0);
+        const ck17_nt = toNumber(sale.chietKhau17, 0);
+        const ck18_nt = toNumber(sale.chietKhau18, 0);
+        const ck19_nt = toNumber(sale.chietKhau19, 0);
+        const ck20_nt = toNumber(sale.chietKhau20, 0);
+        const ck21_nt = toNumber(sale.chietKhau21, 0);
+        const ck22_nt = toNumber(sale.chietKhau22, 0);
+
+        // Helper function để đảm bảo giá trị luôn là string, không phải null/undefined
+        const toString = (value: any, defaultValue: string = ''): string => {
+          if (value === null || value === undefined || value === '') {
+            return defaultValue;
+          }
+          return String(value);
+        };
+
+        // Helper function để giới hạn độ dài string theo spec
+        const limitString = (value: string, maxLength: number): string => {
+          if (!value) return '';
+          const str = String(value);
+          return str.length > maxLength ? str.substring(0, maxLength) : str;
+        };
+
+        // Mỗi sale item xử lý riêng, không dùng giá trị mặc định chung
+        // Lấy dvt từ chính sale item hoặc từ product của nó (đã được fetch từ Loyalty API với unit)
+        // Nếu không có thì dùng 'Cái' làm mặc định (Fast API yêu cầu field này phải có giá trị)
+        const dvt = toString(sale.dvt || sale.product?.dvt || sale.product?.unit, 'Cái');
+
+        // Tính mã kho từ ordertype + ma_bp (bộ phận)
+        // Nếu không tính được thì fallback về sale.maKho hoặc branchCode
+        const maBpForMaKho = sale.department?.ma_bp || sale.branchCode || orderData.branchCode || '';
+        const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBpForMaKho);
+        const maKho = toString(calculatedMaKho || sale.maKho || sale.branchCode, '');
+
+        // Debug: Log maLo value từ sale
+        if (index === 0) {
+        }
+
+        // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
+        // Nếu ma_vt (materialCode) khác itemCode, cần fetch lại product bằng materialCode
+        const materialCode = sale.product?.maVatTu || sale.product?.materialCode || sale.itemCode;
+        let trackSerial: boolean | null = null;
+        let trackBatch: boolean | null = null;
+        let trackInventory: boolean | null = null;
+        let productTypeFromLoyalty: string | null = null;
+
+        // Luôn fetch từ Loyalty API để lấy trackSerial, trackBatch, trackInventory và productType
+        try {
+          const response = await this.httpService.axiosRef.get(
+            `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(materialCode)}`,
+            { headers: { accept: 'application/json' } },
+          );
+          const loyaltyProduct = response?.data?.data?.item || response?.data;
+          if (loyaltyProduct) {
+            trackSerial = loyaltyProduct.trackSerial === true;
+            trackBatch = loyaltyProduct.trackBatch === true;
+            trackInventory = loyaltyProduct.trackInventory === true;
+            productTypeFromLoyalty = loyaltyProduct.productType || loyaltyProduct.producttype || null;
+            // Update sale với thông tin từ Loyalty API
+            sale.productType = productTypeFromLoyalty;
+            sale.trackInventory = trackInventory;
+            // Update sale.product với thông tin từ Loyalty API
+            if (sale.product) {
+              sale.product.productType = productTypeFromLoyalty;
+              sale.product.producttype = productTypeFromLoyalty;
+              sale.product.trackInventory = trackInventory;
+            }
+          }
+        } catch (error) {
+        }
+
+        const productTypeUpper = productTypeFromLoyalty ? String(productTypeFromLoyalty).toUpperCase().trim() : null;
+
+        // Lấy giá trị serial từ sale (tất cả đều lấy từ field "serial")
+        const serialValue = toString(sale.serial || '', '');
+
+        // Debug: Log trackSerial, trackBatch và serial để kiểm tra
+
+        // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
+        const useBatch = this.shouldUseBatch(trackBatch, trackSerial);
+
+        // Lấy brand để phân biệt logic cho F3 (ma_lo)
+        const brandForMaLo = orderData.customer?.brand || orderData.brand || '';
+        let brandLowerForMaLo = (brandForMaLo || '').toLowerCase().trim();
+        // Normalize: "facialbar" → "f3"
+        if (brandLowerForMaLo === 'facialbar') {
+          brandLowerForMaLo = 'f3';
+        }
+
+        // Xác định ma_lo và so_serial dựa trên trackSerial và trackBatch
+        let maLo: string | null = null;
+        let soSerial: string | null = null;
+
+        if (useBatch) {
+          // trackBatch = true → dùng ma_lo với giá trị serial
+          if (serialValue && serialValue.trim() !== '') {
+            // Với F3, lấy toàn bộ serial (không cắt, không xử lý)
+            if (brandLowerForMaLo === 'f3') {
+              maLo = serialValue;
+            } else {
+              // Kiểm tra nếu serial có dạng "XXX_YYYY" (có dấu gạch dưới), lấy phần sau dấu gạch dưới
+              const underscoreIndex = serialValue.indexOf('_');
+              if (underscoreIndex > 0 && underscoreIndex < serialValue.length - 1) {
+                // Lấy phần sau dấu gạch dưới
+                maLo = serialValue.substring(underscoreIndex + 1);
+              } else {
+                // Vẫn cần productType để quyết định cắt bao nhiêu ký tự
+                if (productTypeUpper === 'TPCN') {
+                  // Nếu productType là "TPCN", cắt lấy 8 ký tự cuối
+                  maLo = serialValue.length >= 8 ? serialValue.slice(-8) : serialValue;
+                } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
+                  // Nếu productType là "SKIN" hoặc "GIFT", cắt lấy 4 ký tự cuối
+                  maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
+                } else {
+                  // Các trường hợp khác → lấy 4 ký tự cuối (mặc định)
+                  maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
+                }
+              }
+            }
           } else {
-            // Kiểm tra nếu serial có dạng "XXX_YYYY" (có dấu gạch dưới), lấy phần sau dấu gạch dưới
+            maLo = null;
+          }
+          soSerial = null;
+        } else {
+          // trackSerial = true và trackBatch = false
+          // Nhưng vẫn cần kiểm tra xem có cần ma_lo không (nếu serial có dạng "XXX_YYYY")
+          if (serialValue && serialValue.trim() !== '') {
             const underscoreIndex = serialValue.indexOf('_');
             if (underscoreIndex > 0 && underscoreIndex < serialValue.length - 1) {
-              // Lấy phần sau dấu gạch dưới
+              // Nếu serial có dạng "XXX_YYYY", dùng ma_lo với phần sau dấu gạch dưới
               maLo = serialValue.substring(underscoreIndex + 1);
+              soSerial = null;
             } else {
-              // Vẫn cần productType để quyết định cắt bao nhiêu ký tự
-              if (productTypeUpper === 'TPCN') {
-                // Nếu productType là "TPCN", cắt lấy 8 ký tự cuối
-                maLo = serialValue.length >= 8 ? serialValue.slice(-8) : serialValue;
-              } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
-                // Nếu productType là "SKIN" hoặc "GIFT", cắt lấy 4 ký tự cuối
-                maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
-              } else {
-                // Các trường hợp khác → lấy 4 ký tự cuối (mặc định)
-                maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
-              }
+              // Nếu không có dấu gạch dưới, dùng so_serial
+              maLo = null;
+              soSerial = serialValue;
+            }
+          } else {
+            maLo = null;
+            soSerial = null;
+          }
+        }
+
+        // Log kết quả cuối cùng
+
+        // Cảnh báo nếu không có serial nhưng trackSerial/trackBatch yêu cầu
+        if (!serialValue || serialValue.trim() === '') {
+          if (useBatch) {
+          } else if (trackSerial) {
+          }
+        }
+
+        const maThe = toString(sale.maThe || sale.mvc_serial, '');
+
+        // Extract chỉ phần số từ ordertype (ví dụ: "01.Thường" -> "01", "02. Làm dịch vụ" -> "02")
+        let loaiGd = '01';
+        if (sale.ordertype) {
+          const match = String(sale.ordertype).match(/^(\d+)/);
+          loaiGd = match ? match[1] : '01';
+        }
+
+        const loai = toString(sale.loai || sale.cat1, '');
+
+        // Lấy ma_bp - bắt buộc phải có giá trị
+        const maBp = toString(
+          sale.department?.ma_bp || sale.branchCode || orderData.branchCode,
+          ''
+        );
+
+        // Validate ma_bp - nếu vẫn empty thì log warning
+        if (!maBp || maBp.trim() === '') {
+        }
+
+        // Xác định hàng tặng: giaBan = 0 và tienHang = 0
+        // Với F3: Nếu có promCode → là "mua hàng giảm giá" (giảm 100%), không phải "tặng hàng"
+        const salePromCode = sale.promCode && sale.promCode.trim() !== '';
+        let isTangHang = giaBan === 0 && tienHang === 0;
+
+        // Với F3: Nếu có promCode thì không coi là hàng tặng, mà là mua hàng giảm giá
+        if (brandLower === 'f3' && salePromCode) {
+          isTangHang = false;
+        }
+
+        // Các ordertype dịch vụ không được coi là hàng tặng (không set km_yn = 1)
+        const ordertypeName = sale.ordertype || '';
+        const isDichVu = ordertypeName.includes('02. Làm dịch vụ') ||
+          ordertypeName.includes('04. Đổi DV') ||
+          ordertypeName.includes('08. Tách thẻ') ||
+          ordertypeName.includes('Đổi thẻ KEEP->Thẻ DV');
+        if (isDichVu) {
+          isTangHang = false;
+        }
+
+        // Tính toán ma_ctkm_th
+        let maCtkmTangHang: string = '';
+        if (isTangHang) {
+          // Nếu đã có maCtkmTangHang từ findAllOrders (đã tính sẵn), dùng nó
+          if (sale.maCtkmTangHang) {
+            maCtkmTangHang = toString(sale.maCtkmTangHang, '');
+          } else {
+            // Nếu chưa có, tính toán lại
+            const ordertypeName = sale.ordertype || '';
+            if (ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư')) {
+              maCtkmTangHang = 'TT DAU TU';
+            } else if (
+              (ordertypeName.includes('01.Thường') || ordertypeName.includes('01. Thường')) ||
+              (ordertypeName.includes('07. Bán tài khoản') || ordertypeName.includes('07.Bán tài khoản')) ||
+              (ordertypeName.includes('9. Sàn TMDT') || ordertypeName.includes('9.Sàn TMDT'))
+            ) {
+              // Quy đổi prom_code sang TANGSP
+              const tangSpCode = this.convertPromCodeToTangSp(sale.promCode);
+              maCtkmTangHang = tangSpCode || toString(sale.promotionDisplayCode || sale.promCode, '');
+            } else {
+              // Các trường hợp khác: dùng promCode nếu có
+              maCtkmTangHang = toString(sale.promotionDisplayCode || sale.promCode, '');
             }
           }
         } else {
-          maLo = null;
-        }
-        soSerial = null;
-      } else {
-        // trackSerial = true và trackBatch = false
-        // Nhưng vẫn cần kiểm tra xem có cần ma_lo không (nếu serial có dạng "XXX_YYYY")
-        if (serialValue && serialValue.trim() !== '') {
-          const underscoreIndex = serialValue.indexOf('_');
-          if (underscoreIndex > 0 && underscoreIndex < serialValue.length - 1) {
-            // Nếu serial có dạng "XXX_YYYY", dùng ma_lo với phần sau dấu gạch dưới
-            maLo = serialValue.substring(underscoreIndex + 1);
-            soSerial = null;
-          } else {
-            // Nếu không có dấu gạch dưới, dùng so_serial
-            maLo = null;
-            soSerial = serialValue;
-          }
-        } else {
-          maLo = null;
-          soSerial = null;
-        }
-      }
-      
-      // Log kết quả cuối cùng
-      
-      // Cảnh báo nếu không có serial nhưng trackSerial/trackBatch yêu cầu
-      if (!serialValue || serialValue.trim() === '') {
-        if (useBatch) {
-        } else if (trackSerial) {
-        }
-      }
-      
-      const maThe = toString(sale.maThe || sale.mvc_serial, '');
-      
-      // Extract chỉ phần số từ ordertype (ví dụ: "01.Thường" -> "01", "02. Làm dịch vụ" -> "02")
-      let loaiGd = '01';
-      if (sale.ordertype) {
-        const match = String(sale.ordertype).match(/^(\d+)/);
-        loaiGd = match ? match[1] : '01';
-      }
-      
-      const loai = toString(sale.loai || sale.cat1, '');
-
-      // Lấy ma_bp - bắt buộc phải có giá trị
-      const maBp = toString(
-        sale.department?.ma_bp || sale.branchCode || orderData.branchCode,
-        ''
-      );
-      
-      // Validate ma_bp - nếu vẫn empty thì log warning
-      if (!maBp || maBp.trim() === '') {
-      }
-
-      // Xác định hàng tặng: giaBan = 0 và tienHang = 0
-      // Với F3: Nếu có promCode → là "mua hàng giảm giá" (giảm 100%), không phải "tặng hàng"
-      const salePromCode = sale.promCode && sale.promCode.trim() !== '';
-      let isTangHang = giaBan === 0 && tienHang === 0;
-      
-      // Với F3: Nếu có promCode thì không coi là hàng tặng, mà là mua hàng giảm giá
-      if (brandLower === 'f3' && salePromCode) {
-        isTangHang = false;
-      }
-      
-      // Các ordertype dịch vụ không được coi là hàng tặng (không set km_yn = 1)
-      const ordertypeName = sale.ordertype || '';
-      const isDichVu = ordertypeName.includes('02. Làm dịch vụ') || 
-                       ordertypeName.includes('04. Đổi DV') ||
-                       ordertypeName.includes('08. Tách thẻ') ||
-                       ordertypeName.includes('Đổi thẻ KEEP->Thẻ DV');
-      if (isDichVu) {
-        isTangHang = false;
-      }
-      
-      // Tính toán ma_ctkm_th
-      let maCtkmTangHang: string = '';
-      if (isTangHang) {
-        // Nếu đã có maCtkmTangHang từ findAllOrders (đã tính sẵn), dùng nó
-        if (sale.maCtkmTangHang) {
+          // Nếu không phải hàng tặng, dùng giá trị từ sale.maCtkmTangHang (nếu có)
           maCtkmTangHang = toString(sale.maCtkmTangHang, '');
-        } else {
-          // Nếu chưa có, tính toán lại
-          const ordertypeName = sale.ordertype || '';
-          if (ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư')) {
-            maCtkmTangHang = 'TT DAU TU';
-          } else if (
-            (ordertypeName.includes('01.Thường') || ordertypeName.includes('01. Thường')) ||
-            (ordertypeName.includes('07. Bán tài khoản') || ordertypeName.includes('07.Bán tài khoản')) ||
-            (ordertypeName.includes('9. Sàn TMDT') || ordertypeName.includes('9.Sàn TMDT'))
-          ) {
-            // Quy đổi prom_code sang TANGSP
-            const tangSpCode = this.convertPromCodeToTangSp(sale.promCode);
-            maCtkmTangHang = tangSpCode || toString(sale.promotionDisplayCode || sale.promCode, '');
-          } else {
-            // Các trường hợp khác: dùng promCode nếu có
-            maCtkmTangHang = toString(sale.promotionDisplayCode || sale.promCode, '');
-          }
         }
-      } else {
-        // Nếu không phải hàng tặng, dùng giá trị từ sale.maCtkmTangHang (nếu có)
-        maCtkmTangHang = toString(sale.maCtkmTangHang, '');
-      }
-      
-      // Nếu là hàng tặng, không set ma_ck01 (Mã CTKM mua hàng giảm giá)
-      // Nếu không phải hàng tặng, set ma_ck01 từ promCode như cũ
-      // Với F3: Nếu có promCode và giaBan = 0 && tienHang = 0 → là mua hàng giảm giá (giảm 100%)
-      const maCk01 = isTangHang ? '' : (sale.promCode ? sale.promCode : '');
 
-      // Kiểm tra có mã số thẻ (maThe) không - nếu có thì km_yn = 0
-      const hasMaThe = sale.maThe && sale.maThe.trim() !== '';
-      // Kiểm tra nếu ma_ctkm_th = "TT DAU TU" thì cũng không set km_yn = 1
-      const isTTDauTu = maCtkmTangHang && maCtkmTangHang.trim() === 'TT DAU TU';
+        // Nếu là hàng tặng, không set ma_ck01 (Mã CTKM mua hàng giảm giá)
+        // Nếu không phải hàng tặng, set ma_ck01 từ promCode như cũ
+        // Với F3: Nếu có promCode và giaBan = 0 && tienHang = 0 → là mua hàng giảm giá (giảm 100%)
+        const maCk01 = isTangHang ? '' : (sale.promCode ? sale.promCode : '');
 
-      return {
-        // ma_vt: Mã vật tư (String, max 16 ký tự) - Bắt buộc
-        ma_vt: limitString(toString(sale.product?.maVatTu || sale.itemCode || ''), 16),
-        // dvt: Đơn vị tính (String, max 32 ký tự) - Bắt buộc
-        dvt: limitString(dvt, 32),
-        // loai: Loại (String, max 2 ký tự) - 07-phí,lệ phí; 90-giảm thuế (mặc định rỗng)
-        loai: limitString(loai, 2),
-        // ma_ctkm_th: Mã ctkm tặng hàng (String, max 32 ký tự)
-        ma_ctkm_th: limitString(maCtkmTangHang, 32),
-        // ma_kho: Mã kho (String, max 16 ký tự) - Bắt buộc
-        ma_kho: limitString(maKho, 16),
-        // so_luong: Số lượng (Decimal)
-        so_luong: Number(qty),
-        // gia_ban: Giá bán (Decimal)
-        gia_ban: Number(giaBan),
-        // tien_hang: Tiền hàng (Decimal)
-        tien_hang: Number(tienHang),
-        // is_reward_line: is_reward_line (Int)
-        is_reward_line: sale.isRewardLine ? 1 : 0,
-        // is_bundle_reward_line: is_bundle_reward_line (Int)
-        is_bundle_reward_line: sale.isBundleRewardLine ? 1 : 0,
-        // km_yn: Khuyến mãi (Int) - = 1 khi là hàng tặng (giaBan = 0 && tienHang = 0) hoặc có promCode
-        // Nếu có mã số thẻ (maThe) hoặc ma_ctkm_th = "TT DAU TU" thì km_yn = 0
-        km_yn: (hasMaThe || isTTDauTu) ? 0 : ((isTangHang || sale.promCode) ? 1 : 0),
-        // dong_thuoc_goi: dong_thuoc_goi (String, max 32 ký tự)
-        dong_thuoc_goi: limitString(toString(sale.dongThuocGoi, ''), 32),
-        // trang_thai: trang_thai (String, max 32 ký tự)
-        trang_thai: limitString(toString(sale.trangThai, ''), 32),
-        // barcode: Barcode (String, max 32 ký tự)
-        barcode: limitString(toString(sale.barcode, ''), 32),
-        // ma_ck01: Mã ctkm mua hàng giảm giá (String, max 32 ký tự)
-        ma_ck01: limitString(maCk01, 32),
-        // ck01_nt: Tiền (Decimal)
-        ck01_nt: Number(ck01_nt),
-        // ma_ck02: Mã ck theo chính sách (String, max 32 ký tự)
-        ma_ck02: limitString(toString(sale.ckTheoChinhSach, ''), 32),
-        // ck02_nt: Tiền (Decimal)
-        ck02_nt: Number(ck02_nt),
-        // ma_ck03: Mua hàng ck vip (String, max 32 ký tự)
-        ma_ck03: limitString(toString(maCk03, ''), 32),
-        // ck03_nt: Tiền (Decimal)
-        ck03_nt: Number(ck03_nt),
-        // ma_ck04: Thanh toán coupon (String, max 32 ký tự)
-        ma_ck04: limitString((ck04_nt > 0 || sale.thanhToanCoupon) ? toString(sale.maCk04 || 'COUPON', '') : '', 32),
-        // ck04_nt: Tiền (Decimal)
-        ck04_nt: Number(ck04_nt),
-        // ma_ck05: Thanh toán voucher (String, max 32 ký tự)
-        ...(ck05_nt > 0 ? {
-          ma_ck05: limitString(maCk05Value || toString(sale.maCk05 || 'VOUCHER', ''), 32),
-        } : {}),
-        // ck05_nt: Tiền (Decimal)
-        ck05_nt: Number(ck05_nt),
-        // ma_ck06: Dự phòng 1 (String, max 32 ký tự) - không sử dụng
-        ma_ck06: '',
-        // ck06_nt: Tiền (Decimal)
-        ck06_nt: Number(ck06_nt),
-        // ma_ck07: Dự phòng 2 (String, max 32 ký tự)
-        ma_ck07: limitString(sale.voucherDp2 ? 'VOUCHER_DP2' : '', 32),
-        // ck07_nt: Tiền (Decimal)
-        ck07_nt: Number(ck07_nt),
-        // ma_ck08: Dự phòng 3 (String, max 32 ký tự)
-        ma_ck08: limitString(sale.voucherDp3 ? 'VOUCHER_DP3' : '', 32),
-        // ck08_nt: Tiền (Decimal)
-        ck08_nt: Number(ck08_nt),
-        // ma_ck09: Chiết khấu hãng (String, max 32 ký tự)
-        ma_ck09: limitString(toString(sale.maCk09, ''), 32),
-        // ck09_nt: Tiền (Decimal)
-        ck09_nt: Number(ck09_nt),
-        // ma_ck10: Thưởng bằng hàng (String, max 32 ký tự)
-        ma_ck10: limitString(toString(sale.maCk10, ''), 32),
-        // ck10_nt: Tiền (Decimal)
-        ck10_nt: Number(ck10_nt),
-        // ma_ck11: Thanh toán TK tiền ảo (String, max 32 ký tự)
-        // Format: YYMM{brand_code}.TKDV (ví dụ: 2510MN.TKDV)
-        ma_ck11: limitString(
-          (ck11_nt > 0 || sale.thanhToanTkTienAo) 
-            ? toString(sale.maCk11 || this.generateTkTienAoLabel(orderData), '')
-            : '',
-          32
-        ),
-        // ck11_nt: Tiền (Decimal)
-        ck11_nt: Number(ck11_nt),
-        // ma_ck12: CK thêm 1 (String, max 32 ký tự)
-        ma_ck12: limitString(toString(sale.maCk12, ''), 32),
-        // ck12_nt: Tiền (Decimal)
-        ck12_nt: Number(ck12_nt),
-        // ma_ck13: CK thêm 2 (String, max 32 ký tự)
-        ma_ck13: limitString(toString(sale.maCk13, ''), 32),
-        // ck13_nt: Tiền (Decimal)
-        ck13_nt: Number(ck13_nt),
-        // ma_ck14: CK thêm 3 (String, max 32 ký tự)
-        ma_ck14: limitString(toString(sale.maCk14, ''), 32),
-        // ck14_nt: Tiền (Decimal)
-        ck14_nt: Number(ck14_nt),
-        // ma_ck15: Voucher DP1 (String, max 32 ký tự)
-        // Với F3, thêm prefix "FBV TT " trước "VC CTKM SÀN"
-        ma_ck15: limitString(
-          ck15_nt_voucherDp1 > 0 
-            ? (brandLower === 'f3' ? 'FBV TT VC CTKM SÀN' : 'VC CTKM SÀN')
-            : toString(sale.maCk15, ''),
-          32
-        ),
-        // ck15_nt: Tiền (Decimal)
-        ck15_nt: Number(ck15_nt),
-        // ma_ck16: Voucher DP2 (String, max 32 ký tự)
-        ma_ck16: limitString(toString(sale.maCk16, ''), 32),
-        // ck16_nt: Tiền (Decimal)
-        ck16_nt: Number(ck16_nt),
-        // ma_ck17: Voucher DP3 (String, max 32 ký tự)
-        ma_ck17: limitString(toString(sale.maCk17, ''), 32),
-        // ck17_nt: Tiền (Decimal)
-        ck17_nt: Number(ck17_nt),
-        // ma_ck18: Voucher DP4 (String, max 32 ký tự)
-        ma_ck18: limitString(toString(sale.maCk18, ''), 32),
-        // ck18_nt: Tiền (Decimal)
-        ck18_nt: Number(ck18_nt),
-        // ma_ck19: Voucher DP5 (String, max 32 ký tự)
-        ma_ck19: limitString(toString(sale.maCk19, ''), 32),
-        // ck19_nt: Tiền (Decimal)
-        ck19_nt: Number(ck19_nt),
-        // ma_ck20: Voucher DP6 (String, max 32 ký tự)
-        ma_ck20: limitString(toString(sale.maCk20, ''), 32),
-        // ck20_nt: Tiền (Decimal)
-        ck20_nt: Number(ck20_nt),
-        // ma_ck21: Voucher DP7 (String, max 32 ký tự)
-        ma_ck21: limitString(toString(sale.maCk21, ''), 32),
-        // ck21_nt: Tiền (Decimal)
-        ck21_nt: Number(ck21_nt),
-        // ma_ck22: Voucher DP8 (String, max 32 ký tự)
-        ma_ck22: limitString(toString(sale.maCk22, ''), 32),
-        // ck22_nt: Tiền (Decimal)
-        ck22_nt: Number(ck22_nt),
-        // dt_tg_nt: Tiền trợ giá (Decimal)
-        dt_tg_nt: Number(toNumber(sale.dtTgNt, 0)),
-        // ma_thue: Mã thuế (String, max 8 ký tự) - Bắt buộc
-        ma_thue: limitString(toString(sale.maThue, '10'), 8),
-        // thue_suat: Thuế suất (Decimal)
-        thue_suat: Number(toNumber(sale.thueSuat, 0)),
-        // tien_thue: Tiền thuế (Decimal)
-        tien_thue: Number(toNumber(sale.tienThue, 0)),
-        // tk_thue: Tài khoản thuế (String, max 16 ký tự)
-        tk_thue: limitString(toString(sale.tkThueCo, ''), 16),
-        // tk_cpbh: Tài khoản chiết khấu km (String, max 16 ký tự)
-        tk_cpbh: limitString(toString(sale.tkCpbh, ''), 16),
-        // ma_bp: Mã bộ phận (String, max 8 ký tự) - Bắt buộc
-        ma_bp: limitString(maBp, 8),
-        // ma_the: Mã thẻ (String, max 256 ký tự)
-        ma_the: limitString(maThe, 256),
-        // ma_lo: Mã lô (String, max 16 ký tự)
-        // so_serial: Số serial (String, max 64 ký tự)
-        // Chỉ thêm ma_lo hoặc so_serial vào payload (không gửi cả hai, và chỉ gửi khi có giá trị)
-        ...(soSerial && soSerial.trim() !== '' 
-          ? { so_serial: limitString(soSerial, 64) } 
-          : (maLo && maLo.trim() !== '' ? { ma_lo: limitString(maLo, 16) } : {})),
-        // loai_gd: Loại giao dịch (String, max 2 ký tự) - Bắt buộc
-        loai_gd: limitString(loaiGd, 2),
-        // ma_combo: mã combo (String, max 16 ký tự)
-        ma_combo: limitString(toString(sale.maCombo, ''), 16),
-        // id_goc: ID phiếu gốc (String, max 70 ký tự)
-        id_goc: limitString(toString(sale.idGoc, ''), 70),
-        // id_goc_ct: Số ct phiếu gốc (String, max 16 ký tự)
-        id_goc_ct: limitString(toString(sale.idGocCt, ''), 16),
-        // id_goc_so: Dòng phiếu gốc (Int)
-        id_goc_so: Number(toNumber(sale.idGocSo, 0)),
-        // dong: Dòng của phiếu (Int) - Bắt buộc, bắt đầu từ 1
-        dong: index + 1,
-        // id_goc_ngay: Ngày phiếu gốc (DateTime)
-        id_goc_ngay: sale.idGocNgay ? formatDateISO(new Date(sale.idGocNgay)) : formatDateISO(new Date()),
-        // id_goc_dv: Đơn vị phiếu gốc (String, max 8 ký tự)
-        id_goc_dv: limitString(toString(sale.idGocDv, ''), 8),
-      };
-    }));
-    
+        // Kiểm tra có mã số thẻ (maThe) không - nếu có thì km_yn = 0
+        const hasMaThe = sale.maThe && sale.maThe.trim() !== '';
+        // Kiểm tra nếu ma_ctkm_th = "TT DAU TU" thì cũng không set km_yn = 1
+        const isTTDauTu = maCtkmTangHang && maCtkmTangHang.trim() === 'TT DAU TU';
+
+        return {
+          // ma_vt: Mã vật tư (String, max 16 ký tự) - Bắt buộc
+          ma_vt: limitString(toString(sale.product?.maVatTu || sale.itemCode || ''), 16),
+          // dvt: Đơn vị tính (String, max 32 ký tự) - Bắt buộc
+          dvt: limitString(dvt, 32),
+          // loai: Loại (String, max 2 ký tự) - 07-phí,lệ phí; 90-giảm thuế (mặc định rỗng)
+          loai: limitString(loai, 2),
+          // ma_ctkm_th: Mã ctkm tặng hàng (String, max 32 ký tự)
+          ma_ctkm_th: limitString(maCtkmTangHang, 32),
+          // ma_kho: Mã kho (String, max 16 ký tự) - Bắt buộc
+          ma_kho: limitString(maKho, 16),
+          // so_luong: Số lượng (Decimal)
+          so_luong: Number(qty),
+          // gia_ban: Giá bán (Decimal)
+          gia_ban: Number(giaBan),
+          // tien_hang: Tiền hàng (Decimal)
+          tien_hang: Number(tienHang),
+          // is_reward_line: is_reward_line (Int)
+          is_reward_line: sale.isRewardLine ? 1 : 0,
+          // is_bundle_reward_line: is_bundle_reward_line (Int)
+          is_bundle_reward_line: sale.isBundleRewardLine ? 1 : 0,
+          // km_yn: Khuyến mãi (Int) - = 1 khi là hàng tặng (giaBan = 0 && tienHang = 0) hoặc có promCode
+          // Nếu có mã số thẻ (maThe) hoặc ma_ctkm_th = "TT DAU TU" thì km_yn = 0
+          km_yn: (hasMaThe || isTTDauTu) ? 0 : ((isTangHang || sale.promCode) ? 1 : 0),
+          // dong_thuoc_goi: dong_thuoc_goi (String, max 32 ký tự)
+          dong_thuoc_goi: limitString(toString(sale.dongThuocGoi, ''), 32),
+          // trang_thai: trang_thai (String, max 32 ký tự)
+          trang_thai: limitString(toString(sale.trangThai, ''), 32),
+          // barcode: Barcode (String, max 32 ký tự)
+          barcode: limitString(toString(sale.barcode, ''), 32),
+          // ma_ck01: Mã ctkm mua hàng giảm giá (String, max 32 ký tự)
+          ma_ck01: limitString(maCk01, 32),
+          // ck01_nt: Tiền (Decimal)
+          ck01_nt: Number(ck01_nt),
+          // ma_ck02: Mã ck theo chính sách (String, max 32 ký tự)
+          ma_ck02: limitString(toString(sale.ckTheoChinhSach, ''), 32),
+          // ck02_nt: Tiền (Decimal)
+          ck02_nt: Number(ck02_nt),
+          // ma_ck03: Mua hàng ck vip (String, max 32 ký tự)
+          ma_ck03: limitString(toString(maCk03, ''), 32),
+          // ck03_nt: Tiền (Decimal)
+          ck03_nt: Number(ck03_nt),
+          // ma_ck04: Thanh toán coupon (String, max 32 ký tự)
+          ma_ck04: limitString((ck04_nt > 0 || sale.thanhToanCoupon) ? toString(sale.maCk04 || 'COUPON', '') : '', 32),
+          // ck04_nt: Tiền (Decimal)
+          ck04_nt: Number(ck04_nt),
+          // ma_ck05: Thanh toán voucher (String, max 32 ký tự)
+          ...(ck05_nt > 0 ? {
+            ma_ck05: limitString(maCk05Value || toString(sale.maCk05 || 'VOUCHER', ''), 32),
+          } : {}),
+          // ck05_nt: Tiền (Decimal)
+          ck05_nt: Number(ck05_nt),
+          // ma_ck06: Dự phòng 1 (String, max 32 ký tự) - không sử dụng
+          ma_ck06: '',
+          // ck06_nt: Tiền (Decimal)
+          ck06_nt: Number(ck06_nt),
+          // ma_ck07: Dự phòng 2 (String, max 32 ký tự)
+          ma_ck07: limitString(sale.voucherDp2 ? 'VOUCHER_DP2' : '', 32),
+          // ck07_nt: Tiền (Decimal)
+          ck07_nt: Number(ck07_nt),
+          // ma_ck08: Dự phòng 3 (String, max 32 ký tự)
+          ma_ck08: limitString(sale.voucherDp3 ? 'VOUCHER_DP3' : '', 32),
+          // ck08_nt: Tiền (Decimal)
+          ck08_nt: Number(ck08_nt),
+          // ma_ck09: Chiết khấu hãng (String, max 32 ký tự)
+          ma_ck09: limitString(toString(sale.maCk09, ''), 32),
+          // ck09_nt: Tiền (Decimal)
+          ck09_nt: Number(ck09_nt),
+          // ma_ck10: Thưởng bằng hàng (String, max 32 ký tự)
+          ma_ck10: limitString(toString(sale.maCk10, ''), 32),
+          // ck10_nt: Tiền (Decimal)
+          ck10_nt: Number(ck10_nt),
+          // ma_ck11: Thanh toán TK tiền ảo (String, max 32 ký tự)
+          // Format: YYMM{brand_code}.TKDV (ví dụ: 2510MN.TKDV)
+          ma_ck11: limitString(
+            (ck11_nt > 0 || sale.thanhToanTkTienAo)
+              ? toString(sale.maCk11 || this.generateTkTienAoLabel(orderData), '')
+              : '',
+            32
+          ),
+          // ck11_nt: Tiền (Decimal)
+          ck11_nt: Number(ck11_nt),
+          // ma_ck12: CK thêm 1 (String, max 32 ký tự)
+          ma_ck12: limitString(toString(sale.maCk12, ''), 32),
+          // ck12_nt: Tiền (Decimal)
+          ck12_nt: Number(ck12_nt),
+          // ma_ck13: CK thêm 2 (String, max 32 ký tự)
+          ma_ck13: limitString(toString(sale.maCk13, ''), 32),
+          // ck13_nt: Tiền (Decimal)
+          ck13_nt: Number(ck13_nt),
+          // ma_ck14: CK thêm 3 (String, max 32 ký tự)
+          ma_ck14: limitString(toString(sale.maCk14, ''), 32),
+          // ck14_nt: Tiền (Decimal)
+          ck14_nt: Number(ck14_nt),
+          // ma_ck15: Voucher DP1 (String, max 32 ký tự)
+          // Với F3, thêm prefix "FBV TT " trước "VC CTKM SÀN"
+          ma_ck15: limitString(
+            ck15_nt_voucherDp1 > 0
+              ? (brandLower === 'f3' ? 'FBV TT VC CTKM SÀN' : 'VC CTKM SÀN')
+              : toString(sale.maCk15, ''),
+            32
+          ),
+          // ck15_nt: Tiền (Decimal)
+          ck15_nt: Number(ck15_nt),
+          // ma_ck16: Voucher DP2 (String, max 32 ký tự)
+          ma_ck16: limitString(toString(sale.maCk16, ''), 32),
+          // ck16_nt: Tiền (Decimal)
+          ck16_nt: Number(ck16_nt),
+          // ma_ck17: Voucher DP3 (String, max 32 ký tự)
+          ma_ck17: limitString(toString(sale.maCk17, ''), 32),
+          // ck17_nt: Tiền (Decimal)
+          ck17_nt: Number(ck17_nt),
+          // ma_ck18: Voucher DP4 (String, max 32 ký tự)
+          ma_ck18: limitString(toString(sale.maCk18, ''), 32),
+          // ck18_nt: Tiền (Decimal)
+          ck18_nt: Number(ck18_nt),
+          // ma_ck19: Voucher DP5 (String, max 32 ký tự)
+          ma_ck19: limitString(toString(sale.maCk19, ''), 32),
+          // ck19_nt: Tiền (Decimal)
+          ck19_nt: Number(ck19_nt),
+          // ma_ck20: Voucher DP6 (String, max 32 ký tự)
+          ma_ck20: limitString(toString(sale.maCk20, ''), 32),
+          // ck20_nt: Tiền (Decimal)
+          ck20_nt: Number(ck20_nt),
+          // ma_ck21: Voucher DP7 (String, max 32 ký tự)
+          ma_ck21: limitString(toString(sale.maCk21, ''), 32),
+          // ck21_nt: Tiền (Decimal)
+          ck21_nt: Number(ck21_nt),
+          // ma_ck22: Voucher DP8 (String, max 32 ký tự)
+          ma_ck22: limitString(toString(sale.maCk22, ''), 32),
+          // ck22_nt: Tiền (Decimal)
+          ck22_nt: Number(ck22_nt),
+          // dt_tg_nt: Tiền trợ giá (Decimal)
+          dt_tg_nt: Number(toNumber(sale.dtTgNt, 0)),
+          // ma_thue: Mã thuế (String, max 8 ký tự) - Bắt buộc
+          ma_thue: limitString(toString(sale.maThue, '10'), 8),
+          // thue_suat: Thuế suất (Decimal)
+          thue_suat: Number(toNumber(sale.thueSuat, 0)),
+          // tien_thue: Tiền thuế (Decimal)
+          tien_thue: Number(toNumber(sale.tienThue, 0)),
+          // tk_thue: Tài khoản thuế (String, max 16 ký tự)
+          tk_thue: limitString(toString(sale.tkThueCo, ''), 16),
+          // tk_cpbh: Tài khoản chiết khấu km (String, max 16 ký tự)
+          tk_cpbh: limitString(toString(sale.tkCpbh, ''), 16),
+          // ma_bp: Mã bộ phận (String, max 8 ký tự) - Bắt buộc
+          ma_bp: limitString(maBp, 8),
+          // ma_the: Mã thẻ (String, max 256 ký tự)
+          ma_the: limitString(maThe, 256),
+          // ma_lo: Mã lô (String, max 16 ký tự)
+          // so_serial: Số serial (String, max 64 ký tự)
+          // Chỉ thêm ma_lo hoặc so_serial vào payload (không gửi cả hai, và chỉ gửi khi có giá trị)
+          ...(soSerial && soSerial.trim() !== ''
+            ? { so_serial: limitString(soSerial, 64) }
+            : (maLo && maLo.trim() !== '' ? { ma_lo: limitString(maLo, 16) } : {})),
+          // loai_gd: Loại giao dịch (String, max 2 ký tự) - Bắt buộc
+          loai_gd: limitString(loaiGd, 2),
+          // ma_combo: mã combo (String, max 16 ký tự)
+          ma_combo: limitString(toString(sale.maCombo, ''), 16),
+          // id_goc: ID phiếu gốc (String, max 70 ký tự)
+          id_goc: limitString(toString(sale.idGoc, ''), 70),
+          // id_goc_ct: Số ct phiếu gốc (String, max 16 ký tự)
+          id_goc_ct: limitString(toString(sale.idGocCt, ''), 16),
+          // id_goc_so: Dòng phiếu gốc (Int)
+          id_goc_so: Number(toNumber(sale.idGocSo, 0)),
+          // dong: Dòng của phiếu (Int) - Bắt buộc, bắt đầu từ 1
+          dong: index + 1,
+          // id_goc_ngay: Ngày phiếu gốc (DateTime)
+          id_goc_ngay: sale.idGocNgay ? formatDateISO(new Date(sale.idGocNgay)) : formatDateISO(new Date()),
+          // id_goc_dv: Đơn vị phiếu gốc (String, max 8 ký tự)
+          id_goc_dv: limitString(toString(sale.idGocDv, ''), 8),
+        };
+      }));
+
 
       // Validate sales array
       if (!orderData.sales || orderData.sales.length === 0) {
@@ -2754,7 +2756,7 @@ export class SalesService {
       // Build cbdetail từ detail (tổng hợp thông tin sản phẩm)
       const cbdetail = detail.map((item: any) => {
         // Tính tổng chiết khấu từ tất cả các loại chiết khấu
-        const tongChietKhau = 
+        const tongChietKhau =
           Number(item.ck01_nt || 0) +
           Number(item.ck02_nt || 0) +
           Number(item.ck03_nt || 0) +
@@ -2791,7 +2793,7 @@ export class SalesService {
       const firstSale = orderData.sales[0];
       const maKenh = 'ONLINE'; // Fix mã kênh là ONLINE
       const soSeri = firstSale?.kyHieu || firstSale?.branchCode || orderData.branchCode || 'DEFAULT';
-      
+
       // Extract chỉ phần số từ ordertype (ví dụ: "01.Thường" -> "01")
       let loaiGd = '01';
       if (firstSale?.ordertype) {
@@ -2800,10 +2802,10 @@ export class SalesService {
       }
 
       // Lấy ma_dvcs từ department API (ưu tiên), nếu không có thì fallback
-      const maDvcs = firstSale?.department?.ma_dvcs 
+      const maDvcs = firstSale?.department?.ma_dvcs
         || firstSale?.department?.ma_dvcs_ht
-        || orderData.customer?.brand 
-        || orderData.branchCode 
+        || orderData.customer?.brand
+        || orderData.branchCode
         || '';
 
       return {
@@ -2849,7 +2851,7 @@ export class SalesService {
     try {
       // Group theo doccode để xử lý từng phiếu
       const transferMap = new Map<string, StockTransferItem[]>();
-      
+
       for (const item of createDto.data) {
         if (!transferMap.has(item.doccode)) {
           transferMap.set(item.doccode, []);
@@ -2868,7 +2870,7 @@ export class SalesService {
         try {
           // Lấy item đầu tiên để lấy thông tin chung
           const firstItem = items[0];
-          
+
           // Join với order nếu có so_code
           let orderData: any = null;
           if (firstItem.so_code) {
@@ -2961,7 +2963,7 @@ export class SalesService {
         let trackSerial: boolean | null = null;
         let trackBatch: boolean | null = null;
         let productTypeFromLoyalty: string | null = null;
-        
+
         try {
           const product = await this.productItemRepository.findOne({
             where: { maERP: item.item_code },
@@ -2990,17 +2992,17 @@ export class SalesService {
         }
 
         const productTypeUpper = productTypeFromLoyalty ? String(productTypeFromLoyalty).toUpperCase().trim() : null;
-        
+
         // Debug log để kiểm tra trackSerial và trackBatch
         if (index === 0) {
         }
-        
+
         // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
         const useBatch = this.shouldUseBatch(trackBatch, trackSerial);
-        
+
         let maLo: string | null = null;
         let soSerial: string | null = null;
-        
+
         if (useBatch) {
           // trackBatch = true → dùng ma_lo với giá trị batchserial
           const batchSerial = item.batchserial || null;
@@ -3084,5 +3086,268 @@ export class SalesService {
   /**
    * Build warehouse release data cho Fast API
    */
-}
 
+  /**
+   * Lấy checkFaceID data theo partner_code và date
+   * @param partnerCode - Partner code (customer code)
+   * @param date - Date format: YYYY-MM-DD hoặc DDMMMYYYY
+   */
+  async getCheckFaceIdByPartnerCode(partnerCode: string, date?: string): Promise<CheckFaceId[]> {
+    const query = this.checkFaceIdRepository
+      .createQueryBuilder('checkFaceId')
+      .where('checkFaceId.code = :partnerCode', { partnerCode })
+      .orderBy('checkFaceId.startTime', 'DESC');
+
+    if (date) {
+      // Parse date nếu là format DDMMMYYYY
+      let dateObj: Date;
+      if (date.includes('-')) {
+        // Format: YYYY-MM-DD
+        dateObj = new Date(date);
+      } else {
+        // Format: DDMMMYYYY
+        const day = parseInt(date.substring(0, 2));
+        const monthStr = date.substring(2, 5).toUpperCase();
+        const year = parseInt(date.substring(5, 9));
+        const monthMap: Record<string, number> = {
+          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+        };
+        dateObj = new Date(year, monthMap[monthStr] || 0, day);
+      }
+      query.andWhere('DATE(checkFaceId.date) = DATE(:date)', { date: dateObj });
+    }
+
+    return query.getMany();
+  }
+
+  /**
+   * Lấy orders với checkFaceID data theo partner_code
+   * @param partnerCode - Partner code (customer code)
+   * @param date - Date format: YYYY-MM-DD hoặc DDMMMYYYY
+   */
+  async getOrdersWithCheckFaceId(partnerCode: string, date?: string): Promise<{
+    orders: Order[];
+    checkFaceIds: CheckFaceId[];
+  }> {
+    // Lấy orders theo partner_code
+    const sales = await this.saleRepository.find({
+      where: { partnerCode },
+      relations: ['customer'],
+      order: { docDate: 'DESC', createdAt: 'DESC' },
+    });
+
+    // Group sales by docCode
+    const ordersMap = new Map<string, Order>();
+    for (const sale of sales) {
+      if (!ordersMap.has(sale.docCode)) {
+        // Map Customer entity sang OrderCustomer type
+        const customer = sale.customer;
+        const orderCustomer = customer ? {
+          code: customer.code,
+          name: customer.name,
+          brand: customer.brand || '',
+          mobile: customer.mobile,
+          sexual: customer.sexual,
+          idnumber: customer.idnumber,
+          enteredat: customer.enteredat ? customer.enteredat.toISOString() : undefined,
+          crm_lead_source: customer.crm_lead_source,
+          address: customer.address,
+          province_name: customer.province_name,
+          birthday: customer.birthday ? customer.birthday.toISOString().split('T')[0] : undefined,
+          grade_name: customer.grade_name,
+          branch_code: customer.branch_code,
+        } : null;
+
+        ordersMap.set(sale.docCode, {
+          docCode: sale.docCode,
+          docDate: sale.docDate.toISOString(),
+          branchCode: sale.branchCode,
+          docSourceType: sale.docSourceType || 'sale',
+          customer: orderCustomer as any,
+          totalRevenue: 0,
+          totalQty: 0,
+          totalItems: 0,
+          isProcessed: sale.isProcessed,
+          sales: [],
+        });
+      }
+      const order = ordersMap.get(sale.docCode)!;
+      order.sales = order.sales || [];
+      order.sales.push(sale as any);
+      order.totalRevenue += sale.revenue || 0;
+      order.totalQty += sale.qty || 0;
+      order.totalItems += 1;
+    }
+
+    // Lấy checkFaceID data
+    const checkFaceIds = await this.getCheckFaceIdByPartnerCode(partnerCode, date);
+
+    return {
+      orders: Array.from(ordersMap.values()),
+      checkFaceIds,
+    };
+  }
+
+  /**
+   * Lấy tất cả orders với checkFaceID data đã join, có phân trang
+   * @param options - Pagination options
+   */
+  async getAllGiaiTrinhFaceId(options: {
+    page: number;
+    limit: number;
+    date?: string;
+  }): Promise<{
+    items: Array<{
+      partnerCode: string;
+      partnerName: string;
+      checkFaceIds: CheckFaceId[];
+      orders: Order[];
+    }>;
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasNext: boolean;
+      hasPrev: boolean;
+    };
+  }> {
+    try {
+
+      const { page, limit, date } = options;
+      const skip = (page - 1) * limit;
+
+      // Lấy tất cả checkFaceId records, group by partner_code
+      let checkFaceIdQuery = this.checkFaceIdRepository
+        .createQueryBuilder('checkFaceId')
+        .orderBy('checkFaceId.date', 'DESC')
+        .addOrderBy('checkFaceId.startTime', 'DESC');
+
+      if (date) {
+        // Parse date nếu là format DDMMMYYYY
+        let dateObj: Date;
+        if (date.includes('-')) {
+          // Format: YYYY-MM-DD
+          dateObj = new Date(date);
+        } else {
+          // Format: DDMMMYYYY
+          const day = parseInt(date.substring(0, 2));
+          const monthStr = date.substring(2, 5).toUpperCase();
+          const year = parseInt(date.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          dateObj = new Date(year, monthMap[monthStr] || 0, day);
+        }
+        checkFaceIdQuery.andWhere('DATE(checkFaceId.date) = DATE(:date)', { date: dateObj });
+      }
+
+      const allCheckFaceIds = await checkFaceIdQuery.getMany();
+
+      // Group checkFaceIds by partner_code
+      const checkFaceIdsByPartner = new Map<string, CheckFaceId[]>();
+      for (const checkFaceId of allCheckFaceIds) {
+        if (!checkFaceId.partnerCode) continue;
+        if (!checkFaceIdsByPartner.has(checkFaceId.partnerCode)) {
+          checkFaceIdsByPartner.set(checkFaceId.partnerCode, []);
+        }
+        checkFaceIdsByPartner.get(checkFaceId.partnerCode)!.push(checkFaceId);
+      }
+
+      // Get unique partner codes
+      const partnerCodes = Array.from(checkFaceIdsByPartner.keys());
+      const total = partnerCodes.length;
+      const totalPages = Math.ceil(total / limit);
+      const paginatedPartnerCodes = partnerCodes.slice(skip, skip + limit);
+
+      // Lấy orders cho từng partner code
+      const items: Array<{
+        partnerCode: string;
+        partnerName: string;
+        checkFaceIds: CheckFaceId[];
+        orders: Order[];
+      }> = [];
+
+      for (const partnerCode of paginatedPartnerCodes) {
+        const checkFaceIds = checkFaceIdsByPartner.get(partnerCode) || [];
+        const firstCheckFaceId = checkFaceIds[0];
+        const partnerName = firstCheckFaceId?.name || partnerCode;
+
+        // Lấy orders cho partner này
+        const sales = await this.saleRepository.find({
+          where: { partnerCode },
+          relations: ['customer'],
+          order: { docDate: 'DESC', createdAt: 'DESC' },
+        });
+
+        // Group sales by docCode
+        const ordersMap = new Map<string, Order>();
+        for (const sale of sales) {
+          if (!ordersMap.has(sale.docCode)) {
+            const customer = sale.customer;
+            const orderCustomer = customer ? {
+              code: customer.code,
+              name: customer.name,
+              brand: customer.brand || '',
+              mobile: customer.mobile,
+              sexual: customer.sexual,
+              idnumber: customer.idnumber,
+              enteredat: customer.enteredat ? customer.enteredat.toISOString() : undefined,
+              crm_lead_source: customer.crm_lead_source,
+              address: customer.address,
+              province_name: customer.province_name,
+              birthday: customer.birthday ? customer.birthday.toISOString().split('T')[0] : undefined,
+              grade_name: customer.grade_name,
+              branch_code: customer.branch_code,
+            } : null;
+
+            ordersMap.set(sale.docCode, {
+              docCode: sale.docCode,
+              docDate: sale.docDate.toISOString(),
+              branchCode: sale.branchCode,
+              docSourceType: sale.docSourceType || 'sale',
+              customer: orderCustomer as any,
+              totalRevenue: 0,
+              totalQty: 0,
+              totalItems: 0,
+              isProcessed: sale.isProcessed,
+              sales: [],
+            });
+          }
+          const order = ordersMap.get(sale.docCode)!;
+          order.sales = order.sales || [];
+          order.sales.push(sale as any);
+          order.totalRevenue += sale.revenue || 0;
+          order.totalQty += sale.qty || 0;
+          order.totalItems += 1;
+        }
+
+        items.push({
+          partnerCode,
+          partnerName,
+          checkFaceIds,
+          orders: Array.from(ordersMap.values()),
+        });
+      }
+
+      return {
+        items,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1,
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`[SalesService] getAllGiaiTrinhFaceId error: ${error?.message || error}`);
+      throw new InternalServerErrorException('getAllGiaiTrinhFaceId error');
+    }
+  }
+}

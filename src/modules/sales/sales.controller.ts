@@ -30,6 +30,19 @@ export class SalesController {
     });
   }
 
+  @Get('giai-trinh-faceid')
+  async getAllGiaiTrinhFaceId(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('date') date?: string,
+  ) {
+    return this.salesService.getAllGiaiTrinhFaceId({
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 10,
+      date,
+    });
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.salesService.findOne(id);
@@ -121,6 +134,22 @@ export class SalesController {
       throw new BadRequestException('Dữ liệu stock transfer không hợp lệ');
     }
     return this.salesService.createStockTransfer(createDto);
+  }
+
+  @Get('check-face-id/:partnerCode')
+  async getCheckFaceIdByPartnerCode(
+    @Param('partnerCode') partnerCode: string,
+    @Query('date') date?: string,
+  ) {
+    return this.salesService.getCheckFaceIdByPartnerCode(partnerCode, date);
+  }
+
+  @Get('orders-with-check-face-id/:partnerCode')
+  async getOrdersWithCheckFaceId(
+    @Param('partnerCode') partnerCode: string,
+    @Query('date') date?: string,
+  ) {
+    return this.salesService.getOrdersWithCheckFaceId(partnerCode, date);
   }
 }
 

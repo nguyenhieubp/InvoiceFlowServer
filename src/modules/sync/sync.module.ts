@@ -9,10 +9,11 @@ import { SalesModule } from '../sales/sales.module';
 import { Customer } from '../../entities/customer.entity';
 import { Sale } from '../../entities/sale.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
+import { CheckFaceId } from '../../entities/check-face-id.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Customer, Sale, DailyCashio]),
+    TypeOrmModule.forFeature([Customer, Sale, DailyCashio, CheckFaceId]),
     HttpModule,
     forwardRef(() => SalesModule),
   ],

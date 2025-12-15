@@ -5,6 +5,7 @@ import { HttpService } from '@nestjs/axios';
 import { Customer } from '../entities/customer.entity';
 import { Sale } from '../entities/sale.entity';
 import { DailyCashio } from '../entities/daily-cashio.entity';
+import { CheckFaceId } from '../entities/check-face-id.entity';
 import { ZappyApiService } from './zappy-api.service';
 import { SalesService } from '../modules/sales/sales.service';
 
@@ -34,6 +35,8 @@ export class SyncService {
     private saleRepository: Repository<Sale>,
     @InjectRepository(DailyCashio)
     private dailyCashioRepository: Repository<DailyCashio>,
+    @InjectRepository(CheckFaceId)
+    private checkFaceIdRepository: Repository<CheckFaceId>,
     private httpService: HttpService,
     private zappyApiService: ZappyApiService,
     @Inject(forwardRef(() => SalesService))
@@ -840,6 +843,14 @@ export class SyncService {
         });
       }
 
+      // Sync checkFaceID data từ API
+      try {
+        await this.syncCheckFaceId(date, branchCodes);
+      } catch (checkFaceIdError: any) {
+        this.logger.warn(`Failed to sync checkFaceID data: ${checkFaceIdError?.message || checkFaceIdError}`);
+        // Không throw error, chỉ log warning vì đây là tính năng bổ sung
+      }
+
       // Trả về response ngay sau khi đồng bộ sale xong (không đợi tạo invoice)
       return {
         success: errors.length === 0,
@@ -1109,6 +1120,135 @@ export class SyncService {
     
     if (sales.length > 0) {
     }
+  }
+
+  /**
+   * Sync checkFaceID data từ API
+   * @param date - Date format: DDMMMYYYY (ví dụ: 10DEC2025)
+   * @param shopCodes - Array of shop codes (branch codes)
+   */
+  private async syncCheckFaceId(date: string, shopCodes: string[]): Promise<void> {
+    if (!shopCodes || shopCodes.length === 0) {
+      return;
+    }
+
+    // Parse date từ DDMMMYYYY sang YYYY-MM-DD
+    // Ví dụ: 10DEC2025 -> 10-12-2025
+    const parseDate = (dateStr: string): string => {
+      // Format: DDMMMYYYY (ví dụ: 10DEC2025)
+      const day = dateStr.substring(0, 2);
+      const monthStr = dateStr.substring(2, 5).toUpperCase();
+      const year = dateStr.substring(5, 9);
+      
+      const monthMap: Record<string, string> = {
+        'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04',
+        'MAY': '05', 'JUN': '06', 'JUL': '07', 'AUG': '08',
+        'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12',
+      };
+      
+      const month = monthMap[monthStr] || '01';
+      return `${day}-${month}-${year}`; // Format: 10-12-2025
+    };
+
+    const dateFormatted = parseDate(date);
+    let savedCount = 0;
+    let skippedCount = 0;
+
+    // Gọi API checkFaceID cho mỗi shop_code
+    for (const shopCode of shopCodes) {
+      try {
+        const response = await this.httpService.axiosRef.get(
+          `https://vmt.ipchello.com/api/inout-customer/`,
+          {
+            params: {
+              shop_code: shopCode,
+              fromDate: dateFormatted,
+              toDate: dateFormatted,
+            },
+            headers: { accept: 'application/json' },
+            timeout: 10000, // 10 seconds timeout
+          },
+        );
+
+        const checkFaceIdData = response?.data?.data || [];
+        if (!Array.isArray(checkFaceIdData) || checkFaceIdData.length === 0) {
+          continue;
+        }
+
+        // Parse date string sang Date object
+        const parseDateTime = (dateTimeStr: string): Date | null => {
+          if (!dateTimeStr) return null;
+          // Format: "10-12-2025 09:13:19"
+          try {
+            const [datePart, timePart] = dateTimeStr.split(' ');
+            const [day, month, year] = datePart.split('-');
+            const [hour, minute, second] = timePart ? timePart.split(':') : ['00', '00', '00'];
+            return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute), parseInt(second || '0'));
+          } catch (error) {
+            return null;
+          }
+        };
+
+        // Lưu từng checkFaceID record vào database
+        for (const item of checkFaceIdData) {
+          try {
+            // Kiểm tra xem đã có record với apiId chưa
+            if (item.id) {
+              const existingCheckFaceId = await this.checkFaceIdRepository.findOne({
+                where: { apiId: item.id },
+              });
+
+              if (existingCheckFaceId) {
+                skippedCount++;
+                continue;
+              }
+            }
+
+            // Parse dates
+            const startTime = item.start_time ? parseDateTime(item.start_time) : null;
+            const checking = item.checking ? parseDateTime(item.checking) : null;
+            const monthMapForDate: Record<string, string> = {
+              'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04',
+              'MAY': '05', 'JUN': '06', 'JUL': '07', 'AUG': '08',
+              'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12',
+            };
+            const dateObj = startTime || (date ? (() => {
+              const day = parseInt(date.substring(0, 2));
+              const monthStr = date.substring(2, 5).toUpperCase();
+              const month = parseInt(monthMapForDate[monthStr] || '01');
+              const year = parseInt(date.substring(5, 9));
+              return new Date(year, month - 1, day);
+            })() : new Date());
+
+            const checkFaceIdDataToSave: Partial<CheckFaceId> = {
+              apiId: item.id || undefined,
+              startTime: startTime || undefined,
+              checking: checking || undefined,
+              isFirstInDay: item.is_first_in_day === true || item.is_first_in_day === 1,
+              image: item.image || undefined,
+              partnerCode: item.code || '',
+              name: item.name || undefined,
+              mobile: item.mobile || undefined,
+              isNv: item.is_nv || undefined,
+              shopCode: item.shop_code || shopCode,
+              shopName: item.shop_name || undefined,
+              camId: item.cam_id || undefined,
+              date: dateObj || new Date(),
+            };
+
+            const newCheckFaceId = this.checkFaceIdRepository.create(checkFaceIdDataToSave);
+            await this.checkFaceIdRepository.save(newCheckFaceId);
+            savedCount++;
+          } catch (itemError: any) {
+            this.logger.warn(`Failed to save checkFaceID record ${item.id || 'unknown'}: ${itemError?.message || itemError}`);
+          }
+        }
+      } catch (error: any) {
+        this.logger.warn(`Failed to fetch checkFaceID data for shop_code ${shopCode}: ${error?.message || error}`);
+      }
+    }
+
+    this.logger.log(`[Sync] Đã lưu ${savedCount} checkFaceID records mới, bỏ qua ${skippedCount} records đã tồn tại`);
   }
 }
 
