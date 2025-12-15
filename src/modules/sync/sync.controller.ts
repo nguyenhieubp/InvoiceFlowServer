@@ -110,5 +110,30 @@ export class SyncController {
       ],
     };
   }
+
+  /**
+   * Backfill toàn bộ đơn hàng cho khoảng ngày cố định 01/10/2025 - 30/11/2025.
+   * Chạy tuần tự theo ngày, gọi syncAllBrands cho từng ngày.
+   */
+  @Post('all-range-oct-nov-2025')
+  async syncAllRangeOctNov2025() {
+    try {
+      await this.syncService.syncAllBrandsRange_01OctTo30Nov2025();
+      return {
+        success: true,
+        message: 'Đã kích hoạt đồng bộ tất cả brand cho khoảng 01/10/2025 - 30/11/2025 (vui lòng xem log server).',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi đồng bộ khoảng 01/10/2025 - 30/11/2025',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }
 

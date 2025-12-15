@@ -43,6 +43,44 @@ export class SyncService {
     private salesService: SalesService,
   ) {}
 
+  /**
+   * Đồng bộ toàn bộ đơn hàng (tất cả brand) cho một khoảng ngày cố định.
+   * Mốc đồng bộ: từ 01/10/2025 đến 30/11/2025 (31/11 không tồn tại).
+   *
+   * Lưu ý: hàm này không được expose ra API, chỉ gọi thủ công khi cần backfill dữ liệu.
+   */
+  async syncAllBrandsRange_01OctTo30Nov2025(): Promise<void> {
+    // 01/10/2025
+    const start = new Date(2025, 9, 1); // month 9 = October
+    // 30/11/2025
+    const end = new Date(2025, 10, 30); // month 10 = November
+
+    const formatToDDMMMYYYY = (d: Date): string => {
+      const day = d.getDate().toString().padStart(2, '0');
+      const monthIdx = d.getMonth(); // 0-based
+      const year = d.getFullYear();
+      const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+      const monthStr = months[monthIdx];
+      return `${day}${monthStr}${year}`;
+    };
+
+    let current = new Date(start.getTime());
+    while (current <= end) {
+      const dateStr = formatToDDMMMYYYY(current);
+      this.logger.log(`[Backfill] Bắt đầu đồng bộ tất cả brand cho ngày ${dateStr}`);
+      try {
+        await this.syncAllBrands(dateStr);
+        this.logger.log(`[Backfill] Hoàn thành đồng bộ tất cả brand cho ngày ${dateStr}`);
+      } catch (error: any) {
+        this.logger.error(
+          `[Backfill] Lỗi khi đồng bộ tất cả brand cho ngày ${dateStr}: ${error?.message || error}`,
+        );
+      }
+      // Tăng 1 ngày
+      current.setDate(current.getDate() + 1);
+    }
+  }
+
   async syncAllBrands(date: string): Promise<{
     success: boolean;
     message: string;
