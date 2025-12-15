@@ -3440,13 +3440,13 @@ export class SalesService {
       page: number;
       limit: number;
       total: number;
+      totalLines: number;
       totalPages: number;
       hasNext: boolean;
       hasPrev: boolean;
     };
   }> {
     try {
-
       const { page, limit, date, orderCode, partnerCode, faceStatus } = options;
       const skip = (page - 1) * limit;
 
@@ -3459,63 +3459,103 @@ export class SalesService {
         const monthStr = dateStr.substring(2, 5).toUpperCase();
         const year = parseInt(dateStr.substring(5, 9));
         const monthMap: Record<string, number> = {
-          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          JAN: 0, FEB: 1, MAR: 2, APR: 3,
+          MAY: 4, JUN: 5, JUL: 6, AUG: 7,
+          SEP: 8, OCT: 9, NOV: 10, DEC: 11,
         };
         return new Date(year, monthMap[monthStr] || 0, day);
       };
 
       const dateObj = parseDate(date);
 
-      // Lấy tất cả checkFaceId records, group by partner_code
-      let checkFaceIdQuery = this.checkFaceIdRepository
-        .createQueryBuilder('checkFaceId')
-        .orderBy('checkFaceId.date', 'DESC')
-        .addOrderBy('checkFaceId.startTime', 'DESC');
-
-      if (dateObj) {
-        checkFaceIdQuery.andWhere('DATE(checkFaceId.date) = DATE(:date)', { date: dateObj });
-      }
-
-      const allCheckFaceIds = await checkFaceIdQuery.getMany();
-
-      // Group checkFaceIds by partner_code
-      const checkFaceIdsByPartner = new Map<string, CheckFaceId[]>();
-      for (const checkFaceId of allCheckFaceIds) {
-        if (!checkFaceId.partnerCode) continue;
-        if (!checkFaceIdsByPartner.has(checkFaceId.partnerCode)) {
-          checkFaceIdsByPartner.set(checkFaceId.partnerCode, []);
-        }
-        checkFaceIdsByPartner.get(checkFaceId.partnerCode)!.push(checkFaceId);
-      }
-
-      // Lấy tất cả sales (orders) theo ngày / filter để bao gồm cả đối tác không có FaceID
-      let salesQuery = this.saleRepository
+      // 1) Base query cho sale theo ngày + filter, dùng lại cho count + partnerCodes + load sales
+      let baseSalesQuery = this.saleRepository
         .createQueryBuilder('sale')
-        .leftJoinAndSelect('sale.customer', 'customer')
-        .orderBy('sale.docDate', 'DESC')
-        .addOrderBy('sale.createdAt', 'DESC');
+        .leftJoinAndSelect('sale.customer', 'customer');
 
       if (dateObj) {
-        salesQuery.andWhere('DATE(sale.docDate) = DATE(:date)', { date: dateObj });
+        baseSalesQuery = baseSalesQuery.andWhere('DATE(sale.docDate) = DATE(:date)', { date: dateObj });
       }
       if (orderCode) {
-        salesQuery.andWhere('LOWER(sale.docCode) LIKE LOWER(:orderCode)', {
+        baseSalesQuery = baseSalesQuery.andWhere('LOWER(sale.docCode) LIKE LOWER(:orderCode)', {
           orderCode: `%${orderCode}%`,
         });
       }
       if (partnerCode) {
-        salesQuery.andWhere('LOWER(sale.partnerCode) LIKE LOWER(:partnerCode)', {
+        baseSalesQuery = baseSalesQuery.andWhere('LOWER(sale.partnerCode) LIKE LOWER(:partnerCode)', {
           partnerCode: `%${partnerCode}%`,
         });
       }
 
-      const allSales = await salesQuery.getMany();
+      // 2) Đếm tổng số partner (distinct partnerCode) và tổng số dòng hàng (sales) theo filter
+      const partnerCountResult = await baseSalesQuery
+        .clone()
+        .select('COUNT(DISTINCT sale.partnerCode)', 'cnt')
+        .getRawOne<{ cnt: string }>();
 
-      // Group sales by partner_code -> docCode
+      const lineCountResult = await baseSalesQuery
+        .clone()
+        .select('COUNT(*)', 'cnt')
+        .getRawOne<{ cnt: string }>();
+
+      const total = Number(partnerCountResult?.cnt || 0); // tổng khách (partner)
+      const totalLines = Number(lineCountResult?.cnt || 0); // tổng dòng hàng (sales)
+      const totalPages = Math.ceil(total / limit) || 1;
+
+      if (total === 0) {
+        return {
+          items: [],
+          pagination: {
+            page,
+            limit,
+            total: 0,
+            totalLines: 0,
+            totalPages: 0,
+            hasNext: false,
+            hasPrev: false,
+          },
+        };
+      }
+
+      // 3) Lấy danh sách partnerCode cho trang hiện tại (paginate ở DB)
+      const partnerRows = await baseSalesQuery
+        .clone()
+        .select('DISTINCT sale.partnerCode', 'partnerCode')
+        .orderBy('sale.partnerCode', 'ASC')
+        .offset(skip)
+        .limit(limit)
+        .getRawMany<{ partnerCode: string }>();
+
+      const pagePartnerCodes = partnerRows.map((r) => r.partnerCode).filter(Boolean);
+
+      if (pagePartnerCodes.length === 0) {
+        return {
+          items: [],
+          pagination: {
+            page,
+            limit,
+            total,
+            totalLines,
+            totalPages,
+            hasNext: page < totalPages,
+            hasPrev: page > 1,
+          },
+        };
+      }
+
+      // 4) Lấy toàn bộ sales cho các partner trong trang hiện tại
+      const sales = await this.saleRepository
+        .createQueryBuilder('sale')
+        .leftJoinAndSelect('sale.customer', 'customer')
+        .where('sale.partnerCode IN (:...partnerCodes)', { partnerCodes: pagePartnerCodes })
+        .andWhere('DATE(sale.docDate) = DATE(:date)', { date: dateObj })
+        .orderBy('sale.docDate', 'DESC')
+        .addOrderBy('sale.createdAt', 'DESC')
+        .getMany();
+
+      // 5) Group sales theo partnerCode -> docCode và build Order[]
       const ordersByPartner = new Map<string, Map<string, Order>>();
-      for (const sale of allSales) {
+      for (const sale of sales) {
         if (!sale.partnerCode) continue;
         if (!ordersByPartner.has(sale.partnerCode)) {
           ordersByPartner.set(sale.partnerCode, new Map<string, Order>());
@@ -3524,21 +3564,23 @@ export class SalesService {
 
         if (!partnerOrders.has(sale.docCode)) {
           const customer = sale.customer;
-          const orderCustomer = customer ? {
-            code: customer.code,
-            name: customer.name,
-            brand: customer.brand || '',
-            mobile: customer.mobile,
-            sexual: customer.sexual,
-            idnumber: customer.idnumber,
-            enteredat: customer.enteredat ? customer.enteredat.toISOString() : undefined,
-            crm_lead_source: customer.crm_lead_source,
-            address: customer.address,
-            province_name: customer.province_name,
-            birthday: customer.birthday ? customer.birthday.toISOString().split('T')[0] : undefined,
-            grade_name: customer.grade_name,
-            branch_code: customer.branch_code,
-          } : null;
+          const orderCustomer = customer
+            ? {
+                code: customer.code,
+                name: customer.name,
+                brand: customer.brand || '',
+                mobile: customer.mobile,
+                sexual: customer.sexual,
+                idnumber: customer.idnumber,
+                enteredat: customer.enteredat ? customer.enteredat.toISOString() : undefined,
+                crm_lead_source: customer.crm_lead_source,
+                address: customer.address,
+                province_name: customer.province_name,
+                birthday: customer.birthday ? customer.birthday.toISOString().split('T')[0] : undefined,
+                grade_name: customer.grade_name,
+                branch_code: customer.branch_code,
+              }
+            : null;
 
           partnerOrders.set(sale.docCode, {
             docCode: sale.docCode,
@@ -3562,24 +3604,35 @@ export class SalesService {
         order.totalItems += 1;
       }
 
-      // Union partner codes từ checkFaceId và sales
-      const partnerCodeSet = new Set<string>();
-      for (const code of checkFaceIdsByPartner.keys()) partnerCodeSet.add(code);
-      for (const code of ordersByPartner.keys()) partnerCodeSet.add(code);
+      // 6) Lấy checkFaceIds chỉ cho các partner trong trang hiện tại
+      let checkFaceIdQuery = this.checkFaceIdRepository
+        .createQueryBuilder('checkFaceId')
+        .where('checkFaceId.partnerCode IN (:...partnerCodes)', { partnerCodes: pagePartnerCodes })
+        .orderBy('checkFaceId.date', 'DESC')
+        .addOrderBy('checkFaceId.startTime', 'DESC');
 
-      // Lọc theo trạng thái FaceID nếu có yêu cầu
-      let partnerCodes = Array.from(partnerCodeSet);
-      if (faceStatus === 'yes') {
-        partnerCodes = partnerCodes.filter((code) => checkFaceIdsByPartner.has(code));
-      } else if (faceStatus === 'no') {
-        partnerCodes = partnerCodes.filter((code) => !checkFaceIdsByPartner.has(code));
+      if (dateObj) {
+        checkFaceIdQuery = checkFaceIdQuery.andWhere('DATE(checkFaceId.date) = DATE(:date)', { date: dateObj });
       }
 
-      const total = partnerCodes.length;
-      const totalPages = Math.ceil(total / limit);
-      const paginatedPartnerCodes = partnerCodes.slice(skip, skip + limit);
+      const faceRows = await checkFaceIdQuery.getMany();
+      const checkFaceIdsByPartner = new Map<string, CheckFaceId[]>();
+      for (const cf of faceRows) {
+        if (!cf.partnerCode) continue;
+        if (!checkFaceIdsByPartner.has(cf.partnerCode)) {
+          checkFaceIdsByPartner.set(cf.partnerCode, []);
+        }
+        checkFaceIdsByPartner.get(cf.partnerCode)!.push(cf);
+      }
 
-      // Lấy orders cho từng partner code
+      // 7) Nếu filter theo faceStatus, loại bớt partnerCodes trong trang
+      let filteredPartnerCodes = [...pagePartnerCodes];
+      if (faceStatus === 'yes') {
+        filteredPartnerCodes = filteredPartnerCodes.filter((code) => checkFaceIdsByPartner.has(code));
+      } else if (faceStatus === 'no') {
+        filteredPartnerCodes = filteredPartnerCodes.filter((code) => !checkFaceIdsByPartner.has(code));
+      }
+
       const items: Array<{
         partnerCode: string;
         partnerName: string;
@@ -3587,17 +3640,23 @@ export class SalesService {
         orders: Order[];
       }> = [];
 
-      for (const partnerCode of paginatedPartnerCodes) {
-        const checkFaceIds = checkFaceIdsByPartner.get(partnerCode) || [];
-        const firstCheckFaceId = checkFaceIds[0];
-        const partnerName = firstCheckFaceId?.name || partnerCode;
+      for (const code of filteredPartnerCodes) {
+        const partnerOrdersMap = ordersByPartner.get(code) || new Map<string, Order>();
+        const orders = Array.from(partnerOrdersMap.values());
+        if (orders.length === 0) continue;
 
-        const partnerOrdersMap = ordersByPartner.get(partnerCode) || new Map<string, Order>();
+        const checkFaceIds = checkFaceIdsByPartner.get(code) || [];
+        const firstOrder = orders[0];
+        const partnerName =
+          checkFaceIds[0]?.name ||
+          (firstOrder.customer as any)?.name ||
+          code;
+
         items.push({
-          partnerCode,
+          partnerCode: code,
           partnerName,
           checkFaceIds,
-          orders: Array.from(partnerOrdersMap.values()),
+          orders,
         });
       }
 
@@ -3607,6 +3666,7 @@ export class SalesService {
           page,
           limit,
           total,
+          totalLines,
           totalPages,
           hasNext: page < totalPages,
           hasPrev: page > 1,
