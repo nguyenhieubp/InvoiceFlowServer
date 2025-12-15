@@ -601,18 +601,44 @@ export class SalesService {
           }) || [],
         }));
 
-        // Phân trang
-        const total = enrichedOrders.length;
-        const startIndex = (page - 1) * limit;
-        const endIndex = startIndex + limit;
-        const paginatedOrders = enrichedOrders.slice(startIndex, endIndex);
+        // Phân trang theo rows (sale items), không phải orders
+        // Tính tổng số rows (sale items) từ tất cả orders
+        let totalRows = 0;
+        enrichedOrders.forEach(order => {
+          totalRows += (order.sales && order.sales.length > 0) ? order.sales.length : (order.totalItems > 0 ? order.totalItems : 1);
+        });
+        
+        const paginationStartIndex = (page - 1) * limit;
+        const paginationEndIndex = paginationStartIndex + limit;
+        
+        // Paginate orders dựa trên số rows
+        let currentRowCount = 0;
+        const paginatedOrders: typeof enrichedOrders = [];
+        
+        for (const order of enrichedOrders) {
+          const orderRowCount = (order.sales && order.sales.length > 0) ? order.sales.length : (order.totalItems > 0 ? order.totalItems : 1);
+          const orderStartRow = currentRowCount;
+          const orderEndRow = currentRowCount + orderRowCount;
+          
+          // Nếu order này có overlap với phạm vi pagination, thêm vào
+          if (orderEndRow > paginationStartIndex && orderStartRow < paginationEndIndex) {
+            paginatedOrders.push(order);
+          }
+          
+          currentRowCount += orderRowCount;
+          
+          // Nếu đã vượt quá phạm vi pagination, dừng lại
+          if (currentRowCount >= paginationEndIndex) {
+            break;
+          }
+        }
 
         return {
           data: paginatedOrders,
-          total,
+          total: totalRows, // Tổng số rows (sale items)
           page,
           limit,
-          totalPages: Math.ceil(total / limit),
+          totalPages: Math.ceil(totalRows / limit),
         };
       } catch (error: any) {
         this.logger.error(`Error fetching orders from Zappy API: ${error?.message || error}`);
@@ -800,15 +826,17 @@ export class SalesService {
       }
     }
 
-    // Tối ưu: Query với LIMIT lớn hơn một chút để đảm bảo có đủ orders
-    // Ước tính: mỗi order có khoảng 2-3 sale items, nên lấy thêm 50% để đảm bảo
-    const estimatedLimit = Math.ceil(limit * 1.5);
+    // Ước tính số sales cần lấy để có đủ rows cho trang hiện tại
+    // Mỗi order trung bình có 2-3 sale items, nên lấy thêm một chút để đảm bảo
+    // Nhưng phải giới hạn để tránh lấy quá nhiều
+    const estimatedSalesNeeded = Math.ceil(limit * 2); // Ước tính 2x limit để đảm bảo có đủ
     const queryStartIndex = (page - 1) * limit;
+    
     query = query
       .orderBy('sale.docDate', 'DESC')
       .addOrderBy('sale.docCode', 'ASC')
       .skip(queryStartIndex)
-      .take(estimatedLimit);
+      .take(estimatedSalesNeeded);
 
     const allSales = await query.getRawMany();
 
@@ -928,11 +956,6 @@ export class SalesService {
       // Tính số rows của order này
       const orderRowCount = order.totalItems > 0 ? order.totalItems : 1;
       
-      // Nếu đã đủ rows cho trang này, dừng lại
-      if (currentRowCount >= paginationEndIndex) {
-        break;
-      }
-      
       // Kiểm tra xem order này có nằm trong phạm vi pagination không
       // Order được thêm nếu có ít nhất 1 row nằm trong phạm vi [paginationStartIndex, paginationEndIndex)
       const orderStartRow = currentRowCount;
@@ -940,12 +963,30 @@ export class SalesService {
       
       // Nếu order này có overlap với phạm vi pagination, thêm vào
       if (orderEndRow > paginationStartIndex && orderStartRow < paginationEndIndex) {
-        paginatedOrders.push(order);
+        // Tính số rows còn lại cần lấy
+        const remainingRowsNeeded = paginationEndIndex - Math.max(currentRowCount, paginationStartIndex);
+        
+        // Nếu order này có nhiều sale items hơn số rows còn lại cần lấy, cần giới hạn
+        if (orderRowCount > remainingRowsNeeded && order.sales && order.sales.length > 0) {
+          // Tính index bắt đầu và kết thúc của sale items cần lấy trong order này
+          const startOffset = Math.max(0, paginationStartIndex - currentRowCount);
+          const endOffset = startOffset + remainingRowsNeeded;
+          
+          // Tạo order mới với sales đã được giới hạn
+          const limitedOrder = {
+            ...order,
+            sales: order.sales.slice(startOffset, endOffset),
+            totalItems: Math.min(orderRowCount, remainingRowsNeeded),
+          };
+          paginatedOrders.push(limitedOrder);
+        } else {
+          paginatedOrders.push(order);
+        }
       }
       
       currentRowCount += orderRowCount;
       
-      // Nếu đã đủ rows cho trang này sau khi thêm order này, dừng lại
+      // Nếu đã vượt quá phạm vi pagination, dừng lại
       if (currentRowCount >= paginationEndIndex) {
         break;
       }
