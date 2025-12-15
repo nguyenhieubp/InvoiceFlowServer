@@ -459,6 +459,7 @@ export class SalesService {
   async findAllOrders(options: {
     brand?: string;
     isProcessed?: boolean;
+    statusAsys?: boolean;
     page?: number;
     limit?: number;
     date?: string; // Format: DDMMMYYYY (ví dụ: 04DEC2025)
@@ -466,7 +467,7 @@ export class SalesService {
     dateTo?: string; // Format: YYYY-MM-DD hoặc ISO string
     search?: string; // Search query để tìm theo docCode, customer name, code, mobile
   }) {
-    const { brand, isProcessed, page = 1, limit = 50, date, dateFrom, dateTo, search } = options;
+    const { brand, isProcessed, statusAsys, page = 1, limit = 50, date, dateFrom, dateTo, search } = options;
 
     // Nếu có search query, luôn search trong database (không dùng Zappy API)
     // Vì Zappy API chỉ lấy được một ngày, không hỗ trợ date range
@@ -660,8 +661,185 @@ export class SalesService {
       .createQueryBuilder('sale')
       .select('COUNT(sale.id)', 'count');
 
+    // Nếu filter statusAsys = false, cần tìm tất cả các order có ít nhất 1 sale item lỗi
+    // Sau đó lấy các sale items lỗi của những order đó
+    // Nếu filter statusAsys = true, cần tìm tất cả các order KHÔNG có sale item lỗi nào
+    // (tức là tất cả sale items đều có statusAsys = true)
+    let errorOrderDocCodes: string[] = [];
+    let successOrderDocCodes: string[] = [];
+    if (statusAsys === false) {
+      // Tìm tất cả các docCode có ít nhất 1 sale item với statusAsys = false
+      const errorOrdersQuery = this.saleRepository
+        .createQueryBuilder('sale')
+        .select('DISTINCT sale.docCode', 'docCode');
+
+      // Áp dụng các filter tương tự (date, brand, search) để tìm các order lỗi
+      if (dateFrom || dateTo) {
+        if (dateFrom && dateTo) {
+          const startDate = new Date(dateFrom);
+          startDate.setHours(0, 0, 0, 0);
+          const endDate = new Date(dateTo);
+          endDate.setHours(23, 59, 59, 999);
+          errorOrdersQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+            dateFrom: startDate,
+            dateTo: endDate,
+          });
+        } else if (dateFrom) {
+          const startDate = new Date(dateFrom);
+          startDate.setHours(0, 0, 0, 0);
+          errorOrdersQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
+        } else if (dateTo) {
+          const endDate = new Date(dateTo);
+          endDate.setHours(23, 59, 59, 999);
+          errorOrdersQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
+        }
+      } else if (date) {
+        const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+        if (dateMatch) {
+          const [, day, monthStr, year] = dateMatch;
+          const monthMap: { [key: string]: number } = {
+            JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+            JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+          };
+          const month = monthMap[monthStr.toUpperCase()];
+          if (month !== undefined) {
+            const dateObj = new Date(parseInt(year), month, parseInt(day));
+            const startOfDay = new Date(dateObj);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(dateObj);
+            endOfDay.setHours(23, 59, 59, 999);
+            errorOrdersQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+              dateFrom: startOfDay,
+              dateTo: endOfDay,
+            });
+          }
+        }
+      }
+
+      errorOrdersQuery.andWhere('sale.statusAsys = :statusAsys', { statusAsys: false });
+
+      // Join với customer để filter brand và search
+      errorOrdersQuery.leftJoin('sale.customer', 'errorCustomer');
+
+      if (brand) {
+        errorOrdersQuery.andWhere('errorCustomer.brand = :brand', { brand });
+      }
+
+      if (search && search.trim() !== '') {
+        const searchPattern = `%${search.trim().toLowerCase()}%`;
+        errorOrdersQuery.andWhere(
+          '(LOWER(sale.docCode) LIKE :search OR LOWER(errorCustomer.name) LIKE :search OR LOWER(errorCustomer.code) LIKE :search OR LOWER(errorCustomer.mobile) LIKE :search)',
+          { search: searchPattern }
+        );
+      }
+
+      const errorOrdersResult = await errorOrdersQuery.getRawMany();
+      errorOrderDocCodes = errorOrdersResult.map((r: any) => r.docCode);
+
+      // Nếu không có order nào lỗi, trả về empty
+      if (errorOrderDocCodes.length === 0) {
+        return {
+          data: [],
+          total: 0,
+          page,
+          limit,
+          totalPages: 0,
+        };
+      }
+
+      // Filter query và count query theo danh sách docCode này
+      // Và chỉ lấy các sale items có statusAsys = false (không lấy các sale items có statusAsys = true)
+      query.andWhere('sale.docCode IN (:...errorOrderDocCodes)', { errorOrderDocCodes });
+      query.andWhere('sale.statusAsys = :statusAsys', { statusAsys: false });
+      countQuery.andWhere('sale.docCode IN (:...errorOrderDocCodes)', { errorOrderDocCodes });
+      countQuery.andWhere('sale.statusAsys = :statusAsys', { statusAsys: false });
+    } else if (statusAsys === true) {
+      // Tìm tất cả các docCode có ít nhất 1 sale item với statusAsys = false (để loại bỏ)
+      const errorOrdersQuery = this.saleRepository
+        .createQueryBuilder('sale')
+        .select('DISTINCT sale.docCode', 'docCode')
+        .where('sale.statusAsys = :statusAsys', { statusAsys: false });
+
+      // Áp dụng các filter tương tự (date, brand, search) để tìm các order lỗi
+      if (dateFrom || dateTo) {
+        if (dateFrom && dateTo) {
+          const startDate = new Date(dateFrom);
+          startDate.setHours(0, 0, 0, 0);
+          const endDate = new Date(dateTo);
+          endDate.setHours(23, 59, 59, 999);
+          errorOrdersQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+            dateFrom: startDate,
+            dateTo: endDate,
+          });
+        } else if (dateFrom) {
+          const startDate = new Date(dateFrom);
+          startDate.setHours(0, 0, 0, 0);
+          errorOrdersQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
+        } else if (dateTo) {
+          const endDate = new Date(dateTo);
+          endDate.setHours(23, 59, 59, 999);
+          errorOrdersQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
+        }
+      } else if (date) {
+        const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+        if (dateMatch) {
+          const [, day, monthStr, year] = dateMatch;
+          const monthMap: { [key: string]: number } = {
+            JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+            JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+          };
+          const month = monthMap[monthStr.toUpperCase()];
+          if (month !== undefined) {
+            const dateObj = new Date(parseInt(year), month, parseInt(day));
+            const startOfDay = new Date(dateObj);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(dateObj);
+            endOfDay.setHours(23, 59, 59, 999);
+            errorOrdersQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+              dateFrom: startOfDay,
+              dateTo: endOfDay,
+            });
+          }
+        }
+      }
+
+      // Join với customer để filter brand và search
+      errorOrdersQuery.leftJoin('sale.customer', 'errorCustomer');
+
+      if (brand) {
+        errorOrdersQuery.andWhere('errorCustomer.brand = :brand', { brand });
+      }
+
+      if (search && search.trim() !== '') {
+        const searchPattern = `%${search.trim().toLowerCase()}%`;
+        errorOrdersQuery.andWhere(
+          '(LOWER(sale.docCode) LIKE :search OR LOWER(errorCustomer.name) LIKE :search OR LOWER(errorCustomer.code) LIKE :search OR LOWER(errorCustomer.mobile) LIKE :search)',
+          { search: searchPattern }
+        );
+      }
+
+      const errorOrdersResult = await errorOrdersQuery.getRawMany();
+      errorOrderDocCodes = errorOrdersResult.map((r: any) => r.docCode);
+
+      // Filter query và count query: chỉ lấy các sale items có statusAsys = true
+      // Và loại bỏ các order có ít nhất 1 sale item lỗi
+      query.andWhere('sale.statusAsys = :statusAsys', { statusAsys: true });
+      countQuery.andWhere('sale.statusAsys = :statusAsys', { statusAsys: true });
+      
+      if (errorOrderDocCodes.length > 0) {
+        // Loại bỏ các order có lỗi
+        query.andWhere('sale.docCode NOT IN (:...errorOrderDocCodes)', { errorOrderDocCodes });
+        countQuery.andWhere('sale.docCode NOT IN (:...errorOrderDocCodes)', { errorOrderDocCodes });
+      }
+    }
+
     if (isProcessed !== undefined) {
       countQuery.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
+    }
+
+    // Chỉ filter statusAsys nếu không phải là filter lỗi hoặc đúng (vì đã filter ở trên rồi)
+    if (statusAsys !== undefined && statusAsys !== false && statusAsys !== true) {
+      countQuery.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
     }
 
     // Luôn join với customer để có thể search
@@ -746,10 +924,16 @@ export class SalesService {
       'sale.chietKhauVoucherDp1', // Thêm chietKhauVoucherDp1 để frontend hiển thị voucher dự phòng
       'sale.chietKhauThanhToanTkTienAo', // Thêm chietKhauThanhToanTkTienAo để frontend hiển thị ECOIN
       'sale.paid_by_voucher_ecode_ecoin_bp', // Thêm paid_by_voucher_ecode_ecoin_bp để frontend check voucher
+      'sale.statusAsys', // Thêm statusAsys để frontend có thể hiển thị và filter
     ]);
 
     if (isProcessed !== undefined) {
       query = query.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
+    }
+
+    // Chỉ filter statusAsys nếu không phải là filter lỗi hoặc đúng (vì đã filter ở trên rồi)
+    if (statusAsys !== undefined && statusAsys !== false && statusAsys !== true) {
+      query = query.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
     }
 
     // Luôn join với customer để có thể search và lấy thông tin customer
@@ -829,19 +1013,29 @@ export class SalesService {
       }
     }
 
-    // Ước tính số sales cần lấy để có đủ rows cho trang hiện tại
-    // Mỗi order trung bình có 2-3 sale items, nên lấy thêm một chút để đảm bảo
-    // Nhưng phải giới hạn để tránh lấy quá nhiều
-    const estimatedSalesNeeded = Math.ceil(limit * 2); // Ước tính 2x limit để đảm bảo có đủ
-    const queryStartIndex = (page - 1) * limit;
+    // Khi filter statusAsys = false hoặc true, cần lấy TẤT CẢ sale items của các order
+    // Sau đó group by order, rồi mới paginate theo order
+    // Với các filter khác, vẫn dùng pagination trên sale items như cũ
+    let allSales: any[];
+    if ((statusAsys === false && errorOrderDocCodes.length > 0) || statusAsys === true) {
+      // Lấy TẤT CẢ sale items của các order lỗi (không limit)
+      query = query
+        .orderBy('sale.docDate', 'DESC')
+        .addOrderBy('sale.docCode', 'ASC');
+      allSales = await query.getRawMany();
+    } else {
+      // Với các filter khác, vẫn dùng pagination trên sale items
+      const estimatedSalesNeeded = Math.ceil(limit * 2); // Ước tính 2x limit để đảm bảo có đủ
+      const queryStartIndex = (page - 1) * limit;
 
-    query = query
-      .orderBy('sale.docDate', 'DESC')
-      .addOrderBy('sale.docCode', 'ASC')
-      .skip(queryStartIndex)
-      .take(estimatedSalesNeeded);
+      query = query
+        .orderBy('sale.docDate', 'DESC')
+        .addOrderBy('sale.docCode', 'ASC')
+        .skip(queryStartIndex)
+        .take(estimatedSalesNeeded);
 
-    const allSales = await query.getRawMany();
+      allSales = await query.getRawMany();
+    }
 
     // Gộp theo docCode - chỉ trả về data cơ bản
     const orderMap = new Map<string, {
@@ -890,6 +1084,26 @@ export class SalesService {
       order.totalRevenue += Number(sale.sale_revenue || 0);
       order.totalQty += Number(sale.sale_qty || 0);
       order.totalItems += 1;
+
+      // Lưu sale item vào order.sales để trả về đầy đủ dữ liệu
+      order.sales.push({
+        itemCode: sale.sale_itemCode,
+        revenue: sale.sale_revenue,
+        qty: sale.sale_qty,
+        isProcessed: sale.sale_isProcessed,
+        statusAsys: sale.sale_statusAsys,
+        grade_discamt: sale.sale_grade_discamt,
+        muaHangCkVip: sale.sale_muaHangCkVip,
+        chietKhauMuaHangCkVip: sale.sale_chietKhauMuaHangCkVip,
+        chietKhauVoucherDp1: sale.sale_chietKhauVoucherDp1,
+        chietKhauThanhToanTkTienAo: sale.sale_chietKhauThanhToanTkTienAo,
+        paid_by_voucher_ecode_ecoin_bp: sale.sale_paid_by_voucher_ecode_ecoin_bp,
+        partnerCode: sale.sale_partnerCode,
+        branchCode: sale.sale_branchCode,
+        docCode: sale.sale_docCode,
+        docDate: sale.sale_docDate,
+        docSourceType: sale.sale_docSourceType,
+      });
 
       // Nếu có ít nhất 1 sale chưa xử lý thì đơn hàng chưa xử lý
       if (!sale.sale_isProcessed) {
@@ -944,16 +1158,29 @@ export class SalesService {
       };
     });
 
-    // Phân trang - total là số sale items (rows), không phải số orders
-    const total = totalSaleItems; // Tổng số sale items (rows)
-    const paginationStartIndex = (page - 1) * limit;
-    const paginationEndIndex = paginationStartIndex + limit;
+    // Phân trang
+    // Khi filter statusAsys = false hoặc true, paginate theo orders (vì đã lấy tất cả sale items)
+    // Với các filter khác, paginate theo sale items (rows)
+    let total: number;
+    let paginatedOrders: typeof enrichedOrders;
 
-    // Tính toán số orders cần lấy dựa trên số rows
-    // Mỗi order có thể có nhiều sale items, nên cần lấy đủ orders để có đủ rows
-    // Nhưng phải đảm bảo tổng số rows không vượt quá limit
-    let currentRowCount = 0;
-    const paginatedOrders: typeof enrichedOrders = [];
+    if ((statusAsys === false && errorOrderDocCodes.length > 0) || statusAsys === true) {
+      // Paginate theo orders
+      total = enrichedOrders.length; // Tổng số orders
+      const paginationStartIndex = (page - 1) * limit;
+      const paginationEndIndex = paginationStartIndex + limit;
+      paginatedOrders = enrichedOrders.slice(paginationStartIndex, paginationEndIndex);
+    } else {
+      // Paginate theo sale items (rows)
+      total = totalSaleItems; // Tổng số sale items (rows)
+      const paginationStartIndex = (page - 1) * limit;
+      const paginationEndIndex = paginationStartIndex + limit;
+
+      // Tính toán số orders cần lấy dựa trên số rows
+      // Mỗi order có thể có nhiều sale items, nên cần lấy đủ orders để có đủ rows
+      // Nhưng phải đảm bảo tổng số rows không vượt quá limit
+      let currentRowCount = 0;
+      paginatedOrders = [];
 
     for (const order of enrichedOrders) {
       // Tính số rows của order này
@@ -993,11 +1220,12 @@ export class SalesService {
       if (currentRowCount >= paginationEndIndex) {
         break;
       }
+      }
     }
 
     return {
       data: paginatedOrders,
-      total, // Tổng số sale items (rows)
+      total, // Tổng số sale items (rows) hoặc tổng số orders (nếu filter statusAsys = false)
       page,
       limit,
       totalPages: Math.ceil(total / limit),
@@ -3198,6 +3426,9 @@ export class SalesService {
     page: number;
     limit: number;
     date?: string;
+    orderCode?: string;
+    partnerCode?: string;
+    faceStatus?: 'yes' | 'no';
   }): Promise<{
     items: Array<{
       partnerCode: string;
@@ -3216,8 +3447,26 @@ export class SalesService {
   }> {
     try {
 
-      const { page, limit, date } = options;
+      const { page, limit, date, orderCode, partnerCode, faceStatus } = options;
       const skip = (page - 1) * limit;
+
+      const parseDate = (dateStr?: string): Date | undefined => {
+        if (!dateStr) return undefined;
+        if (dateStr.includes('-')) {
+          return new Date(dateStr);
+        }
+        const day = parseInt(dateStr.substring(0, 2));
+        const monthStr = dateStr.substring(2, 5).toUpperCase();
+        const year = parseInt(dateStr.substring(5, 9));
+        const monthMap: Record<string, number> = {
+          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+        };
+        return new Date(year, monthMap[monthStr] || 0, day);
+      };
+
+      const dateObj = parseDate(date);
 
       // Lấy tất cả checkFaceId records, group by partner_code
       let checkFaceIdQuery = this.checkFaceIdRepository
@@ -3225,24 +3474,7 @@ export class SalesService {
         .orderBy('checkFaceId.date', 'DESC')
         .addOrderBy('checkFaceId.startTime', 'DESC');
 
-      if (date) {
-        // Parse date nếu là format DDMMMYYYY
-        let dateObj: Date;
-        if (date.includes('-')) {
-          // Format: YYYY-MM-DD
-          dateObj = new Date(date);
-        } else {
-          // Format: DDMMMYYYY
-          const day = parseInt(date.substring(0, 2));
-          const monthStr = date.substring(2, 5).toUpperCase();
-          const year = parseInt(date.substring(5, 9));
-          const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
-          };
-          dateObj = new Date(year, monthMap[monthStr] || 0, day);
-        }
+      if (dateObj) {
         checkFaceIdQuery.andWhere('DATE(checkFaceId.date) = DATE(:date)', { date: dateObj });
       }
 
@@ -3258,8 +3490,91 @@ export class SalesService {
         checkFaceIdsByPartner.get(checkFaceId.partnerCode)!.push(checkFaceId);
       }
 
-      // Get unique partner codes
-      const partnerCodes = Array.from(checkFaceIdsByPartner.keys());
+      // Lấy tất cả sales (orders) theo ngày / filter để bao gồm cả đối tác không có FaceID
+      let salesQuery = this.saleRepository
+        .createQueryBuilder('sale')
+        .leftJoinAndSelect('sale.customer', 'customer')
+        .orderBy('sale.docDate', 'DESC')
+        .addOrderBy('sale.createdAt', 'DESC');
+
+      if (dateObj) {
+        salesQuery.andWhere('DATE(sale.docDate) = DATE(:date)', { date: dateObj });
+      }
+      if (orderCode) {
+        salesQuery.andWhere('LOWER(sale.docCode) LIKE LOWER(:orderCode)', {
+          orderCode: `%${orderCode}%`,
+        });
+      }
+      if (partnerCode) {
+        salesQuery.andWhere('LOWER(sale.partnerCode) LIKE LOWER(:partnerCode)', {
+          partnerCode: `%${partnerCode}%`,
+        });
+      }
+
+      const allSales = await salesQuery.getMany();
+
+      // Group sales by partner_code -> docCode
+      const ordersByPartner = new Map<string, Map<string, Order>>();
+      for (const sale of allSales) {
+        if (!sale.partnerCode) continue;
+        if (!ordersByPartner.has(sale.partnerCode)) {
+          ordersByPartner.set(sale.partnerCode, new Map<string, Order>());
+        }
+        const partnerOrders = ordersByPartner.get(sale.partnerCode)!;
+
+        if (!partnerOrders.has(sale.docCode)) {
+          const customer = sale.customer;
+          const orderCustomer = customer ? {
+            code: customer.code,
+            name: customer.name,
+            brand: customer.brand || '',
+            mobile: customer.mobile,
+            sexual: customer.sexual,
+            idnumber: customer.idnumber,
+            enteredat: customer.enteredat ? customer.enteredat.toISOString() : undefined,
+            crm_lead_source: customer.crm_lead_source,
+            address: customer.address,
+            province_name: customer.province_name,
+            birthday: customer.birthday ? customer.birthday.toISOString().split('T')[0] : undefined,
+            grade_name: customer.grade_name,
+            branch_code: customer.branch_code,
+          } : null;
+
+          partnerOrders.set(sale.docCode, {
+            docCode: sale.docCode,
+            docDate: sale.docDate.toISOString(),
+            branchCode: sale.branchCode,
+            docSourceType: sale.docSourceType || 'sale',
+            customer: orderCustomer as any,
+            totalRevenue: 0,
+            totalQty: 0,
+            totalItems: 0,
+            isProcessed: sale.isProcessed,
+            sales: [],
+          });
+        }
+
+        const order = partnerOrders.get(sale.docCode)!;
+        order.sales = order.sales || [];
+        order.sales.push(sale as any);
+        order.totalRevenue += sale.revenue || 0;
+        order.totalQty += sale.qty || 0;
+        order.totalItems += 1;
+      }
+
+      // Union partner codes từ checkFaceId và sales
+      const partnerCodeSet = new Set<string>();
+      for (const code of checkFaceIdsByPartner.keys()) partnerCodeSet.add(code);
+      for (const code of ordersByPartner.keys()) partnerCodeSet.add(code);
+
+      // Lọc theo trạng thái FaceID nếu có yêu cầu
+      let partnerCodes = Array.from(partnerCodeSet);
+      if (faceStatus === 'yes') {
+        partnerCodes = partnerCodes.filter((code) => checkFaceIdsByPartner.has(code));
+      } else if (faceStatus === 'no') {
+        partnerCodes = partnerCodes.filter((code) => !checkFaceIdsByPartner.has(code));
+      }
+
       const total = partnerCodes.length;
       const totalPages = Math.ceil(total / limit);
       const paginatedPartnerCodes = partnerCodes.slice(skip, skip + limit);
@@ -3277,60 +3592,12 @@ export class SalesService {
         const firstCheckFaceId = checkFaceIds[0];
         const partnerName = firstCheckFaceId?.name || partnerCode;
 
-        // Lấy orders cho partner này
-        const sales = await this.saleRepository.find({
-          where: { partnerCode },
-          relations: ['customer'],
-          order: { docDate: 'DESC', createdAt: 'DESC' },
-        });
-
-        // Group sales by docCode
-        const ordersMap = new Map<string, Order>();
-        for (const sale of sales) {
-          if (!ordersMap.has(sale.docCode)) {
-            const customer = sale.customer;
-            const orderCustomer = customer ? {
-              code: customer.code,
-              name: customer.name,
-              brand: customer.brand || '',
-              mobile: customer.mobile,
-              sexual: customer.sexual,
-              idnumber: customer.idnumber,
-              enteredat: customer.enteredat ? customer.enteredat.toISOString() : undefined,
-              crm_lead_source: customer.crm_lead_source,
-              address: customer.address,
-              province_name: customer.province_name,
-              birthday: customer.birthday ? customer.birthday.toISOString().split('T')[0] : undefined,
-              grade_name: customer.grade_name,
-              branch_code: customer.branch_code,
-            } : null;
-
-            ordersMap.set(sale.docCode, {
-              docCode: sale.docCode,
-              docDate: sale.docDate.toISOString(),
-              branchCode: sale.branchCode,
-              docSourceType: sale.docSourceType || 'sale',
-              customer: orderCustomer as any,
-              totalRevenue: 0,
-              totalQty: 0,
-              totalItems: 0,
-              isProcessed: sale.isProcessed,
-              sales: [],
-            });
-          }
-          const order = ordersMap.get(sale.docCode)!;
-          order.sales = order.sales || [];
-          order.sales.push(sale as any);
-          order.totalRevenue += sale.revenue || 0;
-          order.totalQty += sale.qty || 0;
-          order.totalItems += 1;
-        }
-
+        const partnerOrdersMap = ordersByPartner.get(partnerCode) || new Map<string, Order>();
         items.push({
           partnerCode,
           partnerName,
           checkFaceIds,
-          orders: Array.from(ordersMap.values()),
+          orders: Array.from(partnerOrdersMap.values()),
         });
       }
 
