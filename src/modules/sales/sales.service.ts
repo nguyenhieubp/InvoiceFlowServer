@@ -855,18 +855,17 @@ export class SalesService {
       }
     }
 
-    // Dùng limit/offset ngay từ đầu để tối ưu performance
-    const queryStartIndex = (page - 1) * limit;
-    const estimatedSalesNeeded = limit; // Chỉ lấy đúng số records cần thiết
-
+    // Phân trang đơn giản: lấy sale items trực tiếp với limit và offset
+    const offset = (page - 1) * limit;
+    
     // Tối ưu: Apply date filter TRƯỚC khi order và paginate để database có thể dùng index
     // Đảm bảo order by được set sau khi đã có tất cả filters
     query = query
       .orderBy('sale.docDate', 'DESC')
       .addOrderBy('sale.docCode', 'ASC')
       .addOrderBy('sale.id', 'ASC') // Thêm order by id để đảm bảo consistent pagination
-      .skip(queryStartIndex)
-      .take(estimatedSalesNeeded);
+      .skip(offset)
+      .take(limit);
 
     // Log query để debug (có thể remove sau)
     const sql = query.getSql();
@@ -979,63 +978,15 @@ export class SalesService {
       };
     });
 
-    // Phân trang - total là số sale items (rows), không phải số orders
-    const total = totalSaleItems; // Tổng số sale items (rows)
-    const paginationStartIndex = (page - 1) * limit;
-    const paginationEndIndex = paginationStartIndex + limit;
-
-    // Tính toán số orders cần lấy dựa trên số rows
-    // Mỗi order có thể có nhiều sale items, nên cần lấy đủ orders để có đủ rows
-    // Nhưng phải đảm bảo tổng số rows không vượt quá limit
-    let currentRowCount = 0;
-    const paginatedOrders: typeof enrichedOrders = [];
-
-    for (const order of enrichedOrders) {
-      // Tính số rows của order này
-      const orderRowCount = order.totalItems > 0 ? order.totalItems : 1;
-
-      // Kiểm tra xem order này có nằm trong phạm vi pagination không
-      // Order được thêm nếu có ít nhất 1 row nằm trong phạm vi [paginationStartIndex, paginationEndIndex)
-      const orderStartRow = currentRowCount;
-      const orderEndRow = currentRowCount + orderRowCount;
-
-      // Nếu order này có overlap với phạm vi pagination, thêm vào
-      if (orderEndRow > paginationStartIndex && orderStartRow < paginationEndIndex) {
-        // Tính số rows còn lại cần lấy
-        const remainingRowsNeeded = paginationEndIndex - Math.max(currentRowCount, paginationStartIndex);
-
-        // Nếu order này có nhiều sale items hơn số rows còn lại cần lấy, cần giới hạn
-        if (orderRowCount > remainingRowsNeeded && order.sales && order.sales.length > 0) {
-          // Tính index bắt đầu và kết thúc của sale items cần lấy trong order này
-          const startOffset = Math.max(0, paginationStartIndex - currentRowCount);
-          const endOffset = startOffset + remainingRowsNeeded;
-
-          // Tạo order mới với sales đã được giới hạn
-          const limitedOrder = {
-            ...order,
-            sales: order.sales.slice(startOffset, endOffset),
-            totalItems: Math.min(orderRowCount, remainingRowsNeeded),
-          };
-          paginatedOrders.push(limitedOrder);
-        } else {
-          paginatedOrders.push(order);
-        }
-      }
-
-      currentRowCount += orderRowCount;
-
-      // Nếu đã vượt quá phạm vi pagination, dừng lại
-      if (currentRowCount >= paginationEndIndex) {
-        break;
-      }
-    }
-
+    // Trả về tất cả orders đã group
+    // Vì đã lấy đúng số sale items với limit và offset rồi, nên chỉ cần trả về tất cả orders đã group
+    // Frontend sẽ tự paginate lại dựa trên số rows (totalItems) của mỗi order
     return {
-      data: paginatedOrders,
-      total, // Tổng số sale items (rows)
+      data: enrichedOrders,
+      total: totalSaleItems, // Tổng số sale items (rows)
       page,
       limit,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(totalSaleItems / limit),
     };
   }
 
