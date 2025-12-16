@@ -6,10 +6,15 @@ import {
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 import { Customer } from './customer.entity';
 
 @Entity('sales')
+@Index(['docDate']) // Index để query nhanh hơn
+@Index(['docDate', 'docCode']) // Composite index cho order by
+@Index(['customerId']) // Index cho join với customer
+@Index(['isProcessed']) // Index cho filter isProcessed
 export class Sale {
   @PrimaryGeneratedColumn('uuid')
   id: string;

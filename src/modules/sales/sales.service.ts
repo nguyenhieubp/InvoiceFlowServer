@@ -495,7 +495,7 @@ export class SalesService {
           );
         }
 
-        // Fetch departments để tính maKho
+        // Fetch departments để tính maKho - PARALLEL để tối ưu performance
         const branchCodes = Array.from(
           new Set(
             filteredOrders
@@ -506,22 +506,31 @@ export class SalesService {
         );
 
         const departmentMap = new Map<string, any>();
-        for (const branchCode of branchCodes) {
-          try {
-            const response = await this.httpService.axiosRef.get(
-              `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-              { headers: { accept: 'application/json' } },
-            );
-            const department = response?.data?.data?.items?.[0];
+        // Fetch parallel thay vì sequential
+        if (branchCodes.length > 0) {
+          const departmentPromises = branchCodes.map(async (branchCode) => {
+            try {
+              const response = await this.httpService.axiosRef.get(
+                `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+                { headers: { accept: 'application/json' } },
+              );
+              const department = response?.data?.data?.items?.[0];
+              return { branchCode, department };
+            } catch (error) {
+              this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+              return { branchCode, department: null };
+            }
+          });
+          
+          const departmentResults = await Promise.all(departmentPromises);
+          departmentResults.forEach(({ branchCode, department }) => {
             if (department) {
               departmentMap.set(branchCode, department);
             }
-          } catch (error) {
-            this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
-          }
+          });
         }
 
-        // Fetch products từ Loyalty API để lấy producttype
+        // Fetch products từ Loyalty API để lấy producttype - PARALLEL để tối ưu performance
         const itemCodes = Array.from(
           new Set(
             filteredOrders
@@ -532,19 +541,28 @@ export class SalesService {
         );
 
         const loyaltyProductMap = new Map<string, any>();
-        for (const itemCode of itemCodes) {
-          try {
-            const response = await this.httpService.axiosRef.get(
-              `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-              { headers: { accept: 'application/json' } },
-            );
-            const loyaltyProduct = response?.data?.data?.item || response?.data;
+        // Fetch parallel thay vì sequential
+        if (itemCodes.length > 0) {
+          const productPromises = itemCodes.map(async (itemCode) => {
+            try {
+              const response = await this.httpService.axiosRef.get(
+                `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+                { headers: { accept: 'application/json' } },
+              );
+              const loyaltyProduct = response?.data?.data?.item || response?.data;
+              return { itemCode, loyaltyProduct };
+            } catch (error) {
+              this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
+              return { itemCode, loyaltyProduct: null };
+            }
+          });
+          
+          const productResults = await Promise.all(productPromises);
+          productResults.forEach(({ itemCode, loyaltyProduct }) => {
             if (loyaltyProduct) {
               loyaltyProductMap.set(itemCode, loyaltyProduct);
             }
-          } catch (error) {
-            this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
-          }
+          });
         }
 
         // Thêm promotionDisplayCode, maKho, maCtkmTangHang và producttype vào các sales items
@@ -727,7 +745,9 @@ export class SalesService {
     }
 
     const totalResult = await countQuery.getRawOne();
-    const totalSaleItems = parseInt(totalResult?.count || '0', 10);
+    const totalSaleItems = 
+    
+    parseInt(totalResult?.count || '0', 10);
 
     // Chỉ select các field cơ bản cần thiết
     query = query.select([
@@ -752,8 +772,9 @@ export class SalesService {
       query = query.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
     }
 
-    // Luôn join với customer để có thể search và lấy thông tin customer
-    if (!query.expressionMap.joinAttributes.find(j => j.alias.name === 'customer')) {
+    // Chỉ join với customer khi cần (có brand filter hoặc search)
+    const needsCustomerJoin = brand || (search && search.trim() !== '');
+    if (needsCustomerJoin && !query.expressionMap.joinAttributes.find(j => j.alias.name === 'customer')) {
       query = query.leftJoin('sale.customer', 'customer');
     }
 
@@ -770,12 +791,17 @@ export class SalesService {
       );
     }
 
-    // Luôn select customer fields
-    query = query
-      .addSelect('customer.code', 'customer_code')
-      .addSelect('customer.brand', 'customer_brand')
-      .addSelect('customer.name', 'customer_name')
-      .addSelect('customer.mobile', 'customer_mobile');
+    // Chỉ select customer fields khi đã join
+    if (needsCustomerJoin) {
+      query = query
+        .addSelect('customer.code', 'customer_code')
+        .addSelect('customer.brand', 'customer_brand')
+        .addSelect('customer.name', 'customer_name')
+        .addSelect('customer.mobile', 'customer_mobile');
+    } else {
+      // Nếu không join customer, lấy từ partnerCode (customer code)
+      query = query.addSelect('sale.partnerCode', 'customer_code');
+    }
 
     // Thêm date filter vào query chính
     // Ưu tiên dateFrom/dateTo (date range), nếu không có thì dùng date (single day)
@@ -829,19 +855,28 @@ export class SalesService {
       }
     }
 
-    // Ước tính số sales cần lấy để có đủ rows cho trang hiện tại
-    // Mỗi order trung bình có 2-3 sale items, nên lấy thêm một chút để đảm bảo
-    // Nhưng phải giới hạn để tránh lấy quá nhiều
-    const estimatedSalesNeeded = Math.ceil(limit * 2); // Ước tính 2x limit để đảm bảo có đủ
+    // Dùng limit/offset ngay từ đầu để tối ưu performance
     const queryStartIndex = (page - 1) * limit;
+    const estimatedSalesNeeded = limit; // Chỉ lấy đúng số records cần thiết
 
+    // Tối ưu: Apply date filter TRƯỚC khi order và paginate để database có thể dùng index
+    // Đảm bảo order by được set sau khi đã có tất cả filters
     query = query
       .orderBy('sale.docDate', 'DESC')
       .addOrderBy('sale.docCode', 'ASC')
+      .addOrderBy('sale.id', 'ASC') // Thêm order by id để đảm bảo consistent pagination
       .skip(queryStartIndex)
       .take(estimatedSalesNeeded);
 
+    // Log query để debug (có thể remove sau)
+    const sql = query.getSql();
+    this.logger.debug(`[findAllOrders] Query: ${sql}`);
+    this.logger.debug(`[findAllOrders] Params: ${JSON.stringify(query.getParameters())}`);
+
+    const startTime = Date.now();
     const allSales = await query.getRawMany();
+    const queryTime = Date.now() - startTime;
+    this.logger.debug(`[findAllOrders] Query executed in ${queryTime}ms, returned ${allSales.length} records`);
 
     // Gộp theo docCode - chỉ trả về data cơ bản
     const orderMap = new Map<string, {
@@ -872,8 +907,8 @@ export class SalesService {
           docDate: sale.sale_docDate,
           branchCode: sale.sale_branchCode,
           docSourceType: sale.sale_docSourceType,
-          customer: sale.customer_code ? {
-            code: sale.customer_code,
+          customer: (sale.customer_code || sale.sale_partnerCode) ? {
+            code: sale.customer_code || sale.sale_partnerCode || null,
             brand: sale.customer_brand || null,
             name: sale.customer_name || null,
             mobile: sale.customer_mobile || null,
