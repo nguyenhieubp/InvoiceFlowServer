@@ -1023,13 +1023,10 @@ export class SalesService {
 
     // Nếu export mode, trả về sales items riêng lẻ (không group)
     if (isExport) {
-      // Map entity data thành format cho export
+      // Trả về đầy đủ entity data với customer relation
       const salesWithCustomer = allSales.map((sale) => {
         return {
-          docCode: sale.docCode || '',
-          docDate: sale.docDate,
-          branchCode: sale.branchCode || '',
-          docSourceType: sale.docSourceType || '',
+          ...sale, // Trả về tất cả fields từ entity
           customer: sale.customer ? {
             code: sale.customer.code || sale.partnerCode || null,
             brand: sale.customer.brand || null,
@@ -1041,14 +1038,6 @@ export class SalesService {
             name: null,
             mobile: null,
           } : null),
-          itemCode: sale.itemCode || '',
-          qty: sale.qty || 0,
-          giaBan: sale.giaBan || 0,
-          tienHang: sale.tienHang || 0,
-          linetotal: sale.linetotal || 0,
-          revenue: sale.revenue || 0,
-          isProcessed: sale.isProcessed || false,
-          statusAsys: sale.statusAsys !== undefined ? sale.statusAsys : true,
         };
       });
 
@@ -3725,24 +3714,214 @@ export class SalesService {
       const errorCount = allSales.filter(s => s.statusAsys === false).length;
       this.logger.debug(`[exportOrders] Found ${errorCount} error orders (statusAsys = false) out of ${allSales.length} total`);
 
-      // Prepare Excel data - flatten sales thành rows
+      // Enrich dữ liệu với products và departments (batch process)
+      // Lấy tất cả itemCode và branchCode unique
+      const itemCodes = Array.from(new Set(allSales.map(s => s.itemCode).filter(Boolean)));
+      const branchCodes = Array.from(new Set(allSales.map(s => s.branchCode).filter(Boolean)));
+      
+      // Fetch products từ Loyalty API (chỉ cho các sale không phải đơn lỗi)
+      const loyaltyProductMap = new Map<string, any>();
+      const validItemCodes = itemCodes.filter(itemCode => {
+        const sale = allSales.find(s => s.itemCode === itemCode);
+        return sale && sale.statusAsys !== false;
+      });
+      
+      if (validItemCodes.length > 0) {
+        const productPromises = validItemCodes.map(async (itemCode) => {
+          try {
+            const response = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+              { headers: { accept: 'application/json' } },
+            );
+            const loyaltyProduct = response?.data?.data?.item || response?.data;
+            return { itemCode, loyaltyProduct };
+          } catch (error) {
+            this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
+            return { itemCode, loyaltyProduct: null };
+          }
+        });
+        const productResults = await Promise.all(productPromises);
+        productResults.forEach(({ itemCode, loyaltyProduct }) => {
+          if (loyaltyProduct) {
+            loyaltyProductMap.set(itemCode, loyaltyProduct);
+          }
+        });
+      }
+      
+      // Fetch departments
+      const departmentMap = new Map<string, any>();
+      if (branchCodes.length > 0) {
+        const departmentPromises = branchCodes.map(async (branchCode) => {
+          try {
+            const response = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+              { headers: { accept: 'application/json' } },
+            );
+            const department = response?.data?.data?.items?.[0];
+            return { branchCode, department };
+          } catch (error) {
+            this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+            return { branchCode, department: null };
+          }
+        });
+        const departmentResults = await Promise.all(departmentPromises);
+        departmentResults.forEach(({ branchCode, department }) => {
+          if (department) {
+            departmentMap.set(branchCode, department);
+          }
+        });
+      }
+      
+      // Prepare Excel data với các cột giống frontend (MAIN_COLUMNS)
+      // Các cột theo thứ tự: partnerCode, docDate, docCode, kyHieu, description, itemCode, dvt, loai, promCode, maKho, maLo, qty, giaBan, tienHang, tyGia, maThue, tkNo, tkDoanhThu, tkGiaVon, cucThue, maThanhToan, vuViec, boPhan, trangThai, barcode, muaHangGiamGia, chietKhauMuaHangGiamGia, chietKhauCkTheoChinhSach, muaHangCkVip, chietKhauMuaHangCkVip, thanhToanCoupon, chietKhauThanhToanCoupon, thanhToanVoucher, chietKhauThanhToanVoucher, thanhToanTkTienAo, chietKhauThanhToanTkTienAo, voucherDp1, chietKhauVoucherDp1, maCtkmTangHang, maThe, soSerial
       const excelData = allSales.map((sale) => {
+        const product = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
+        const department = sale.branchCode ? departmentMap.get(sale.branchCode) : null;
+        const brand = sale.customer?.brand || '';
+        const brandLower = brand.toLowerCase().trim();
+        const normalizedBrand = brandLower === 'facialbar' ? 'f3' : brandLower;
+        
+        // Tính toán các giá trị
+        const tienHang = sale.tienHang || sale.linetotal || 0;
+        const qty = sale.qty || 0;
+        let giaBan = sale.giaBan || 0;
+        if (giaBan === 0 && tienHang != null && qty > 0) {
+          giaBan = tienHang / qty;
+        }
+        const revenue = sale.revenue || 0;
+        const isTangHang = giaBan === 0 && tienHang === 0 && revenue === 0;
+        
+        // Tính maKho
+        const maBp = department?.ma_bp || sale.branchCode || null;
+        const maKho = this.calculateMaKho(sale.ordertype || '', maBp) || sale.maKho || sale.branchCode || '';
+        
+        // Tính maLo (đơn giản hóa - cần logic đầy đủ từ frontend)
+        let maLo = sale.maLo || '';
+        const serial = sale.serial || '';
+        if (!maLo && serial) {
+          const underscoreIndex = serial.indexOf('_');
+          if (underscoreIndex > 0 && underscoreIndex < serial.length - 1) {
+            maLo = serial.substring(underscoreIndex + 1);
+          } else if (product?.trackBatch === true) {
+            if (normalizedBrand === 'f3') {
+              maLo = serial;
+            } else {
+              const productType = product?.productType || product?.producttype || '';
+              const productTypeUpper = productType.toUpperCase().trim();
+              if (productTypeUpper === 'TPCN') {
+                maLo = serial.length >= 8 ? serial.slice(-8) : serial;
+              } else {
+                maLo = serial.length >= 4 ? serial.slice(-4) : serial;
+              }
+            }
+          }
+        }
+        
+        // Tính soSerial
+        let soSerial = '';
+        if (product?.trackSerial === true && product?.trackBatch !== true) {
+          if (serial && serial.indexOf('_') <= 0) {
+            soSerial = serial;
+          }
+        }
+        
+        // Tính promCode (Khuyến mãi)
+        let promCode = '';
+        const ordertypeName = sale.ordertype || '';
+        const isDichVu = ordertypeName.includes('02. Làm dịch vụ') || 
+                         ordertypeName.includes('04. Đổi DV') ||
+                         ordertypeName.includes('08. Tách thẻ') ||
+                         ordertypeName.includes('Đổi thẻ KEEP->Thẻ DV');
+        const hasPromCode = sale.promCode && String(sale.promCode).trim() !== '';
+        let isTangHangForProm = isTangHang;
+        
+        // Với F3: Nếu có promCode và giaBan = 0 && tienHang = 0 → là "mua hàng giảm giá", không phải "tặng hàng"
+        if (normalizedBrand === 'f3' && hasPromCode && isTangHangForProm) {
+          isTangHangForProm = false;
+        }
+        
+        if (!isDichVu && isTangHangForProm) {
+          const hasMaThe = sale.maThe && String(sale.maThe).trim() !== '';
+          let maCtkmTangHang = sale.maCtkmTangHang || '';
+          if (!maCtkmTangHang && isTangHangForProm) {
+            if (ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư')) {
+              maCtkmTangHang = 'TT DAU TU';
+            }
+          }
+          if (!hasMaThe && maCtkmTangHang !== 'TT DAU TU') {
+            promCode = '1';
+          }
+        }
+        
+        // Tính maCtkmTangHang
+        let maCtkmTangHang = sale.maCtkmTangHang || '';
+        if (!maCtkmTangHang && isTangHang) {
+          if (ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư')) {
+            maCtkmTangHang = 'TT DAU TU';
+          } else if (
+            ordertypeName.includes('01.Thường') || ordertypeName.includes('01. Thường') ||
+            ordertypeName.includes('07. Bán tài khoản') || ordertypeName.includes('07.Bán tài khoản') ||
+            ordertypeName.includes('9. Sàn TMDT') || ordertypeName.includes('9.Sàn TMDT')
+          ) {
+            const tangSpCode = this.convertPromCodeToTangSp(sale.promCode);
+            maCtkmTangHang = tangSpCode || this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
+          } else {
+            maCtkmTangHang = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
+          }
+        }
+        
+        // Tính muaHangGiamGia
+        let muaHangGiamGia = '';
+        if (!isTangHang) {
+          if (normalizedBrand === 'f3' && hasPromCode && giaBan === 0 && tienHang === 0) {
+            muaHangGiamGia = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
+          } else if (sale.promCode) {
+            muaHangGiamGia = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
+          }
+        }
+        
         return {
-          'Mã đơn hàng': sale.docCode || '',
-          'Ngày đơn hàng': sale.docDate ? new Date(sale.docDate).toLocaleDateString('vi-VN') : '',
-          'Mã chi nhánh': sale.branchCode || '',
-          'Loại đơn': sale.docSourceType || '',
-          'Mã khách hàng': sale.customer?.code || '',
-          'Tên khách hàng': sale.customer?.name || '',
-          'Số điện thoại': sale.customer?.mobile || '',
-          'Brand': sale.customer?.brand || '',
-          'Mã sản phẩm': sale.itemCode || '',
-          'Số lượng': sale.qty || 0,
-          'Giá bán': sale.giaBan || 0,
-          'Thành tiền': sale.tienHang || sale.linetotal || 0,
-          'Doanh thu': sale.revenue || 0,
-          'Trạng thái xử lý': sale.isProcessed ? 'Đã xử lý' : 'Chưa xử lý',
-          'Trạng thái sync': sale.statusAsys ? 'Thành công' : 'Lỗi',
+          '* Mã khách': sale.partnerCode || sale.customer?.code || '',
+          '* Ngày': sale.docDate ? new Date(sale.docDate).toLocaleDateString('vi-VN') : '',
+          '* Số hóa đơn': sale.docCode || '',
+          '* Ký hiệu': department?.branchcode || sale.branchCode || '',
+          'Diễn giải': sale.docCode || '',
+          '* Mã hàng': product?.maVatTu || sale.itemCode || '',
+          'Đvt': product?.dvt || sale.dvt || '',
+          'Loại': sale.loai || (sale.cat1 ? `${sale.cat1}${sale.cat2 ? ` / ${sale.cat2}` : ''}${sale.cat3 ? ` / ${sale.cat3}` : ''}` : '') || '',
+          'Khuyến mãi': promCode,
+          '* Mã kho': maKho,
+          '* Mã lô': maLo,
+          'Số lượng': qty,
+          'Giá bán': giaBan,
+          'Tiền hàng': tienHang,
+          'Tỷ giá': sale.tyGia || 1,
+          '* Mã thuế': sale.maThue || 'VAT10',
+          '* Tk nợ': sale.tkNo || '131',
+          '* Tk doanh thu': sale.tkDoanhThu || '',
+          '* Tk giá vốn': sale.tkGiaVon || '',
+          '* Cục thuế': sale.cucThue || '',
+          'Mã thanh toán': sale.maThanhToan || '',
+          'Vụ việc': sale.vuViec || '',
+          'Bộ phận': sale.boPhan || '',
+          'Trạng thai': sale.isProcessed ? 'Đã xử lý' : 'Chưa xử lý',
+          'Barcode': sale.barcode || '',
+          'Mua hàng giảm giá': muaHangGiamGia,
+          'Chiết khấu mua hàng giảm giá': sale.chietKhauMuaHangGiamGia || 0,
+          'Chiết khấu ck theo chính sách': sale.chietKhauCkTheoChinhSach || 0,
+          'Mua hàng CK VIP': sale.muaHangCkVip || '',
+          'Chiết khấu mua hàng CK VIP': sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0,
+          'Thanh toán coupon': sale.thanhToanCoupon || '',
+          'Chiết khấu thanh toán coupon': sale.chietKhauThanhToanCoupon || 0,
+          'Thanh toán voucher': sale.thanhToanVoucher || '',
+          'Chiết khấu thanh toán voucher': sale.chietKhauThanhToanVoucher || 0,
+          'Thanh toán TK tiền ảo': sale.thanhToanTkTienAo || '',
+          'Chiết khấu thanh toán TK tiền ảo': sale.chietKhauThanhToanTkTienAo || 0,
+          'Voucher DP1': sale.voucherDp1 || '',
+          'Chiết khấu Voucher DP1': sale.chietKhauVoucherDp1 || 0,
+          'Mã CTKM tặng hàng': maCtkmTangHang,
+          'Mã thẻ': sale.maThe || '',
+          'Số serial': soSerial,
         };
       });
 
