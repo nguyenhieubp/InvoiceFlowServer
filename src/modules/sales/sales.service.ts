@@ -15,7 +15,7 @@ import { InvoiceService } from '../../services/invoice.service';
 import { ZappyApiService } from '../../services/zappy-api.service';
 import { FastApiService } from '../../services/fast-api.service';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
-import { Order } from '../../types/order.types';
+import { Order, SaleItem } from '../../types/order.types';
 import { CreateStockTransferDto, StockTransferItem } from '../../dto/create-stock-transfer.dto';
 import { calculateVCType } from '../../utils/product.utils';
 
@@ -3391,6 +3391,8 @@ export class SalesService {
     page: number;
     limit: number;
     date?: string;
+    dateFrom?: string;
+    dateTo?: string;
     orderCode?: string;
     partnerCode?: string;
     faceStatus?: 'yes' | 'no';
@@ -3399,6 +3401,7 @@ export class SalesService {
       partnerCode: string;
       partnerName: string;
       checkFaceIds: CheckFaceId[];
+      isCheckFaceId: boolean;
       orders: Order[];
     }>;
     pagination: {
@@ -3412,11 +3415,11 @@ export class SalesService {
     };
   }> {
     try {
-      const { page, limit, date, orderCode, partnerCode, faceStatus } = options;
+      const { page, limit, date, dateFrom, dateTo, orderCode, partnerCode, faceStatus } = options;
       const skip = (page - 1) * limit;
 
-      // Dùng chuỗi date truyền từ FE trực tiếp cho so sánh DATE(column) = :date
-      // Hỗ trợ cả 'YYYY-MM-DD' và 'DDMMMYYYY' nếu DB hiểu được
+      // Ưu tiên lọc theo khoảng ngày nếu có dateFrom / dateTo, fallback về date (1 ngày)
+      const hasDateRange = !!(dateFrom || dateTo);
       const dateParam = date;
 
       // 1) Base query cho sales theo ngày + filter orderCode / partnerCode
@@ -3424,7 +3427,19 @@ export class SalesService {
         .createQueryBuilder('sale')
         .leftJoinAndSelect('sale.customer', 'customer');
 
-      if (dateParam) {
+      if (hasDateRange) {
+        if (dateFrom && dateTo) {
+          baseSalesQuery = baseSalesQuery.andWhere('sale.docDate BETWEEN :dateFrom AND :dateTo', {
+            dateFrom,
+            dateTo,
+          });
+        } else if (dateFrom) {
+          baseSalesQuery = baseSalesQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom });
+        } else if (dateTo) {
+          baseSalesQuery = baseSalesQuery.andWhere('sale.docDate <= :dateTo', { dateTo });
+        }
+      } else if (dateParam) {
+        // Dùng chuỗi date truyền từ FE trực tiếp cho so sánh DATE(column) = :date
         baseSalesQuery = baseSalesQuery.andWhere('DATE(sale.docDate) = :date', { date: dateParam });
       }
       if (orderCode) {
@@ -3472,7 +3487,18 @@ export class SalesService {
         .orderBy('checkFaceId.date', 'DESC')
         .addOrderBy('checkFaceId.startTime', 'DESC');
 
-      if (dateParam) {
+      if (hasDateRange) {
+        if (dateFrom && dateTo) {
+          checkFaceIdQuery = checkFaceIdQuery.andWhere(
+            'checkFaceId.date BETWEEN :dateFrom AND :dateTo',
+            { dateFrom, dateTo },
+          );
+        } else if (dateFrom) {
+          checkFaceIdQuery = checkFaceIdQuery.andWhere('checkFaceId.date >= :dateFrom', { dateFrom });
+        } else if (dateTo) {
+          checkFaceIdQuery = checkFaceIdQuery.andWhere('checkFaceId.date <= :dateTo', { dateTo });
+        }
+      } else if (dateParam) {
         checkFaceIdQuery = checkFaceIdQuery.andWhere('DATE(checkFaceId.date) = :date', { date: dateParam });
       }
 
@@ -3553,7 +3579,18 @@ export class SalesService {
         .leftJoinAndSelect('sale.customer', 'customer')
         .where('sale.partnerCode IN (:...partnerCodes)', { partnerCodes: pagePartnerCodes });
 
-      if (dateParam) {
+      if (hasDateRange) {
+        if (dateFrom && dateTo) {
+          pageSalesQuery = pageSalesQuery.andWhere('sale.docDate BETWEEN :dateFrom AND :dateTo', {
+            dateFrom,
+            dateTo,
+          });
+        } else if (dateFrom) {
+          pageSalesQuery = pageSalesQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom });
+        } else if (dateTo) {
+          pageSalesQuery = pageSalesQuery.andWhere('sale.docDate <= :dateTo', { dateTo });
+        }
+      } else if (dateParam) {
         pageSalesQuery = pageSalesQuery.andWhere('DATE(sale.docDate) = :date', { date: dateParam });
       }
 
@@ -3610,9 +3647,21 @@ export class SalesService {
 
         const order = partnerOrders.get(sale.docCode)!;
         order.sales = order.sales || [];
-        order.sales.push(sale as any);
-        order.totalRevenue += sale.revenue || 0;
-        order.totalQty += sale.qty || 0;
+
+        // Tối ưu payload: chỉ trả ra các field cần dùng trên UI cho từng dòng hàng
+        const slimSale: SaleItem = {
+          id: (sale as any).id,
+          itemCode: sale.itemCode,
+          itemName: sale.itemName,
+          qty: sale.qty,
+        };
+
+        order.sales.push(slimSale);
+        // Parse string thành number để tránh nối chuỗi
+        const revenue = typeof sale.revenue === 'string' ? parseFloat(sale.revenue) || 0 : (sale.revenue || 0);
+        const qty = typeof sale.qty === 'string' ? parseFloat(sale.qty) || 0 : (sale.qty || 0);
+        order.totalRevenue += revenue;
+        order.totalQty += qty;
         order.totalItems += 1;
       }
 
@@ -3621,6 +3670,7 @@ export class SalesService {
         partnerCode: string;
         partnerName: string;
         checkFaceIds: CheckFaceId[];
+        isCheckFaceId: boolean;
         orders: Order[];
       }> = [];
 
@@ -3631,6 +3681,7 @@ export class SalesService {
 
         const normalizedCode = String(code).trim().toUpperCase();
         const checkFaceIds = checkFaceIdsByPartner.get(normalizedCode) || [];
+        const isCheckFaceId = checkFaceIds.length > 0;
         const firstOrder = orders[0];
         const partnerName =
           checkFaceIds[0]?.name ||
@@ -3641,6 +3692,7 @@ export class SalesService {
           partnerCode: code,
           partnerName,
           checkFaceIds,
+          isCheckFaceId,
           orders,
         });
       }
@@ -3896,7 +3948,7 @@ export class SalesService {
           'Giá bán': giaBan,
           'Tiền hàng': tienHang,
           'Tỷ giá': sale.tyGia || 1,
-          '* Mã thuế': sale.maThue || 'VAT10',
+          '* Mã thuế': sale.maThue ,
           '* Tk nợ': sale.tkNo || '131',
           '* Tk doanh thu': sale.tkDoanhThu || '',
           '* Tk giá vốn': sale.tkGiaVon || '',
