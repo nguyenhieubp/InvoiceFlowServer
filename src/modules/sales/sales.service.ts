@@ -2403,19 +2403,17 @@ export class SalesService {
       const ngayCt = formatDateISO(docDate);
       const ngayLct = formatDateISO(docDate);
 
-      // Lọc bỏ các sale item không có dvt trước khi xử lý
-      const salesWithDvt = (orderData.sales || []).filter((sale: any) => {
-        const dvt = sale.dvt || sale.product?.dvt || sale.product?.unit;
-        return dvt && String(dvt).trim() !== '';
-      });
+      // Lấy TẤT CẢ sales (giống logic printOrder - không filter)
+      // Không filter theo dvt hay statusAsys - lấy tất cả như luồng tạo hóa đơn ban đầu
+      const allSales = orderData.sales || [];
 
-      // Nếu không còn sale item nào có dvt, throw error để bỏ qua order này
-      if (salesWithDvt.length === 0) {
-        throw new Error(`Đơn hàng ${orderData.docCode} không có sale item nào có đơn vị tính (dvt), bỏ qua không đồng bộ`);
+      // Nếu không có sale nào, throw error
+      if (allSales.length === 0) {
+        throw new Error(`Đơn hàng ${orderData.docCode} không có sale item nào, bỏ qua không đồng bộ`);
       }
 
       // Xử lý từng sale với index để tính dong
-      const detail = await Promise.all(salesWithDvt.map(async (sale: any, index: number) => {
+      const detail = await Promise.all(allSales.map(async (sale: any, index: number) => {
         const tienHang = toNumber(sale.tienHang || sale.linetotal || sale.revenue, 0);
         const qty = toNumber(sale.qty, 0);
         let giaBan = toNumber(sale.giaBan, 0);
