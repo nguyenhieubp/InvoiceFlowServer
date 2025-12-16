@@ -3396,6 +3396,7 @@ export class SalesService {
     orderCode?: string;
     partnerCode?: string;
     faceStatus?: 'yes' | 'no';
+    brandCode?: string;
   }): Promise<{
     items: Array<{
       partnerCode: string;
@@ -3415,19 +3416,19 @@ export class SalesService {
     };
   }> {
     try {
-      const { page, limit, date, dateFrom, dateTo, orderCode, partnerCode, faceStatus } = options;
+      const { page, limit, date, dateFrom, dateTo, orderCode, partnerCode, faceStatus, brandCode } = options;
       
       // Kiểm tra xem có phân trang không (cần cả page và limit, và phải là số hợp lệ)
       const hasPagination = page !== undefined && page !== null && limit !== undefined && limit !== null && !isNaN(page) && !isNaN(limit);
       const skip = hasPagination ? (page! - 1) * limit! : 0;
       
-      this.logger.debug(`[getAllGiaiTrinhFaceId] page=${page}, limit=${limit}, hasPagination=${hasPagination}`);
+      this.logger.debug(`[getAllGiaiTrinhFaceId] page=${page}, limit=${limit}, hasPagination=${hasPagination}, brandCode=${brandCode}`);
 
       // Ưu tiên lọc theo khoảng ngày nếu có dateFrom / dateTo, fallback về date (1 ngày)
       const hasDateRange = !!(dateFrom || dateTo);
       const dateParam = date;
 
-      // 1) Base query cho sales theo ngày + filter orderCode / partnerCode
+      // 1) Base query cho sales theo ngày + filter orderCode / partnerCode / brandCode
       let baseSalesQuery = this.saleRepository
         .createQueryBuilder('sale')
         .leftJoinAndSelect('sale.customer', 'customer');
@@ -3455,6 +3456,11 @@ export class SalesService {
       if (partnerCode) {
         baseSalesQuery = baseSalesQuery.andWhere('LOWER(sale.partnerCode) LIKE LOWER(:partnerCode)', {
           partnerCode: `%${partnerCode}%`,
+        });
+      }
+      if (brandCode) {
+        baseSalesQuery = baseSalesQuery.andWhere('LOWER(sale.branchCode) = LOWER(:brandCode)', {
+          brandCode: brandCode.trim(),
         });
       }
 
@@ -3615,6 +3621,11 @@ export class SalesService {
         }
       } else if (dateParam) {
         pageSalesQuery = pageSalesQuery.andWhere('DATE(sale.docDate) = :date', { date: dateParam });
+      }
+      if (brandCode) {
+        pageSalesQuery = pageSalesQuery.andWhere('LOWER(sale.branchCode) = LOWER(:brandCode)', {
+          brandCode: brandCode.trim(),
+        });
       }
 
       const sales = await pageSalesQuery

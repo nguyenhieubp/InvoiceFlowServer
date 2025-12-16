@@ -77,6 +77,7 @@ export class SalesController {
     @Query('orderCode') orderCode?: string,
     @Query('partnerCode') partnerCode?: string,
     @Query('faceStatus') faceStatus?: 'yes' | 'no',
+    @Query('brandCode') brandCode?: string,
   ) {
     return this.salesService.getAllGiaiTrinhFaceId({
       page: page ? parseInt(page) : undefined,
@@ -87,6 +88,7 @@ export class SalesController {
       orderCode,
       partnerCode,
       faceStatus,
+      brandCode,
     });
   }
 
