@@ -3388,8 +3388,8 @@ export class SalesService {
    * @param options - Pagination options
    */
   async getAllGiaiTrinhFaceId(options: {
-    page: number;
-    limit: number;
+    page?: number;
+    limit?: number;
     date?: string;
     dateFrom?: string;
     dateTo?: string;
@@ -3404,7 +3404,7 @@ export class SalesService {
       isCheckFaceId: boolean;
       orders: Order[];
     }>;
-    pagination: {
+    pagination?: {
       page: number;
       limit: number;
       total: number;
@@ -3416,7 +3416,12 @@ export class SalesService {
   }> {
     try {
       const { page, limit, date, dateFrom, dateTo, orderCode, partnerCode, faceStatus } = options;
-      const skip = (page - 1) * limit;
+      
+      // Kiểm tra xem có phân trang không (cần cả page và limit, và phải là số hợp lệ)
+      const hasPagination = page !== undefined && page !== null && limit !== undefined && limit !== null && !isNaN(page) && !isNaN(limit);
+      const skip = hasPagination ? (page! - 1) * limit! : 0;
+      
+      this.logger.debug(`[getAllGiaiTrinhFaceId] page=${page}, limit=${limit}, hasPagination=${hasPagination}`);
 
       // Ưu tiên lọc theo khoảng ngày nếu có dateFrom / dateTo, fallback về date (1 ngày)
       const hasDateRange = !!(dateFrom || dateTo);
@@ -3463,17 +3468,22 @@ export class SalesService {
       const allPartnerCodes = allPartnerRows.map((r) => r.partnerCode).filter(Boolean);
 
       if (allPartnerCodes.length === 0) {
+        if (hasPagination) {
+          return {
+            items: [],
+            pagination: {
+              page: page!,
+              limit: limit!,
+              total: 0,
+              totalLines: 0,
+              totalPages: 0,
+              hasNext: false,
+              hasPrev: false,
+            },
+          };
+        }
         return {
           items: [],
-          pagination: {
-            page,
-            limit,
-            total: 0,
-            totalLines: 0,
-            totalPages: 0,
-            hasNext: false,
-            hasPrev: false,
-          },
         };
       }
 
@@ -3531,21 +3541,24 @@ export class SalesService {
 
       const total = filteredPartnerCodes.length;
       if (total === 0) {
+        if (hasPagination) {
+          return {
+            items: [],
+            pagination: {
+              page: page!,
+              limit: limit!,
+              total: 0,
+              totalLines: 0,
+              totalPages: 0,
+              hasNext: false,
+              hasPrev: false,
+            },
+          };
+        }
         return {
           items: [],
-          pagination: {
-            page,
-            limit,
-            total: 0,
-            totalLines: 0,
-            totalPages: 0,
-            hasNext: false,
-            hasPrev: false,
-          },
         };
       }
-
-      const totalPages = Math.ceil(total / limit) || 1;
 
       // 5) Đếm totalLines: tổng số dòng hàng (sales) cho các partner đã filter
       const lineCountResult = await baseSalesQuery
@@ -3555,22 +3568,32 @@ export class SalesService {
         .getRawOne<{ cnt: string }>();
       const totalLines = Number(lineCountResult?.cnt || 0);
 
-      // 6) Paginate partnerCodes sau khi filter
-      const pagePartnerCodes = filteredPartnerCodes.slice(skip, skip + limit);
-
-      if (pagePartnerCodes.length === 0) {
-        return {
-          items: [],
-          pagination: {
-            page,
-            limit,
-            total,
-            totalLines,
-            totalPages,
-            hasNext: page < totalPages,
-            hasPrev: page > 1,
-          },
-        };
+      // 6) Paginate partnerCodes sau khi filter (nếu có phân trang)
+      let pagePartnerCodes: string[];
+      let totalPages: number;
+      
+      if (hasPagination) {
+        totalPages = Math.ceil(total / limit!) || 1;
+        pagePartnerCodes = filteredPartnerCodes.slice(skip, skip + limit!);
+        
+        if (pagePartnerCodes.length === 0) {
+          return {
+            items: [],
+            pagination: {
+              page: page!,
+              limit: limit!,
+              total,
+              totalLines,
+              totalPages,
+              hasNext: page! < totalPages,
+              hasPrev: page! > 1,
+            },
+          };
+        }
+      } else {
+        // Không phân trang - lấy tất cả
+        totalPages = 1;
+        pagePartnerCodes = filteredPartnerCodes;
       }
 
       // 7) Lấy sales cho các partner trong trang hiện tại
@@ -3697,17 +3720,23 @@ export class SalesService {
         });
       }
 
+      if (hasPagination) {
+        return {
+          items,
+          pagination: {
+            page: page!,
+            limit: limit!,
+            total,
+            totalLines,
+            totalPages,
+            hasNext: page! < totalPages,
+            hasPrev: page! > 1,
+          },
+        };
+      }
+      
       return {
         items,
-        pagination: {
-          page,
-          limit,
-          total,
-          totalLines,
-          totalPages,
-          hasNext: page < totalPages,
-          hasPrev: page > 1,
-        },
       };
     } catch (error: any) {
       this.logger.error(`[SalesService] getAllGiaiTrinhFaceId error: ${error?.message || error}`);

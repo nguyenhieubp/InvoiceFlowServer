@@ -79,8 +79,8 @@ export class SalesController {
     @Query('faceStatus') faceStatus?: 'yes' | 'no',
   ) {
     return this.salesService.getAllGiaiTrinhFaceId({
-      page: page ? parseInt(page) : 1,
-      limit: limit ? parseInt(limit) : 10,
+      page: page ? parseInt(page) : undefined,
+      limit: limit ? parseInt(limit) : undefined,
       date,
       dateFrom,
       dateTo,
