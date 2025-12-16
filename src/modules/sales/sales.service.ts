@@ -2,7 +2,7 @@ import { Injectable, InternalServerErrorException, Logger, NotFoundException, Ba
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { Sale } from '../../entities/sale.entity';
 import { Customer } from '../../entities/customer.entity';
 import { ProductItem } from '../../entities/product-item.entity';
@@ -3720,6 +3720,10 @@ export class SalesService {
       }
 
       this.logger.debug(`[exportOrders] Fetched ${allSales.length} sales records for export`);
+      
+      // Debug: Đếm số đơn lỗi
+      const errorCount = allSales.filter(s => s.statusAsys === false).length;
+      this.logger.debug(`[exportOrders] Found ${errorCount} error orders (statusAsys = false) out of ${allSales.length} total`);
 
       // Prepare Excel data - flatten sales thành rows
       const excelData = allSales.map((sale) => {
@@ -3753,40 +3757,91 @@ export class SalesService {
         const headerCellAddress = colLetter + '1';
         if (ws[headerCellAddress]) {
           ws[headerCellAddress].s = {
-            fill: { fgColor: { rgb: 'E5E7EB' } },
-            font: { bold: true },
-            alignment: { horizontal: 'left', vertical: 'center' },
+            fill: { 
+              fgColor: { rgb: 'E5E7EB' },
+              patternType: 'solid',
+            },
+            font: { 
+              bold: true,
+              color: { rgb: '000000' },
+            },
+            alignment: { 
+              horizontal: 'left', 
+              vertical: 'center' 
+            },
           };
         }
       }
 
       // Style data rows - bôi đỏ các dòng có statusAsys = false
+      // range.s.r = 0 (header row), data rows bắt đầu từ row 1 (Excel row 2)
       for (let row = range.s.r + 1; row <= range.e.r; row++) {
-        const saleIndex = row - 1; // Index trong allSales (0-based)
+        // saleIndex = row - range.s.r - 1 = row - 0 - 1 = row - 1
+        // Row 1 (Excel row 2, data row đầu tiên) -> saleIndex = 0
+        const saleIndex = row - range.s.r - 1;
         const sale = allSales[saleIndex];
-        const isErrorRow = sale?.statusAsys === false;
+        
+        if (!sale) {
+          this.logger.warn(`[exportOrders] No sale found for row ${row}, saleIndex ${saleIndex}`);
+          continue;
+        }
+        
+        // Kiểm tra statusAsys: false = đơn lỗi
+        // Đảm bảo kiểm tra đúng: statusAsys phải là boolean false
+        const statusAsysValue = sale.statusAsys;
+        const isErrorRow = statusAsysValue === false || statusAsysValue === 'false' || statusAsysValue === 0;
+        
+        // Log để debug
+        if (isErrorRow) {
+          this.logger.debug(`[exportOrders] Row ${row} (saleIndex ${saleIndex}) is ERROR ROW: docCode=${sale.docCode}, statusAsys=${statusAsysValue}, type=${typeof statusAsysValue}, isErrorRow=${isErrorRow}`);
+        }
 
         for (let col = range.s.c; col <= range.e.c; col++) {
           const colLetter = XLSX.utils.encode_col(col);
+          // Excel rows là 1-based, nên row 0-based + 1 = Excel row number
           const cellAddress = colLetter + (row + 1);
           const cell = ws[cellAddress];
           
-          if (cell) {
-            if (!cell.s) {
-              cell.s = {};
-            }
-            
-            // Set background color: đỏ nhạt cho đơn lỗi
-            if (isErrorRow) {
-              cell.s.fill = { fgColor: { rgb: 'FFE5E5' } };
-              cell.s.font = { color: { rgb: '000000' } };
-            } else {
-              cell.s.fill = { fgColor: { rgb: 'FFFFFF' } };
-              cell.s.font = { color: { rgb: '000000' } };
-            }
-            
-            cell.s.alignment = { horizontal: 'left', vertical: 'center' };
+          if (!cell) {
+            continue;
           }
+          
+          if (!cell.s) {
+            cell.s = {};
+          }
+          
+          // Set background color: đỏ nhạt cho đơn lỗi
+          if (isErrorRow) {
+            // Màu đỏ nhạt: #FFE5E5 (RGB: 255, 229, 229)
+            cell.s.fill = {
+              fgColor: { rgb: 'FFE5E5' },
+              patternType: 'solid',
+            };
+            cell.s.font = { 
+              color: { rgb: '000000' },
+              bold: false,
+            };
+            
+            // Log sau khi set style (chỉ log cột đầu tiên)
+            if (col === range.s.c) {
+              this.logger.debug(`[exportOrders] ERROR ROW STYLE APPLIED to cell ${cellAddress}, fill=${JSON.stringify(cell.s.fill)}`);
+            }
+          } else {
+            // Màu trắng cho các dòng bình thường
+            cell.s.fill = {
+              fgColor: { rgb: 'FFFFFF' },
+              patternType: 'solid',
+            };
+            cell.s.font = { 
+              color: { rgb: '000000' },
+              bold: false,
+            };
+          }
+          
+          cell.s.alignment = { 
+            horizontal: 'left', 
+            vertical: 'center' 
+          };
         }
       }
 
