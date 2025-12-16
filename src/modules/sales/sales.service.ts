@@ -178,12 +178,12 @@ export class SalesService {
 
   /**
    * Quy đổi prom_code sang ma_ctkm_th cho trường hợp tặng sản phẩm
-   * Quy tắc: PRMN.020255-R510ECOM → 2510MN.TANGSP
+   * Quy tắc: PRMN.020255-R510ECOM → 2512MN.TANGSP (nếu đơn hàng tháng 12/2025)
    * - Từ "PRMN.020255": lấy 2 ký tự cuối của phần trước dấu chấm → "MN"
-   * - Từ "R510ECOM": parse số (5→25, 10→10) → "2510"
-   * - Kết hợp: "2510MN.TANGSP"
+   * - Từ docDate: lấy năm và tháng (ví dụ: 2025-12-14 → "2512")
+   * - Kết hợp: "2512MN.TANGSP"
    */
-  private convertPromCodeToTangSp(promCode: string | null | undefined): string | null {
+  private convertPromCodeToTangSp(promCode: string | null | undefined, docDate?: string | Date | null): string | null {
     if (!promCode || promCode.trim() === '') return null;
 
     const parts = promCode.split('-');
@@ -202,49 +202,72 @@ export class SalesService {
       }
     }
 
-    // Parse số từ part2: R510ECOM → tìm số 5 và 10
-    // Quy tắc: 5 → 25, 10 → 10
-    // Cần tìm "10" trước (2 chữ số), sau đó tìm "5" (1 chữ số)
-    const numbers: string[] = [];
-    const part2Upper = part2.toUpperCase();
-
-    // Tìm tất cả số "10" trước (2 chữ số)
-    let searchIndex = 0;
-    while (searchIndex < part2Upper.length - 1) {
-      const foundIndex = part2Upper.indexOf('10', searchIndex);
-      if (foundIndex >= 0) {
-        numbers.push('10');
-        searchIndex = foundIndex + 2;
-      } else {
-        break;
+    // Lấy năm và tháng từ docDate (ngày đơn hàng)
+    let yearMonth = '';
+    if (docDate) {
+      try {
+        const date = typeof docDate === 'string' ? new Date(docDate) : docDate;
+        if (!isNaN(date.getTime())) {
+          const year = date.getFullYear();
+          const month = date.getMonth() + 1; // getMonth() trả về 0-11
+          // Lấy 2 số cuối của năm và tháng (ví dụ: 2025-12 → "2512")
+          const yearLast2 = String(year).slice(-2);
+          const monthStr = String(month).padStart(2, '0');
+          yearMonth = `${yearLast2}${monthStr}`;
+        }
+      } catch (error) {
+        // Nếu không parse được date, fallback về logic cũ
       }
     }
 
-    // Tìm tất cả số "5" (1 chữ số, nhưng không phải là phần của "10")
-    searchIndex = 0;
-    while (searchIndex < part2Upper.length) {
-      if (part2Upper[searchIndex] === '5') {
-        // Kiểm tra xem có phải là phần của "10" không (trước đó là "1" hoặc sau đó là "0")
-        const isPartOf10 =
-          (searchIndex > 0 && part2Upper[searchIndex - 1] === '1') ||
-          (searchIndex < part2Upper.length - 1 && part2Upper[searchIndex + 1] === '0');
-        if (!isPartOf10) {
-          numbers.push('25'); // 5 → 25
+    // Nếu không có docDate hoặc parse thất bại, fallback về logic cũ (parse từ promCode)
+    if (!yearMonth) {
+      // Parse số từ part2: R510ECOM → tìm số 5 và 10
+      // Quy tắc: 5 → 25, 10 → 10
+      // Cần tìm "10" trước (2 chữ số), sau đó tìm "5" (1 chữ số)
+      const numbers: string[] = [];
+      const part2Upper = part2.toUpperCase();
+
+      // Tìm tất cả số "10" trước (2 chữ số)
+      let searchIndex = 0;
+      while (searchIndex < part2Upper.length - 1) {
+        const foundIndex = part2Upper.indexOf('10', searchIndex);
+        if (foundIndex >= 0) {
+          numbers.push('10');
+          searchIndex = foundIndex + 2;
+        } else {
+          break;
         }
       }
-      searchIndex++;
+
+      // Tìm tất cả số "5" (1 chữ số, nhưng không phải là phần của "10")
+      searchIndex = 0;
+      while (searchIndex < part2Upper.length) {
+        if (part2Upper[searchIndex] === '5') {
+          // Kiểm tra xem có phải là phần của "10" không (trước đó là "1" hoặc sau đó là "0")
+          const isPartOf10 =
+            (searchIndex > 0 && part2Upper[searchIndex - 1] === '1') ||
+            (searchIndex < part2Upper.length - 1 && part2Upper[searchIndex + 1] === '0');
+          if (!isPartOf10) {
+            numbers.push('25'); // 5 → 25
+          }
+        }
+        searchIndex++;
+      }
+
+      // Sắp xếp: 25 trước, 10 sau
+      const sortedNumbers = numbers.sort((a, b) => {
+        if (a === '25' && b === '10') return -1;
+        if (a === '10' && b === '25') return 1;
+        return 0;
+      });
+
+      yearMonth = sortedNumbers.join('');
     }
 
-    // Sắp xếp: 25 trước, 10 sau
-    const sortedNumbers = numbers.sort((a, b) => {
-      if (a === '25' && b === '10') return -1;
-      if (a === '10' && b === '25') return 1;
-      return 0;
-    });
-
     // Kết hợp: số + MN + .TANGSP
-    if (sortedNumbers.length > 0 && mnPart) {
-      return `${sortedNumbers.join('')}${mnPart}.TANGSP`;
+    if (yearMonth && mnPart) {
+      return `${yearMonth}${mnPart}.TANGSP`;
     }
 
     return null;
@@ -545,15 +568,15 @@ export class SalesService {
         // Fetch parallel thay vì sequential
         if (branchCodes.length > 0) {
           const departmentPromises = branchCodes.map(async (branchCode) => {
-            try {
-              const response = await this.httpService.axiosRef.get(
-                `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-                { headers: { accept: 'application/json' } },
-              );
-              const department = response?.data?.data?.items?.[0];
+          try {
+            const response = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+              { headers: { accept: 'application/json' } },
+            );
+            const department = response?.data?.data?.items?.[0];
               return { branchCode, department };
-            } catch (error) {
-              this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+          } catch (error) {
+            this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
               return { branchCode, department: null };
             }
           });
@@ -582,15 +605,15 @@ export class SalesService {
         // Fetch parallel thay vì sequential
         if (itemCodes.length > 0) {
           const productPromises = itemCodes.map(async (itemCode) => {
-            try {
-              const response = await this.httpService.axiosRef.get(
-                `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-                { headers: { accept: 'application/json' } },
-              );
-              const loyaltyProduct = response?.data?.data?.item || response?.data;
+          try {
+            const response = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+              { headers: { accept: 'application/json' } },
+            );
+            const loyaltyProduct = response?.data?.data?.item || response?.data;
               return { itemCode, loyaltyProduct };
-            } catch (error) {
-              this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
+          } catch (error) {
+            this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
               return { itemCode, loyaltyProduct: null };
             }
           });
@@ -633,8 +656,9 @@ export class SalesService {
                 (ordertypeName.includes('07. Bán tài khoản') || ordertypeName.includes('07.Bán tài khoản')) ||
                 (ordertypeName.includes('9. Sàn TMDT') || ordertypeName.includes('9.Sàn TMDT'))
               ) {
-                // Quy đổi prom_code sang TANGSP
-                const tangSpCode = this.convertPromCodeToTangSp(sale.promCode);
+                // Quy đổi prom_code sang TANGSP - lấy năm/tháng từ ngày đơn hàng
+                const docDate = order.docDate || sale.docDate || sale.docdate;
+                const tangSpCode = this.convertPromCodeToTangSp(sale.promCode, docDate);
                 maCtkmTangHang = tangSpCode || this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
               } else {
                 // Các trường hợp khác: dùng promCode nếu có
@@ -829,11 +853,11 @@ export class SalesService {
 
     // Chỉ select customer fields khi đã join
     if (needsCustomerJoin) {
-      query = query
-        .addSelect('customer.code', 'customer_code')
-        .addSelect('customer.brand', 'customer_brand')
-        .addSelect('customer.name', 'customer_name')
-        .addSelect('customer.mobile', 'customer_mobile');
+    query = query
+      .addSelect('customer.code', 'customer_code')
+      .addSelect('customer.brand', 'customer_brand')
+      .addSelect('customer.name', 'customer_name')
+      .addSelect('customer.mobile', 'customer_mobile');
     } else {
       // Nếu không join customer, lấy từ partnerCode (customer code)
       query = query.addSelect('sale.partnerCode', 'customer_code');
@@ -905,9 +929,9 @@ export class SalesService {
     // Nếu không phải export mode, phân trang bình thường
     if (!isExport) {
       const offset = (page - 1) * limit;
-      query = query
-        .orderBy('sale.docDate', 'DESC')
-        .addOrderBy('sale.docCode', 'ASC')
+    query = query
+      .orderBy('sale.docDate', 'DESC')
+      .addOrderBy('sale.docCode', 'ASC')
         .addOrderBy('sale.id', 'ASC') // Thêm order by id để đảm bảo consistent pagination
         .skip(offset)
         .take(limit);
@@ -1157,7 +1181,7 @@ export class SalesService {
     const limitedOrders = enrichedOrders.slice(0, maxOrders);
     
     this.logger.debug(`[findAllOrders] Returning ${limitedOrders.length} orders (limit: ${limit}, total sale items: ${totalSaleItems})`);
-    
+
     return {
       data: limitedOrders,
       total: totalSaleItems, // Tổng số sale items (rows)
@@ -1246,15 +1270,15 @@ export class SalesService {
     
     if (validItemCodes.length > 0) {
       const productPromises = validItemCodes.map(async (itemCode) => {
-        try {
-          const response = await this.httpService.axiosRef.get(
-            `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-            { headers: { accept: 'application/json' } },
-          );
-          const loyaltyProduct = response?.data?.data?.item || response?.data;
+      try {
+        const response = await this.httpService.axiosRef.get(
+          `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+          { headers: { accept: 'application/json' } },
+        );
+        const loyaltyProduct = response?.data?.data?.item || response?.data;
           return { itemCode, loyaltyProduct };
-        } catch (error) {
-          this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
+      } catch (error) {
+        this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
           return { itemCode, loyaltyProduct: null };
         }
       });
@@ -1310,15 +1334,15 @@ export class SalesService {
     // Fetch departments parallel để tối ưu performance
     if (branchCodes.length > 0) {
       const departmentPromises = branchCodes.map(async (branchCode) => {
-        try {
-          const response = await this.httpService.axiosRef.get(
-            `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-            { headers: { accept: 'application/json' } },
-          );
-          const department = response?.data?.data?.items?.[0];
+      try {
+        const response = await this.httpService.axiosRef.get(
+          `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+          { headers: { accept: 'application/json' } },
+        );
+        const department = response?.data?.data?.items?.[0];
           return { branchCode, department };
-        } catch (error) {
-          this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+      } catch (error) {
+        this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
           return { branchCode, department: null };
         }
       });
@@ -1364,17 +1388,17 @@ export class SalesService {
 
     if (uniquePromCodes.length > 0) {
       const promotionPromises = uniquePromCodes.map(async (promCode) => {
-        try {
-          // Gọi Loyalty API theo externalCode = promCode
-          const response = await this.httpService.axiosRef.get(
-            `https://loyaltyapi.vmt.vn/promotions/item/external/${promCode}`,
-            {
-              headers: { accept: 'application/json' },
+      try {
+        // Gọi Loyalty API theo externalCode = promCode
+        const response = await this.httpService.axiosRef.get(
+          `https://loyaltyapi.vmt.vn/promotions/item/external/${promCode}`,
+          {
+            headers: { accept: 'application/json' },
               timeout: 5000, // Timeout 5s để tránh chờ quá lâu
-            },
-          );
+          },
+        );
 
-          const data = response?.data;
+        const data = response?.data;
           return { promCode, data };
         } catch (error) {
           // Chỉ log error nếu không phải 404 (không tìm thấy promotion là bình thường)
@@ -2547,6 +2571,29 @@ export class SalesService {
         const ck21_nt = toNumber(sale.chietKhau21, 0);
         const ck22_nt = toNumber(sale.chietKhau22, 0);
 
+        // Tính tổng chiết khấu
+        const tongChietKhau = ck01_nt + ck02_nt + ck03_nt + ck04_nt + ck05_nt + ck06_nt + ck07_nt + ck08_nt +
+          ck09_nt + ck10_nt + ck11_nt + ck12_nt + ck13_nt + ck14_nt + ck15_nt + ck16_nt +
+          ck17_nt + ck18_nt + ck19_nt + ck20_nt + ck21_nt + ck22_nt;
+
+        // tien_hang phải là giá gốc (trước chiết khấu)
+        // Ưu tiên: mn_linetotal > linetotal > tienHang > (revenue + tongChietKhau)
+        let tienHangGoc = toNumber((sale as any).mn_linetotal || sale.linetotal || sale.tienHang, 0);
+        if (tienHangGoc === 0) {
+          // Nếu không có giá gốc, tính từ revenue + chiết khấu
+          tienHangGoc = tienHang + tongChietKhau;
+        }
+
+        // Tính gia_ban: giá gốc (trước chiết khấu)
+        // Nếu sale.giaBan đã có giá trị, dùng nó (đó là giá gốc)
+        // Nếu không, tính từ tienHangGoc
+        if (giaBan === 0 && qty > 0) {
+          giaBan = tienHangGoc / qty;
+        } else if (giaBan === 0 && tienHangGoc > 0 && qty > 0) {
+          // Fallback: nếu không có chiết khấu, dùng tienHangGoc / qty
+          giaBan = tienHangGoc / qty;
+        }
+
         // Helper function để đảm bảo giá trị luôn là string, không phải null/undefined
         const toString = (value: any, defaultValue: string = ''): string => {
           if (value === null || value === undefined || value === '') {
@@ -2748,8 +2795,8 @@ export class SalesService {
               (ordertypeName.includes('07. Bán tài khoản') || ordertypeName.includes('07.Bán tài khoản')) ||
               (ordertypeName.includes('9. Sàn TMDT') || ordertypeName.includes('9.Sàn TMDT'))
             ) {
-              // Quy đổi prom_code sang TANGSP
-              const tangSpCode = this.convertPromCodeToTangSp(sale.promCode);
+              // Quy đổi prom_code sang TANGSP - lấy năm/tháng từ ngày đơn hàng
+              const tangSpCode = this.convertPromCodeToTangSp(sale.promCode, orderData.docDate);
               maCtkmTangHang = tangSpCode || toString(sale.promotionDisplayCode || sale.promCode, '');
             } else {
               // Các trường hợp khác: dùng promCode nếu có
@@ -2784,10 +2831,10 @@ export class SalesService {
           ma_kho: limitString(maKho, 16),
           // so_luong: Số lượng (Decimal)
           so_luong: Number(qty),
-          // gia_ban: Giá bán (Decimal)
+          // gia_ban: Giá bán (Decimal) - giá gốc trước chiết khấu
           gia_ban: Number(giaBan),
-          // tien_hang: Tiền hàng (Decimal)
-          tien_hang: Number(tienHang),
+          // tien_hang: Tiền hàng (Decimal) - giá gốc trước chiết khấu
+          tien_hang: Number(tienHangGoc),
           // is_reward_line: is_reward_line (Int)
           is_reward_line: sale.isRewardLine ? 1 : 0,
           // is_bundle_reward_line: is_bundle_reward_line (Int)
@@ -3640,7 +3687,7 @@ export class SalesService {
       // 8) Group sales theo partnerCode -> docCode và build Order[]
       // Dùng Map với key là partnerCode gốc (không normalize) để match với pagePartnerCodes
       const ordersByPartner = new Map<string, Map<string, Order>>();
-      for (const sale of sales) {
+        for (const sale of sales) {
         if (!sale.partnerCode) continue;
         // Giữ nguyên partnerCode gốc để match với pagePartnerCodes
         const partnerCodeKey = sale.partnerCode;
@@ -3650,41 +3697,41 @@ export class SalesService {
         const partnerOrders = ordersByPartner.get(partnerCodeKey)!;
 
         if (!partnerOrders.has(sale.docCode)) {
-          const customer = sale.customer;
+            const customer = sale.customer;
           const orderCustomer = customer
             ? {
-                code: customer.code,
-                name: customer.name,
-                brand: customer.brand || '',
-                mobile: customer.mobile,
-                sexual: customer.sexual,
-                idnumber: customer.idnumber,
-                enteredat: customer.enteredat ? customer.enteredat.toISOString() : undefined,
-                crm_lead_source: customer.crm_lead_source,
-                address: customer.address,
-                province_name: customer.province_name,
-                birthday: customer.birthday ? customer.birthday.toISOString().split('T')[0] : undefined,
-                grade_name: customer.grade_name,
-                branch_code: customer.branch_code,
+              code: customer.code,
+              name: customer.name,
+              brand: customer.brand || '',
+              mobile: customer.mobile,
+              sexual: customer.sexual,
+              idnumber: customer.idnumber,
+              enteredat: customer.enteredat ? customer.enteredat.toISOString() : undefined,
+              crm_lead_source: customer.crm_lead_source,
+              address: customer.address,
+              province_name: customer.province_name,
+              birthday: customer.birthday ? customer.birthday.toISOString().split('T')[0] : undefined,
+              grade_name: customer.grade_name,
+              branch_code: customer.branch_code,
               }
             : null;
 
           partnerOrders.set(sale.docCode, {
-            docCode: sale.docCode,
-            docDate: sale.docDate.toISOString(),
-            branchCode: sale.branchCode,
-            docSourceType: sale.docSourceType || 'sale',
-            customer: orderCustomer as any,
-            totalRevenue: 0,
-            totalQty: 0,
-            totalItems: 0,
-            isProcessed: sale.isProcessed,
-            sales: [],
-          });
-        }
+              docCode: sale.docCode,
+              docDate: sale.docDate.toISOString(),
+              branchCode: sale.branchCode,
+              docSourceType: sale.docSourceType || 'sale',
+              customer: orderCustomer as any,
+              totalRevenue: 0,
+              totalQty: 0,
+              totalItems: 0,
+              isProcessed: sale.isProcessed,
+              sales: [],
+            });
+          }
 
         const order = partnerOrders.get(sale.docCode)!;
-        order.sales = order.sales || [];
+          order.sales = order.sales || [];
 
         // Tối ưu payload: chỉ trả ra các field cần dùng trên UI cho từng dòng hàng
         const slimSale: SaleItem = {
@@ -3700,8 +3747,8 @@ export class SalesService {
         const qty = typeof sale.qty === 'string' ? parseFloat(sale.qty) || 0 : (sale.qty || 0);
         order.totalRevenue += revenue;
         order.totalQty += qty;
-        order.totalItems += 1;
-      }
+          order.totalItems += 1;
+        }
 
       // 9) Build items cho các partner trong trang hiện tại
       const items: Array<{
@@ -3736,17 +3783,17 @@ export class SalesService {
       }
 
       if (hasPagination) {
-        return {
-          items,
-          pagination: {
+      return {
+        items,
+        pagination: {
             page: page!,
             limit: limit!,
-            total,
+          total,
             totalLines,
-            totalPages,
+          totalPages,
             hasNext: page! < totalPages,
             hasPrev: page! > 1,
-          },
+        },
         };
       }
       
@@ -3959,7 +4006,9 @@ export class SalesService {
             ordertypeName.includes('07. Bán tài khoản') || ordertypeName.includes('07.Bán tài khoản') ||
             ordertypeName.includes('9. Sàn TMDT') || ordertypeName.includes('9.Sàn TMDT')
           ) {
-            const tangSpCode = this.convertPromCodeToTangSp(sale.promCode);
+            // Quy đổi prom_code sang TANGSP - lấy năm/tháng từ ngày đơn hàng
+            const docDate = sale.docDate || sale.docdate || (sale as any).order?.docDate;
+            const tangSpCode = this.convertPromCodeToTangSp(sale.promCode, docDate);
             maCtkmTangHang = tangSpCode || this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
           } else {
             maCtkmTangHang = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
