@@ -1,6 +1,7 @@
-import { Controller, Get, Query, Param, Post, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Query, Param, Post, Body, BadRequestException, Res } from '@nestjs/common';
 import { SalesService } from './sales.service';
 import type { CreateStockTransferDto } from '../../dto/create-stock-transfer.dto';
+import type { Response } from 'express';
 
 @Controller('sales')
 export class SalesController {
@@ -28,6 +29,42 @@ export class SalesController {
       dateTo, // Pass dateTo parameter
       search, // Pass search parameter
     });
+  }
+
+  @Get('export-orders')
+  async exportOrders(
+    @Res() res: Response,
+    @Query('brand') brand?: string,
+    @Query('processed') processed?: string,
+    @Query('date') date?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('search') search?: string,
+    @Query('statusAsys') statusAsys?: string,
+  ) {
+    const buffer = await this.salesService.exportOrders({
+      brand,
+      isProcessed: processed === 'true' ? true : processed === 'false' ? false : undefined,
+      date,
+      dateFrom,
+      dateTo,
+      search,
+      statusAsys: statusAsys === 'true' ? true : statusAsys === 'false' ? false : undefined,
+    });
+
+    // Generate filename
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0].replace(/-/g, '');
+    const brandSuffix = brand ? `_${brand.toUpperCase()}` : '';
+    const fileName = `DonHang_${dateStr}${brandSuffix}.xlsx`;
+
+    // Set headers
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+    res.setHeader('Content-Length', buffer.length);
+
+    // Send buffer
+    res.send(buffer);
   }
 
   @Get('giai-trinh-faceid')

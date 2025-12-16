@@ -1,7 +1,8 @@
-import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
+import * as XLSX from 'xlsx';
 import { Sale } from '../../entities/sale.entity';
 import { Customer } from '../../entities/customer.entity';
 import { ProductItem } from '../../entities/product-item.entity';
@@ -465,13 +466,16 @@ export class SalesService {
     dateFrom?: string; // Format: YYYY-MM-DD hoặc ISO string
     dateTo?: string; // Format: YYYY-MM-DD hoặc ISO string
     search?: string; // Search query để tìm theo docCode, customer name, code, mobile
+    statusAsys?: boolean; // Filter theo statusAsys (true/false)
+    export?: boolean; // Nếu true, trả về sales items riêng lẻ (không group, không paginate) để export Excel
   }) {
-    const { brand, isProcessed, page = 1, limit = 50, date, dateFrom, dateTo, search } = options;
+    const { brand, isProcessed, page = 1, limit = 50, date, dateFrom, dateTo, search, statusAsys, export: isExport } = options;
 
     // Nếu có search query, luôn search trong database (không dùng Zappy API)
     // Vì Zappy API chỉ lấy được một ngày, không hỗ trợ date range
-    // Nếu có date parameter và không có search, lấy dữ liệu từ Zappy API
-    if (date && !search) {
+    // Nếu có brand filter, luôn dùng database query (không dùng Zappy API) để tránh fetch tất cả products
+    // Nếu có date parameter và không có search và không có brand, lấy dữ liệu từ Zappy API
+    if (date && !search && !brand) {
       try {
         const orders = await this.zappyApiService.getDailySales(date);
 
@@ -495,10 +499,42 @@ export class SalesService {
           );
         }
 
-        // Fetch departments để tính maKho - PARALLEL để tối ưu performance
+        // Phân trang TRƯỚC khi fetch products/departments để tránh fetch quá nhiều
+        // Tính tổng số rows (sale items) từ tất cả orders
+        let totalRows = 0;
+        filteredOrders.forEach(order => {
+          totalRows += (order.sales && order.sales.length > 0) ? order.sales.length : (order.totalItems > 0 ? order.totalItems : 1);
+        });
+
+        const paginationStartIndex = (page - 1) * limit;
+        const paginationEndIndex = paginationStartIndex + limit;
+
+        // Paginate orders dựa trên số rows
+        let currentRowCount = 0;
+        const paginatedOrders: typeof filteredOrders = [];
+
+        for (const order of filteredOrders) {
+          const orderRowCount = (order.sales && order.sales.length > 0) ? order.sales.length : (order.totalItems > 0 ? order.totalItems : 1);
+          const orderStartRow = currentRowCount;
+          const orderEndRow = currentRowCount + orderRowCount;
+
+          // Nếu order này có overlap với phạm vi pagination, thêm vào
+          if (orderEndRow > paginationStartIndex && orderStartRow < paginationEndIndex) {
+            paginatedOrders.push(order);
+          }
+
+          currentRowCount += orderRowCount;
+
+          // Nếu đã vượt quá phạm vi pagination, dừng lại
+          if (currentRowCount >= paginationEndIndex) {
+            break;
+          }
+        }
+
+        // Fetch departments để tính maKho - CHỈ cho paginated orders
         const branchCodes = Array.from(
           new Set(
-            filteredOrders
+            paginatedOrders
               .flatMap((order) => order.sales || [])
               .map((sale) => sale.branchCode)
               .filter((code): code is string => !!code && code.trim() !== '')
@@ -530,11 +566,13 @@ export class SalesService {
           });
         }
 
-        // Fetch products từ Loyalty API để lấy producttype - PARALLEL để tối ưu performance
+        // Fetch products từ Loyalty API để lấy producttype - CHỈ cho paginated orders
+        // BỎ QUA các sale có statusAsys = false (đơn lỗi) - không fetch từ Loyalty API
         const itemCodes = Array.from(
           new Set(
-            filteredOrders
+            paginatedOrders
               .flatMap((order) => order.sales || [])
+              .filter((sale) => sale.statusAsys !== false) // Bỏ qua đơn lỗi
               .map((sale) => sale.itemCode)
               .filter((code): code is string => !!code && code.trim() !== '')
           )
@@ -566,7 +604,7 @@ export class SalesService {
         }
 
         // Thêm promotionDisplayCode, maKho, maCtkmTangHang và producttype vào các sales items
-        const enrichedOrders = filteredOrders.map((order) => ({
+        const enrichedOrders = paginatedOrders.map((order) => ({
           ...order,
           sales: order.sales?.map((sale) => {
             const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
@@ -622,40 +660,8 @@ export class SalesService {
           }) || [],
         }));
 
-        // Phân trang theo rows (sale items), không phải orders
-        // Tính tổng số rows (sale items) từ tất cả orders
-        let totalRows = 0;
-        enrichedOrders.forEach(order => {
-          totalRows += (order.sales && order.sales.length > 0) ? order.sales.length : (order.totalItems > 0 ? order.totalItems : 1);
-        });
-
-        const paginationStartIndex = (page - 1) * limit;
-        const paginationEndIndex = paginationStartIndex + limit;
-
-        // Paginate orders dựa trên số rows
-        let currentRowCount = 0;
-        const paginatedOrders: typeof enrichedOrders = [];
-
-        for (const order of enrichedOrders) {
-          const orderRowCount = (order.sales && order.sales.length > 0) ? order.sales.length : (order.totalItems > 0 ? order.totalItems : 1);
-          const orderStartRow = currentRowCount;
-          const orderEndRow = currentRowCount + orderRowCount;
-
-          // Nếu order này có overlap với phạm vi pagination, thêm vào
-          if (orderEndRow > paginationStartIndex && orderStartRow < paginationEndIndex) {
-            paginatedOrders.push(order);
-          }
-
-          currentRowCount += orderRowCount;
-
-          // Nếu đã vượt quá phạm vi pagination, dừng lại
-          if (currentRowCount >= paginationEndIndex) {
-            break;
-          }
-        }
-
         return {
-          data: paginatedOrders,
+          data: enrichedOrders,
           total: totalRows, // Tổng số rows (sale items)
           page,
           limit,
@@ -682,7 +688,12 @@ export class SalesService {
       countQuery.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
     }
 
-    // Luôn join với customer để có thể search
+    // Thêm filter statusAsys vào count query
+    if (statusAsys !== undefined) {
+      countQuery.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
+    }
+
+    // Luôn join với customer để có thể search hoặc export
     countQuery.leftJoin('sale.customer', 'customer');
 
     if (brand) {
@@ -699,8 +710,11 @@ export class SalesService {
     }
 
     // Date filter cho count query - PHẢI XỬ LÝ TRƯỚC KHI THỰC THI COUNT QUERY
-    // Ưu tiên dateFrom/dateTo (date range), nếu không có thì dùng date (single day)
+    // Brand -> limit (30 ngày) nếu chưa có ngày
+    // Brand -> date -> limit nếu có ngày
+    let countHasDateFilter = false;
     if (dateFrom || dateTo) {
+      countHasDateFilter = true;
       // Date range filter
       if (dateFrom && dateTo) {
         const startDate = new Date(dateFrom);
@@ -721,6 +735,7 @@ export class SalesService {
         countQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
       }
     } else if (date) {
+      countHasDateFilter = true;
       // Single date filter (format: DDMMMYYYY)
       const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
       if (dateMatch) {
@@ -742,6 +757,18 @@ export class SalesService {
           });
         }
       }
+    } else if (brand && !countHasDateFilter) {
+      // Brand -> limit (30 ngày) nếu chưa có ngày
+      const endDate = new Date();
+      endDate.setHours(23, 59, 59, 999);
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 30);
+      startDate.setHours(0, 0, 0, 0);
+      countQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+        dateFrom: startDate,
+        dateTo: endDate,
+      });
+      this.logger.debug(`[findAllOrders] Brand filter without date - limiting to last 30 days: ${startDate.toISOString()} to ${endDate.toISOString()}`);
     }
 
     const totalResult = await countQuery.getRawOne();
@@ -766,14 +793,23 @@ export class SalesService {
       'sale.chietKhauVoucherDp1', // Thêm chietKhauVoucherDp1 để frontend hiển thị voucher dự phòng
       'sale.chietKhauThanhToanTkTienAo', // Thêm chietKhauThanhToanTkTienAo để frontend hiển thị ECOIN
       'sale.paid_by_voucher_ecode_ecoin_bp', // Thêm paid_by_voucher_ecode_ecoin_bp để frontend check voucher
+      'sale.statusAsys', // Thêm statusAsys để export
+      'sale.giaBan', // Thêm giaBan để export
+      'sale.tienHang', // Thêm tienHang để export
+      'sale.linetotal', // Thêm linetotal để export
     ]);
 
     if (isProcessed !== undefined) {
       query = query.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
     }
 
-    // Chỉ join với customer khi cần (có brand filter hoặc search)
-    const needsCustomerJoin = brand || (search && search.trim() !== '');
+    // Thêm filter statusAsys vào query chính
+    if (statusAsys !== undefined) {
+      query = query.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
+    }
+
+    // Chỉ join với customer khi cần (có brand filter, search, hoặc export mode)
+    const needsCustomerJoin = brand || (search && search.trim() !== '') || isExport;
     if (needsCustomerJoin && !query.expressionMap.joinAttributes.find(j => j.alias.name === 'customer')) {
       query = query.leftJoin('sale.customer', 'customer');
     }
@@ -804,8 +840,11 @@ export class SalesService {
     }
 
     // Thêm date filter vào query chính
-    // Ưu tiên dateFrom/dateTo (date range), nếu không có thì dùng date (single day)
+    // Brand -> limit (30 ngày) nếu chưa có ngày
+    // Brand -> date -> limit nếu có ngày
+    let hasDateFilter = false;
     if (dateFrom || dateTo) {
+      hasDateFilter = true;
       // Date range filter
       if (dateFrom && dateTo) {
         const startDate = new Date(dateFrom);
@@ -816,22 +855,17 @@ export class SalesService {
           dateFrom: startDate,
           dateTo: endDate,
         });
-        countQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
-          dateFrom: startDate,
-          dateTo: endDate,
-        });
       } else if (dateFrom) {
         const startDate = new Date(dateFrom);
         startDate.setHours(0, 0, 0, 0);
         query.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
-        countQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
       } else if (dateTo) {
         const endDate = new Date(dateTo);
         endDate.setHours(23, 59, 59, 999);
         query.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
-        countQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
       }
     } else if (date) {
+      hasDateFilter = true;
       // Single date filter (format: DDMMMYYYY)
       const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
       if (dateMatch) {
@@ -853,19 +887,37 @@ export class SalesService {
           });
         }
       }
+    } else if (brand && !hasDateFilter) {
+      // Brand -> limit (30 ngày) nếu chưa có ngày
+      const endDate = new Date();
+      endDate.setHours(23, 59, 59, 999);
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 30);
+      startDate.setHours(0, 0, 0, 0);
+      query.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+        dateFrom: startDate,
+        dateTo: endDate,
+      });
+      this.logger.debug(`[findAllOrders] Brand filter without date - limiting to last 30 days: ${startDate.toISOString()} to ${endDate.toISOString()}`);
     }
 
-    // Phân trang đơn giản: lấy sale items trực tiếp với limit và offset
-    const offset = (page - 1) * limit;
-    
-    // Tối ưu: Apply date filter TRƯỚC khi order và paginate để database có thể dùng index
-    // Đảm bảo order by được set sau khi đã có tất cả filters
-    query = query
-      .orderBy('sale.docDate', 'DESC')
-      .addOrderBy('sale.docCode', 'ASC')
-      .addOrderBy('sale.id', 'ASC') // Thêm order by id để đảm bảo consistent pagination
-      .skip(offset)
-      .take(limit);
+    // Nếu export mode, không paginate, lấy tất cả
+    // Nếu không phải export mode, phân trang bình thường
+    if (!isExport) {
+      const offset = (page - 1) * limit;
+      query = query
+        .orderBy('sale.docDate', 'DESC')
+        .addOrderBy('sale.docCode', 'ASC')
+        .addOrderBy('sale.id', 'ASC') // Thêm order by id để đảm bảo consistent pagination
+        .skip(offset)
+        .take(limit);
+    } else {
+      // Export mode: không paginate, lấy tất cả
+      query = query
+        .orderBy('sale.docDate', 'DESC')
+        .addOrderBy('sale.docCode', 'ASC')
+        .addOrderBy('sale.id', 'ASC');
+    }
 
     // Log query để debug (có thể remove sau)
     const sql = query.getSql();
@@ -873,9 +925,138 @@ export class SalesService {
     this.logger.debug(`[findAllOrders] Params: ${JSON.stringify(query.getParameters())}`);
 
     const startTime = Date.now();
-    const allSales = await query.getRawMany();
+    
+    // Nếu export mode, dùng getMany() để lấy đầy đủ entity data với customer relation
+    // Nếu không phải export mode, dùng getRawMany() để tối ưu performance
+    let allSales: any[];
+    if (isExport) {
+      // Khi export, cần lấy đầy đủ entity data với customer relation
+      // Remove select() để lấy tất cả fields từ entity
+      const exportQuery = this.saleRepository
+        .createQueryBuilder('sale')
+        .leftJoinAndSelect('sale.customer', 'customer')
+        .orderBy('sale.docDate', 'DESC')
+        .addOrderBy('sale.docCode', 'ASC')
+        .addOrderBy('sale.id', 'ASC');
+      
+      // Apply same filters
+      if (isProcessed !== undefined) {
+        exportQuery.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
+      }
+      if (statusAsys !== undefined) {
+        exportQuery.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
+      }
+      if (brand) {
+        exportQuery.andWhere('customer.brand = :brand', { brand });
+      }
+      if (search && search.trim() !== '') {
+        const searchPattern = `%${search.trim().toLowerCase()}%`;
+        exportQuery.andWhere(
+          '(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, \'\')) LIKE :search OR LOWER(COALESCE(customer.code, \'\')) LIKE :search OR LOWER(COALESCE(customer.mobile, \'\')) LIKE :search)',
+          { search: searchPattern }
+        );
+      }
+      
+      // Apply date filters
+      let hasDateFilter = false;
+      if (dateFrom || dateTo) {
+        hasDateFilter = true;
+        if (dateFrom && dateTo) {
+          const startDate = new Date(dateFrom);
+          startDate.setHours(0, 0, 0, 0);
+          const endDate = new Date(dateTo);
+          endDate.setHours(23, 59, 59, 999);
+          exportQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+            dateFrom: startDate,
+            dateTo: endDate,
+          });
+        } else if (dateFrom) {
+          const startDate = new Date(dateFrom);
+          startDate.setHours(0, 0, 0, 0);
+          exportQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
+        } else if (dateTo) {
+          const endDate = new Date(dateTo);
+          endDate.setHours(23, 59, 59, 999);
+          exportQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
+        }
+      } else if (date) {
+        hasDateFilter = true;
+        const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+        if (dateMatch) {
+          const [, day, monthStr, year] = dateMatch;
+          const monthMap: { [key: string]: number } = {
+            JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+            JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+          };
+          const month = monthMap[monthStr.toUpperCase()];
+          if (month !== undefined) {
+            const dateObj = new Date(parseInt(year), month, parseInt(day));
+            const startOfDay = new Date(dateObj);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(dateObj);
+            endOfDay.setHours(23, 59, 59, 999);
+            exportQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+              dateFrom: startOfDay,
+              dateTo: endOfDay,
+            });
+          }
+        }
+      } else if (brand && !hasDateFilter) {
+        const endDate = new Date();
+        endDate.setHours(23, 59, 59, 999);
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30);
+        startDate.setHours(0, 0, 0, 0);
+        exportQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+          dateFrom: startDate,
+          dateTo: endDate,
+        });
+      }
+      
+      allSales = await exportQuery.getMany();
+    } else {
+      allSales = await query.getRawMany();
+    }
+    
     const queryTime = Date.now() - startTime;
     this.logger.debug(`[findAllOrders] Query executed in ${queryTime}ms, returned ${allSales.length} records`);
+
+    // Nếu export mode, trả về sales items riêng lẻ (không group)
+    if (isExport) {
+      // Map entity data thành format cho export
+      const salesWithCustomer = allSales.map((sale) => {
+        return {
+          docCode: sale.docCode || '',
+          docDate: sale.docDate,
+          branchCode: sale.branchCode || '',
+          docSourceType: sale.docSourceType || '',
+          customer: sale.customer ? {
+            code: sale.customer.code || sale.partnerCode || null,
+            brand: sale.customer.brand || null,
+            name: sale.customer.name || null,
+            mobile: sale.customer.mobile || null,
+          } : (sale.partnerCode ? {
+            code: sale.partnerCode || null,
+            brand: null,
+            name: null,
+            mobile: null,
+          } : null),
+          itemCode: sale.itemCode || '',
+          qty: sale.qty || 0,
+          giaBan: sale.giaBan || 0,
+          tienHang: sale.tienHang || 0,
+          linetotal: sale.linetotal || 0,
+          revenue: sale.revenue || 0,
+          isProcessed: sale.isProcessed || false,
+          statusAsys: sale.statusAsys !== undefined ? sale.statusAsys : true,
+        };
+      });
+
+      return {
+        sales: salesWithCustomer,
+        total: totalSaleItems,
+      };
+    }
 
     // Gộp theo docCode - chỉ trả về data cơ bản
     const orderMap = new Map<string, {
@@ -981,8 +1162,15 @@ export class SalesService {
     // Trả về tất cả orders đã group
     // Vì đã lấy đúng số sale items với limit và offset rồi, nên chỉ cần trả về tất cả orders đã group
     // Frontend sẽ tự paginate lại dựa trên số rows (totalItems) của mỗi order
+    // GIỚI HẠN: chỉ trả về tối đa số orders bằng limit * 2 để tránh quá tải
+    // (vì mỗi order có thể có nhiều sale items, nên số orders có thể nhiều hơn limit)
+    const maxOrders = limit * 2; // Cho phép tối đa 2x limit orders
+    const limitedOrders = enrichedOrders.slice(0, maxOrders);
+    
+    this.logger.debug(`[findAllOrders] Returning ${limitedOrders.length} orders (limit: ${limit}, total sale items: ${totalSaleItems})`);
+    
     return {
-      data: enrichedOrders,
+      data: limitedOrders,
       total: totalSaleItems, // Tổng số sale items (rows)
       page,
       limit,
@@ -1059,20 +1247,35 @@ export class SalesService {
     }));
 
     // Fetch products từ Loyalty API cho các itemCode không có trong database hoặc không có dvt
+    // BỎ QUA các sale có statusAsys = false (đơn lỗi) - không fetch từ Loyalty API
     const loyaltyProductMap = new Map<string, any>();
-    for (const itemCode of itemCodes) {
-      try {
-        const response = await this.httpService.axiosRef.get(
-          `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-          { headers: { accept: 'application/json' } },
-        );
-        const loyaltyProduct = response?.data?.data?.item || response?.data;
+    // Filter itemCodes: chỉ fetch cho các sale không phải đơn lỗi
+    const validItemCodes = itemCodes.filter(itemCode => {
+      const sale = sales.find(s => s.itemCode === itemCode);
+      return sale && sale.statusAsys !== false;
+    });
+    
+    if (validItemCodes.length > 0) {
+      const productPromises = validItemCodes.map(async (itemCode) => {
+        try {
+          const response = await this.httpService.axiosRef.get(
+            `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+            { headers: { accept: 'application/json' } },
+          );
+          const loyaltyProduct = response?.data?.data?.item || response?.data;
+          return { itemCode, loyaltyProduct };
+        } catch (error) {
+          this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
+          return { itemCode, loyaltyProduct: null };
+        }
+      });
+      
+      const productResults = await Promise.all(productPromises);
+      productResults.forEach(({ itemCode, loyaltyProduct }) => {
         if (loyaltyProduct) {
           loyaltyProductMap.set(itemCode, loyaltyProduct);
         }
-      } catch (error) {
-        this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
-      }
+      });
     }
 
     // Enrich sales với product từ Loyalty API (thêm dvt từ unit)
@@ -1115,19 +1318,28 @@ export class SalesService {
     );
 
     const departmentMap = new Map<string, any>();
-    for (const branchCode of branchCodes) {
-      try {
-        const response = await this.httpService.axiosRef.get(
-          `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-          { headers: { accept: 'application/json' } },
-        );
-        const department = response?.data?.data?.items?.[0];
+    // Fetch departments parallel để tối ưu performance
+    if (branchCodes.length > 0) {
+      const departmentPromises = branchCodes.map(async (branchCode) => {
+        try {
+          const response = await this.httpService.axiosRef.get(
+            `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+            { headers: { accept: 'application/json' } },
+          );
+          const department = response?.data?.data?.items?.[0];
+          return { branchCode, department };
+        } catch (error) {
+          this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+          return { branchCode, department: null };
+        }
+      });
+      
+      const departmentResults = await Promise.all(departmentPromises);
+      departmentResults.forEach(({ branchCode, department }) => {
         if (department) {
           departmentMap.set(branchCode, department);
         }
-      } catch (error) {
-        this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
-      }
+      });
     }
 
     // Enrich sales với department information và tính maKho
@@ -1151,6 +1363,7 @@ export class SalesService {
     const firstSale = sales[0];
 
     // Lấy thông tin khuyến mại từ Loyalty API cho các promCode trong đơn hàng
+    // Fetch parallel để tối ưu performance
     const promotionsByCode: Record<string, any> = {};
     const uniquePromCodes = Array.from(
       new Set(
@@ -1160,33 +1373,38 @@ export class SalesService {
       ),
     );
 
-    for (const promCode of uniquePromCodes) {
-      try {
-        // Gọi Loyalty API theo externalCode = promCode
-        const response = await this.httpService.axiosRef.get(
-          `https://loyaltyapi.vmt.vn/promotions/item/external/${promCode}`,
-          {
-            headers: { accept: 'application/json' },
-          },
-        );
+    if (uniquePromCodes.length > 0) {
+      const promotionPromises = uniquePromCodes.map(async (promCode) => {
+        try {
+          // Gọi Loyalty API theo externalCode = promCode
+          const response = await this.httpService.axiosRef.get(
+            `https://loyaltyapi.vmt.vn/promotions/item/external/${promCode}`,
+            {
+              headers: { accept: 'application/json' },
+              timeout: 5000, // Timeout 5s để tránh chờ quá lâu
+            },
+          );
 
-        const data = response?.data;
-        // Lưu cả response gốc và promotion data
+          const data = response?.data;
+          return { promCode, data };
+        } catch (error) {
+          // Chỉ log error nếu không phải 404 (không tìm thấy promotion là bình thường)
+          if ((error as any)?.response?.status !== 404) {
+            this.logger.warn(
+              `Lỗi khi lấy promotion cho promCode ${promCode}: ${(error as any)?.message || error}`,
+            );
+          }
+          return { promCode, data: null };
+        }
+      });
+      
+      const promotionResults = await Promise.all(promotionPromises);
+      promotionResults.forEach(({ promCode, data }) => {
         promotionsByCode[promCode] = {
           raw: data,
           main: data || null,
         };
-      } catch (error) {
-        this.logger.error(
-          `Lỗi khi lấy promotion cho promCode ${promCode}: ${(error as any)?.message || error
-          }`,
-        );
-        // Nếu không tìm thấy promotion, lưu null để không ảnh hưởng đến flow
-        promotionsByCode[promCode] = {
-          raw: null,
-          main: null,
-        };
-      }
+      });
     }
 
     // Gắn promotion tương ứng vào từng dòng sale (chỉ để trả ra API, không lưu DB)
@@ -3453,6 +3671,161 @@ export class SalesService {
     } catch (error: any) {
       this.logger.error(`[SalesService] getAllGiaiTrinhFaceId error: ${error?.message || error}`);
       throw new InternalServerErrorException('getAllGiaiTrinhFaceId error');
+    }
+  }
+
+  /**
+   * Export orders to Excel file
+   * Sử dụng getAllOrders với export=true để đảm bảo đồng bộ với UI
+   * Khi getAllOrders thay đổi gì thì export Excel cũng tự động thay đổi theo
+   */
+  async exportOrders(options: {
+    brand?: string;
+    isProcessed?: boolean;
+    date?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    search?: string;
+    statusAsys?: boolean;
+  }): Promise<Buffer> {
+    const { brand, isProcessed, date, dateFrom, dateTo, search, statusAsys } = options;
+
+    try {
+      this.logger.debug(`[exportOrders] Starting export with filters: ${JSON.stringify(options)}`);
+
+      // Limit số records để tránh quá tải
+      const MAX_EXPORT_RECORDS = 100000;
+
+      // Gọi getAllOrders với export=true để lấy tất cả sales items (đồng bộ với UI)
+      const result = await this.findAllOrders({
+        brand,
+        isProcessed,
+        date,
+        dateFrom,
+        dateTo,
+        search,
+        statusAsys,
+        export: true, // Export mode: trả về sales items riêng lẻ
+      });
+
+      const allSales = result.sales || [];
+      const totalCount = result.total || 0;
+
+      if (totalCount > MAX_EXPORT_RECORDS) {
+        throw new BadRequestException(`Số lượng records quá lớn (${totalCount}). Vui lòng thêm filter để giảm số lượng (tối đa ${MAX_EXPORT_RECORDS} records)`);
+      }
+
+      if (allSales.length === 0) {
+        throw new BadRequestException('Không có dữ liệu để xuất Excel');
+      }
+
+      this.logger.debug(`[exportOrders] Fetched ${allSales.length} sales records for export`);
+
+      // Prepare Excel data - flatten sales thành rows
+      const excelData = allSales.map((sale) => {
+        return {
+          'Mã đơn hàng': sale.docCode || '',
+          'Ngày đơn hàng': sale.docDate ? new Date(sale.docDate).toLocaleDateString('vi-VN') : '',
+          'Mã chi nhánh': sale.branchCode || '',
+          'Loại đơn': sale.docSourceType || '',
+          'Mã khách hàng': sale.customer?.code || '',
+          'Tên khách hàng': sale.customer?.name || '',
+          'Số điện thoại': sale.customer?.mobile || '',
+          'Brand': sale.customer?.brand || '',
+          'Mã sản phẩm': sale.itemCode || '',
+          'Số lượng': sale.qty || 0,
+          'Giá bán': sale.giaBan || 0,
+          'Thành tiền': sale.tienHang || sale.linetotal || 0,
+          'Doanh thu': sale.revenue || 0,
+          'Trạng thái xử lý': sale.isProcessed ? 'Đã xử lý' : 'Chưa xử lý',
+          'Trạng thái sync': sale.statusAsys ? 'Thành công' : 'Lỗi',
+        };
+      });
+
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(excelData);
+
+      // Style header row
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+      for (let col = range.s.c; col <= range.e.c; col++) {
+        const colLetter = XLSX.utils.encode_col(col);
+        const headerCellAddress = colLetter + '1';
+        if (ws[headerCellAddress]) {
+          ws[headerCellAddress].s = {
+            fill: { fgColor: { rgb: 'E5E7EB' } },
+            font: { bold: true },
+            alignment: { horizontal: 'left', vertical: 'center' },
+          };
+        }
+      }
+
+      // Style data rows - bôi đỏ các dòng có statusAsys = false
+      for (let row = range.s.r + 1; row <= range.e.r; row++) {
+        const saleIndex = row - 1; // Index trong allSales (0-based)
+        const sale = allSales[saleIndex];
+        const isErrorRow = sale?.statusAsys === false;
+
+        for (let col = range.s.c; col <= range.e.c; col++) {
+          const colLetter = XLSX.utils.encode_col(col);
+          const cellAddress = colLetter + (row + 1);
+          const cell = ws[cellAddress];
+          
+          if (cell) {
+            if (!cell.s) {
+              cell.s = {};
+            }
+            
+            // Set background color: đỏ nhạt cho đơn lỗi
+            if (isErrorRow) {
+              cell.s.fill = { fgColor: { rgb: 'FFE5E5' } };
+              cell.s.font = { color: { rgb: '000000' } };
+            } else {
+              cell.s.fill = { fgColor: { rgb: 'FFFFFF' } };
+              cell.s.font = { color: { rgb: '000000' } };
+            }
+            
+            cell.s.alignment = { horizontal: 'left', vertical: 'center' };
+          }
+        }
+      }
+
+      // Set column widths
+      const colWidths = [
+        { wch: 15 }, // Mã đơn hàng
+        { wch: 12 }, // Ngày đơn hàng
+        { wch: 12 }, // Mã chi nhánh
+        { wch: 12 }, // Loại đơn
+        { wch: 15 }, // Mã khách hàng
+        { wch: 25 }, // Tên khách hàng
+        { wch: 12 }, // Số điện thoại
+        { wch: 10 }, // Brand
+        { wch: 15 }, // Mã sản phẩm
+        { wch: 10 }, // Số lượng
+        { wch: 12 }, // Giá bán
+        { wch: 12 }, // Thành tiền
+        { wch: 12 }, // Doanh thu
+        { wch: 15 }, // Trạng thái xử lý
+        { wch: 15 }, // Trạng thái sync
+      ];
+      ws['!cols'] = colWidths;
+
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, 'Đơn hàng');
+
+      // Convert to buffer
+      this.logger.debug(`[exportOrders] Creating Excel buffer...`);
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      this.logger.debug(`[exportOrders] Excel buffer created, size: ${buffer.length} bytes`);
+
+      return buffer;
+    } catch (error: any) {
+      this.logger.error(`[exportOrders] Error: ${error?.message || error}`);
+      this.logger.error(`[exportOrders] Stack: ${error?.stack || 'No stack trace'}`);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(`Error exporting orders to Excel: ${error?.message || 'Unknown error'}`);
     }
   }
 }
