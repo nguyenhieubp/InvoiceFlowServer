@@ -2275,17 +2275,23 @@ export class SalesService {
       }
 
       // Check response từ Fast API - nếu status === 0 thì coi là lỗi
+      // Nếu result là mảng rỗng [] thì coi là thành công
       const isSuccess = Array.isArray(result)
-        ? result.every((item: any) => item.status !== 0)
+        ? result.length === 0 || result.every((item: any) => item.status !== 0)
         : (result?.status !== 0 && result?.status !== undefined);
 
       // Lấy thông tin từ response
-      const responseStatus = Array.isArray(result) && result.length > 0
-        ? result[0].status
-        : result?.status ?? 0;
-      const responseMessage = Array.isArray(result) && result.length > 0
-        ? result[0].message || result[0].error || 'Tạo hóa đơn thất bại'
-        : result?.message || result?.error || 'Tạo hóa đơn thất bại';
+      // Nếu result là mảng rỗng [] thì coi là thành công (status = 1)
+      const responseStatus = Array.isArray(result)
+        ? result.length === 0 
+          ? 1  // Mảng rỗng = thành công
+          : (result[0].status ?? 0)
+        : (result?.status ?? 0);
+      const responseMessage = Array.isArray(result)
+        ? result.length === 0
+          ? 'Tạo hóa đơn thành công'  // Mảng rỗng = thành công
+          : (result[0].message || result[0].error || 'Tạo hóa đơn thất bại')
+        : (result?.message || result?.error || 'Tạo hóa đơn thất bại');
       const responseGuid = Array.isArray(result) && result.length > 0
         ? (Array.isArray(result[0].guid) ? result[0].guid[0] : result[0].guid)
         : result?.guid;
