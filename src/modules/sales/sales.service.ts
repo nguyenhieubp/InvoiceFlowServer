@@ -2298,27 +2298,54 @@ export class SalesService {
         };
       }
 
-      // Check response từ Fast API - nếu status === 0 thì coi là lỗi
-      // Nếu result là mảng rỗng [] thì coi là thành công
-      const isSuccess = Array.isArray(result)
-        ? result.length === 0 || result.every((item: any) => item.status !== 0)
-        : (result?.status !== 0 && result?.status !== undefined);
+      // FIX: Check response từ Fast API
+      // Response thành công: [{ status: 1, message: "OK", guid: [...] }]
+      // Response lỗi: [] hoặc [{ status: 0, message: "..." }]
+      let isSuccess = false;
+      let responseStatus = 0;
+      let responseMessage = 'Tạo hóa đơn thất bại';
+      let responseGuid: string | null = null;
 
-      // Lấy thông tin từ response
-      // Nếu result là mảng rỗng [] thì coi là thành công (status = 1)
-      const responseStatus = Array.isArray(result)
-        ? result.length === 0 
-          ? 1  // Mảng rỗng = thành công
-          : (result[0].status ?? 0)
-        : (result?.status ?? 0);
-      const responseMessage = Array.isArray(result)
-        ? result.length === 0
-          ? 'Tạo hóa đơn thành công'  // Mảng rỗng = thành công
-          : (result[0].message || result[0].error || 'Tạo hóa đơn thất bại')
-        : (result?.message || result?.error || 'Tạo hóa đơn thất bại');
-      const responseGuid = Array.isArray(result) && result.length > 0
-        ? (Array.isArray(result[0].guid) ? result[0].guid[0] : result[0].guid)
-        : result?.guid;
+      if (Array.isArray(result)) {
+        if (result.length === 0) {
+          // Mảng rỗng = thất bại
+          isSuccess = false;
+          responseStatus = 0;
+          responseMessage = 'Fast API trả về mảng rỗng - tạo hóa đơn thất bại';
+        } else {
+          // Kiểm tra phần tử đầu tiên
+          const firstItem = result[0];
+          if (firstItem.status === 1) {
+            // status === 1 = thành công
+            isSuccess = true;
+            responseStatus = 1;
+            responseMessage = firstItem.message || 'Tạo hóa đơn thành công';
+            responseGuid = Array.isArray(firstItem.guid) ? firstItem.guid[0] : firstItem.guid || null;
+          } else {
+            // status === 0 hoặc khác = lỗi
+            isSuccess = false;
+            responseStatus = firstItem.status ?? 0;
+            responseMessage = firstItem.message || firstItem.error || 'Tạo hóa đơn thất bại';
+          }
+        }
+      } else if (result && typeof result === 'object') {
+        // Nếu result không phải mảng
+        if (result.status === 1) {
+          isSuccess = true;
+          responseStatus = 1;
+          responseMessage = result.message || 'Tạo hóa đơn thành công';
+          responseGuid = result.guid || null;
+        } else {
+          isSuccess = false;
+          responseStatus = result.status ?? 0;
+          responseMessage = result.message || result.error || 'Tạo hóa đơn thất bại';
+        }
+      } else {
+        // Fallback: không có result hoặc result không hợp lệ
+        isSuccess = false;
+        responseStatus = 0;
+        responseMessage = 'Fast API không trả về response hợp lệ';
+      }
 
       // Lưu vào bảng kê hóa đơn (cả thành công và thất bại)
       await this.saveFastApiInvoice({
