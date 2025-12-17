@@ -2790,7 +2790,7 @@ export class SalesService {
         }
 
         // Xác định hàng tặng: giaBan = 0 và tienHang = 0
-        // Với F3: Nếu có promCode → là "mua hàng giảm giá" (giảm 100%), không phải "tặng hàng"
+        // Với F3 (FBV): Nếu có promCode → là "mua hàng giảm giá" (giảm 100%), không phải "tặng hàng"
         const salePromCode = sale.promCode && sale.promCode.trim() !== '';
         let isTangHang = giaBan === 0 && tienHang === 0;
 
@@ -2869,10 +2869,14 @@ export class SalesService {
           is_reward_line: sale.isRewardLine ? 1 : 0,
           // is_bundle_reward_line: is_bundle_reward_line (Int)
           is_bundle_reward_line: sale.isBundleRewardLine ? 1 : 0,
-          // km_yn: Khuyến mãi (Int) - = 1 CHỈ KHI là hàng tặng (giaBan = 0 && tienHang = 0)
-          // KHÔNG set = 1 khi chỉ có promCode (promCode là mã CTKM mua hàng giảm giá, không phải hàng tặng)
-          // Nếu có mã số thẻ (maThe) hoặc ma_ctkm_th = "TT DAU TU" thì km_yn = 0
-          km_yn: (hasMaThe || isTTDauTu) ? 0 : (isTangHang ? 1 : 0),
+          // km_yn: Khuyến mãi (Int)
+          // - = 1 CHỈ KHI là hàng tặng (giaBan = 0 && tienHang = 0)
+          // - KHÔNG set = 1 khi chỉ có promCode (promCode là mã CTKM mua hàng giảm giá, không phải hàng tặng)
+          // - Nếu có mã số thẻ (maThe) hoặc ma_ctkm_th = "TT DAU TU" thì km_yn = 0
+          // - Với FBV (brandLower === 'f3'): luôn set km_yn = 0 theo yêu cầu Fast
+          km_yn: brandLower === 'f3'
+            ? 0
+            : ((hasMaThe || isTTDauTu) ? 0 : (isTangHang ? 1 : 0)),
           // dong_thuoc_goi: dong_thuoc_goi (String, max 32 ký tự)
           dong_thuoc_goi: limitString(toString(sale.dongThuocGoi, ''), 32),
           // trang_thai: trang_thai (String, max 32 ký tự)
