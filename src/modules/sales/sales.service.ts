@@ -2250,87 +2250,6 @@ export class SalesService {
       // Build invoice data
       const invoiceData = await this.buildFastApiInvoiceData(orderData);
 
-      // FIX: Validate mã CTKM với Loyalty API trước khi gửi lên Fast API
-      // Helper function: cắt phần sau dấu "-" để lấy mã CTKM để check (ví dụ: "PRMN.020228-R510SOCOM" → "PRMN.020228")
-      const getPromotionCodeToCheck = (promCode: string | null | undefined): string | null => {
-        if (!promCode) return null;
-        const trimmed = promCode.trim();
-        if (trimmed === '') return null;
-        // Cắt phần sau dấu "-" để lấy mã CTKM
-        const parts = trimmed.split('-');
-        return parts[0] || trimmed;
-      };
-
-      const validationErrors: string[] = [];
-      const promotionCodes = new Set<string>();
-
-      // Collect tất cả mã CTKM từ detail (ma_ck01, ma_ck02, ..., ma_ck22, ma_ctkm_th)
-      if (invoiceData.detail && Array.isArray(invoiceData.detail)) {
-        for (const item of invoiceData.detail) {
-          // Collect ma_ctkm_th (mã CTKM tặng hàng)
-          if (item.ma_ctkm_th && item.ma_ctkm_th.trim() !== '' && item.ma_ctkm_th !== 'TT DAU TU') {
-            const codeToCheck = getPromotionCodeToCheck(item.ma_ctkm_th);
-            if (codeToCheck) {
-              promotionCodes.add(codeToCheck);
-            }
-          }
-          
-          // Collect các mã CTKM mua hàng giảm giá (ma_ck01 đến ma_ck22)
-          for (let i = 1; i <= 22; i++) {
-            const maCk = item[`ma_ck${i.toString().padStart(2, '0')}`];
-            if (maCk && maCk.trim() !== '') {
-              const codeToCheck = getPromotionCodeToCheck(maCk);
-              if (codeToCheck) {
-                promotionCodes.add(codeToCheck);
-              }
-            }
-          }
-        }
-      }
-
-      // Validate từng mã CTKM với Loyalty API (chỉ check phần trước dấu "-")
-      for (const promCode of promotionCodes) {
-        try {
-          const promotion = await this.categoriesService.getPromotionFromLoyaltyAPI(promCode);
-          if (!promotion || !promotion.code) {
-            validationErrors.push(`Mã khuyến mãi "${promCode}" không tồn tại trên Loyalty API`);
-          }
-        } catch (error: any) {
-          // Nếu API trả về 404 hoặc không tìm thấy, coi như mã không tồn tại
-          if (error?.response?.status === 404 || error?.message?.includes('404')) {
-            validationErrors.push(`Mã khuyến mãi "${promCode}" không tồn tại trên Loyalty API`);
-          } else {
-            // Lỗi khác (network, timeout, etc.) - log nhưng không block
-            this.logger.warn(`Lỗi khi kiểm tra mã khuyến mãi "${promCode}": ${error?.message || error}`);
-          }
-        }
-      }
-
-      // Nếu có lỗi validation, throw error và không gửi lên Fast API
-      if (validationErrors.length > 0) {
-        const errorMessage = `Mã khuyến mãi không hợp lệ:\n${validationErrors.join('\n')}`;
-        this.logger.error(`[createInvoiceViaFastApi] ${errorMessage}`);
-        
-        // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
-        await this.saveFastApiInvoice({
-          docCode,
-          maDvcs: invoiceData.ma_dvcs,
-          maKh: invoiceData.ma_kh,
-          tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
-          ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
-          status: 0,
-          message: errorMessage,
-          guid: null,
-          fastApiResponse: JSON.stringify({ errors: validationErrors }),
-        });
-
-        return {
-          success: false,
-          message: errorMessage,
-          result: { errors: validationErrors },
-        };
-      }
-
       // Gọi API tạo đơn hàng
       let result: any;
       try {
@@ -2720,9 +2639,10 @@ export class SalesService {
         };
 
         // Mỗi sale item xử lý riêng, không dùng giá trị mặc định chung
-        // Lấy dvt từ chính sale item hoặc từ product của nó (đã được fetch từ Loyalty API với unit)
+        // Lấy dvt từ product (đã được enrich từ Loyalty API) trước, sau đó mới lấy từ sale
+        // Frontend: sale?.product?.dvt || sale?.dvt
         // Nếu không có thì dùng 'Cái' làm mặc định (Fast API yêu cầu field này phải có giá trị)
-        const dvt = toString(sale.dvt || sale.product?.dvt || sale.product?.unit, 'Cái');
+        const dvt = toString(sale.product?.dvt || sale.product?.unit || sale.dvt, 'Cái');
 
         // Tính mã kho từ ordertype + ma_bp (bộ phận)
         // Nếu không tính được thì fallback về sale.maKho hoặc branchCode

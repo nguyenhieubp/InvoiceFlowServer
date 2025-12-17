@@ -62,11 +62,17 @@ export class FastApiInvoiceService {
     }
 
     if (startDate) {
-      query.andWhere('invoice.ngayCt >= :startDate', { startDate });
+      // Set thời gian về đầu ngày (00:00:00)
+      const startDateNormalized = new Date(startDate);
+      startDateNormalized.setHours(0, 0, 0, 0);
+      query.andWhere('invoice.ngayCt >= :startDate', { startDate: startDateNormalized });
     }
 
     if (endDate) {
-      query.andWhere('invoice.ngayCt <= :endDate', { endDate });
+      // Set thời gian về cuối ngày (23:59:59.999) để lấy tất cả invoice trong ngày đó
+      const endDateNormalized = new Date(endDate);
+      endDateNormalized.setHours(23, 59, 59, 999);
+      query.andWhere('invoice.ngayCt <= :endDate', { endDate: endDateNormalized });
     }
 
     // Order by created date descending
@@ -126,11 +132,17 @@ export class FastApiInvoiceService {
     const query = this.fastApiInvoiceRepository.createQueryBuilder('invoice');
 
     if (options?.startDate) {
-      query.andWhere('invoice.ngayCt >= :startDate', { startDate: options.startDate });
+      // Set thời gian về đầu ngày (00:00:00)
+      const startDateNormalized = new Date(options.startDate);
+      startDateNormalized.setHours(0, 0, 0, 0);
+      query.andWhere('invoice.ngayCt >= :startDate', { startDate: startDateNormalized });
     }
 
     if (options?.endDate) {
-      query.andWhere('invoice.ngayCt <= :endDate', { endDate: options.endDate });
+      // Set thời gian về cuối ngày (23:59:59.999) để lấy tất cả invoice trong ngày đó
+      const endDateNormalized = new Date(options.endDate);
+      endDateNormalized.setHours(23, 59, 59, 999);
+      query.andWhere('invoice.ngayCt <= :endDate', { endDate: endDateNormalized });
     }
 
     if (options?.maDvcs) {
