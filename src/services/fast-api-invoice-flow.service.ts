@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { FastApiService } from './fast-api.service';
+import { CategoriesService } from '../modules/categories/categories.service';
 
 /**
  * Service quản lý tạo invoice trong Fast API
@@ -9,7 +10,10 @@ import { FastApiService } from './fast-api.service';
 export class FastApiInvoiceFlowService {
   private readonly logger = new Logger(FastApiInvoiceFlowService.name);
 
-  constructor(private readonly fastApiService: FastApiService) {}
+  constructor(
+    private readonly fastApiService: FastApiService,
+    private readonly categoriesService: CategoriesService,
+  ) {}
 
   /**
    * Tạo/cập nhật khách hàng trong Fast API
@@ -44,6 +48,69 @@ export class FastApiInvoiceFlowService {
   async createSalesInvoice(invoiceData: any): Promise<any> {
     this.logger.log(`[Flow] Creating sales invoice ${invoiceData.so_ct}...`);
     try {
+      // FIX: Validate mã CTKM với Loyalty API trước khi gửi lên Fast API
+      // Helper function: cắt phần sau dấu "-" để lấy mã CTKM để check (ví dụ: "PRMN.020228-R510SOCOM" → "PRMN.020228")
+      const getPromotionCodeToCheck = (promCode: string | null | undefined): string | null => {
+        if (!promCode) return null;
+        const trimmed = promCode.trim();
+        if (trimmed === '') return null;
+        // Cắt phần sau dấu "-" để lấy mã CTKM
+        const parts = trimmed.split('-');
+        return parts[0] || trimmed;
+      };
+
+      const validationErrors: string[] = [];
+      const promotionCodes = new Set<string>();
+
+      // Collect tất cả mã CTKM từ detail (ma_ck01, ma_ck02, ..., ma_ck22, ma_ctkm_th)
+      if (invoiceData.detail && Array.isArray(invoiceData.detail)) {
+        for (const item of invoiceData.detail) {
+          // Collect ma_ctkm_th (mã CTKM tặng hàng)
+          if (item.ma_ctkm_th && item.ma_ctkm_th.trim() !== '' && item.ma_ctkm_th !== 'TT DAU TU') {
+            const codeToCheck = getPromotionCodeToCheck(item.ma_ctkm_th);
+            if (codeToCheck) {
+              promotionCodes.add(codeToCheck);
+            }
+          }
+          
+          // Collect các mã CTKM mua hàng giảm giá (ma_ck01 đến ma_ck22)
+          for (let i = 1; i <= 22; i++) {
+            const maCk = item[`ma_ck${i.toString().padStart(2, '0')}`];
+            if (maCk && maCk.trim() !== '') {
+              const codeToCheck = getPromotionCodeToCheck(maCk);
+              if (codeToCheck) {
+                promotionCodes.add(codeToCheck);
+              }
+            }
+          }
+        }
+      }
+
+      // Validate từng mã CTKM với Loyalty API (chỉ check phần trước dấu "-")
+      for (const promCode of promotionCodes) {
+        try {
+          const promotion = await this.categoriesService.getPromotionFromLoyaltyAPI(promCode);
+          if (!promotion || !promotion.code) {
+            validationErrors.push(`Mã khuyến mãi "${promCode}" không tồn tại trên Loyalty API`);
+          }
+        } catch (error: any) {
+          // Nếu API trả về 404 hoặc không tìm thấy, coi như mã không tồn tại
+          if (error?.response?.status === 404 || error?.message?.includes('404')) {
+            validationErrors.push(`Mã khuyến mãi "${promCode}" không tồn tại trên Loyalty API`);
+          } else {
+            // Lỗi khác (network, timeout, etc.) - log nhưng không block
+            this.logger.warn(`[Flow] Lỗi khi kiểm tra mã khuyến mãi "${promCode}": ${error?.message || error}`);
+          }
+        }
+      }
+
+      // Nếu có lỗi validation, throw error và không gửi lên Fast API
+      if (validationErrors.length > 0) {
+        const errorMessage = `Mã khuyến mãi không hợp lệ:\n${validationErrors.join('\n')}`;
+        this.logger.error(`[Flow] ${errorMessage}`);
+        throw new BadRequestException(errorMessage);
+      }
+
       // Helper function để loại bỏ các field null, undefined, hoặc empty string
       // Nhưng giữ lại ma_lo và so_serial (có thể là null nhưng vẫn cần gửi lên API)
       const removeEmptyFields = (obj: any): any => {

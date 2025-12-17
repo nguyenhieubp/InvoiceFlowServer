@@ -17,12 +17,14 @@ import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
 import { CheckFaceId } from '../../entities/check-face-id.entity';
 import { InvoicesModule } from '../invoices/invoices.module';
+import { CategoriesModule } from '../categories/categories.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Sale, Customer, ProductItem, Invoice, InvoiceItem, FastApiInvoice, DailyCashio, CheckFaceId]),
     HttpModule,
     forwardRef(() => InvoicesModule),
+    CategoriesModule,
   ],
   controllers: [SalesController],
   providers: [SalesService, InvoicePrintService, ZappyApiService, FastApiService, FastApiInvoiceFlowService],
