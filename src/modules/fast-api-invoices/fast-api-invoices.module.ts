@@ -1,11 +1,15 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FastApiInvoicesController } from './fast-api-invoices.controller';
 import { FastApiInvoiceService } from '../../services/fast-api-invoice.service';
 import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
+import { SalesModule } from '../sales/sales.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([FastApiInvoice])],
+  imports: [
+    TypeOrmModule.forFeature([FastApiInvoice]),
+    forwardRef(() => SalesModule),
+  ],
   controllers: [FastApiInvoicesController],
   providers: [FastApiInvoiceService],
   exports: [FastApiInvoiceService],

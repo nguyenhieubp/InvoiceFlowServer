@@ -160,5 +160,38 @@ export class FastApiInvoiceService {
       successRate: total > 0 ? ((success / total) * 100).toFixed(2) : '0.00',
     };
   }
+
+  /**
+   * Lấy danh sách invoice thất bại theo khoảng thời gian (để đồng bộ)
+   */
+  async getFailedInvoicesByDateRange(options: {
+    startDate: Date;
+    endDate: Date;
+    maDvcs?: string;
+  }): Promise<FastApiInvoice[]> {
+    const query = this.fastApiInvoiceRepository.createQueryBuilder('invoice');
+
+    // Chỉ lấy invoice thất bại
+    query.andWhere('invoice.status = :status', { status: 0 });
+
+    // Filter theo khoảng thời gian (chuẩn xác)
+    const startDateNormalized = new Date(options.startDate);
+    startDateNormalized.setHours(0, 0, 0, 0);
+    query.andWhere('invoice.ngayCt >= :startDate', { startDate: startDateNormalized });
+
+    const endDateNormalized = new Date(options.endDate);
+    endDateNormalized.setHours(23, 59, 59, 999);
+    query.andWhere('invoice.ngayCt <= :endDate', { endDate: endDateNormalized });
+
+    // Filter theo maDvcs nếu có
+    if (options.maDvcs) {
+      query.andWhere('invoice.maDvcs = :maDvcs', { maDvcs: options.maDvcs });
+    }
+
+    // Order by ngayCt để đồng bộ theo thứ tự thời gian
+    query.orderBy('invoice.ngayCt', 'ASC');
+
+    return await query.getMany();
+  }
 }
 

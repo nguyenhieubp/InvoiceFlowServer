@@ -1193,6 +1193,218 @@ export class SalesService {
     };
   }
 
+  async getStatusAsys(statusAsys?: string, page?: number, limit?: number) {
+    // Parse statusAsys: 'true' -> true, 'false' -> false, undefined/empty -> undefined
+    let statusAsysValue: boolean | undefined;
+    if (statusAsys === 'true') {
+      statusAsysValue = true;
+    } else if (statusAsys === 'false') {
+      statusAsysValue = false;
+    } else {
+      statusAsysValue = undefined;
+    }
+
+    // Build where condition
+    const whereCondition: any = {};
+    if (statusAsysValue !== undefined) {
+      whereCondition.statusAsys = statusAsysValue;
+    }
+
+    const pageNumber = page || 1;
+    const limitNumber = limit || 10;
+    const skip = (pageNumber - 1) * limitNumber;
+
+    const [sales, total] = await this.saleRepository.findAndCount({
+      where: whereCondition,
+      skip,
+      take: limitNumber,
+      order: {
+        createdAt: 'DESC',
+      },
+    });
+
+    return {
+      data: sales,
+      total,
+      page: pageNumber,
+      limit: limitNumber,
+      totalPages: Math.ceil(total / limitNumber),
+    };
+  }
+
+  /**
+   * Đồng bộ lại đơn lỗi - check lại với Loyalty API
+   * Nếu tìm thấy trong Loyalty, cập nhật itemCode (mã vật tư) và statusAsys = true
+   */
+  async syncErrorOrders(): Promise<{
+    total: number;
+    success: number;
+    failed: number;
+    updated: Array<{ id: string; docCode: string; itemCode: string; oldItemCode: string; newItemCode: string }>;
+  }> {
+    this.logger.log('[syncErrorOrders] Bắt đầu đồng bộ lại đơn lỗi...');
+
+    // Lấy tất cả sales có statusAsys = false
+    const errorSales = await this.saleRepository.find({
+      where: { statusAsys: false },
+      order: { createdAt: 'DESC' },
+    });
+
+    this.logger.log(`[syncErrorOrders] Tìm thấy ${errorSales.length} đơn lỗi cần check lại`);
+
+    let successCount = 0;
+    let failCount = 0;
+    const updated: Array<{ id: string; docCode: string; itemCode: string; oldItemCode: string; newItemCode: string }> = [];
+
+    // Check lại từng sale với Loyalty API
+    for (const sale of errorSales) {
+      try {
+        const itemCode = sale.itemCode || '';
+        if (!itemCode) {
+          failCount++;
+          continue;
+        }
+
+        // Gọi Loyalty API để check lại
+        const product = await this.categoriesService.getProductFromLoyaltyAPI(itemCode);
+
+        if (product && product.materialCode) {
+          // Tìm thấy trong Loyalty - cập nhật
+          const newItemCode = product.materialCode; // Mã vật tư từ Loyalty
+          const oldItemCode = itemCode;
+
+          // Cập nhật sale
+          await this.saleRepository.update(sale.id, {
+            itemCode: newItemCode,
+            statusAsys: true, // Đánh dấu đã có trong Loyalty
+          });
+
+          successCount++;
+          updated.push({
+            id: sale.id,
+            docCode: sale.docCode || '',
+            itemCode: sale.itemCode || '',
+            oldItemCode,
+            newItemCode,
+          });
+
+          this.logger.log(`[syncErrorOrders] ✅ Cập nhật sale ${sale.id} (${sale.docCode}): ${oldItemCode} → ${newItemCode}`);
+        } else {
+          // Vẫn không tìm thấy trong Loyalty
+          failCount++;
+          this.logger.warn(`[syncErrorOrders] ❌ Sale ${sale.id} (${sale.docCode}): itemCode ${itemCode} vẫn không tồn tại trong Loyalty`);
+        }
+      } catch (error: any) {
+        failCount++;
+        this.logger.error(`[syncErrorOrders] ❌ Lỗi khi check sale ${sale.id}: ${error?.message || error}`);
+      }
+    }
+
+    this.logger.log(`[syncErrorOrders] Hoàn thành: ${successCount} thành công, ${failCount} thất bại`);
+
+    return {
+      total: errorSales.length,
+      success: successCount,
+      failed: failCount,
+      updated,
+    };
+  }
+
+  /**
+   * Đồng bộ lại một đơn hàng cụ thể - check lại với Loyalty API
+   * Nếu tìm thấy trong Loyalty, cập nhật itemCode (mã vật tư) và statusAsys = true
+   */
+  async syncErrorOrderByDocCode(docCode: string): Promise<{
+    success: boolean;
+    message: string;
+    updated: number;
+    failed: number;
+    details: Array<{ id: string; itemCode: string; oldItemCode: string; newItemCode: string }>;
+  }> {
+    this.logger.log(`[syncErrorOrderByDocCode] Bắt đầu đồng bộ lại đơn ${docCode}...`);
+
+    // Lấy tất cả sales của đơn hàng có statusAsys = false
+    const errorSales = await this.saleRepository.find({
+      where: { 
+        docCode,
+        statusAsys: false,
+      },
+    });
+
+    if (errorSales.length === 0) {
+      return {
+        success: true,
+        message: `Đơn hàng ${docCode} không có dòng nào cần đồng bộ`,
+        updated: 0,
+        failed: 0,
+        details: [],
+      };
+    }
+
+    this.logger.log(`[syncErrorOrderByDocCode] Tìm thấy ${errorSales.length} dòng lỗi trong đơn ${docCode}`);
+
+    let successCount = 0;
+    let failCount = 0;
+    const details: Array<{ id: string; itemCode: string; oldItemCode: string; newItemCode: string }> = [];
+
+    // Check lại từng sale với Loyalty API
+    for (const sale of errorSales) {
+      try {
+        const itemCode = sale.itemCode || '';
+        if (!itemCode) {
+          failCount++;
+          continue;
+        }
+
+        // Gọi Loyalty API để check lại
+        const product = await this.categoriesService.getProductFromLoyaltyAPI(itemCode);
+
+        if (product && product.materialCode) {
+          // Tìm thấy trong Loyalty - cập nhật
+          const newItemCode = product.materialCode; // Mã vật tư từ Loyalty
+          const oldItemCode = itemCode;
+
+          // Cập nhật sale
+          await this.saleRepository.update(sale.id, {
+            itemCode: newItemCode,
+            statusAsys: true, // Đánh dấu đã có trong Loyalty
+          });
+
+          successCount++;
+          details.push({
+            id: sale.id,
+            itemCode: sale.itemCode || '',
+            oldItemCode,
+            newItemCode,
+          });
+
+          this.logger.log(`[syncErrorOrderByDocCode] ✅ Cập nhật sale ${sale.id} (${docCode}): ${oldItemCode} → ${newItemCode}`);
+        } else {
+          // Vẫn không tìm thấy trong Loyalty
+          failCount++;
+          this.logger.warn(`[syncErrorOrderByDocCode] ❌ Sale ${sale.id} (${docCode}): itemCode ${itemCode} vẫn không tồn tại trong Loyalty`);
+        }
+      } catch (error: any) {
+        failCount++;
+        this.logger.error(`[syncErrorOrderByDocCode] ❌ Lỗi khi check sale ${sale.id}: ${error?.message || error}`);
+      }
+    }
+
+    const message = successCount > 0
+      ? `Đồng bộ thành công: ${successCount} dòng đã được cập nhật${failCount > 0 ? `, ${failCount} dòng vẫn lỗi` : ''}`
+      : `Không có dòng nào được cập nhật. ${failCount} dòng vẫn không tìm thấy trong Loyalty API`;
+
+    this.logger.log(`[syncErrorOrderByDocCode] Hoàn thành đơn ${docCode}: ${successCount} thành công, ${failCount} thất bại`);
+
+    return {
+      success: successCount > 0,
+      message,
+      updated: successCount,
+      failed: failCount,
+      details,
+    };
+  }
+
   async findOne(id: string) {
     const sale = await this.saleRepository.findOne({
       where: { id },
@@ -2405,6 +2617,14 @@ export class SalesService {
       // Đánh dấu đơn hàng là đã xử lý
       await this.markOrderAsProcessed(docCode);
 
+      // Log màu vàng khi tạo thành công: "TẠI ĐƠN (MÃ ĐƠN)-Ngày(Ngày đocate)"
+      const ngayCtDate = invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date();
+      const ngayCtFormatted = ngayCtDate.toLocaleDateString('vi-VN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      this.logger.log(`\x1b[33mTẠI ĐƠN (${docCode})-Ngày(${ngayCtFormatted})\x1b[0m`);
 
       return {
         success: true,
@@ -2648,7 +2868,12 @@ export class SalesService {
         // Nếu không tính được thì fallback về sale.maKho hoặc branchCode
         const maBpForMaKho = sale.department?.ma_bp || sale.branchCode || orderData.branchCode || '';
         const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBpForMaKho);
-        const maKho = toString(calculatedMaKho || sale.maKho || sale.branchCode, '');
+        let maKho = toString(calculatedMaKho || sale.maKho || sale.branchCode, '');
+        
+        // FIX: Nếu ma_bp = "MSO1" và có mã kho, fix cứng mã kho = "BMHT2"
+        if (maBpForMaKho === 'MSO1' && maKho) {
+          maKho = 'BMHT2';
+        }
 
         // Debug: Log maLo value từ sale
         if (index === 0) {

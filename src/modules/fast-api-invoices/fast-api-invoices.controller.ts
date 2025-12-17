@@ -5,12 +5,19 @@ import {
   Param,
   ParseIntPipe,
   DefaultValuePipe,
+  Post,
+  Body,
+  BadRequestException,
 } from '@nestjs/common';
 import { FastApiInvoiceService } from '../../services/fast-api-invoice.service';
+import { SalesService } from '../sales/sales.service';
 
 @Controller('fast-api-invoices')
 export class FastApiInvoicesController {
-  constructor(private readonly fastApiInvoiceService: FastApiInvoiceService) {}
+  constructor(
+    private readonly fastApiInvoiceService: FastApiInvoiceService,
+    private readonly salesService: SalesService,
+  ) {}
 
   @Get('test')
   async test() {
@@ -96,6 +103,107 @@ export class FastApiInvoicesController {
     }
 
     return this.fastApiInvoiceService.findAll(options);
+  }
+
+  @Post('sync-by-date-range')
+  async syncByDateRange(
+    @Body('startDate') startDate: string,
+    @Body('endDate') endDate: string,
+    @Body('maDvcs') maDvcs?: string,
+  ) {
+    if (!startDate || !endDate) {
+      throw new BadRequestException('startDate và endDate là bắt buộc (format: YYYY-MM-DD)');
+    }
+
+    const startDateObj = new Date(startDate);
+    const endDateObj = new Date(endDate);
+
+    if (isNaN(startDateObj.getTime()) || isNaN(endDateObj.getTime())) {
+      throw new BadRequestException('startDate và endDate phải là định dạng ngày hợp lệ');
+    }
+
+    if (startDateObj > endDateObj) {
+      throw new BadRequestException('startDate phải nhỏ hơn hoặc bằng endDate');
+    }
+
+    // Lấy danh sách invoice thất bại trong khoảng thời gian
+    const failedInvoices = await this.fastApiInvoiceService.getFailedInvoicesByDateRange({
+      startDate: startDateObj,
+      endDate: endDateObj,
+      maDvcs,
+    });
+
+    if (failedInvoices.length === 0) {
+      return {
+        success: true,
+        message: `Không có invoice thất bại nào trong khoảng thời gian ${startDate} đến ${endDate}${maDvcs ? ` (Mã ĐVCS: ${maDvcs})` : ''}`,
+        total: 0,
+        successCount: 0,
+        failCount: 0,
+        alreadyExistsCount: 0,
+        results: [],
+      };
+    }
+
+    // Đồng bộ từng invoice
+    let successCount = 0;
+    let failCount = 0;
+    let alreadyExistsCount = 0;
+    const results: Array<{
+      docCode: string;
+      success: boolean;
+      message?: string;
+      alreadyExists?: boolean;
+      error?: string;
+    }> = [];
+
+    for (const invoice of failedInvoices) {
+      try {
+        const result = await this.salesService.createInvoiceViaFastApi(invoice.docCode, true);
+        
+        if (result.alreadyExists) {
+          alreadyExistsCount++;
+          results.push({
+            docCode: invoice.docCode,
+            success: true,
+            message: result.message,
+            alreadyExists: true,
+          });
+        } else if (result.success) {
+          successCount++;
+          results.push({
+            docCode: invoice.docCode,
+            success: true,
+            message: result.message,
+          });
+        } else {
+          failCount++;
+          results.push({
+            docCode: invoice.docCode,
+            success: false,
+            message: result.message,
+            error: result.message,
+          });
+        }
+      } catch (error: any) {
+        failCount++;
+        results.push({
+          docCode: invoice.docCode,
+          success: false,
+          error: error?.message || 'Lỗi không xác định',
+        });
+      }
+    }
+
+    return {
+      success: true,
+      message: `Đồng bộ hoàn tất: ${successCount} thành công, ${failCount} thất bại, ${alreadyExistsCount} đã tồn tại`,
+      total: failedInvoices.length,
+      successCount,
+      failCount,
+      alreadyExistsCount,
+      results,
+    };
   }
 }
 

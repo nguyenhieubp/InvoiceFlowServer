@@ -92,6 +92,22 @@ export class SalesController {
     });
   }
 
+  @Get('status-asys')
+  async getStatusAsys(
+    @Query('statusAsys') statusAsys?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNumber = page ? parseInt(page) : undefined;
+    const limitNumber = limit ? parseInt(limit) : undefined;
+    
+    return this.salesService.getStatusAsys(
+      statusAsys,
+      pageNumber,
+      limitNumber,
+    );
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.salesService.findOne(id);
@@ -199,6 +215,16 @@ export class SalesController {
     @Query('date') date?: string,
   ) {
     return this.salesService.getOrdersWithCheckFaceId(partnerCode, date);
+  }
+
+  @Post('sync-error-orders')
+  async syncErrorOrders() {
+    return this.salesService.syncErrorOrders();
+  }
+
+  @Post('sync-error-order/:docCode')
+  async syncErrorOrderByDocCode(@Param('docCode') docCode: string) {
+    return this.salesService.syncErrorOrderByDocCode(docCode);
   }
 }
 
