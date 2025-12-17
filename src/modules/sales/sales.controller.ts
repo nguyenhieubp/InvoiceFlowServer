@@ -97,15 +97,29 @@ export class SalesController {
     @Query('statusAsys') statusAsys?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('brand') brand?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('search') search?: string,
   ) {
-    const pageNumber = page ? parseInt(page) : undefined;
-    const limitNumber = limit ? parseInt(limit) : undefined;
-    
-    return this.salesService.getStatusAsys(
-      statusAsys,
-      pageNumber,
-      limitNumber,
-    );
+    try {
+      const pageNumber = page ? parseInt(page) : undefined;
+      const limitNumber = limit ? parseInt(limit) : undefined;
+      
+      return await this.salesService.getStatusAsys(
+        statusAsys,
+        pageNumber,
+        limitNumber,
+        brand,
+        dateFrom,
+        dateTo,
+        search,
+      );
+    } catch (error: any) {
+      throw new BadRequestException(
+        `Lỗi khi lấy danh sách đơn hàng: ${error?.message || error}`
+      );
+    }
   }
 
   @Get(':id')

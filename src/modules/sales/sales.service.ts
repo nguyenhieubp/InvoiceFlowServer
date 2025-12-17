@@ -1193,43 +1193,128 @@ export class SalesService {
     };
   }
 
-  async getStatusAsys(statusAsys?: string, page?: number, limit?: number) {
-    // Parse statusAsys: 'true' -> true, 'false' -> false, undefined/empty -> undefined
-    let statusAsysValue: boolean | undefined;
-    if (statusAsys === 'true') {
-      statusAsysValue = true;
-    } else if (statusAsys === 'false') {
-      statusAsysValue = false;
-    } else {
-      statusAsysValue = undefined;
+  async getStatusAsys(
+    statusAsys?: string,
+    page?: number,
+    limit?: number,
+    brand?: string,
+    dateFrom?: string,
+    dateTo?: string,
+    search?: string,
+  ) {
+    try {
+      // Parse statusAsys: 'true' -> true, 'false' -> false, undefined/empty -> undefined
+      let statusAsysValue: boolean | undefined;
+      if (statusAsys === 'true') {
+        statusAsysValue = true;
+      } else if (statusAsys === 'false') {
+        statusAsysValue = false;
+      } else {
+        statusAsysValue = undefined;
+      }
+
+      const pageNumber = page || 1;
+      const limitNumber = limit || 10;
+      const skip = (pageNumber - 1) * limitNumber;
+
+      // Sử dụng QueryBuilder để hỗ trợ filter phức tạp
+      let query = this.saleRepository.createQueryBuilder('sale');
+
+      // Luôn leftJoinAndSelect customer để load relation (cần cho response)
+      query = query.leftJoinAndSelect('sale.customer', 'customer');
+
+      // Filter statusAsys
+      if (statusAsysValue !== undefined) {
+        query = query.andWhere('sale.statusAsys = :statusAsys', { statusAsys: statusAsysValue });
+      }
+
+      // Filter brand
+      if (brand) {
+        query = query.andWhere('customer.brand = :brand', { brand });
+      }
+
+      // Filter search (docCode, customer name, code, mobile)
+      if (search && search.trim() !== '') {
+        const searchPattern = `%${search.trim().toLowerCase()}%`;
+        query = query.andWhere(
+          '(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, \'\')) LIKE :search OR LOWER(COALESCE(customer.code, \'\')) LIKE :search OR LOWER(COALESCE(customer.mobile, \'\')) LIKE :search)',
+          { search: searchPattern }
+        );
+      }
+
+      // Filter date range - dùng Date object (TypeORM sẽ convert tự động)
+      let startDate: Date | undefined;
+      let endDate: Date | undefined;
+      
+      if (dateFrom) {
+        startDate = new Date(dateFrom);
+        startDate.setHours(0, 0, 0, 0);
+        query = query.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
+      }
+      if (dateTo) {
+        endDate = new Date(dateTo);
+        endDate.setHours(23, 59, 59, 999);
+        query = query.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
+      }
+
+      // Tạo count query riêng (không dùng leftJoinAndSelect để tối ưu)
+      const countQuery = this.saleRepository.createQueryBuilder('sale');
+      
+      // Apply cùng các filters như query chính nhưng chỉ dùng leftJoin (không Select)
+      const needsCustomerJoin = brand || (search && search.trim() !== '');
+      if (needsCustomerJoin) {
+        countQuery.leftJoin('sale.customer', 'customer');
+      }
+      
+      if (statusAsysValue !== undefined) {
+        countQuery.andWhere('sale.statusAsys = :statusAsys', { statusAsys: statusAsysValue });
+      }
+      
+      if (brand) {
+        countQuery.andWhere('customer.brand = :brand', { brand });
+      }
+      
+      if (search && search.trim() !== '') {
+        const searchPattern = `%${search.trim().toLowerCase()}%`;
+        countQuery.andWhere(
+          '(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, \'\')) LIKE :search OR LOWER(COALESCE(customer.code, \'\')) LIKE :search OR LOWER(COALESCE(customer.mobile, \'\')) LIKE :search)',
+          { search: searchPattern }
+        );
+      }
+      
+      if (startDate) {
+        countQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
+      }
+      
+      if (endDate) {
+        countQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
+      }
+
+      // Count total
+      this.logger.debug(`[getStatusAsys] Count query: ${countQuery.getSql()}`);
+      const totalCount = await countQuery.getCount();
+
+      // Apply pagination và order
+      query = query
+        .orderBy('sale.createdAt', 'DESC')
+        .skip(skip)
+        .take(limitNumber);
+
+      this.logger.debug(`[getStatusAsys] Data query: ${query.getSql()}`);
+      const sales = await query.getMany();
+
+      return {
+        data: sales,
+        total: totalCount,
+        page: pageNumber,
+        limit: limitNumber,
+        totalPages: Math.ceil(totalCount / limitNumber),
+      };
+    } catch (error: any) {
+      this.logger.error(`[getStatusAsys] Error: ${error?.message || error}`);
+      this.logger.error(`[getStatusAsys] Stack: ${error?.stack || 'No stack trace'}`);
+      throw error;
     }
-
-    // Build where condition
-    const whereCondition: any = {};
-    if (statusAsysValue !== undefined) {
-      whereCondition.statusAsys = statusAsysValue;
-    }
-
-    const pageNumber = page || 1;
-    const limitNumber = limit || 10;
-    const skip = (pageNumber - 1) * limitNumber;
-
-    const [sales, total] = await this.saleRepository.findAndCount({
-      where: whereCondition,
-      skip,
-      take: limitNumber,
-      order: {
-        createdAt: 'DESC',
-      },
-    });
-
-    return {
-      data: sales,
-      total,
-      page: pageNumber,
-      limit: limitNumber,
-      totalPages: Math.ceil(total / limitNumber),
-    };
   }
 
   /**
@@ -1265,8 +1350,58 @@ export class SalesService {
           continue;
         }
 
-        // Gọi Loyalty API để check lại
-        const product = await this.categoriesService.getProductFromLoyaltyAPI(itemCode);
+        // Check với Loyalty API - thử /products/code/ trước, nếu không có thì thử /products/old-code/
+        let product: any = null;
+        
+        // Thử endpoint /products/code/ trước
+        try {
+          const response = await this.httpService.axiosRef.get(
+            `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+            {
+              headers: { accept: 'application/json' },
+              timeout: 5000,
+            },
+          );
+          // Parse response: endpoint /products/code/ trả về data.item
+          product = response?.data?.data?.item || response?.data?.data || response?.data;
+          if (product) {
+            // Tìm thấy tại /products/code/
+            this.logger.log(`[syncErrorOrders] Tìm thấy sản phẩm ${itemCode} tại /products/code/`);
+          }
+        } catch (error: any) {
+          // Nếu 404, thử fallback
+          if (error?.response?.status === 404) {
+            this.logger.warn(`[syncErrorOrders] Sản phẩm không tìm thấy tại /products/code/: ${itemCode} (404), thử /products/old-code/...`);
+          } else {
+            // Lỗi khác 404 - không coi là not found
+            this.logger.warn(`[syncErrorOrders] Lỗi khi fetch product ${itemCode} từ /products/code/: ${error?.message || error?.response?.status || 'Unknown error'}`);
+          }
+        }
+
+        // Nếu /products/code/ không tìm thấy, thử fallback /products/old-code/
+        if (!product) {
+          try {
+            const fallbackResponse = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/products/old-code/${encodeURIComponent(itemCode)}`,
+              {
+                headers: { accept: 'application/json' },
+                timeout: 5000,
+              },
+            );
+            // Parse response: endpoint /products/old-code/ trả về trực tiếp object (không có wrapper data.item)
+            product = fallbackResponse?.data || null;
+            if (product) {
+              // Tìm thấy tại fallback endpoint
+              this.logger.log(`[syncErrorOrders] Tìm thấy sản phẩm ${itemCode} tại /products/old-code/`);
+            }
+          } catch (fallbackError: any) {
+            if (fallbackError?.response?.status === 404) {
+              this.logger.warn(`[syncErrorOrders] Sản phẩm không tìm thấy tại cả /products/code/ và /products/old-code/: ${itemCode}`);
+            } else {
+              this.logger.warn(`[syncErrorOrders] Lỗi khi fetch product ${itemCode} từ /products/old-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`);
+            }
+          }
+        }
 
         if (product && product.materialCode) {
           // Tìm thấy trong Loyalty - cập nhật
@@ -1356,8 +1491,58 @@ export class SalesService {
           continue;
         }
 
-        // Gọi Loyalty API để check lại
-        const product = await this.categoriesService.getProductFromLoyaltyAPI(itemCode);
+        // Check với Loyalty API - thử /products/code/ trước, nếu không có thì thử /products/old-code/
+        let product: any = null;
+        
+        // Thử endpoint /products/code/ trước
+        try {
+          const response = await this.httpService.axiosRef.get(
+            `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+            {
+              headers: { accept: 'application/json' },
+              timeout: 5000,
+            },
+          );
+          // Parse response: endpoint /products/code/ trả về data.item
+          product = response?.data?.data?.item || response?.data?.data || response?.data;
+          if (product) {
+            // Tìm thấy tại /products/code/
+            this.logger.log(`[syncErrorOrderByDocCode] Tìm thấy sản phẩm ${itemCode} tại /products/code/`);
+          }
+        } catch (error: any) {
+          // Nếu 404, thử fallback
+          if (error?.response?.status === 404) {
+            this.logger.warn(`[syncErrorOrderByDocCode] Sản phẩm không tìm thấy tại /products/code/: ${itemCode} (404), thử /products/old-code/...`);
+          } else {
+            // Lỗi khác 404 - không coi là not found
+            this.logger.warn(`[syncErrorOrderByDocCode] Lỗi khi fetch product ${itemCode} từ /products/code/: ${error?.message || error?.response?.status || 'Unknown error'}`);
+          }
+        }
+
+        // Nếu /products/code/ không tìm thấy, thử fallback /products/old-code/
+        if (!product) {
+          try {
+            const fallbackResponse = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/products/old-code/${encodeURIComponent(itemCode)}`,
+              {
+                headers: { accept: 'application/json' },
+                timeout: 5000,
+              },
+            );
+            // Parse response: endpoint /products/old-code/ trả về trực tiếp object (không có wrapper data.item)
+            product = fallbackResponse?.data || null;
+            if (product) {
+              // Tìm thấy tại fallback endpoint
+              this.logger.log(`[syncErrorOrderByDocCode] Tìm thấy sản phẩm ${itemCode} tại /products/old-code/`);
+            }
+          } catch (fallbackError: any) {
+            if (fallbackError?.response?.status === 404) {
+              this.logger.warn(`[syncErrorOrderByDocCode] Sản phẩm không tìm thấy tại cả /products/code/ và /products/old-code/: ${itemCode}`);
+            } else {
+              this.logger.warn(`[syncErrorOrderByDocCode] Lỗi khi fetch product ${itemCode} từ /products/old-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`);
+            }
+          }
+        }
 
         if (product && product.materialCode) {
           // Tìm thấy trong Loyalty - cập nhật
@@ -2196,7 +2381,6 @@ export class SalesService {
           );
 
           // Fetch products từ Loyalty API để check sản phẩm không tồn tại (404)
-          // CHỈ bỏ qua khi có 404 error ở cả 2 endpoint, không phải khi response thành công nhưng không có data
           const notFoundItemCodes = new Set<string>();
 
           if (orderItemCodes.length > 0) {
@@ -2205,7 +2389,7 @@ export class SalesService {
               orderItemCodes.map(async (trimmedItemCode) => {
                 let isNotFound = false;
 
-                // Thử endpoint /products/code/ trước
+                // Check endpoint /products/code/ trước
                 try {
                   const response = await this.httpService.axiosRef.get(
                     `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(trimmedItemCode)}`,
@@ -2214,18 +2398,18 @@ export class SalesService {
                       timeout: 5000,
                     },
                   );
-                  // Nếu response thành công (status 200), kiểm tra có data không
+                  // Parse response: endpoint /products/code/ trả về data.item
                   const loyaltyProduct = response?.data?.data?.item || response?.data?.data || response?.data;
-                  // Nếu có data, sản phẩm tồn tại → return sớm, không cần check fallback
+                  // Nếu có data, sản phẩm tồn tại → return sớm
                   if (loyaltyProduct) {
                     return;
                   }
-                  // Nếu response 200 nhưng không có data → thử fallback endpoint
-                  this.logger.warn(`[SalesService] Response 200 nhưng không có data tại /products/code/: ${trimmedItemCode}, thử /products/material-code/...`);
+                  // Nếu response 200 nhưng không có data → thử fallback
+                  this.logger.warn(`[SalesService] Response 200 nhưng không có data tại /products/code/: ${trimmedItemCode}, thử /products/old-code/...`);
                 } catch (error: any) {
-                  // Nếu 404, thử fallback sang /products/material-code/
+                  // Nếu 404 → thử fallback
                   if (error?.response?.status === 404) {
-                    this.logger.warn(`[SalesService] Sản phẩm không tồn tại tại /products/code/: ${trimmedItemCode} (404), thử /products/material-code/...`);
+                    this.logger.warn(`[SalesService] Sản phẩm không tồn tại tại /products/code/: ${trimmedItemCode} (404), thử /products/old-code/...`);
                   } else {
                     // Lỗi khác 404 - không coi là not found, có thể là network error
                     this.logger.warn(`[SalesService] Lỗi khi fetch product ${trimmedItemCode} từ /products/code/: ${error?.message || error?.response?.status || 'Unknown error'}`);
@@ -2233,41 +2417,37 @@ export class SalesService {
                   }
                 }
 
-                // Nếu đến đây, có nghĩa là:
-                // 1. /products/code/ trả về 200 nhưng không có data, HOẶC
-                // 2. /products/code/ trả về 404
-                // → Thử fallback endpoint
+                // Nếu đến đây, /products/code/ không tìm thấy → thử fallback /products/old-code/
                 try {
                   const fallbackResponse = await this.httpService.axiosRef.get(
-                    `https://loyaltyapi.vmt.vn/products/material-code/${encodeURIComponent(trimmedItemCode)}`,
+                    `https://loyaltyapi.vmt.vn/products/old-code/${encodeURIComponent(trimmedItemCode)}`,
                     {
                       headers: { accept: 'application/json' },
                       timeout: 5000,
                     },
                   );
-                  const loyaltyProduct = fallbackResponse?.data?.data?.item || fallbackResponse?.data?.data || fallbackResponse?.data;
+                  // Parse response: endpoint /products/old-code/ trả về trực tiếp object (không có wrapper data.item)
+                  const loyaltyProduct = fallbackResponse?.data || null;
                   if (loyaltyProduct) {
                     // Tìm thấy tại fallback endpoint
-                    this.logger.log(`[SalesService] Tìm thấy sản phẩm ${trimmedItemCode} tại /products/material-code/`);
+                    this.logger.log(`[SalesService] Tìm thấy sản phẩm ${trimmedItemCode} tại /products/old-code/`);
                     return;
                   }
-                  // Nếu fallback response 200 nhưng không có data → coi là not found
+                  // Nếu fallback response 200 nhưng không có data → đánh dấu not found
                   isNotFound = true;
-                  this.logger.warn(`[SalesService] Sản phẩm không tồn tại: ${trimmedItemCode} (Response 200 nhưng không có data tại cả /products/code/ và /products/material-code/) - Sẽ bỏ qua sale item này`);
+                  this.logger.warn(`[SalesService] Response 200 nhưng không có data tại /products/old-code/: ${trimmedItemCode}`);
                 } catch (fallbackError: any) {
                   if (fallbackError?.response?.status === 404) {
-                    // Cả 2 endpoint đều 404 → sản phẩm không tồn tại
+                    // Cả 2 endpoint đều 404 → đánh dấu not found
                     isNotFound = true;
-                    this.logger.warn(`[SalesService] Sản phẩm không tồn tại: ${trimmedItemCode} (404 Not Found tại cả /products/code/ và /products/material-code/) - Sẽ bỏ qua sale item này`);
+                    this.logger.warn(`[SalesService] Sản phẩm không tồn tại tại cả /products/code/ và /products/old-code/: ${trimmedItemCode}`);
                   } else {
                     // Lỗi khác 404 - không coi là not found
-                    this.logger.warn(`[SalesService] Lỗi khi fetch product ${trimmedItemCode} từ /products/material-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`);
+                    this.logger.warn(`[SalesService] Lỗi khi fetch product ${trimmedItemCode} từ /products/old-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`);
                   }
                 }
 
-                // Đánh dấu not found khi:
-                // 1. Cả 2 endpoint đều 404, HOẶC
-                // 2. Cả 2 endpoint đều trả về 200 nhưng không có data
+                // Đánh dấu not found nếu cả 2 endpoint đều không tìm thấy
                 if (isNotFound) {
                   notFoundItemCodes.add(trimmedItemCode);
                   this.logger.log(`[SalesService] Đã thêm ${trimmedItemCode} vào danh sách bỏ qua (notFoundItemCodes size: ${notFoundItemCodes.size})`);
