@@ -179,10 +179,10 @@ export class SalesService {
 
   /**
    * Quy đổi prom_code sang ma_ctkm_th cho trường hợp tặng sản phẩm
-   * Quy tắc: PRMN.020255-R510ECOM → 2512MN.TANGSP (nếu đơn hàng tháng 12/2025)
+   * Quy tắc: PRMN.020255-R510ECOM → 2512MN.TANG SP (nếu đơn hàng tháng 12/2025)
    * - Từ "PRMN.020255": lấy 2 ký tự cuối của phần trước dấu chấm → "MN"
    * - Từ docDate: lấy năm và tháng (ví dụ: 2025-12-14 → "2512")
-   * - Kết hợp: "2512MN.TANGSP"
+   * - Kết hợp: "2512MN.TANG SP"
    */
   private convertPromCodeToTangSp(promCode: string | null | undefined, docDate?: string | Date | null): string | null {
     if (!promCode || promCode.trim() === '') return null;
@@ -266,9 +266,9 @@ export class SalesService {
       yearMonth = sortedNumbers.join('');
     }
 
-    // Kết hợp: số + MN + .TANGSP
+    // Kết hợp: số + MN + ".TANG SP" (có dấu cách giữa "TANG" và "SP" để khớp Loyalty)
     if (yearMonth && mnPart) {
-      return `${yearMonth}${mnPart}.TANGSP`;
+      return `${yearMonth}${mnPart}.TANG SP`;
     }
 
     return null;
