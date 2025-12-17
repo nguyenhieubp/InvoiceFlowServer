@@ -2954,7 +2954,8 @@ export class SalesService {
           // dt_tg_nt: Tiền trợ giá (Decimal)
           dt_tg_nt: Number(toNumber(sale.dtTgNt, 0)),
           // ma_thue: Mã thuế (String, max 8 ký tự) - Bắt buộc
-          ma_thue: limitString(toString(sale.maThue, '10'), 8),
+          // Nếu không có mã thuế, set thành "00" thay vì "10"
+          ma_thue: limitString(toString(sale.maThue, '00'), 8),
           // thue_suat: Thuế suất (Decimal)
           thue_suat: Number(toNumber(sale.thueSuat, 0)),
           // tien_thue: Tiền thuế (Decimal)
