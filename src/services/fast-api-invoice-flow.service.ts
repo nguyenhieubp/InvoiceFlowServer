@@ -114,7 +114,7 @@ export class FastApiInvoiceFlowService {
           }
           return result;
         }) || [],
-        cbdetail: invoiceData.cbdetail ?? null,
+        cbdetail: null,
       };
 
       // Loại bỏ các field null, undefined, hoặc empty string trước khi gửi
