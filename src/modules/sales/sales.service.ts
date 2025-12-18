@@ -3858,6 +3858,7 @@ export class SalesService {
           name: customer.name,
           brand: customer.brand || '',
           mobile: customer.mobile,
+          phone: customer.phone || customer.mobile, // Fallback sang mobile nếu phone không có
           sexual: customer.sexual,
           idnumber: customer.idnumber,
           enteredat: customer.enteredat ? customer.enteredat.toISOString() : undefined,
@@ -3983,20 +3984,29 @@ export class SalesService {
         });
       }
 
-      // 2) Lấy tất cả partnerCodes từ sales theo filter
-      const allPartnerRows = await baseSalesQuery
+      // 2) Lấy tất cả sales với customer để lấy mobile
+      const allSalesWithCustomer = await baseSalesQuery
         .clone()
-        .select('DISTINCT sale.partnerCode', 'partnerCode')
-        .orderBy('sale.partnerCode', 'ASC')
-        .getRawMany<{ partnerCode: string }>();
+        .getMany();
 
-      const allPartnerCodes = allPartnerRows.map((r) => r.partnerCode).filter(Boolean);
+      // Lấy tất cả mobile numbers từ sales (từ customer.mobile)
+      const allMobiles = new Set<string>();
+      for (const sale of allSalesWithCustomer) {
+        if (sale.customer?.mobile) {
+          const mobile = String(sale.customer.mobile).trim();
+          if (mobile) {
+            allMobiles.add(mobile);
+          }
+        }
+      }
+
+      const allMobileList = Array.from(allMobiles);
 
       this.logger.debug(
-        `[getAllGiaiTrinhFaceId] Tìm thấy ${allPartnerCodes.length} partner codes với filters: dateFrom=${dateFrom}, dateTo=${dateTo}, brandCode=${brandCode}, orderCode=${orderCode}, partnerCode=${partnerCode}`,
+        `[getAllGiaiTrinhFaceId] Tìm thấy ${allMobileList.length} mobile numbers với filters: dateFrom=${dateFrom}, dateTo=${dateTo}, brandCode=${brandCode}, orderCode=${orderCode}, partnerCode=${partnerCode}`,
       );
 
-      if (allPartnerCodes.length === 0) {
+      if (allMobileList.length === 0) {
         if (hasPagination) {
           return {
             items: [],
@@ -4016,13 +4026,13 @@ export class SalesService {
         };
       }
 
-      // 3) Lấy tất cả checkFaceIds cho các partner này (theo ngày nếu có)
-      // Dùng IN với UPPER(TRIM()) để so sánh không phân biệt hoa/thường
-      const normalizedPartnerCodes = allPartnerCodes.map((code) => String(code).trim().toUpperCase());
+      // 3) Lấy tất cả checkFaceIds cho các mobile này (theo ngày nếu có)
+      // Dùng IN với TRIM() để so sánh mobile
+      const normalizedMobiles = allMobileList.map((mobile) => String(mobile).trim());
 
       let checkFaceIdQuery = this.checkFaceIdRepository
         .createQueryBuilder('checkFaceId')
-        .where('UPPER(TRIM(checkFaceId.partnerCode)) IN (:...partnerCodes)', { partnerCodes: normalizedPartnerCodes })
+        .where('TRIM(checkFaceId.mobile) IN (:...mobiles)', { mobiles: normalizedMobiles })
         .orderBy('checkFaceId.date', 'DESC')
         .addOrderBy('checkFaceId.startTime', 'DESC');
 
@@ -4047,43 +4057,57 @@ export class SalesService {
       }
 
       const allFaceRows = await checkFaceIdQuery.getMany();
-      // Map: normalized partnerCode -> CheckFaceId[]
-      const checkFaceIdsByPartner = new Map<string, CheckFaceId[]>();
+      // Map: normalized mobile -> CheckFaceId[]
+      const checkFaceIdsByMobile = new Map<string, CheckFaceId[]>();
 
       for (const cf of allFaceRows) {
-        if (!cf.partnerCode) continue;
-        const normalizedCode = String(cf.partnerCode).trim().toUpperCase();
-        if (!checkFaceIdsByPartner.has(normalizedCode)) {
-          checkFaceIdsByPartner.set(normalizedCode, []);
+        if (!cf.mobile) continue;
+        const normalizedMobile = String(cf.mobile).trim();
+        if (!checkFaceIdsByMobile.has(normalizedMobile)) {
+          checkFaceIdsByMobile.set(normalizedMobile, []);
         }
-        checkFaceIdsByPartner.get(normalizedCode)!.push(cf);
+        checkFaceIdsByMobile.get(normalizedMobile)!.push(cf);
       }
 
-      // 4) Đếm totalLines: tổng số dòng hàng (sales) cho tất cả partner codes
-      const lineCountResult = await baseSalesQuery
-        .clone()
-        .select('COUNT(*)', 'cnt')
-        .getRawOne<{ cnt: string }>();
-      const totalLines = Number(lineCountResult?.cnt || 0);
+      // 4) Đếm totalLines: tổng số dòng hàng (sales)
+      const totalLines = allSalesWithCustomer.length;
 
-      // 5) Paginate partnerCodes TRƯỚC KHI filter faceStatus (lấy đơn hàng làm gốc)
-      const total = allPartnerCodes.length;
+      // 5) Group sales theo mobile để paginate (lấy đơn hàng làm gốc)
+      // Map: mobile -> Set<partnerCode> để giữ danh sách partner codes theo mobile
+      const partnerCodesByMobile = new Map<string, Set<string>>();
+      for (const sale of allSalesWithCustomer) {
+        if (!sale.customer?.mobile || !sale.partnerCode) continue;
+        const mobile = String(sale.customer.mobile).trim();
+        if (!partnerCodesByMobile.has(mobile)) {
+          partnerCodesByMobile.set(mobile, new Set());
+        }
+        partnerCodesByMobile.get(mobile)!.add(sale.partnerCode);
+      }
+
+      const allMobilesForPagination = Array.from(partnerCodesByMobile.keys());
+      const total = allMobilesForPagination.length;
       let totalPages: number;
-      let pagePartnerCodes: string[];
+      let pageMobiles: string[];
       
       if (hasPagination) {
         totalPages = Math.ceil(total / limit!) || 1;
-        pagePartnerCodes = allPartnerCodes.slice(skip, skip + limit!);
+        pageMobiles = allMobilesForPagination.slice(skip, skip + limit!);
       } else {
         totalPages = 1;
-        pagePartnerCodes = allPartnerCodes;
+        pageMobiles = allMobilesForPagination;
       }
 
-      // 6) Lấy sales cho các partner trong trang hiện tại (lấy đơn hàng làm gốc)
+      // 6) Lấy sales cho các mobile trong trang hiện tại (lấy đơn hàng làm gốc)
+      const pagePartnerCodes = new Set<string>();
+      for (const mobile of pageMobiles) {
+        const partnerCodes = partnerCodesByMobile.get(mobile) || new Set();
+        partnerCodes.forEach(code => pagePartnerCodes.add(code));
+      }
+
       let pageSalesQuery = this.saleRepository
         .createQueryBuilder('sale')
         .leftJoinAndSelect('sale.customer', 'customer')
-        .where('sale.partnerCode IN (:...partnerCodes)', { partnerCodes: pagePartnerCodes });
+        .where('sale.partnerCode IN (:...partnerCodes)', { partnerCodes: Array.from(pagePartnerCodes) });
 
       if (hasDateRange) {
         if (dateFrom && dateTo) {
@@ -4115,26 +4139,28 @@ export class SalesService {
         .addOrderBy('sale.createdAt', 'DESC')
         .getMany();
 
-      // 8) Group sales theo partnerCode -> docCode và build Order[]
-      // Dùng Map với key là partnerCode gốc (không normalize) để match với pagePartnerCodes
-      const ordersByPartner = new Map<string, Map<string, Order>>();
-        for (const sale of sales) {
-        if (!sale.partnerCode) continue;
-        // Giữ nguyên partnerCode gốc để match với pagePartnerCodes
-        const partnerCodeKey = sale.partnerCode;
-        if (!ordersByPartner.has(partnerCodeKey)) {
-          ordersByPartner.set(partnerCodeKey, new Map<string, Order>());
+      // 7) Group sales theo mobile -> docCode và build Order[]
+      // Dùng Map với key là mobile để group orders
+      const ordersByMobile = new Map<string, Map<string, Order>>();
+      for (const sale of sales) {
+        if (!sale.customer?.mobile) continue;
+        const mobileKey = String(sale.customer.mobile).trim();
+        if (!mobileKey) continue;
+        
+        if (!ordersByMobile.has(mobileKey)) {
+          ordersByMobile.set(mobileKey, new Map<string, Order>());
         }
-        const partnerOrders = ordersByPartner.get(partnerCodeKey)!;
+        const mobileOrders = ordersByMobile.get(mobileKey)!;
 
-        if (!partnerOrders.has(sale.docCode)) {
-            const customer = sale.customer;
+        if (!mobileOrders.has(sale.docCode)) {
+          const customer = sale.customer;
           const orderCustomer = customer
             ? {
               code: customer.code,
               name: customer.name,
               brand: customer.brand || '',
               mobile: customer.mobile,
+              phone: customer.phone || customer.mobile, // Fallback sang mobile nếu phone không có
               sexual: customer.sexual,
               idnumber: customer.idnumber,
               enteredat: customer.enteredat ? customer.enteredat.toISOString() : undefined,
@@ -4144,25 +4170,25 @@ export class SalesService {
               birthday: customer.birthday ? customer.birthday.toISOString().split('T')[0] : undefined,
               grade_name: customer.grade_name,
               branch_code: customer.branch_code,
-              }
+            }
             : null;
 
-          partnerOrders.set(sale.docCode, {
-              docCode: sale.docCode,
-              docDate: sale.docDate.toISOString(),
-              branchCode: sale.branchCode,
-              docSourceType: sale.docSourceType || 'sale',
-              customer: orderCustomer as any,
-              totalRevenue: 0,
-              totalQty: 0,
-              totalItems: 0,
-              isProcessed: sale.isProcessed,
-              sales: [],
-            });
-          }
+          mobileOrders.set(sale.docCode, {
+            docCode: sale.docCode,
+            docDate: sale.docDate.toISOString(),
+            branchCode: sale.branchCode,
+            docSourceType: sale.docSourceType || 'sale',
+            customer: orderCustomer as any,
+            totalRevenue: 0,
+            totalQty: 0,
+            totalItems: 0,
+            isProcessed: sale.isProcessed,
+            sales: [],
+          });
+        }
 
-        const order = partnerOrders.get(sale.docCode)!;
-          order.sales = order.sales || [];
+        const order = mobileOrders.get(sale.docCode)!;
+        order.sales = order.sales || [];
 
         // Tối ưu payload: chỉ trả ra các field cần dùng trên UI cho từng dòng hàng
         const slimSale: SaleItem = {
@@ -4178,10 +4204,10 @@ export class SalesService {
         const qty = typeof sale.qty === 'string' ? parseFloat(sale.qty) || 0 : (sale.qty || 0);
         order.totalRevenue += revenue;
         order.totalQty += qty;
-          order.totalItems += 1;
-        }
+        order.totalItems += 1;
+      }
 
-      // 9) Build items cho các partner trong trang hiện tại
+      // 8) Build items cho các mobile trong trang hiện tại
       const items: Array<{
         partnerCode: string;
         partnerName: string;
@@ -4190,31 +4216,33 @@ export class SalesService {
         orders: Order[];
       }> = [];
 
-      for (const code of pagePartnerCodes) {
-        const partnerOrdersMap = ordersByPartner.get(code) || new Map<string, Order>();
-        const orders = Array.from(partnerOrdersMap.values());
+      for (const mobile of pageMobiles) {
+        const mobileOrdersMap = ordersByMobile.get(mobile) || new Map<string, Order>();
+        const orders = Array.from(mobileOrdersMap.values());
         if (orders.length === 0) continue;
 
-        const normalizedCode = String(code).trim().toUpperCase();
-        const checkFaceIds = checkFaceIdsByPartner.get(normalizedCode) || [];
+        const normalizedMobile = String(mobile).trim();
+        const checkFaceIds = checkFaceIdsByMobile.get(normalizedMobile) || [];
         const isCheckFaceId = checkFaceIds.length > 0;
         
         // Áp dụng filter faceStatus SAU KHI build items (lấy đơn hàng làm gốc)
         if (faceStatus === 'yes' && !isCheckFaceId) {
-          continue; // Bỏ qua các partner không có FaceID khi filter = 'yes'
+          continue; // Bỏ qua các mobile không có FaceID khi filter = 'yes'
         }
         if (faceStatus === 'no' && isCheckFaceId) {
-          continue; // Bỏ qua các partner có FaceID khi filter = 'no'
+          continue; // Bỏ qua các mobile có FaceID khi filter = 'no'
         }
 
         const firstOrder = orders[0];
+        const partnerCode = (firstOrder.customer as any)?.code || '';
         const partnerName =
           checkFaceIds[0]?.name ||
           (firstOrder.customer as any)?.name ||
-          code;
+          partnerCode ||
+          mobile;
 
         items.push({
-          partnerCode: code,
+          partnerCode: partnerCode || mobile, // Dùng partnerCode từ customer, fallback về mobile
           partnerName,
           checkFaceIds,
           isCheckFaceId,
@@ -4264,8 +4292,8 @@ export class SalesService {
         relations: ['customer'],
       });
 
-      if (!sale || !sale.partnerCode) {
-        throw new NotFoundException(`Không tìm thấy đơn hàng với mã: ${docCode}`);
+      if (!sale || !sale.customer?.mobile) {
+        throw new NotFoundException(`Không tìm thấy đơn hàng với mã: ${docCode} hoặc đơn hàng không có số điện thoại`);
       }
 
       // Parse ngày giải trình
@@ -4274,10 +4302,11 @@ export class SalesService {
         throw new BadRequestException('Ngày giải trình không hợp lệ (format: YYYY-MM-DD)');
       }
 
-      // Tìm các CheckFaceId records theo partnerCode và ngày đơn hàng
+      // Tìm các CheckFaceId records theo mobile và ngày đơn hàng
+      const mobile = String(sale.customer.mobile).trim();
       const checkFaceIds = await this.checkFaceIdRepository
         .createQueryBuilder('checkFaceId')
-        .where('checkFaceId.partnerCode = :partnerCode', { partnerCode: sale.partnerCode })
+        .where('TRIM(checkFaceId.mobile) = :mobile', { mobile })
         .andWhere('DATE(checkFaceId.date) = DATE(:orderDate)', { orderDate: sale.docDate })
         .getMany();
 

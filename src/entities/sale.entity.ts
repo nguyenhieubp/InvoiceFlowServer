@@ -40,6 +40,9 @@ export class Sale {
   @Column({ nullable: true })
   partnerCode: string;
 
+  @Column({ nullable: true })
+  mobile: string; // Số điện thoại khách hàng tại thời điểm bán
+
   @Column()
   itemCode: string;
 

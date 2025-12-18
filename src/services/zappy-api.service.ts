@@ -115,7 +115,7 @@ export class ZappyApiService {
         code: zappySale.partner_code || '',
         name: zappySale.partner_name || '',
         brand: '', // Không có trong Zappy API, để rỗng
-        mobile: undefined,
+        mobile: zappySale.partner_mobile || undefined, // Map partner_mobile từ API
         sexual: undefined,
         idnumber: undefined,
         enteredat: undefined,

@@ -367,6 +367,7 @@ export class SyncService {
               name: order.customer.name,
               brand: brandFromDepartment,
               mobile: order.customer.mobile,
+              phone: order.customer.mobile, // Set phone = mobile khi tạo mới
               sexual: order.customer.sexual,
               idnumber: order.customer.idnumber,
               enteredat: order.customer.enteredat ? new Date(order.customer.enteredat) : null,
@@ -382,14 +383,44 @@ export class SyncService {
             customersCount++;
           } else {
             // Cập nhật thông tin customer nếu cần
-            customer.name = order.customer.name || customer.name;
-            customer.mobile = order.customer.mobile || customer.mobile;
-            customer.grade_name = order.customer.grade_name || customer.grade_name;
-            // Cập nhật brand từ department nếu có
-            if (brandFromDepartment) {
-              customer.brand = brandFromDepartment;
+            let hasUpdate = false;
+            
+            if (order.customer.name && order.customer.name !== customer.name) {
+              customer.name = order.customer.name;
+              hasUpdate = true;
             }
-            customer = await this.customerRepository.save(customer);
+            
+            // Update mobile nếu có partner_mobile mới từ API (ưu tiên giá trị mới)
+            if (order.customer.mobile && order.customer.mobile.trim() && order.customer.mobile !== customer.mobile) {
+              customer.mobile = order.customer.mobile.trim();
+              // Nếu phone chưa có hoặc bằng mobile cũ, cập nhật phone = mobile mới
+              if (!customer.phone || customer.phone === customer.mobile) {
+                customer.phone = order.customer.mobile.trim();
+              }
+              hasUpdate = true;
+            }
+            
+            // Update phone nếu chưa có
+            if (!customer.phone && customer.mobile) {
+              customer.phone = customer.mobile;
+              hasUpdate = true;
+            }
+            
+            if (order.customer.grade_name && order.customer.grade_name !== customer.grade_name) {
+              customer.grade_name = order.customer.grade_name;
+              hasUpdate = true;
+            }
+            
+            // Cập nhật brand từ department nếu có
+            if (brandFromDepartment && brandFromDepartment !== customer.brand) {
+              customer.brand = brandFromDepartment;
+              hasUpdate = true;
+            }
+            
+            // Chỉ save nếu có thay đổi
+            if (hasUpdate) {
+              customer = await this.customerRepository.save(customer);
+            }
           }
 
           // Đảm bảo customer không null
@@ -735,6 +766,10 @@ export class SyncService {
                   if (saleItem.ordertype !== undefined) existingSale.ordertype = saleItem.ordertype;
                   if (saleItem.description !== undefined) existingSale.description = saleItem.description;
                   if (saleItem.partnerCode !== undefined) existingSale.partnerCode = saleItem.partnerCode;
+                  // Update mobile từ customer tại thời điểm sync
+                  if (order.customer.mobile) {
+                    existingSale.mobile = order.customer.mobile;
+                  }
                   existingSale.itemCode = saleItem.itemCode || '';
                   existingSale.itemName = saleItem.itemName || '';
                   existingSale.qty = saleItem.qty || 0;
@@ -789,6 +824,7 @@ export class SyncService {
                     ordertype: saleItem.ordertype,
                     description: saleItem.description,
                     partnerCode: saleItem.partnerCode,
+                    mobile: order.customer.mobile || undefined, // Lưu mobile từ customer tại thời điểm bán
                     itemCode: saleItem.itemCode || '',
                     itemName: saleItem.itemName || '',
                     qty: saleItem.qty || 0,
@@ -1098,6 +1134,7 @@ export class SyncService {
             docDate: new Date(saleData.docdate),
             docSourceType: saleData.docsourcetype || 'sale', // Mặc định 'sale' nếu không có
             partnerCode: saleData.partner_code || personalInfo.code, // Dùng customer code nếu không có partner_code
+            mobile: personalInfo.mobile || customer.mobile || undefined, // Lưu mobile từ customer tại thời điểm bán
             itemCode: saleData.itemcode, // Mã sản phẩm
             itemName: saleData.itemname,
             qty: saleData.qty, // Số lượng - lưu trực tiếp từ API
@@ -1258,13 +1295,24 @@ export class SyncService {
               return new Date(year, month - 1, day);
             })() : new Date());
 
+            // Kiểm tra xem item.code có tồn tại trong Customer không để tránh foreign key constraint violation
+            let partnerCode: string | null = null;
+            if (item.code && item.code.trim()) {
+              const existingCustomer = await this.customerRepository.findOne({
+                where: { code: item.code.trim() },
+              });
+              if (existingCustomer) {
+                partnerCode = item.code.trim();
+              }
+            }
+
             const checkFaceIdDataToSave: Partial<CheckFaceId> = {
               apiId: item.id || undefined,
               startTime: startTime || undefined,
               checking: checking || undefined,
               isFirstInDay: item.is_first_in_day === true || item.is_first_in_day === 1,
               image: item.image || undefined,
-              partnerCode: item.code || '',
+              partnerCode: partnerCode || undefined,
               name: item.name || undefined,
               mobile: item.mobile || undefined,
               isNv: item.is_nv || undefined,
@@ -1287,6 +1335,175 @@ export class SyncService {
     }
 
     this.logger.log(`[Sync] Đã lưu ${savedCount} checkFaceID records mới, bỏ qua ${skippedCount} records đã tồn tại`);
+  }
+
+  /**
+   * Sync checkFaceID data từ API theo ngày (public method)
+   * @param date - Date format: DDMMMYYYY (ví dụ: 13DEC2025)
+   * @param shopCodes - Optional array of shop codes. Nếu không có, sẽ gọi API không có shop_code để lấy tất cả
+   */
+  async syncFaceIdByDate(date: string, shopCodes?: string[]): Promise<{
+    success: boolean;
+    message: string;
+    savedCount: number;
+    skippedCount: number;
+    errors?: string[];
+  }> {
+    try {
+      // Parse date từ DDMMMYYYY sang DD-MM-YYYY
+      const parseDate = (dateStr: string): string => {
+        const day = dateStr.substring(0, 2);
+        const monthStr = dateStr.substring(2, 5).toUpperCase();
+        const year = dateStr.substring(5, 9);
+        
+        const monthMap: Record<string, string> = {
+          'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04',
+          'MAY': '05', 'JUN': '06', 'JUL': '07', 'AUG': '08',
+          'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12',
+        };
+        
+        const month = monthMap[monthStr] || '01';
+        return `${day}-${month}-${year}`; // Format: 13-12-2025
+      };
+
+      const dateFormatted = parseDate(date);
+      let savedCount = 0;
+      let skippedCount = 0;
+      const errors: string[] = [];
+
+      // Parse date string sang Date object
+      const parseDateTime = (dateTimeStr: string): Date | null => {
+        if (!dateTimeStr) return null;
+        // Format: "13-12-2025 13:42:59"
+        try {
+          const [datePart, timePart] = dateTimeStr.split(' ');
+          const [day, month, year] = datePart.split('-');
+          const [hour, minute, second] = timePart ? timePart.split(':') : ['00', '00', '00'];
+          return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute), parseInt(second || '0'));
+        } catch (error) {
+          return null;
+        }
+      };
+
+      const monthMapForDate: Record<string, string> = {
+        'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04',
+        'MAY': '05', 'JUN': '06', 'JUL': '07', 'AUG': '08',
+        'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12',
+      };
+      const dateObj = (() => {
+        const day = parseInt(date.substring(0, 2));
+        const monthStr = date.substring(2, 5).toUpperCase();
+        const month = parseInt(monthMapForDate[monthStr] || '01');
+        const year = parseInt(date.substring(5, 9));
+        return new Date(year, month - 1, day);
+      })();
+
+      // Nếu có shopCodes, gọi API cho từng shop_code
+      // Nếu không có, gọi API một lần không có shop_code để lấy tất cả
+      const shopCodesToProcess = shopCodes && shopCodes.length > 0 ? shopCodes : [null]; // null = không có shop_code
+
+      for (const shopCode of shopCodesToProcess) {
+        try {
+          const params: any = {
+            fromDate: dateFormatted,
+            toDate: dateFormatted,
+          };
+          
+          // Chỉ thêm shop_code vào params nếu có
+          if (shopCode) {
+            params.shop_code = shopCode;
+          }
+
+          const response = await this.httpService.axiosRef.get(
+            `https://vmt.ipchello.com/api/inout-customer/`,
+            {
+              params,
+              headers: { accept: 'application/json' },
+              timeout: 30000, // 30 seconds timeout
+            },
+          );
+
+          const checkFaceIdData = response?.data?.data || [];
+          if (!Array.isArray(checkFaceIdData) || checkFaceIdData.length === 0) {
+            continue;
+          }
+
+          // Lưu từng checkFaceID record vào database
+          for (const item of checkFaceIdData) {
+            try {
+              // Kiểm tra xem đã có record với apiId chưa
+              if (item.id) {
+                const existingCheckFaceId = await this.checkFaceIdRepository.findOne({
+                  where: { apiId: item.id },
+                });
+
+                if (existingCheckFaceId) {
+                  skippedCount++;
+                  continue;
+                }
+              }
+
+              // Parse dates
+              const startTime = item.start_time ? parseDateTime(item.start_time) : null;
+              const checking = item.checking ? parseDateTime(item.checking) : null;
+
+              // Kiểm tra xem item.code có tồn tại trong Customer không để tránh foreign key constraint violation
+              let partnerCode: string | null = null;
+              if (item.code && item.code.trim()) {
+                const existingCustomer = await this.customerRepository.findOne({
+                  where: { code: item.code.trim() },
+                });
+                if (existingCustomer) {
+                  partnerCode = item.code.trim();
+                }
+              }
+
+              const checkFaceIdDataToSave: Partial<CheckFaceId> = {
+                apiId: item.id || undefined,
+                startTime: startTime || undefined,
+                checking: checking || undefined,
+                isFirstInDay: item.is_first_in_day === true || item.is_first_in_day === 1,
+                image: item.image || undefined,
+                partnerCode: partnerCode || undefined,
+                name: item.name || undefined,
+                mobile: item.mobile || undefined,
+                isNv: item.is_nv || undefined,
+                shopCode: item.shop_code || shopCode || undefined,
+                shopName: item.shop_name || undefined,
+                camId: item.cam_id || undefined,
+                date: startTime ? new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate()) : dateObj,
+              };
+
+              const newCheckFaceId = this.checkFaceIdRepository.create(checkFaceIdDataToSave);
+              await this.checkFaceIdRepository.save(newCheckFaceId);
+              savedCount++;
+            } catch (itemError: any) {
+              const errorMsg = `Failed to save checkFaceID record ${item.id || 'unknown'}: ${itemError?.message || itemError}`;
+              this.logger.warn(errorMsg);
+              errors.push(errorMsg);
+            }
+          }
+        } catch (error: any) {
+          const errorMsg = `Failed to fetch checkFaceID data${shopCode ? ` for shop_code ${shopCode}` : ''}: ${error?.message || error}`;
+          this.logger.warn(errorMsg);
+          errors.push(errorMsg);
+        }
+      }
+
+      this.logger.log(`[Sync FaceID] Đã lưu ${savedCount} checkFaceID records mới, bỏ qua ${skippedCount} records đã tồn tại cho ngày ${date}`);
+
+      return {
+        success: errors.length === 0,
+        message: `Đồng bộ FaceID thành công cho ngày ${date}. Đã lưu ${savedCount} records mới, bỏ qua ${skippedCount} records đã tồn tại.`,
+        savedCount,
+        skippedCount,
+        errors: errors.length > 0 ? errors : undefined,
+      };
+    } catch (error: any) {
+      const errorMsg = `Lỗi khi đồng bộ FaceID cho ngày ${date}: ${error?.message || error}`;
+      this.logger.error(errorMsg);
+      throw new Error(errorMsg);
+    }
   }
 }
 

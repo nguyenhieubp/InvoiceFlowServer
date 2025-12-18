@@ -135,5 +135,40 @@ export class SyncController {
       );
     }
   }
+
+  /**
+   * Đồng bộ FaceID data từ API inout-customer theo ngày
+   * @param date - Date format: DDMMMYYYY (ví dụ: 13DEC2025)
+   * @param shopCodes - Optional array of shop codes. Nếu không có, sẽ lấy tất cả data
+   */
+  @Post('faceid')
+  async syncFaceId(@Body('date') date: string, @Body('shopCodes') shopCodes?: string[]) {
+    if (!date) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 13DEC2025)',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const result = await this.syncService.syncFaceIdByDate(date, shopCodes);
+      return {
+        ...result,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi đồng bộ FaceID',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }
 
