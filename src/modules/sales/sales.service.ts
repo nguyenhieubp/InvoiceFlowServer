@@ -3918,7 +3918,6 @@ export class SalesService {
     items: Array<{
       partnerCode: string;
       partnerName: string;
-      checkFaceIds: CheckFaceId[];
       isCheckFaceId: boolean;
       orders: Order[];
     }>;
@@ -4211,7 +4210,6 @@ export class SalesService {
       const items: Array<{
         partnerCode: string;
         partnerName: string;
-        checkFaceIds: CheckFaceId[];
         isCheckFaceId: boolean;
         orders: Order[];
       }> = [];
@@ -4244,7 +4242,6 @@ export class SalesService {
         items.push({
           partnerCode: partnerCode || mobile, // Dùng partnerCode từ customer, fallback về mobile
           partnerName,
-          checkFaceIds,
           isCheckFaceId,
           orders,
         });
