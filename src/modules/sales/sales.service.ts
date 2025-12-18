@@ -1,7 +1,7 @@
 import { Injectable, InternalServerErrorException, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, Or, IsNull } from 'typeorm';
 import * as XLSX from 'xlsx-js-style';
 import { Sale } from '../../entities/sale.entity';
 import { Customer } from '../../entities/customer.entity';
@@ -1338,9 +1338,13 @@ export class SalesService {
   }> {
     this.logger.log('[syncErrorOrders] Bắt đầu đồng bộ lại đơn lỗi...');
 
-    // Lấy tất cả sales có statusAsys = false
+    // Lấy tất cả sales có statusAsys = false, null, hoặc undefined
+    // Sử dụng Or để match cả false, null, và undefined
     const errorSales = await this.saleRepository.find({
-      where: { statusAsys: false },
+      where: [
+        { statusAsys: false },
+        { statusAsys: IsNull() },
+      ],
       order: { createdAt: 'DESC' },
     });
 
@@ -1489,12 +1493,13 @@ export class SalesService {
   }> {
     this.logger.log(`[syncErrorOrderByDocCode] Bắt đầu đồng bộ lại đơn ${docCode}...`);
 
-    // Lấy tất cả sales của đơn hàng có statusAsys = false
+    // Lấy tất cả sales của đơn hàng có statusAsys = false, null, hoặc undefined
+    // Sử dụng Or để match cả false, null, và undefined
     const errorSales = await this.saleRepository.find({
-      where: { 
-        docCode,
-        statusAsys: false,
-      },
+      where: [
+        { docCode, statusAsys: false },
+        { docCode, statusAsys: IsNull() },
+      ],
     });
 
     if (errorSales.length === 0) {
