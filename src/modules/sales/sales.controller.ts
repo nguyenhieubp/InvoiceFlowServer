@@ -1,6 +1,7 @@
-import { Controller, Get, Query, Param, Post, Body, BadRequestException, Res } from '@nestjs/common';
+import { Controller, Get, Query, Param, Post, Body, BadRequestException, NotFoundException, Res } from '@nestjs/common';
 import { SalesService } from './sales.service';
 import type { CreateStockTransferDto } from '../../dto/create-stock-transfer.dto';
+import { ExplainFaceIdDto } from '../../dto/explain-faceid.dto';
 import type { Response } from 'express';
 
 @Controller('sales')
@@ -239,6 +240,26 @@ export class SalesController {
   @Post('sync-error-order/:docCode')
   async syncErrorOrderByDocCode(@Param('docCode') docCode: string) {
     return this.salesService.syncErrorOrderByDocCode(docCode);
+  }
+
+  @Post('explain-faceid')
+  async explainFaceId(@Body() explainDto: ExplainFaceIdDto) {
+    try {
+      if (!explainDto) {
+        throw new BadRequestException('Request body không hợp lệ');
+      }
+      if (!explainDto.docCode || !explainDto.explanationDate || !explainDto.explanationMessage) {
+        throw new BadRequestException(
+          `Mã đơn, ngày giải trình và thông tin giải trình là bắt buộc. Nhận được: docCode=${explainDto?.docCode}, explanationDate=${explainDto?.explanationDate}, explanationMessage=${explainDto?.explanationMessage}`,
+        );
+      }
+      return await this.salesService.explainFaceId(explainDto);
+    } catch (error: any) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException(`Lỗi khi giải trình FaceID: ${error?.message || error}`);
+    }
   }
 }
 

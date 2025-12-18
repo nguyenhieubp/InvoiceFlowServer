@@ -57,6 +57,15 @@ export class CheckFaceId {
   @Index()
   date: Date; // Ngày check (từ fromDate/toDate)
 
+  @Column({ type: 'boolean', default: false })
+  isExplained: boolean; // Đã giải trình chưa
+
+  @Column({ type: 'text', nullable: true })
+  explanationMessage: string; // Thông tin giải trình
+
+  @Column({ type: 'date', nullable: true })
+  explanationDate: Date; // Ngày giải trình
+
   @ManyToOne(() => Customer, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'partnerCode', referencedColumnName: 'code' })
   customer: Customer;

@@ -18,6 +18,7 @@ import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.
 import { CategoriesService } from '../categories/categories.service';
 import { Order, SaleItem } from '../../types/order.types';
 import { CreateStockTransferDto, StockTransferItem } from '../../dto/create-stock-transfer.dto';
+import { ExplainFaceIdDto } from '../../dto/explain-faceid.dto';
 import { calculateVCType } from '../../utils/product.utils';
 
 @Injectable()
@@ -3936,9 +3937,7 @@ export class SalesService {
       // Kiểm tra xem có phân trang không (cần cả page và limit, và phải là số hợp lệ)
       const hasPagination = page !== undefined && page !== null && limit !== undefined && limit !== null && !isNaN(page) && !isNaN(limit);
       const skip = hasPagination ? (page! - 1) * limit! : 0;
-      
-      this.logger.debug(`[getAllGiaiTrinhFaceId] page=${page}, limit=${limit}, hasPagination=${hasPagination}, brandCode=${brandCode}`);
-
+ 
       // Ưu tiên lọc theo khoảng ngày nếu có dateFrom / dateTo, fallback về date (1 ngày)
       const hasDateRange = !!(dateFrom || dateTo);
       const dateParam = date;
@@ -3950,10 +3949,15 @@ export class SalesService {
 
       if (hasDateRange) {
         if (dateFrom && dateTo) {
-          baseSalesQuery = baseSalesQuery.andWhere('sale.docDate BETWEEN :dateFrom AND :dateTo', {
-            dateFrom,
-            dateTo,
-          });
+          // Nếu dateFrom và dateTo giống nhau → chỉ lấy đúng ngày đó
+          if (dateFrom === dateTo) {
+            baseSalesQuery = baseSalesQuery.andWhere('DATE(sale.docDate) = DATE(:dateFrom)', { dateFrom });
+          } else {
+            baseSalesQuery = baseSalesQuery.andWhere('sale.docDate BETWEEN :dateFrom AND :dateTo', {
+              dateFrom,
+              dateTo,
+            });
+          }
         } else if (dateFrom) {
           baseSalesQuery = baseSalesQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom });
         } else if (dateTo) {
@@ -3988,6 +3992,10 @@ export class SalesService {
 
       const allPartnerCodes = allPartnerRows.map((r) => r.partnerCode).filter(Boolean);
 
+      this.logger.debug(
+        `[getAllGiaiTrinhFaceId] Tìm thấy ${allPartnerCodes.length} partner codes với filters: dateFrom=${dateFrom}, dateTo=${dateTo}, brandCode=${brandCode}, orderCode=${orderCode}, partnerCode=${partnerCode}`,
+      );
+
       if (allPartnerCodes.length === 0) {
         if (hasPagination) {
           return {
@@ -4020,10 +4028,15 @@ export class SalesService {
 
       if (hasDateRange) {
         if (dateFrom && dateTo) {
-          checkFaceIdQuery = checkFaceIdQuery.andWhere(
-            'checkFaceId.date BETWEEN :dateFrom AND :dateTo',
-            { dateFrom, dateTo },
-          );
+          // Nếu dateFrom và dateTo giống nhau → chỉ lấy đúng ngày đó
+          if (dateFrom === dateTo) {
+            checkFaceIdQuery = checkFaceIdQuery.andWhere('DATE(checkFaceId.date) = DATE(:dateFrom)', { dateFrom });
+          } else {
+            checkFaceIdQuery = checkFaceIdQuery.andWhere(
+              'checkFaceId.date BETWEEN :dateFrom AND :dateTo',
+              { dateFrom, dateTo },
+            );
+          }
         } else if (dateFrom) {
           checkFaceIdQuery = checkFaceIdQuery.andWhere('checkFaceId.date >= :dateFrom', { dateFrom });
         } else if (dateTo) {
@@ -4046,78 +4059,27 @@ export class SalesService {
         checkFaceIdsByPartner.get(normalizedCode)!.push(cf);
       }
 
-      // 4) Áp dụng filter faceStatus TRƯỚC KHI paginate
-      let filteredPartnerCodes = [...allPartnerCodes];
-      if (faceStatus === 'yes') {
-        filteredPartnerCodes = filteredPartnerCodes.filter((code) => {
-          const normalizedCode = String(code).trim().toUpperCase();
-          return checkFaceIdsByPartner.has(normalizedCode) && checkFaceIdsByPartner.get(normalizedCode)!.length > 0;
-        });
-      } else if (faceStatus === 'no') {
-        filteredPartnerCodes = filteredPartnerCodes.filter((code) => {
-          const normalizedCode = String(code).trim().toUpperCase();
-          return !checkFaceIdsByPartner.has(normalizedCode) || checkFaceIdsByPartner.get(normalizedCode)!.length === 0;
-        });
-      }
-
-      const total = filteredPartnerCodes.length;
-      if (total === 0) {
-        if (hasPagination) {
-          return {
-            items: [],
-            pagination: {
-              page: page!,
-              limit: limit!,
-              total: 0,
-              totalLines: 0,
-              totalPages: 0,
-              hasNext: false,
-              hasPrev: false,
-            },
-          };
-        }
-        return {
-          items: [],
-        };
-      }
-
-      // 5) Đếm totalLines: tổng số dòng hàng (sales) cho các partner đã filter
+      // 4) Đếm totalLines: tổng số dòng hàng (sales) cho tất cả partner codes
       const lineCountResult = await baseSalesQuery
         .clone()
-        .andWhere('sale.partnerCode IN (:...partnerCodes)', { partnerCodes: filteredPartnerCodes })
         .select('COUNT(*)', 'cnt')
         .getRawOne<{ cnt: string }>();
       const totalLines = Number(lineCountResult?.cnt || 0);
 
-      // 6) Paginate partnerCodes sau khi filter (nếu có phân trang)
-      let pagePartnerCodes: string[];
+      // 5) Paginate partnerCodes TRƯỚC KHI filter faceStatus (lấy đơn hàng làm gốc)
+      const total = allPartnerCodes.length;
       let totalPages: number;
+      let pagePartnerCodes: string[];
       
       if (hasPagination) {
         totalPages = Math.ceil(total / limit!) || 1;
-        pagePartnerCodes = filteredPartnerCodes.slice(skip, skip + limit!);
-        
-        if (pagePartnerCodes.length === 0) {
-          return {
-            items: [],
-            pagination: {
-              page: page!,
-              limit: limit!,
-              total,
-              totalLines,
-              totalPages,
-              hasNext: page! < totalPages,
-              hasPrev: page! > 1,
-            },
-          };
-        }
+        pagePartnerCodes = allPartnerCodes.slice(skip, skip + limit!);
       } else {
-        // Không phân trang - lấy tất cả
         totalPages = 1;
-        pagePartnerCodes = filteredPartnerCodes;
+        pagePartnerCodes = allPartnerCodes;
       }
 
-      // 7) Lấy sales cho các partner trong trang hiện tại
+      // 6) Lấy sales cho các partner trong trang hiện tại (lấy đơn hàng làm gốc)
       let pageSalesQuery = this.saleRepository
         .createQueryBuilder('sale')
         .leftJoinAndSelect('sale.customer', 'customer')
@@ -4125,10 +4087,15 @@ export class SalesService {
 
       if (hasDateRange) {
         if (dateFrom && dateTo) {
-          pageSalesQuery = pageSalesQuery.andWhere('sale.docDate BETWEEN :dateFrom AND :dateTo', {
-            dateFrom,
-            dateTo,
-          });
+          // Nếu dateFrom và dateTo giống nhau → chỉ lấy đúng ngày đó
+          if (dateFrom === dateTo) {
+            pageSalesQuery = pageSalesQuery.andWhere('DATE(sale.docDate) = DATE(:dateFrom)', { dateFrom });
+          } else {
+            pageSalesQuery = pageSalesQuery.andWhere('sale.docDate BETWEEN :dateFrom AND :dateTo', {
+              dateFrom,
+              dateTo,
+            });
+          }
         } else if (dateFrom) {
           pageSalesQuery = pageSalesQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom });
         } else if (dateTo) {
@@ -4231,6 +4198,15 @@ export class SalesService {
         const normalizedCode = String(code).trim().toUpperCase();
         const checkFaceIds = checkFaceIdsByPartner.get(normalizedCode) || [];
         const isCheckFaceId = checkFaceIds.length > 0;
+        
+        // Áp dụng filter faceStatus SAU KHI build items (lấy đơn hàng làm gốc)
+        if (faceStatus === 'yes' && !isCheckFaceId) {
+          continue; // Bỏ qua các partner không có FaceID khi filter = 'yes'
+        }
+        if (faceStatus === 'no' && isCheckFaceId) {
+          continue; // Bỏ qua các partner có FaceID khi filter = 'no'
+        }
+
         const firstOrder = orders[0];
         const partnerName =
           checkFaceIds[0]?.name ||
@@ -4267,6 +4243,62 @@ export class SalesService {
     } catch (error: any) {
       this.logger.error(`[SalesService] getAllGiaiTrinhFaceId error: ${error?.message || error}`);
       throw new InternalServerErrorException('getAllGiaiTrinhFaceId error');
+    }
+  }
+
+  /**
+   * Giải trình FaceID cho một đơn hàng
+   * @param explainDto - DTO chứa mã đơn, ngày giải trình và thông tin giải trình
+   */
+  async explainFaceId(explainDto: ExplainFaceIdDto): Promise<{
+    success: boolean;
+    message: string;
+    updatedCount: number;
+  }> {
+    try {
+      const { docCode, explanationDate, explanationMessage } = explainDto;
+
+      // Tìm đơn hàng theo docCode
+      const sale = await this.saleRepository.findOne({
+        where: { docCode },
+        relations: ['customer'],
+      });
+
+      if (!sale || !sale.partnerCode) {
+        throw new NotFoundException(`Không tìm thấy đơn hàng với mã: ${docCode}`);
+      }
+
+      // Parse ngày giải trình
+      const explanationDateObj = new Date(explanationDate);
+      if (isNaN(explanationDateObj.getTime())) {
+        throw new BadRequestException('Ngày giải trình không hợp lệ (format: YYYY-MM-DD)');
+      }
+
+      // Tìm các CheckFaceId records theo partnerCode và ngày đơn hàng
+      const checkFaceIds = await this.checkFaceIdRepository
+        .createQueryBuilder('checkFaceId')
+        .where('checkFaceId.partnerCode = :partnerCode', { partnerCode: sale.partnerCode })
+        .andWhere('DATE(checkFaceId.date) = DATE(:orderDate)', { orderDate: sale.docDate })
+        .getMany();
+
+      // Update tất cả các CheckFaceId records
+      let updatedCount = 0;
+      for (const checkFaceId of checkFaceIds) {
+        checkFaceId.isExplained = true;
+        checkFaceId.explanationMessage = explanationMessage;
+        checkFaceId.explanationDate = explanationDateObj;
+        await this.checkFaceIdRepository.save(checkFaceId);
+        updatedCount++;
+      }
+
+      return {
+        success: true,
+        message: explanationMessage,
+        updatedCount,
+      };
+    } catch (error: any) {
+      this.logger.error(`[SalesService] explainFaceId error: ${error?.message || error}`);
+      throw new InternalServerErrorException(`Lỗi khi giải trình FaceID: ${error?.message || error}`);
     }
   }
 
