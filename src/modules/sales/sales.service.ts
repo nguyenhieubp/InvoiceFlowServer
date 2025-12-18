@@ -3840,12 +3840,116 @@ export class SalesService {
     orders: Order[];
     checkFaceIds: CheckFaceId[];
   }> {
-    // Lấy orders theo partner_code
-    const sales = await this.saleRepository.find({
-      where: { partnerCode },
-      relations: ['customer'],
-      order: { docDate: 'DESC', createdAt: 'DESC' },
-    });
+    // Lấy orders theo partner_code với date filter và limit để tránh query quá nhiều records
+    const queryBuilder = this.saleRepository
+      .createQueryBuilder('sale')
+      .leftJoinAndSelect('sale.customer', 'customer')
+      .where('sale.partnerCode = :partnerCode', { partnerCode })
+      .orderBy('sale.docDate', 'DESC')
+      .addOrderBy('sale.createdAt', 'DESC')
+      .limit(1000); // Giới hạn tối đa 1000 records để tránh query quá chậm
+
+    // Thêm date filter nếu có
+    if (date) {
+      let dateObj: Date;
+      if (date.includes('-')) {
+        // Format: YYYY-MM-DD
+        dateObj = new Date(date);
+      } else {
+        // Format: DDMMMYYYY
+        const day = parseInt(date.substring(0, 2));
+        const monthStr = date.substring(2, 5).toUpperCase();
+        const year = parseInt(date.substring(5, 9));
+        const monthMap: Record<string, number> = {
+          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+        };
+        dateObj = new Date(year, monthMap[monthStr] || 0, day);
+      }
+      queryBuilder.andWhere('DATE(sale.docDate) = DATE(:date)', { date: dateObj });
+    }
+
+    const sales = await queryBuilder.getMany();
+
+    // Lấy tất cả mobile và partnerCode từ sales để query FaceID
+    const allMobiles = new Set<string>();
+    const allPartnerCodes = new Set<string>();
+    for (const sale of sales) {
+      const mobile = sale.mobile ? String(sale.mobile).trim() : (sale.customer?.mobile ? String(sale.customer.mobile).trim() : null);
+      if (mobile && mobile.length > 0) {
+        allMobiles.add(mobile);
+      }
+      if (sale.partnerCode) {
+        allPartnerCodes.add(String(sale.partnerCode).trim());
+      }
+    }
+
+    // Query FaceID theo mobile hoặc partnerCode
+    const normalizedMobiles = Array.from(allMobiles).map((mobile) => String(mobile).trim()).filter(m => m.length > 0);
+    const normalizedPartnerCodes = Array.from(allPartnerCodes).map((code) => String(code).trim()).filter(c => c.length > 0);
+
+    let checkFaceIdQuery = this.checkFaceIdRepository
+      .createQueryBuilder('checkFaceId')
+      .orderBy('checkFaceId.date', 'DESC')
+      .addOrderBy('checkFaceId.startTime', 'DESC');
+
+    if (normalizedMobiles.length > 0 && normalizedPartnerCodes.length > 0) {
+      checkFaceIdQuery = checkFaceIdQuery.where(
+        '(TRIM(checkFaceId.mobile) IN (:...mobiles) OR TRIM(checkFaceId.partnerCode) IN (:...partnerCodes))',
+        { mobiles: normalizedMobiles, partnerCodes: normalizedPartnerCodes }
+      );
+    } else if (normalizedMobiles.length > 0) {
+      checkFaceIdQuery = checkFaceIdQuery.where('TRIM(checkFaceId.mobile) IN (:...mobiles)', { mobiles: normalizedMobiles });
+    } else if (normalizedPartnerCodes.length > 0) {
+      checkFaceIdQuery = checkFaceIdQuery.where('TRIM(checkFaceId.partnerCode) IN (:...partnerCodes)', { partnerCodes: normalizedPartnerCodes });
+    } else {
+      checkFaceIdQuery = checkFaceIdQuery.where('1 = 0');
+    }
+
+    if (date) {
+      let dateObj: Date;
+      if (date.includes('-')) {
+        dateObj = new Date(date);
+      } else {
+        const day = parseInt(date.substring(0, 2));
+        const monthStr = date.substring(2, 5).toUpperCase();
+        const year = parseInt(date.substring(5, 9));
+        const monthMap: Record<string, number> = {
+          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+        };
+        dateObj = new Date(year, monthMap[monthStr] || 0, day);
+      }
+      checkFaceIdQuery = checkFaceIdQuery.andWhere('DATE(checkFaceId.date) = DATE(:date)', { date: dateObj });
+    }
+
+    const allFaceRows = await checkFaceIdQuery.getMany();
+
+    // Map FaceID theo mobile và partnerCode
+    const checkFaceIdsByMobile = new Map<string, CheckFaceId[]>();
+    const checkFaceIdsByPartnerCode = new Map<string, CheckFaceId[]>();
+    for (const cf of allFaceRows) {
+      if (cf.mobile) {
+        const normalizedMobile = String(cf.mobile).trim();
+        if (normalizedMobile && normalizedMobile.length > 0) {
+          if (!checkFaceIdsByMobile.has(normalizedMobile)) {
+            checkFaceIdsByMobile.set(normalizedMobile, []);
+          }
+          checkFaceIdsByMobile.get(normalizedMobile)!.push(cf);
+        }
+      }
+      if (cf.partnerCode) {
+        const normalizedCode = String(cf.partnerCode).trim();
+        if (normalizedCode && normalizedCode.length > 0) {
+          if (!checkFaceIdsByPartnerCode.has(normalizedCode)) {
+            checkFaceIdsByPartnerCode.set(normalizedCode, []);
+          }
+          checkFaceIdsByPartnerCode.get(normalizedCode)!.push(cf);
+        }
+      }
+    }
 
     // Group sales by docCode
     const ordersMap = new Map<string, Order>();
@@ -3857,8 +3961,8 @@ export class SalesService {
           code: customer.code,
           name: customer.name,
           brand: customer.brand || '',
-          mobile: customer.mobile,
-          phone: customer.phone || customer.mobile, // Fallback sang mobile nếu phone không có
+          mobile: sale.mobile || customer.mobile, // Ưu tiên sale.mobile (partner_mobile)
+          phone: customer.phone || sale.mobile || customer.mobile,
           sexual: customer.sexual,
           idnumber: customer.idnumber,
           enteredat: customer.enteredat ? customer.enteredat.toISOString() : undefined,
@@ -3891,12 +3995,17 @@ export class SalesService {
       order.totalItems += 1;
     }
 
-    // Lấy checkFaceID data
-    const checkFaceIds = await this.getCheckFaceIdByPartnerCode(partnerCode, date);
+    // Lấy tất cả checkFaceIds để trả về (remove duplicates)
+    const allCheckFaceIds = Array.from(checkFaceIdsByMobile.values()).flat().concat(
+      Array.from(checkFaceIdsByPartnerCode.values()).flat()
+    );
+    const uniqueCheckFaceIds = Array.from(
+      new Map(allCheckFaceIds.map(cf => [cf.id, cf])).values()
+    );
 
     return {
       orders: Array.from(ordersMap.values()),
-      checkFaceIds,
+      checkFaceIds: uniqueCheckFaceIds,
     };
   }
 
@@ -3983,57 +4092,71 @@ export class SalesService {
         });
       }
 
-      // 2) Lấy tất cả sales với customer để lấy mobile
-      const allSalesWithCustomer = await baseSalesQuery
-        .clone()
-        .getMany();
+      // 2) Lấy tất cả sales với customer (áp dụng pagination nếu có)
+      // Tăng limit để lấy nhiều sales hơn trước khi group thành orders và items
+      // Ví dụ: limit=10 → lấy 100 sales để có nhiều orders hơn
+      let queryToExecute = baseSalesQuery.clone();
+      const salesLimit = hasPagination ? (limit! * 20) : undefined; // Lấy nhiều sales hơn để có nhiều orders
+      const salesSkip = hasPagination ? skip : undefined;
+      
+      if (!hasDateRange && !dateParam && hasPagination) {
+        queryToExecute = queryToExecute
+          .orderBy('sale.docDate', 'DESC')
+          .addOrderBy('sale.createdAt', 'DESC')
+          .skip(salesSkip || 0)
+          .take(salesLimit || limit!);
+      } else if (hasPagination) {
+        queryToExecute = queryToExecute
+          .orderBy('sale.docDate', 'DESC')
+          .addOrderBy('sale.createdAt', 'DESC')
+          .skip(salesSkip || 0)
+          .take(salesLimit || limit!);
+      } else {
+        queryToExecute = queryToExecute
+          .orderBy('sale.docDate', 'DESC')
+          .addOrderBy('sale.createdAt', 'DESC');
+      }
 
-      // Lấy tất cả mobile numbers từ sales (từ customer.mobile)
+      const allSalesWithCustomer = await queryToExecute.getMany();
+
+      // Đếm total để pagination
+      const totalCount = await baseSalesQuery.clone().getCount();
+      const totalLines = totalCount;
+      const totalPages = hasPagination ? Math.ceil(totalCount / limit!) : 1;
+
+      // Lấy tất cả mobile numbers từ sales để query FaceID
+      // Join bằng: sale.mobile (partner_mobile) = FaceID.mobile
       const allMobiles = new Set<string>();
       for (const sale of allSalesWithCustomer) {
-        if (sale.customer?.mobile) {
-          const mobile = String(sale.customer.mobile).trim();
-          if (mobile) {
-            allMobiles.add(mobile);
-          }
+        // Ưu tiên lấy từ sale.mobile (partner_mobile từ Zappy API)
+        const mobile = sale.mobile ? String(sale.mobile).trim() : (sale.customer?.mobile ? String(sale.customer.mobile).trim() : null);
+        if (mobile && mobile.length > 0) {
+          allMobiles.add(mobile);
         }
       }
 
       const allMobileList = Array.from(allMobiles);
 
       this.logger.debug(
-        `[getAllGiaiTrinhFaceId] Tìm thấy ${allMobileList.length} mobile numbers với filters: dateFrom=${dateFrom}, dateTo=${dateTo}, brandCode=${brandCode}, orderCode=${orderCode}, partnerCode=${partnerCode}`,
+        `[getAllGiaiTrinhFaceId] Tìm thấy ${allSalesWithCustomer.length} sales, ${allMobileList.length} mobile numbers với filters: dateFrom=${dateFrom}, dateTo=${dateTo}, brandCode=${brandCode}, orderCode=${orderCode}, partnerCode=${partnerCode}`,
       );
 
-      if (allMobileList.length === 0) {
-        if (hasPagination) {
-          return {
-            items: [],
-            pagination: {
-              page: page!,
-              limit: limit!,
-              total: 0,
-              totalLines: 0,
-              totalPages: 0,
-              hasNext: false,
-              hasPrev: false,
-            },
-          };
-        }
-        return {
-          items: [],
-        };
-      }
-
       // 3) Lấy tất cả checkFaceIds cho các mobile này (theo ngày nếu có)
-      // Dùng IN với TRIM() để so sánh mobile
-      const normalizedMobiles = allMobileList.map((mobile) => String(mobile).trim());
+      // Join bằng: sale.mobile (partner_mobile) = FaceID.mobile
+      const normalizedMobiles = Array.from(allMobiles).map((mobile) => String(mobile).trim()).filter(m => m.length > 0);
 
       let checkFaceIdQuery = this.checkFaceIdRepository
         .createQueryBuilder('checkFaceId')
-        .where('TRIM(checkFaceId.mobile) IN (:...mobiles)', { mobiles: normalizedMobiles })
         .orderBy('checkFaceId.date', 'DESC')
         .addOrderBy('checkFaceId.startTime', 'DESC');
+
+      // Join chỉ bằng mobile
+      if (normalizedMobiles.length > 0) {
+        checkFaceIdQuery = checkFaceIdQuery.where('TRIM(checkFaceId.mobile) IN (:...mobiles)', { mobiles: normalizedMobiles });
+      } else {
+        // Không có mobile nào → không query FaceID
+        checkFaceIdQuery = checkFaceIdQuery.where('1 = 0'); // Không trả về kết quả nào
+      }
 
       if (hasDateRange) {
         if (dateFrom && dateTo) {
@@ -4056,110 +4179,70 @@ export class SalesService {
       }
 
       const allFaceRows = await checkFaceIdQuery.getMany();
+      
+      this.logger.debug(
+        `[getAllGiaiTrinhFaceId] Tìm thấy ${allFaceRows.length} FaceID records với ${normalizedMobiles.length} mobiles`,
+      );
+      
       // Map: normalized mobile -> CheckFaceId[]
       const checkFaceIdsByMobile = new Map<string, CheckFaceId[]>();
 
       for (const cf of allFaceRows) {
-        if (!cf.mobile) continue;
-        const normalizedMobile = String(cf.mobile).trim();
-        if (!checkFaceIdsByMobile.has(normalizedMobile)) {
-          checkFaceIdsByMobile.set(normalizedMobile, []);
-        }
-        checkFaceIdsByMobile.get(normalizedMobile)!.push(cf);
-      }
-
-      // 4) Đếm totalLines: tổng số dòng hàng (sales)
-      const totalLines = allSalesWithCustomer.length;
-
-      // 5) Group sales theo mobile để paginate (lấy đơn hàng làm gốc)
-      // Map: mobile -> Set<partnerCode> để giữ danh sách partner codes theo mobile
-      const partnerCodesByMobile = new Map<string, Set<string>>();
-      for (const sale of allSalesWithCustomer) {
-        if (!sale.customer?.mobile || !sale.partnerCode) continue;
-        const mobile = String(sale.customer.mobile).trim();
-        if (!partnerCodesByMobile.has(mobile)) {
-          partnerCodesByMobile.set(mobile, new Set());
-        }
-        partnerCodesByMobile.get(mobile)!.add(sale.partnerCode);
-      }
-
-      const allMobilesForPagination = Array.from(partnerCodesByMobile.keys());
-      const total = allMobilesForPagination.length;
-      let totalPages: number;
-      let pageMobiles: string[];
-      
-      if (hasPagination) {
-        totalPages = Math.ceil(total / limit!) || 1;
-        pageMobiles = allMobilesForPagination.slice(skip, skip + limit!);
-      } else {
-        totalPages = 1;
-        pageMobiles = allMobilesForPagination;
-      }
-
-      // 6) Lấy sales cho các mobile trong trang hiện tại (lấy đơn hàng làm gốc)
-      const pagePartnerCodes = new Set<string>();
-      for (const mobile of pageMobiles) {
-        const partnerCodes = partnerCodesByMobile.get(mobile) || new Set();
-        partnerCodes.forEach(code => pagePartnerCodes.add(code));
-      }
-
-      let pageSalesQuery = this.saleRepository
-        .createQueryBuilder('sale')
-        .leftJoinAndSelect('sale.customer', 'customer')
-        .where('sale.partnerCode IN (:...partnerCodes)', { partnerCodes: Array.from(pagePartnerCodes) });
-
-      if (hasDateRange) {
-        if (dateFrom && dateTo) {
-          // Nếu dateFrom và dateTo giống nhau → chỉ lấy đúng ngày đó
-          if (dateFrom === dateTo) {
-            pageSalesQuery = pageSalesQuery.andWhere('DATE(sale.docDate) = DATE(:dateFrom)', { dateFrom });
-          } else {
-            pageSalesQuery = pageSalesQuery.andWhere('sale.docDate BETWEEN :dateFrom AND :dateTo', {
-              dateFrom,
-              dateTo,
-            });
+        // Map theo mobile nếu có
+        if (cf.mobile) {
+          const normalizedMobile = String(cf.mobile).trim();
+          if (normalizedMobile && normalizedMobile.length > 0) {
+            if (!checkFaceIdsByMobile.has(normalizedMobile)) {
+              checkFaceIdsByMobile.set(normalizedMobile, []);
+            }
+            checkFaceIdsByMobile.get(normalizedMobile)!.push(cf);
           }
-        } else if (dateFrom) {
-          pageSalesQuery = pageSalesQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom });
-        } else if (dateTo) {
-          pageSalesQuery = pageSalesQuery.andWhere('sale.docDate <= :dateTo', { dateTo });
         }
-      } else if (dateParam) {
-        pageSalesQuery = pageSalesQuery.andWhere('DATE(sale.docDate) = :date', { date: dateParam });
       }
-      if (brandCode) {
-        pageSalesQuery = pageSalesQuery.andWhere('LOWER(sale.branchCode) = LOWER(:brandCode)', {
-          brandCode: brandCode.trim(),
-        });
-      }
+      
+      this.logger.debug(
+        `[getAllGiaiTrinhFaceId] Mapped ${checkFaceIdsByMobile.size} unique mobiles trong FaceID data`,
+      );
 
-      const sales = await pageSalesQuery
-        .orderBy('sale.docDate', 'DESC')
-        .addOrderBy('sale.createdAt', 'DESC')
-        .getMany();
-
-      // 7) Group sales theo mobile -> docCode và build Order[]
-      // Dùng Map với key là mobile để group orders
-      const ordersByMobile = new Map<string, Map<string, Order>>();
-      for (const sale of sales) {
-        if (!sale.customer?.mobile) continue;
-        const mobileKey = String(sale.customer.mobile).trim();
-        if (!mobileKey) continue;
+      // 4) Map sales với FaceID để xác định isCheckFaceId cho từng sale
+      // Map: sale.id -> isCheckFaceId
+      const saleFaceIdMap = new Map<string, boolean>();
+      let salesWithFaceIdCount = 0;
+      for (const sale of allSalesWithCustomer) {
+        const saleMobile = sale.mobile ? String(sale.mobile).trim() : (sale.customer?.mobile ? String(sale.customer.mobile).trim() : null);
         
-        if (!ordersByMobile.has(mobileKey)) {
-          ordersByMobile.set(mobileKey, new Map<string, Order>());
+        // Tìm FaceID chỉ theo mobile
+        let checkFaceIds: CheckFaceId[] = [];
+        if (saleMobile) {
+          const normalizedMobile = String(saleMobile).trim();
+          checkFaceIds = checkFaceIdsByMobile.get(normalizedMobile) || [];
         }
-        const mobileOrders = ordersByMobile.get(mobileKey)!;
+        const isCheckFaceId = checkFaceIds.length > 0;
+        if (isCheckFaceId) {
+          salesWithFaceIdCount++;
+        }
+        const saleId = (sale as any).id;
+        if (saleId) {
+          saleFaceIdMap.set(saleId, isCheckFaceId);
+        }
+      }
+      
+      this.logger.debug(
+        `[getAllGiaiTrinhFaceId] Mapped ${salesWithFaceIdCount}/${allSalesWithCustomer.length} sales có FaceID, saleFaceIdMap size: ${saleFaceIdMap.size}`,
+      );
 
-        if (!mobileOrders.has(sale.docCode)) {
+      // 5) Group sales theo docCode để build Order[] (lấy sales làm gốc)
+      const ordersMap = new Map<string, Order>();
+      for (const sale of allSalesWithCustomer) {
+        if (!ordersMap.has(sale.docCode)) {
           const customer = sale.customer;
           const orderCustomer = customer
             ? {
               code: customer.code,
               name: customer.name,
               brand: customer.brand || '',
-              mobile: customer.mobile,
-              phone: customer.phone || customer.mobile, // Fallback sang mobile nếu phone không có
+              mobile: sale.mobile || customer.mobile, // Ưu tiên sale.mobile (partner_mobile)
+              phone: customer.phone || sale.mobile || customer.mobile,
               sexual: customer.sexual,
               idnumber: customer.idnumber,
               enteredat: customer.enteredat ? customer.enteredat.toISOString() : undefined,
@@ -4172,7 +4255,7 @@ export class SalesService {
             }
             : null;
 
-          mobileOrders.set(sale.docCode, {
+          ordersMap.set(sale.docCode, {
             docCode: sale.docCode,
             docDate: sale.docDate.toISOString(),
             branchCode: sale.branchCode,
@@ -4186,10 +4269,9 @@ export class SalesService {
           });
         }
 
-        const order = mobileOrders.get(sale.docCode)!;
+        const order = ordersMap.get(sale.docCode)!;
         order.sales = order.sales || [];
 
-        // Tối ưu payload: chỉ trả ra các field cần dùng trên UI cho từng dòng hàng
         const slimSale: SaleItem = {
           id: (sale as any).id,
           itemCode: sale.itemCode,
@@ -4198,7 +4280,6 @@ export class SalesService {
         };
 
         order.sales.push(slimSale);
-        // Parse string thành number để tránh nối chuỗi
         const revenue = typeof sale.revenue === 'string' ? parseFloat(sale.revenue) || 0 : (sale.revenue || 0);
         const qty = typeof sale.qty === 'string' ? parseFloat(sale.qty) || 0 : (sale.qty || 0);
         order.totalRevenue += revenue;
@@ -4206,64 +4287,126 @@ export class SalesService {
         order.totalItems += 1;
       }
 
-      // 8) Build items cho các mobile trong trang hiện tại
+      // 6) Build items: group orders theo partnerCode và xác định isCheckFaceId
       const items: Array<{
         partnerCode: string;
         partnerName: string;
         isCheckFaceId: boolean;
         orders: Order[];
+        checkFaceIds: CheckFaceId[];
       }> = [];
 
-      for (const mobile of pageMobiles) {
-        const mobileOrdersMap = ordersByMobile.get(mobile) || new Map<string, Order>();
-        const orders = Array.from(mobileOrdersMap.values());
+      // Group orders theo partnerCode
+      const ordersByPartnerCode = new Map<string, Order[]>();
+      for (const order of Array.from(ordersMap.values())) {
+        const partnerCode = (order.customer as any)?.code || '';
+        if (!partnerCode) continue;
+        
+        if (!ordersByPartnerCode.has(partnerCode)) {
+          ordersByPartnerCode.set(partnerCode, []);
+        }
+        ordersByPartnerCode.get(partnerCode)!.push(order);
+      }
+
+      for (const [partnerCode, orders] of ordersByPartnerCode.entries()) {
         if (orders.length === 0) continue;
 
-        const normalizedMobile = String(mobile).trim();
-        const checkFaceIds = checkFaceIdsByMobile.get(normalizedMobile) || [];
-        const isCheckFaceId = checkFaceIds.length > 0;
+        const firstOrder = orders[0];
         
-        // Áp dụng filter faceStatus SAU KHI build items (lấy đơn hàng làm gốc)
+        // Kiểm tra tất cả sales trong orders để xem có FaceID không
+        // Lấy tất cả mobile từ tất cả sales trong orders
+        const allMobilesInOrders = new Set<string>();
+        let hasFaceIdInOrders = false;
+        
+        for (const order of orders) {
+          // Lấy mobile từ order.customer.mobile (có thể là sale.mobile hoặc customer.mobile)
+          const orderMobile = (order.customer as any)?.mobile;
+          if (orderMobile) {
+            const normalizedMobile = String(orderMobile).trim();
+            if (normalizedMobile && normalizedMobile.length > 0) {
+              allMobilesInOrders.add(normalizedMobile);
+            }
+          }
+          
+          // Kiểm tra từng sale trong order để xem có FaceID không (dùng saleFaceIdMap)
+          for (const saleItem of (order.sales || [])) {
+            const saleId = (saleItem as any).id;
+            if (saleId && saleFaceIdMap.has(saleId) && saleFaceIdMap.get(saleId)) {
+              hasFaceIdInOrders = true;
+              break; // Đã tìm thấy ít nhất 1 sale có FaceID
+            }
+          }
+          if (hasFaceIdInOrders) break; // Đã tìm thấy trong order này, không cần kiểm tra tiếp
+        }
+        
+        // Tìm FaceID theo tất cả mobile từ orders
+        let checkFaceIds: CheckFaceId[] = [];
+        for (const mobile of allMobilesInOrders) {
+          const normalizedMobile = String(mobile).trim();
+          if (normalizedMobile && normalizedMobile.length > 0) {
+            const faceIds = checkFaceIdsByMobile.get(normalizedMobile) || [];
+            if (faceIds.length > 0) {
+              checkFaceIds.push(...faceIds);
+            }
+          }
+        }
+        
+        // isCheckFaceId = true nếu có ít nhất 1 sale trong orders có FaceID (theo saleFaceIdMap) HOẶC có FaceID khớp theo mobile
+        const isCheckFaceId = hasFaceIdInOrders || checkFaceIds.length > 0;
+        
+        this.logger.debug(
+          `[getAllGiaiTrinhFaceId] partnerCode=${partnerCode}, hasFaceIdInOrders=${hasFaceIdInOrders}, checkFaceIds.length=${checkFaceIds.length}, isCheckFaceId=${isCheckFaceId}, faceStatus=${faceStatus}`,
+        );
+        
+        // Áp dụng filter faceStatus
         if (faceStatus === 'yes' && !isCheckFaceId) {
-          continue; // Bỏ qua các mobile không có FaceID khi filter = 'yes'
+          continue;
         }
         if (faceStatus === 'no' && isCheckFaceId) {
-          continue; // Bỏ qua các mobile có FaceID khi filter = 'no'
+          continue;
         }
 
-        const firstOrder = orders[0];
-        const partnerCode = (firstOrder.customer as any)?.code || '';
         const partnerName =
           checkFaceIds[0]?.name ||
           (firstOrder.customer as any)?.name ||
-          partnerCode ||
-          mobile;
+          partnerCode;
 
         items.push({
-          partnerCode: partnerCode || mobile, // Dùng partnerCode từ customer, fallback về mobile
+          partnerCode,
           partnerName,
           isCheckFaceId,
           orders,
+          checkFaceIds: checkFaceIds || [],
         });
+      }
+
+      // Tính total dựa trên số lượng unique partnerCode (sau khi filter faceStatus)
+      const totalItems = items.length;
+      
+      // Paginate items sau khi group
+      let paginatedItems = items;
+      if (hasPagination) {
+        const itemsSkip = (page! - 1) * limit!;
+        paginatedItems = items.slice(itemsSkip, itemsSkip + limit!);
       }
 
       if (hasPagination) {
       return {
-        items,
+        items: paginatedItems,
         pagination: {
             page: page!,
             limit: limit!,
-          total,
+          total: totalItems,
             totalLines,
-          totalPages,
-            hasNext: page! < totalPages,
+          totalPages: Math.ceil(totalItems / limit!),
+            hasNext: page! < Math.ceil(totalItems / limit!),
             hasPrev: page! > 1,
         },
         };
       }
       
       return {
-        items,
+        items: paginatedItems,
       };
     } catch (error: any) {
       this.logger.error(`[SalesService] getAllGiaiTrinhFaceId error: ${error?.message || error}`);
