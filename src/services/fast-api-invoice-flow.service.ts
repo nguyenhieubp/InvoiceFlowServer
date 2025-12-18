@@ -50,13 +50,25 @@ export class FastApiInvoiceFlowService {
     try {
       // FIX: Validate mã CTKM với Loyalty API trước khi gửi lên Fast API
       // Helper function: cắt phần sau dấu "-" để lấy mã CTKM để check (ví dụ: "PRMN.020228-R510SOCOM" → "PRMN.020228")
+      // Và chuyển đổi các mã VC label sang format có khoảng trắng (VCHB → VC HB, VCKM → VC KM, VCDV → VC DV)
       const getPromotionCodeToCheck = (promCode: string | null | undefined): string | null => {
         if (!promCode) return null;
         const trimmed = promCode.trim();
         if (trimmed === '') return null;
         // Cắt phần sau dấu "-" để lấy mã CTKM
         const parts = trimmed.split('-');
-        return parts[0] || trimmed;
+        let codeToCheck = parts[0] || trimmed;
+        
+        // Loại bỏ prefix "FBV TT " nếu có (ví dụ: "FBV TT VCHB" → "VCHB")
+        codeToCheck = codeToCheck.replace(/^FBV\s+TT\s+/i, '');
+        
+        // Chuyển đổi các mã VC label sang format có khoảng trắng để match với Loyalty API
+        // VCHB → VC HB, VCKM → VC KM, VCDV → VC DV
+        codeToCheck = codeToCheck.replace(/VCHB/g, 'VC HB');
+        codeToCheck = codeToCheck.replace(/VCKM/g, 'VC KM');
+        codeToCheck = codeToCheck.replace(/VCDV/g, 'VC DV');
+        
+        return codeToCheck;
       };
 
       const validationErrors: string[] = [];

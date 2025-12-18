@@ -100,19 +100,28 @@ export class SalesService {
       return null;
     }
 
+    // Normalize "VC KM" thành "VCKM" và "VC HB" thành "VC HB" (giữ nguyên để xử lý sau cho F3)
+    let normalizedVcLabel = vcLabel;
+    // Normalize "VC KM" thành "VCKM" cho tất cả các brand
+    if (normalizedVcLabel.includes('VC KM')) {
+      normalizedVcLabel = normalizedVcLabel.replace(/VC\s+KM/g, 'VCKM');
+    }
+
     // Với F3, thêm prefix "FBV TT" trước VC label
     // Và chuyển tất cả VCHB hoặc VCHH thành VCHH
     if (brandLower === 'f3') {
-      // Chuyển VCHB thành VCHH
-      let finalVcLabel = vcLabel;
-      if (finalVcLabel.includes('VCHB')) {
+      let finalVcLabel = normalizedVcLabel;
+      // Xử lý cả "VCHB" và "VC HB" (có khoảng trắng) - chuyển thành VCHH
+      if (finalVcLabel.includes('VCHB') || finalVcLabel.includes('VC HB')) {
+        // Thay thế "VC HB" trước, sau đó thay "VCHB"
+        finalVcLabel = finalVcLabel.replace(/VC\s+HB/g, 'VCHH');
         finalVcLabel = finalVcLabel.replace(/VCHB/g, 'VCHH');
       }
       // Nếu có VCHH thì giữ nguyên (không cần thay thế)
       return `FBV TT ${finalVcLabel}`;
     }
 
-    return vcLabel;
+    return normalizedVcLabel;
   }
 
   /**
@@ -3217,14 +3226,7 @@ export class SalesService {
         }
 
         // Xác định hàng tặng: giaBan = 0 và tienHang = 0
-        // Với F3 (FBV): Nếu có promCode → là "mua hàng giảm giá" (giảm 100%), không phải "tặng hàng"
-        const salePromCode = sale.promCode && sale.promCode.trim() !== '';
         let isTangHang = giaBan === 0 && tienHang === 0;
-
-        // Với F3: Nếu có promCode thì không coi là hàng tặng, mà là mua hàng giảm giá
-        if (brandLower === 'f3' && salePromCode) {
-          isTangHang = false;
-        }
 
         // Các ordertype dịch vụ không được coi là hàng tặng (không set km_yn = 1)
         const ordertypeName = sale.ordertype || '';
@@ -3267,12 +3269,9 @@ export class SalesService {
 
         // Nếu là hàng tặng, không set ma_ck01 (Mã CTKM mua hàng giảm giá)
         // Nếu không phải hàng tặng, set ma_ck01 từ promCode như cũ
-        // Với F3: Nếu có promCode và giaBan = 0 && tienHang = 0 → là mua hàng giảm giá (giảm 100%)
         const maCk01 = isTangHang ? '' : (sale.promCode ? sale.promCode : '');
 
-        // Kiểm tra có mã số thẻ (maThe) không - nếu có thì km_yn = 0
-        const hasMaThe = sale.maThe && sale.maThe.trim() !== '';
-        // Kiểm tra nếu ma_ctkm_th = "TT DAU TU" thì cũng không set km_yn = 1
+        // Kiểm tra nếu ma_ctkm_th = "TT DAU TU" thì không set km_yn = 1
         const isTTDauTu = maCtkmTangHang && maCtkmTangHang.trim() === 'TT DAU TU';
 
         return {
@@ -3299,11 +3298,8 @@ export class SalesService {
           // km_yn: Khuyến mãi (Int)
           // - = 1 CHỈ KHI là hàng tặng (giaBan = 0 && tienHang = 0)
           // - KHÔNG set = 1 khi chỉ có promCode (promCode là mã CTKM mua hàng giảm giá, không phải hàng tặng)
-          // - Nếu có mã số thẻ (maThe) hoặc ma_ctkm_th = "TT DAU TU" thì km_yn = 0
-          // - Với FBV (brandLower === 'f3'): luôn set km_yn = 0 theo yêu cầu Fast
-          km_yn: brandLower === 'f3'
-            ? 0
-            : ((hasMaThe || isTTDauTu) ? 0 : (isTangHang ? 1 : 0)),
+          // - Nếu ma_ctkm_th = "TT DAU TU" thì km_yn = 0
+          km_yn: (isTTDauTu ? 0 : (isTangHang ? 1 : 0)),
           // dong_thuoc_goi: dong_thuoc_goi (String, max 32 ký tự)
           dong_thuoc_goi: limitString(toString(sale.dongThuocGoi, ''), 32),
           // trang_thai: trang_thai (String, max 32 ký tự)
@@ -4439,17 +4435,10 @@ export class SalesService {
                          ordertypeName.includes('08. Tách thẻ') ||
                          ordertypeName.includes('Đổi thẻ KEEP->Thẻ DV');
         const hasPromCode = sale.promCode && String(sale.promCode).trim() !== '';
-        let isTangHangForProm = isTangHang;
-        
-        // Với F3: Nếu có promCode và giaBan = 0 && tienHang = 0 → là "mua hàng giảm giá", không phải "tặng hàng"
-        if (normalizedBrand === 'f3' && hasPromCode && isTangHangForProm) {
-          isTangHangForProm = false;
-        }
-        
-        if (!isDichVu && isTangHangForProm) {
+        if (!isDichVu && isTangHang) {
           const hasMaThe = sale.maThe && String(sale.maThe).trim() !== '';
           let maCtkmTangHang = sale.maCtkmTangHang || '';
-          if (!maCtkmTangHang && isTangHangForProm) {
+          if (!maCtkmTangHang && isTangHang) {
             if (ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư')) {
               maCtkmTangHang = 'TT DAU TU';
             }
@@ -4480,12 +4469,8 @@ export class SalesService {
         
         // Tính muaHangGiamGia
         let muaHangGiamGia = '';
-        if (!isTangHang) {
-          if (normalizedBrand === 'f3' && hasPromCode && giaBan === 0 && tienHang === 0) {
-            muaHangGiamGia = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
-          } else if (sale.promCode) {
-            muaHangGiamGia = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
-          }
+        if (!isTangHang && sale.promCode) {
+          muaHangGiamGia = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
         }
         
         return {
