@@ -35,6 +35,30 @@ export class SalesService {
   }
 
   /**
+   * Format voucher code để hiển thị/gửi lên API
+   * - F3 (facialbar): giữ nguyên "FBV TT VCDV", "FBV TT VCHH" (không có khoảng trắng)
+   * - Các brand khác: chuyển đổi "VCHB" → "VC HB", "VCKM" → "VC KM", "VCDV" → "VC DV"
+   * @param maCk05Value - Giá trị từ calculateMaCk05()
+   * @returns Format voucher code đã được chuyển đổi
+   */
+  private formatVoucherCode(maCk05Value: string | null): string | null {
+    if (!maCk05Value) return null;
+    
+    // Riêng với F3 (facialbar): giữ nguyên format "FBV TT VCDV", "FBV TT VCHH" (không có khoảng trắng)
+    if (maCk05Value.includes('FBV TT')) {
+      return maCk05Value;
+    }
+    
+    // Các brand khác: chuyển đổi VCHB → VC HB, VCKM → VC KM, VCDV → VC DV
+    let formatted = maCk05Value;
+    formatted = formatted.replace(/VCHB/g, 'VC HB');
+    formatted = formatted.replace(/VCKM/g, 'VC KM');
+    formatted = formatted.replace(/VCDV/g, 'VC DV');
+    
+    return formatted;
+  }
+
+  /**
    * Tính và trả về ma_ck05 (Thanh toán voucher) dựa trên productType và trackInventory
    * @param sale - Sale object (có thể có customer.brand)
    * @returns Loại VC: "VCDV" | "VCHB" | "VCKM" | "FBV TT VCDV" | "FBV TT VCHB" | null
@@ -51,12 +75,9 @@ export class SalesService {
       return null;
     }
 
-    // Lấy brand để phân biệt logic
-    const brand = sale.customer?.brand || '';
-    let brandLower = (brand || '').toLowerCase().trim();
-    // Normalize: "facialbar" → "f3"
-    if (brandLower === 'facialbar') {
-      brandLower = 'f3';
+    let cucThueValue = sale.cucThue || '';
+    if (cucThueValue.includes('F3')) {
+      cucThueValue = 'FBV';
     }
 
     // Lấy productType và trackInventory từ sale hoặc product
@@ -110,7 +131,7 @@ export class SalesService {
 
     // Với F3, thêm prefix "FBV TT" trước VC label
     // Và chuyển tất cả VCHB hoặc VCHH thành VCHH
-    if (brandLower === 'f3') {
+    if (cucThueValue === 'FBV') {
       let finalVcLabel = normalizedVcLabel;
       // Xử lý cả "VCHB" và "VC HB" (có khoảng trắng) - chuyển thành VCHH
       if (finalVcLabel.includes('VCHB') || finalVcLabel.includes('VC HB')) {
@@ -426,6 +447,474 @@ export class SalesService {
     }
     // Mặc định: nếu không có thông tin → dùng so_serial
     return false;
+  }
+
+  /**
+   * Fetch products từ Loyalty API
+   */
+  private async fetchLoyaltyProducts(itemCodes: string[]): Promise<Map<string, any>> {
+    const productMap = new Map<string, any>();
+    if (itemCodes.length === 0) return productMap;
+
+    const productPromises = itemCodes.map(async (itemCode) => {
+      try {
+        const response = await this.httpService.axiosRef.get(
+          `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
+          { headers: { accept: 'application/json' } },
+        );
+        const loyaltyProduct = response?.data?.data?.item || response?.data;
+        return { itemCode, loyaltyProduct };
+      } catch (error) {
+        this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
+        return { itemCode, loyaltyProduct: null };
+      }
+    });
+    
+    const results = await Promise.all(productPromises);
+    results.forEach(({ itemCode, loyaltyProduct }) => {
+      if (loyaltyProduct) {
+        productMap.set(itemCode, loyaltyProduct);
+      }
+    });
+
+    return productMap;
+  }
+
+  /**
+   * Fetch departments từ Loyalty API
+   */
+  private async fetchLoyaltyDepartments(branchCodes: string[]): Promise<Map<string, any>> {
+    const departmentMap = new Map<string, any>();
+    if (branchCodes.length === 0) return departmentMap;
+
+    const departmentPromises = branchCodes.map(async (branchCode) => {
+      try {
+        const response = await this.httpService.axiosRef.get(
+          `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+          { headers: { accept: 'application/json' } },
+        );
+        const department = response?.data?.data?.items?.[0];
+        return { branchCode, department };
+      } catch (error) {
+        this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+        return { branchCode, department: null };
+      }
+    });
+    
+    const results = await Promise.all(departmentPromises);
+    results.forEach(({ branchCode, department }) => {
+      if (department) {
+        departmentMap.set(branchCode, department);
+      }
+    });
+
+    return departmentMap;
+  }
+
+  /**
+   * Tính toán các field phức tạp cho sale: maLo, maCtkmTangHang, muaHangCkVip
+   */
+  private calculateSaleFields(
+    sale: any,
+    loyaltyProduct: any,
+    department: any,
+    branchCode: string | null
+  ): {
+    maLo: string;
+    maCtkmTangHang: string | null;
+    muaHangCkVip: string;
+    maKho: string | null;
+    isTangHang: boolean;
+    isDichVu: boolean;
+    promCodeDisplay: string | null;
+  } {
+    const maBp = department?.ma_bp || branchCode || null;
+    const maKho = this.calculateMaKho(sale.ordertype, maBp) || sale.maKho || branchCode || null;
+
+    // Tính toán maCtkmTangHang
+    // Lấy tienHang từ các nguồn (không dùng revenue vì revenue có thể khác 0 cho hàng tặng)
+    const tienHang = Number(sale.tienHang || sale.linetotal || 0);
+    const qty = Number(sale.qty || 0);
+    let giaBan = Number(sale.giaBan || 0);
+    if (giaBan === 0 && tienHang != null && qty > 0) {
+      giaBan = tienHang / qty;
+    }
+    const revenue = Number(sale.revenue || 0);
+    // Hàng tặng: giaBan = 0 và tienHang = 0 (revenue có thể > 0 nên không kiểm tra revenue)
+    // Sử dụng Math.abs để tránh vấn đề với số thập phân nhỏ
+    const isTangHang = Math.abs(giaBan) < 0.01 && Math.abs(tienHang) < 0.01;
+    
+    // Kiểm tra dịch vụ
+    const ordertypeName = sale.ordertype || '';
+    const isDichVu = ordertypeName.includes('02. Làm dịch vụ') ||
+      ordertypeName.includes('04. Đổi DV') ||
+      ordertypeName.includes('08. Tách thẻ') ||
+      ordertypeName.includes('Đổi thẻ KEEP->Thẻ DV');
+    
+    // Tính toán maCtkmTangHang TRƯỚC (cần dùng cho promCodeDisplay)
+    // Lấy maCtkmTangHang từ sale (có thể đã có sẵn từ database hoặc tính toán trước đó)
+    let maCtkmTangHang: string | null = sale.maCtkmTangHang ? String(sale.maCtkmTangHang).trim() : null;
+    if (!maCtkmTangHang || maCtkmTangHang === '') {
+      maCtkmTangHang = null;
+    }
+    // Nếu chưa có maCtkmTangHang và là hàng tặng, tính toán nó
+    if (isTangHang && !maCtkmTangHang) {
+      if (ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư')) {
+        maCtkmTangHang = 'TT DAU TU';
+      } else if (
+        (ordertypeName.includes('01.Thường') || ordertypeName.includes('01. Thường')) ||
+        (ordertypeName.includes('07. Bán tài khoản') || ordertypeName.includes('07.Bán tài khoản')) ||
+        (ordertypeName.includes('9. Sàn TMDT') || ordertypeName.includes('9.Sàn TMDT'))
+      ) {
+        const tangSpCode = this.convertPromCodeToTangSp(sale.promCode, sale.docDate);
+        maCtkmTangHang = tangSpCode || this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
+      } else {
+        maCtkmTangHang = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
+      }
+      // Trim lại sau khi tính toán
+      if (maCtkmTangHang) {
+        maCtkmTangHang = maCtkmTangHang.trim();
+      }
+    }
+
+    // Tính toán promCodeDisplay (giá trị hiển thị cho cột promCode) - SAU KHI đã tính maCtkmTangHang
+    // Logic: Nếu là hàng tặng, không phải dịch vụ, và có maCtkmTangHang (không phải "TT DAU TU") → hiển thị "1"
+    let promCodeDisplay: string | null = null;
+    if (isTangHang && !isDichVu) {
+      // Kiểm tra maCtkmTangHang: nếu có giá trị (từ database hoặc tính toán) và không phải "TT DAU TU" → hiển thị "1"
+      const maCtkmTangHangStr = maCtkmTangHang ? String(maCtkmTangHang).trim() : '';
+      if (maCtkmTangHangStr && maCtkmTangHangStr !== 'TT DAU TU') {
+        promCodeDisplay = '1';
+      }
+    }
+
+    // Tính toán muaHangCkVip nếu chưa có
+    let muaHangCkVip = sale.muaHangCkVip || '';
+    const ck03_nt = Number(sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0);
+    if (ck03_nt > 0 && !muaHangCkVip) {
+      const customerBrand = sale.customer?.brand || null;
+      let brandLower = (customerBrand || '').toLowerCase().trim();
+      if (brandLower === 'facialbar') {
+        brandLower = 'f3';
+      }
+
+      const productType = sale.productType || loyaltyProduct?.producttype || loyaltyProduct?.productType || null;
+      if (brandLower === 'f3') {
+        muaHangCkVip = productType === 'DIVU' ? 'FBV CKVIP DV' : 'FBV CKVIP SP';
+      } else {
+        const materialCode = loyaltyProduct?.materialCode || sale.itemCode || null;
+        const code = sale.itemCode || null;
+        const trackInventory = loyaltyProduct?.trackInventory ?? sale.trackInventory ?? null;
+        const trackSerial = loyaltyProduct?.trackSerial ?? sale.trackSerial ?? null;
+        muaHangCkVip = this.calculateVipType(productType, materialCode, code, trackInventory, trackSerial);
+      }
+    }
+
+    // Tính toán maLo từ serial nếu chưa có
+    let maLo = sale.maLo || '';
+    if (!maLo) {
+      const serial = sale.serial || '';
+      if (serial) {
+        const brand = sale.customer?.brand || '';
+        const brandLower = (brand || '').toLowerCase().trim();
+        const underscoreIndex = serial.indexOf('_');
+        if (underscoreIndex > 0 && underscoreIndex < serial.length - 1) {
+          maLo = serial.substring(underscoreIndex + 1);
+        } else {
+          const productType = sale.productType || loyaltyProduct?.producttype || loyaltyProduct?.productType || null;
+          const trackBatch = loyaltyProduct?.trackBatch === true || sale.trackInventory === true;
+          if (trackBatch) {
+            if (brandLower === 'f3') {
+              maLo = serial;
+            } else {
+              const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
+              if (productTypeUpper === 'TPCN') {
+                maLo = serial.length >= 8 ? serial.slice(-8) : serial;
+              } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
+                maLo = serial.length >= 4 ? serial.slice(-4) : serial;
+              } else {
+                maLo = serial.length >= 4 ? serial.slice(-4) : serial;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return { maLo, maCtkmTangHang, muaHangCkVip, maKho, isTangHang, isDichVu, promCodeDisplay };
+  }
+
+  /**
+   * Format sale object để trả về frontend
+   */
+  /**
+   * Tính toán các field display phức tạp cho frontend
+   */
+  private calculateDisplayFields(sale: any, order: any, loyaltyProduct: any, department: any): {
+    thanhToanCouponDisplay: string | null;
+    chietKhauThanhToanCouponDisplay: number | null;
+    thanhToanVoucherDisplay: string | null;
+    chietKhauThanhToanVoucherDisplay: number | null;
+    voucherDp1Display: string | null;
+    chietKhauVoucherDp1Display: number | null;
+    thanhToanTkTienAoDisplay: string | null;
+    chietKhauThanhToanTkTienAoDisplay: number | null;
+    soSerialDisplay: string | null;
+    cucThueDisplay: string | null;
+    tkDoanhThuDisplay: string | null;
+    tkGiaVonDisplay: string | null;
+  } {
+    // Helper: Kiểm tra voucher dự phòng
+    const isVoucherDuPhong = (brand: string, soSource: string | null | undefined, promCode: string | null | undefined, pkgCode: string | null | undefined): boolean => {
+      let brandLower = (brand || '').toLowerCase().trim();
+      if (brandLower === 'facialbar') brandLower = 'f3';
+      const isShopee = Boolean(soSource && String(soSource).toUpperCase() === 'SHOPEE');
+      const hasPromCode = Boolean(promCode && promCode.trim() !== '');
+      const hasPkgCode = Boolean(pkgCode && pkgCode.trim() !== '');
+      if (brandLower === 'f3') {
+        return isShopee;
+      }
+      return isShopee || (hasPromCode && !hasPkgCode);
+    };
+
+    // Helper: Kiểm tra ECOIN
+    const hasEcoin = (orderData: any): boolean => {
+      const chietKhauTkTienAo = orderData.cashioTotalIn ?? 0;
+      const isEcoin = orderData.cashioFopSyscode === 'ECOIN';
+      return chietKhauTkTienAo > 0 || (isEcoin && (orderData.cashioTotalIn ?? 0) > 0);
+    };
+
+    const brand = order?.customer?.brand || order?.brand || sale?.customer?.brand || '';
+    const brandLower = brand.toLowerCase().trim();
+    const normalizedBrand = brandLower === 'facialbar' ? 'f3' : brandLower;
+
+    // thanhToanCouponDisplay
+    const maCoupon = sale.maCk04 || (sale.thanhToanCoupon && sale.thanhToanCoupon > 0 ? 'COUPON' : null);
+    const thanhToanCouponDisplay = maCoupon || null;
+
+    // chietKhauThanhToanCouponDisplay
+    const chietKhauCoupon = sale.chietKhauThanhToanCoupon ?? sale.chietKhau09 ?? 0;
+    const chietKhauThanhToanCouponDisplay = chietKhauCoupon > 0 ? chietKhauCoupon : null;
+
+    // thanhToanVoucherDisplay và chietKhauThanhToanVoucherDisplay
+    let thanhToanVoucherDisplay: string | null = null;
+    let chietKhauThanhToanVoucherDisplay: number | null = null;
+    if (!hasEcoin(order)) {
+      const chietKhauVoucherDp1 = Number(sale.chietKhauVoucherDp1 ?? 0) || 0;
+      const pkgCode = sale.pkg_code || sale.pkgCode || null;
+      const promCode = sale.promCode || null;
+      const soSource = sale.order_source || sale.so_source || null;
+      const paidByVoucher = Number(sale.paid_by_voucher_ecode_ecoin_bp ?? sale.chietKhauThanhToanVoucher ?? 0) || 0;
+      const isVoucherDuPhongValue = isVoucherDuPhong(brand, soSource, promCode, pkgCode);
+
+      if (chietKhauVoucherDp1 > 0 && !isVoucherDuPhongValue) {
+        // Chuyển sang voucher chính
+        const saleForVoucher = {
+          ...sale,
+          paid_by_voucher_ecode_ecoin_bp: chietKhauVoucherDp1,
+          customer: order?.customer || sale.customer,
+          brand: order?.customer?.brand || order?.brand || sale?.customer?.brand || sale?.brand,
+          product: loyaltyProduct,
+        };
+        const maCk05Value = this.calculateMaCk05(saleForVoucher);
+        thanhToanVoucherDisplay = this.formatVoucherCode(maCk05Value);
+        chietKhauThanhToanVoucherDisplay = chietKhauVoucherDp1;
+      } else if (isVoucherDuPhongValue && paidByVoucher > 0) {
+        // Voucher dự phòng - không hiển thị
+        thanhToanVoucherDisplay = null;
+        chietKhauThanhToanVoucherDisplay = null;
+      } else if (paidByVoucher > 0) {
+        const saleForVoucher = {
+          ...sale,
+          paid_by_voucher_ecode_ecoin_bp: paidByVoucher,
+          customer: order?.customer || sale.customer,
+          brand: order?.customer?.brand || order?.brand || sale?.customer?.brand || sale?.brand,
+          product: loyaltyProduct,
+        };
+        const maCk05Value = this.calculateMaCk05(saleForVoucher);
+        thanhToanVoucherDisplay = this.formatVoucherCode(maCk05Value);
+        chietKhauThanhToanVoucherDisplay = paidByVoucher;
+      }
+    }
+
+    // voucherDp1Display và chietKhauVoucherDp1Display
+    let voucherDp1Display: string | null = null;
+    let chietKhauVoucherDp1Display: number | null = null;
+    const pkgCode = sale.pkg_code || sale.pkgCode || null;
+    const promCode = sale.promCode || null;
+    const soSource = sale.order_source || sale.so_source || null;
+    const paidByVoucher = sale.paid_by_voucher_ecode_ecoin_bp ?? 0;
+    const chietKhauVoucherDp1Value = sale.chietKhauVoucherDp1 ?? 0;
+    const isVoucherDuPhongValue = isVoucherDuPhong(brand, soSource, promCode, pkgCode);
+
+    if (chietKhauVoucherDp1Value > 0 && !isVoucherDuPhongValue) {
+      // Không hiển thị voucher dự phòng nếu không phải voucher dự phòng
+      voucherDp1Display = null;
+      chietKhauVoucherDp1Display = null;
+    } else if (isVoucherDuPhongValue && (chietKhauVoucherDp1Value > 0 || paidByVoucher > 0)) {
+      voucherDp1Display = 'VC CTKM SÀN';
+      let chietKhauVoucherDp1Final = chietKhauVoucherDp1Value;
+      if (chietKhauVoucherDp1Final === 0 && isVoucherDuPhongValue && paidByVoucher > 0) {
+        chietKhauVoucherDp1Final = paidByVoucher;
+      }
+      chietKhauVoucherDp1Display = chietKhauVoucherDp1Final > 0 ? chietKhauVoucherDp1Final : null;
+    }
+
+    // thanhToanTkTienAoDisplay và chietKhauThanhToanTkTienAoDisplay
+    let thanhToanTkTienAoDisplay: string | null = null;
+    let chietKhauThanhToanTkTienAoDisplay: number | null = null;
+    const chietKhauTkTienAo = sale.chietKhauThanhToanTkTienAo ?? 0;
+    const vPaidForEcoin = sale.paid_by_voucher_ecode_ecoin_bp ?? 0;
+    if (chietKhauTkTienAo > 0) {
+      thanhToanTkTienAoDisplay = this.generateTkTienAoLabel(order);
+      chietKhauThanhToanTkTienAoDisplay = chietKhauTkTienAo;
+    } else if (vPaidForEcoin > 0 && order?.cashioData && Array.isArray(order.cashioData)) {
+      const ecoinCashio = order.cashioData.find((c: any) => c.fop_syscode === 'ECOIN');
+      if (ecoinCashio && ecoinCashio.total_in && parseFloat(String(ecoinCashio.total_in)) > 0) {
+        thanhToanTkTienAoDisplay = this.generateTkTienAoLabel(order);
+        chietKhauThanhToanTkTienAoDisplay = parseFloat(String(ecoinCashio.total_in)) || null;
+      }
+    }
+
+    // soSerialDisplay
+    let soSerialDisplay: string | null = null;
+    const trackSerial = loyaltyProduct?.trackSerial === true;
+    const trackBatch = loyaltyProduct?.trackBatch === true;
+    const serial = sale.serial || '';
+    if (serial && serial.indexOf('_') <= 0 && trackSerial && !trackBatch) {
+      soSerialDisplay = serial || null;
+    }
+
+    // cucThueDisplay
+    const cucThueDisplay = sale.cucThue || (normalizedBrand === 'f3' ? 'FBV' : null);
+
+    // tkDoanhThuDisplay và tkGiaVonDisplay
+    const deptType = department?.type?.toLowerCase()?.trim();
+    let tkDoanhThuDisplay = '-';
+    let tkGiaVonDisplay = '-';
+    if (deptType === 'bán lẻ') {
+      tkDoanhThuDisplay = loyaltyProduct?.tkDoanhThuBanLe || '-';
+      tkGiaVonDisplay = loyaltyProduct?.tkGiaVonBanLe || '-';
+    } else if (deptType === 'bán buôn') {
+      tkDoanhThuDisplay = loyaltyProduct?.tkDoanhThuBanBuon || '-';
+      tkGiaVonDisplay = loyaltyProduct?.tkGiaVonBanBuon || '-';
+    } else {
+      tkDoanhThuDisplay = loyaltyProduct?.tkDoanhThuBanLe || loyaltyProduct?.tkDoanhThuBanBuon || '-';
+      tkGiaVonDisplay = loyaltyProduct?.tkGiaVonBanLe || loyaltyProduct?.tkGiaVonBanBuon || '-';
+    }
+
+    return {
+      thanhToanCouponDisplay,
+      chietKhauThanhToanCouponDisplay,
+      thanhToanVoucherDisplay,
+      chietKhauThanhToanVoucherDisplay,
+      voucherDp1Display,
+      chietKhauVoucherDp1Display,
+      thanhToanTkTienAoDisplay,
+      chietKhauThanhToanTkTienAoDisplay,
+      soSerialDisplay,
+      cucThueDisplay,
+      tkDoanhThuDisplay,
+      tkGiaVonDisplay,
+    };
+  }
+
+  private formatSaleForFrontend(
+    sale: any,
+    loyaltyProduct: any,
+    department: any,
+    calculatedFields: { maLo: string; maCtkmTangHang: string | null; muaHangCkVip: string; maKho: string | null; isTangHang: boolean; isDichVu: boolean; promCodeDisplay: string | null },
+    order?: any
+  ): any {
+    // Tính toán giaBan nếu chưa có
+    const tienHang = sale.tienHang || sale.linetotal || sale.revenue || 0;
+    const qty = sale.qty || 0;
+    let giaBan = sale.giaBan || 0;
+    if (giaBan === 0 && tienHang != null && qty > 0) {
+      giaBan = tienHang / qty;
+    }
+
+    // Tính toán muaHangGiamGiaDisplay
+    let muaHangGiamGiaDisplay: string | null = null;
+    if (!calculatedFields.isTangHang) {
+      muaHangGiamGiaDisplay = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
+    }
+
+    // Tính toán các field display phức tạp
+    const displayFields = this.calculateDisplayFields(sale, order || { customer: sale.customer, cashioData: sale.cashioData, cashioFopSyscode: sale.cashioFopSyscode, cashioTotalIn: sale.cashioTotalIn, brand: sale.brand }, loyaltyProduct, department);
+
+    return {
+      ...sale,
+      itemName: sale.itemName || loyaltyProduct?.name || null,
+      maKho: calculatedFields.maKho,
+      maCtkmTangHang: calculatedFields.maCtkmTangHang,
+      muaHangCkVip: calculatedFields.muaHangCkVip,
+      maLo: calculatedFields.maLo,
+      isTangHang: calculatedFields.isTangHang,
+      isDichVu: calculatedFields.isDichVu,
+      promCodeDisplay: calculatedFields.promCodeDisplay,
+      muaHangGiamGiaDisplay: muaHangGiamGiaDisplay,
+      giaBan: giaBan, // Đảm bảo giaBan đã được tính toán
+      promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
+      // Các field display từ calculateDisplayFields
+      ...displayFields,
+      producttype: loyaltyProduct?.producttype || loyaltyProduct?.productType || sale.productType || null,
+      productType: loyaltyProduct?.productType || loyaltyProduct?.producttype || sale.productType || null,
+      product: loyaltyProduct ? {
+        ...loyaltyProduct,
+        producttype: loyaltyProduct.producttype || loyaltyProduct.productType || null,
+        productType: loyaltyProduct.productType || loyaltyProduct.producttype || null,
+        dvt: loyaltyProduct.unit || null,
+        maVatTu: loyaltyProduct.materialCode || sale.itemCode,
+        trackInventory: loyaltyProduct.trackInventory ?? null,
+        trackSerial: loyaltyProduct.trackSerial ?? null,
+        trackBatch: loyaltyProduct.trackBatch ?? null,
+      } : null,
+      department: department,
+      dvt: loyaltyProduct?.unit || sale.dvt || null,
+    };
+  }
+
+  /**
+   * Enrich orders với cashio data
+   */
+  private async enrichOrdersWithCashio(orders: any[]): Promise<any[]> {
+    const docCodes = orders.map(o => o.docCode);
+    if (docCodes.length === 0) return orders;
+
+    const cashioRecords = await this.dailyCashioRepository
+      .createQueryBuilder('cashio')
+      .where('cashio.so_code IN (:...docCodes)', { docCodes })
+      .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
+      .getMany();
+
+    const cashioMap = new Map<string, DailyCashio[]>();
+    docCodes.forEach(docCode => {
+      const matchingCashios = cashioRecords.filter(c =>
+        c.so_code === docCode || c.master_code === docCode
+      );
+      if (matchingCashios.length > 0) {
+        cashioMap.set(docCode, matchingCashios);
+      }
+    });
+
+    return orders.map(order => {
+      const cashioRecords = cashioMap.get(order.docCode) || [];
+      const ecoinCashio = cashioRecords.find(c => c.fop_syscode === 'ECOIN');
+      const voucherCashio = cashioRecords.find(c => c.fop_syscode === 'VOUCHER');
+      const selectedCashio = ecoinCashio || voucherCashio || cashioRecords[0] || null;
+
+      return {
+        ...order,
+        cashioData: cashioRecords.length > 0 ? cashioRecords : null,
+        cashioFopSyscode: selectedCashio?.fop_syscode || null,
+        cashioFopDescription: selectedCashio?.fop_description || null,
+        cashioCode: selectedCashio?.code || null,
+        cashioMasterCode: selectedCashio?.master_code || null,
+        cashioTotalIn: selectedCashio?.total_in || null,
+        cashioTotalOut: selectedCashio?.total_out || null,
+      };
+    });
   }
 
   constructor(
@@ -804,7 +1293,6 @@ export class SalesService {
         dateFrom: startDate,
         dateTo: endDate,
       });
-      this.logger.debug(`[findAllOrders] Brand filter without date - limiting to last 30 days: ${startDate.toISOString()} to ${endDate.toISOString()}`);
     }
 
     const totalResult = await countQuery.getRawOne();
@@ -814,86 +1302,86 @@ export class SalesService {
 
     // Dùng getMany() để lấy đầy đủ entity data với customer relation
     const fullQuery = this.saleRepository
-      .createQueryBuilder('sale')
-      .leftJoinAndSelect('sale.customer', 'customer')
-      .orderBy('sale.docDate', 'DESC')
-      .addOrderBy('sale.docCode', 'ASC')
-      .addOrderBy('sale.id', 'ASC');
-    
+        .createQueryBuilder('sale')
+        .leftJoinAndSelect('sale.customer', 'customer')
+        .orderBy('sale.docDate', 'DESC')
+        .addOrderBy('sale.docCode', 'ASC')
+        .addOrderBy('sale.id', 'ASC');
+      
     // Apply filters
-    if (isProcessed !== undefined) {
+      if (isProcessed !== undefined) {
       fullQuery.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
-    }
-    if (statusAsys !== undefined) {
+      }
+      if (statusAsys !== undefined) {
       fullQuery.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
-    }
-    if (brand) {
+      }
+      if (brand) {
       fullQuery.andWhere('customer.brand = :brand', { brand });
-    }
-    if (search && search.trim() !== '') {
-      const searchPattern = `%${search.trim().toLowerCase()}%`;
+      }
+      if (search && search.trim() !== '') {
+        const searchPattern = `%${search.trim().toLowerCase()}%`;
       fullQuery.andWhere(
-        '(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, \'\')) LIKE :search OR LOWER(COALESCE(customer.code, \'\')) LIKE :search OR LOWER(COALESCE(customer.mobile, \'\')) LIKE :search)',
-        { search: searchPattern }
-      );
-    }
-    
-    // Apply date filters
-    let hasDateFilter = false;
-    if (dateFrom || dateTo) {
-      hasDateFilter = true;
-      if (dateFrom && dateTo) {
-        const startDate = new Date(dateFrom);
-        startDate.setHours(0, 0, 0, 0);
-        const endDate = new Date(dateTo);
-        endDate.setHours(23, 59, 59, 999);
+          '(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, \'\')) LIKE :search OR LOWER(COALESCE(customer.code, \'\')) LIKE :search OR LOWER(COALESCE(customer.mobile, \'\')) LIKE :search)',
+          { search: searchPattern }
+        );
+      }
+      
+      // Apply date filters
+      let hasDateFilter = false;
+      if (dateFrom || dateTo) {
+        hasDateFilter = true;
+        if (dateFrom && dateTo) {
+          const startDate = new Date(dateFrom);
+          startDate.setHours(0, 0, 0, 0);
+          const endDate = new Date(dateTo);
+          endDate.setHours(23, 59, 59, 999);
         fullQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+            dateFrom: startDate,
+            dateTo: endDate,
+          });
+        } else if (dateFrom) {
+          const startDate = new Date(dateFrom);
+          startDate.setHours(0, 0, 0, 0);
+        fullQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
+        } else if (dateTo) {
+          const endDate = new Date(dateTo);
+          endDate.setHours(23, 59, 59, 999);
+        fullQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
+        }
+      } else if (date) {
+        hasDateFilter = true;
+        const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+        if (dateMatch) {
+          const [, day, monthStr, year] = dateMatch;
+          const monthMap: { [key: string]: number } = {
+            JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+            JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+          };
+          const month = monthMap[monthStr.toUpperCase()];
+          if (month !== undefined) {
+            const dateObj = new Date(parseInt(year), month, parseInt(day));
+            const startOfDay = new Date(dateObj);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(dateObj);
+            endOfDay.setHours(23, 59, 59, 999);
+          fullQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+              dateFrom: startOfDay,
+              dateTo: endOfDay,
+            });
+          }
+        }
+      } else if (brand && !hasDateFilter) {
+        const endDate = new Date();
+        endDate.setHours(23, 59, 59, 999);
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30);
+        startDate.setHours(0, 0, 0, 0);
+      fullQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
           dateFrom: startDate,
           dateTo: endDate,
         });
-      } else if (dateFrom) {
-        const startDate = new Date(dateFrom);
-        startDate.setHours(0, 0, 0, 0);
-        fullQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
-      } else if (dateTo) {
-        const endDate = new Date(dateTo);
-        endDate.setHours(23, 59, 59, 999);
-        fullQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
       }
-    } else if (date) {
-      hasDateFilter = true;
-      const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
-      if (dateMatch) {
-        const [, day, monthStr, year] = dateMatch;
-        const monthMap: { [key: string]: number } = {
-          JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
-          JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
-        };
-        const month = monthMap[monthStr.toUpperCase()];
-        if (month !== undefined) {
-          const dateObj = new Date(parseInt(year), month, parseInt(day));
-          const startOfDay = new Date(dateObj);
-          startOfDay.setHours(0, 0, 0, 0);
-          const endOfDay = new Date(dateObj);
-          endOfDay.setHours(23, 59, 59, 999);
-          fullQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
-            dateFrom: startOfDay,
-            dateTo: endOfDay,
-          });
-        }
-      }
-    } else if (brand && !hasDateFilter) {
-      const endDate = new Date();
-      endDate.setHours(23, 59, 59, 999);
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 30);
-      startDate.setHours(0, 0, 0, 0);
-      fullQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
-        dateFrom: startDate,
-        dateTo: endDate,
-      });
-    }
-
+      
     // Nếu export mode, không paginate, lấy tất cả
     // Nếu không phải export mode, phân trang bình thường
     if (!isExport) {
@@ -903,7 +1391,6 @@ export class SalesService {
     
     const allSales = await fullQuery.getMany();
     
-    this.logger.debug(`[findAllOrders] Query executed, returned ${allSales.length} records`);
 
     // Nếu export mode, trả về sales items riêng lẻ (không group)
     if (isExport) {
@@ -995,12 +1482,11 @@ export class SalesService {
       allSalesData.push(sale);
     }
 
-    // Enrich sales với products và departments từ Loyalty API
-    // Collect tất cả itemCodes và branchCodes cần fetch
+    // Fetch products và departments từ Loyalty API
     const itemCodes = Array.from(
       new Set(
         allSalesData
-          .filter((sale) => sale.statusAsys !== false) // Bỏ qua đơn lỗi
+          .filter((sale) => sale.statusAsys !== false)
           .map((sale) => sale.itemCode)
           .filter((code): code is string => !!code && code.trim() !== '')
       )
@@ -1014,55 +1500,10 @@ export class SalesService {
       )
     );
 
-    // Fetch products từ Loyalty API
-    const loyaltyProductMap = new Map<string, any>();
-    if (itemCodes.length > 0) {
-      const productPromises = itemCodes.map(async (itemCode) => {
-        try {
-          const response = await this.httpService.axiosRef.get(
-            `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-            { headers: { accept: 'application/json' } },
-          );
-          const loyaltyProduct = response?.data?.data?.item || response?.data;
-          return { itemCode, loyaltyProduct };
-        } catch (error) {
-          this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
-          return { itemCode, loyaltyProduct: null };
-        }
-      });
-      
-      const productResults = await Promise.all(productPromises);
-      productResults.forEach(({ itemCode, loyaltyProduct }) => {
-        if (loyaltyProduct) {
-          loyaltyProductMap.set(itemCode, loyaltyProduct);
-        }
-      });
-    }
-
-    // Fetch departments từ Loyalty API
-    const departmentMap = new Map<string, any>();
-    if (branchCodes.length > 0) {
-      const departmentPromises = branchCodes.map(async (branchCode) => {
-        try {
-          const response = await this.httpService.axiosRef.get(
-            `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-            { headers: { accept: 'application/json' } },
-          );
-          const department = response?.data?.data?.items?.[0];
-          return { branchCode, department };
-        } catch (error) {
-          this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
-          return { branchCode, department: null };
-        }
-      });
-      
-      const departmentResults = await Promise.all(departmentPromises);
-      departmentResults.forEach(({ branchCode, department }) => {
-        if (department) {
-          departmentMap.set(branchCode, department);
-        }
-      });
-    }
+    const [loyaltyProductMap, departmentMap] = await Promise.all([
+      this.fetchLoyaltyProducts(itemCodes),
+      this.fetchLoyaltyDepartments(branchCodes),
+    ]);
 
     // Enrich sales với products, departments và tính toán các field phức tạp
     const enrichedSalesMap = new Map<string, any[]>();
@@ -1072,121 +1513,11 @@ export class SalesService {
         enrichedSalesMap.set(docCode, []);
       }
 
-      const itemCode = sale.itemCode;
-      const branchCode = sale.branchCode;
-      const department = branchCode ? departmentMap.get(branchCode) || null : null;
-      const loyaltyProduct = itemCode ? loyaltyProductMap.get(itemCode) : null;
-      const maBp = department?.ma_bp || branchCode || null;
-      const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBp);
-
-      // Tính toán maCtkmTangHang
-      const tienHang = sale.tienHang || sale.linetotal || sale.revenue || 0;
-      const qty = sale.qty || 0;
-      let giaBan = sale.giaBan || 0;
-      if (giaBan === 0 && tienHang != null && qty > 0) {
-        giaBan = tienHang / qty;
-      }
-      const revenue = sale.revenue || 0;
-      const isTangHang = giaBan === 0 && tienHang === 0 && revenue === 0;
-
-      let maCtkmTangHang: string | null = sale.maCtkmTangHang || null;
-      if (isTangHang && !maCtkmTangHang) {
-        const ordertypeName = sale.ordertype || '';
-        if (ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư')) {
-          maCtkmTangHang = 'TT DAU TU';
-        } else if (
-          (ordertypeName.includes('01.Thường') || ordertypeName.includes('01. Thường')) ||
-          (ordertypeName.includes('07. Bán tài khoản') || ordertypeName.includes('07.Bán tài khoản')) ||
-          (ordertypeName.includes('9. Sàn TMDT') || ordertypeName.includes('9.Sàn TMDT'))
-        ) {
-          const docDate = sale.docDate;
-          const tangSpCode = this.convertPromCodeToTangSp(sale.promCode, docDate);
-          maCtkmTangHang = tangSpCode || this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
-        } else {
-          maCtkmTangHang = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
-        }
-      }
-
-      // Tính toán muaHangCkVip nếu chưa có
-      let muaHangCkVip = sale.muaHangCkVip || '';
-      const ck03_nt = Number(sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0);
-      if (ck03_nt > 0 && !muaHangCkVip) {
-        const customerBrand = sale.customer?.brand || null;
-        let brandLower = (customerBrand || '').toLowerCase().trim();
-        if (brandLower === 'facialbar') {
-          brandLower = 'f3';
-        }
-
-        const productType = sale.productType || loyaltyProduct?.producttype || loyaltyProduct?.productType || null;
-        if (brandLower === 'f3') {
-          if (productType === 'DIVU') {
-            muaHangCkVip = 'FBV CKVIP DV';
-          } else {
-            muaHangCkVip = 'FBV CKVIP SP';
-          }
-        } else {
-          const materialCode = loyaltyProduct?.materialCode || sale.itemCode || null;
-          const code = sale.itemCode || null;
-          const trackInventory = loyaltyProduct?.trackInventory ?? sale.trackInventory ?? null;
-          const trackSerial = loyaltyProduct?.trackSerial ?? sale.trackSerial ?? null;
-          muaHangCkVip = this.calculateVipType(productType, materialCode, code, trackInventory, trackSerial);
-        }
-      }
-
-      // Tính toán maLo từ serial nếu chưa có
-      let maLo = sale.maLo || '';
-      if (!maLo) {
-        const serial = sale.serial || '';
-        if (serial) {
-          const brand = sale.customer?.brand || '';
-          const brandLower = (brand || '').toLowerCase().trim();
-          const underscoreIndex = serial.indexOf('_');
-          if (underscoreIndex > 0 && underscoreIndex < serial.length - 1) {
-            maLo = serial.substring(underscoreIndex + 1);
-          } else {
-            const productType = sale.productType || loyaltyProduct?.producttype || loyaltyProduct?.productType || null;
-            const trackBatch = loyaltyProduct?.trackBatch === true || sale.trackInventory === true;
-            if (trackBatch) {
-              if (brandLower === 'f3') {
-                maLo = serial;
-              } else {
-                const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
-                if (productTypeUpper === 'TPCN') {
-                  maLo = serial.length >= 8 ? serial.slice(-8) : serial;
-                } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
-                  maLo = serial.length >= 4 ? serial.slice(-4) : serial;
-                } else {
-                  maLo = serial.length >= 4 ? serial.slice(-4) : serial;
-                }
-              }
-            }
-          }
-        }
-      }
-
-      const enrichedSale = {
-        ...sale,
-        itemName: sale.itemName || loyaltyProduct?.name || null,
-        maKho: calculatedMaKho || sale.maKho || branchCode || null,
-        maCtkmTangHang: maCtkmTangHang,
-        muaHangCkVip: muaHangCkVip,
-        maLo: maLo,
-        promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
-        producttype: loyaltyProduct?.producttype || loyaltyProduct?.productType || sale.productType || null,
-        productType: loyaltyProduct?.productType || loyaltyProduct?.producttype || sale.productType || null,
-        product: loyaltyProduct ? {
-          ...loyaltyProduct,
-          producttype: loyaltyProduct.producttype || loyaltyProduct.productType || null,
-          productType: loyaltyProduct.productType || loyaltyProduct.producttype || null,
-          dvt: loyaltyProduct.unit || null,
-          maVatTu: loyaltyProduct.materialCode || itemCode,
-          trackInventory: loyaltyProduct.trackInventory ?? null,
-          trackSerial: loyaltyProduct.trackSerial ?? null,
-          trackBatch: loyaltyProduct.trackBatch ?? null,
-        } : null,
-        department: department,
-        dvt: loyaltyProduct?.unit || sale.dvt || null,
-      };
+      const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
+      const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
+      const calculatedFields = this.calculateSaleFields(sale, loyaltyProduct, department, sale.branchCode);
+      const order = orderMap.get(sale.docCode);
+      const enrichedSale = this.formatSaleForFrontend(sale, loyaltyProduct, department, calculatedFields, order);
 
       enrichedSalesMap.get(docCode)!.push(enrichedSale);
     }
@@ -1204,61 +1535,16 @@ export class SalesService {
       return new Date(b.docDate).getTime() - new Date(a.docDate).getTime();
     });
 
-    // Join với daily_cashio để lấy cashio data cho mỗi order
-    // Join dựa trên: cashio.so_code = sales.docCode HOẶC cashio.master_code = sales.docCode
-    const docCodes = orders.map(o => o.docCode);
-    const cashioMap = new Map<string, DailyCashio[]>();
-    if (docCodes.length > 0) {
-      const cashioRecords = await this.dailyCashioRepository
-        .createQueryBuilder('cashio')
-        .where('cashio.so_code IN (:...docCodes)', { docCodes })
-        .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
-        .getMany();
-
-      // Group cashio records by docCode (so_code hoặc master_code match với docCode)
-      docCodes.forEach(docCode => {
-        const matchingCashios = cashioRecords.filter(c =>
-          c.so_code === docCode || c.master_code === docCode
-        );
-        if (matchingCashios.length > 0) {
-          cashioMap.set(docCode, matchingCashios);
-        }
-      });
-    }
-
     // Enrich orders với cashio data
-    const enrichedOrders = orders.map(order => {
-      const cashioRecords = cashioMap.get(order.docCode) || [];
-      // Ưu tiên ECOIN, sau đó VOUCHER, sau đó các loại khác
-      const ecoinCashio = cashioRecords.find(c => c.fop_syscode === 'ECOIN');
-      const voucherCashio = cashioRecords.find(c => c.fop_syscode === 'VOUCHER');
-      const selectedCashio = ecoinCashio || voucherCashio || cashioRecords[0] || null;
+    const enrichedOrders = await this.enrichOrdersWithCashio(orders);
 
-      return {
-        ...order,
-        cashioData: cashioRecords.length > 0 ? cashioRecords : null,
-        cashioFopSyscode: selectedCashio?.fop_syscode || null,
-        cashioFopDescription: selectedCashio?.fop_description || null,
-        cashioCode: selectedCashio?.code || null,
-        cashioMasterCode: selectedCashio?.master_code || null,
-        cashioTotalIn: selectedCashio?.total_in || null,
-        cashioTotalOut: selectedCashio?.total_out || null,
-      };
-    });
-
-    // Trả về tất cả orders đã group
-    // Vì đã lấy đúng số sale items với limit và offset rồi, nên chỉ cần trả về tất cả orders đã group
-    // Frontend sẽ tự paginate lại dựa trên số rows (totalItems) của mỗi order
-    // GIỚI HẠN: chỉ trả về tối đa số orders bằng limit * 2 để tránh quá tải
-    // (vì mỗi order có thể có nhiều sale items, nên số orders có thể nhiều hơn limit)
-    const maxOrders = limit * 2; // Cho phép tối đa 2x limit orders
+    // Giới hạn số orders trả về
+    const maxOrders = limit * 2;
     const limitedOrders = enrichedOrders.slice(0, maxOrders);
-    
-    this.logger.debug(`[findAllOrders] Returning ${limitedOrders.length} orders (limit: ${limit}, total sale items: ${totalSaleItems})`);
 
     return {
       data: limitedOrders,
-      total: totalSaleItems, // Tổng số sale items (rows)
+      total: totalSaleItems,
       page,
       limit,
       totalPages: Math.ceil(totalSaleItems / limit),
@@ -1363,7 +1649,6 @@ export class SalesService {
       }
 
       // Count total
-      this.logger.debug(`[getStatusAsys] Count query: ${countQuery.getSql()}`);
       const totalCount = await countQuery.getCount();
 
       // Apply pagination và order
@@ -1372,7 +1657,6 @@ export class SalesService {
         .skip(skip)
         .take(limitNumber);
 
-      this.logger.debug(`[getStatusAsys] Data query: ${query.getSql()}`);
       const sales = await query.getMany();
 
       return {
@@ -3064,8 +3348,10 @@ export class SalesService {
         const saleWithCustomer = {
           ...sale,
           customer: sale.customer || orderData.customer,
+          brand: sale.customer?.brand || orderData.customer?.brand || sale?.brand || orderData?.brand,
         };
         const maCk05Value = this.calculateMaCk05(saleWithCustomer);
+        const formattedMaCk05 = this.formatVoucherCode(maCk05Value);
         const ck06_nt = 0; // Dự phòng 1 - không sử dụng
         const ck07_nt = toNumber(sale.chietKhauVoucherDp2, 0);
         const ck08_nt = toNumber(sale.chietKhauVoucherDp3, 0);
@@ -3392,7 +3678,7 @@ export class SalesService {
           ck04_nt: Number(ck04_nt),
           // ma_ck05: Thanh toán voucher (String, max 32 ký tự)
           ...(ck05_nt > 0 ? {
-            ma_ck05: limitString(maCk05Value || toString(sale.maCk05 || 'VOUCHER', ''), 32),
+            ma_ck05: limitString(formattedMaCk05 || toString(sale.maCk05 || 'VOUCHER', ''), 32),
           } : {}),
           // ck05_nt: Tiền (Decimal)
           ck05_nt: Number(ck05_nt),
@@ -4108,7 +4394,7 @@ export class SalesService {
       // Kiểm tra xem có phân trang không (cần cả page và limit, và phải là số hợp lệ)
       const hasPagination = page !== undefined && page !== null && limit !== undefined && limit !== null && !isNaN(page) && !isNaN(limit);
       const skip = hasPagination ? (page! - 1) * limit! : 0;
- 
+
       // Ưu tiên lọc theo khoảng ngày nếu có dateFrom / dateTo, fallback về date (1 ngày)
       const hasDateRange = !!(dateFrom || dateTo);
       const dateParam = date;
@@ -4124,10 +4410,10 @@ export class SalesService {
           if (dateFrom === dateTo) {
             baseSalesQuery = baseSalesQuery.andWhere('DATE(sale.docDate) = DATE(:dateFrom)', { dateFrom });
           } else {
-            baseSalesQuery = baseSalesQuery.andWhere('sale.docDate BETWEEN :dateFrom AND :dateTo', {
-              dateFrom,
-              dateTo,
-            });
+          baseSalesQuery = baseSalesQuery.andWhere('sale.docDate BETWEEN :dateFrom AND :dateTo', {
+            dateFrom,
+            dateTo,
+          });
           }
         } else if (dateFrom) {
           baseSalesQuery = baseSalesQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom });
@@ -4226,10 +4512,10 @@ export class SalesService {
           if (dateFrom === dateTo) {
             checkFaceIdQuery = checkFaceIdQuery.andWhere('DATE(checkFaceId.date) = DATE(:dateFrom)', { dateFrom });
           } else {
-            checkFaceIdQuery = checkFaceIdQuery.andWhere(
-              'checkFaceId.date BETWEEN :dateFrom AND :dateTo',
-              { dateFrom, dateTo },
-            );
+          checkFaceIdQuery = checkFaceIdQuery.andWhere(
+            'checkFaceId.date BETWEEN :dateFrom AND :dateTo',
+            { dateFrom, dateTo },
+          );
           }
         } else if (dateFrom) {
           checkFaceIdQuery = checkFaceIdQuery.andWhere('checkFaceId.date >= :dateFrom', { dateFrom });
@@ -4297,7 +4583,7 @@ export class SalesService {
       const ordersMap = new Map<string, Order>();
       for (const sale of allSalesWithCustomer) {
         if (!ordersMap.has(sale.docCode)) {
-          const customer = sale.customer;
+            const customer = sale.customer;
           const orderCustomer = customer
             ? {
               code: customer.code,
@@ -4314,25 +4600,25 @@ export class SalesService {
               birthday: customer.birthday ? customer.birthday.toISOString().split('T')[0] : undefined,
               grade_name: customer.grade_name,
               branch_code: customer.branch_code,
-            }
+              }
             : null;
 
           ordersMap.set(sale.docCode, {
-            docCode: sale.docCode,
-            docDate: sale.docDate.toISOString(),
-            branchCode: sale.branchCode,
-            docSourceType: sale.docSourceType || 'sale',
-            customer: orderCustomer as any,
-            totalRevenue: 0,
-            totalQty: 0,
-            totalItems: 0,
-            isProcessed: sale.isProcessed,
-            sales: [],
-          });
-        }
+              docCode: sale.docCode,
+              docDate: sale.docDate.toISOString(),
+              branchCode: sale.branchCode,
+              docSourceType: sale.docSourceType || 'sale',
+              customer: orderCustomer as any,
+              totalRevenue: 0,
+              totalQty: 0,
+              totalItems: 0,
+              isProcessed: sale.isProcessed,
+              sales: [],
+            });
+          }
 
         const order = ordersMap.get(sale.docCode)!;
-        order.sales = order.sales || [];
+          order.sales = order.sales || [];
 
         const slimSale: SaleItem = {
           id: (sale as any).id,
@@ -4346,8 +4632,8 @@ export class SalesService {
         const qty = typeof sale.qty === 'string' ? parseFloat(sale.qty) || 0 : (sale.qty || 0);
         order.totalRevenue += revenue;
         order.totalQty += qty;
-        order.totalItems += 1;
-      }
+          order.totalItems += 1;
+        }
 
       // 6) Build items: group orders theo partnerCode và xác định isCheckFaceId
       const items: Array<{

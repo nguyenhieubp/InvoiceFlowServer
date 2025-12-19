@@ -77,19 +77,24 @@ export class FastApiInvoiceFlowService {
       // Collect tất cả mã CTKM từ detail (ma_ck01, ma_ck02, ..., ma_ck22, ma_ctkm_th)
       if (invoiceData.detail && Array.isArray(invoiceData.detail)) {
         for (const item of invoiceData.detail) {
-          // Collect ma_ctkm_th (mã CTKM tặng hàng)
+          // Collect ma_ctkm_th (mã CTKM tặng hàng) - không áp dụng getPromotionCodeToCheck
           if (item.ma_ctkm_th && item.ma_ctkm_th.trim() !== '' && item.ma_ctkm_th !== 'TT DAU TU') {
-            const codeToCheck = getPromotionCodeToCheck(item.ma_ctkm_th);
+            const codeToCheck = item.ma_ctkm_th.trim();
             if (codeToCheck) {
               promotionCodes.add(codeToCheck);
             }
           }
           
           // Collect các mã CTKM mua hàng giảm giá (ma_ck01 đến ma_ck22)
+          // Lưu ý: ma_ck05 (Thanh toán voucher) không phải promotion code nên không cần validate
           for (let i = 1; i <= 22; i++) {
+            // Bỏ qua ma_ck05 (Thanh toán voucher) - không cần validate với Loyalty API
+            if (i === 5) continue;
+            
             const maCk = item[`ma_ck${i.toString().padStart(2, '0')}`];
             if (maCk && maCk.trim() !== '') {
-              const codeToCheck = getPromotionCodeToCheck(maCk);
+              // Chỉ áp dụng getPromotionCodeToCheck cho ma_ck01
+              const codeToCheck = i === 1 ? getPromotionCodeToCheck(maCk) : maCk.trim();
               if (codeToCheck) {
                 promotionCodes.add(codeToCheck);
               }
