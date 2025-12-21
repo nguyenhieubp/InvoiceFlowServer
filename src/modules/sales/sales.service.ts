@@ -4875,8 +4875,6 @@ export class SalesService {
     const { brand, isProcessed, date, dateFrom, dateTo, search, statusAsys } = options;
 
     try {
-      this.logger.debug(`[exportOrders] Starting export with filters: ${JSON.stringify(options)}`);
-
       // Limit số records để tránh quá tải
       const MAX_EXPORT_RECORDS = 100000;
 

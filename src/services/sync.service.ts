@@ -43,118 +43,6 @@ export class SyncService {
     private salesService: SalesService,
   ) {}
 
-  /**
-   * Đồng bộ toàn bộ đơn hàng (tất cả brand) cho một khoảng ngày cố định.
-   * Mốc đồng bộ: từ 01/10/2025 đến 30/11/2025 (31/11 không tồn tại).
-   *
-   * Lưu ý: hàm này không được expose ra API, chỉ gọi thủ công khi cần backfill dữ liệu.
-   */
-  async syncAllBrandsRange_01OctTo30Nov2025(): Promise<void> {
-    // 01/10/2025
-    const start = new Date(2025, 9, 1); // month 9 = October
-    // 30/11/2025
-    const end = new Date(2025, 10, 30); // month 10 = November
-
-    const formatToDDMMMYYYY = (d: Date): string => {
-      const day = d.getDate().toString().padStart(2, '0');
-      const monthIdx = d.getMonth(); // 0-based
-      const year = d.getFullYear();
-      const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-      const monthStr = months[monthIdx];
-      return `${day}${monthStr}${year}`;
-    };
-
-    let current = new Date(start.getTime());
-    while (current <= end) {
-      const dateStr = formatToDDMMMYYYY(current);
-      this.logger.log(`[Backfill] Bắt đầu đồng bộ tất cả brand cho ngày ${dateStr}`);
-      try {
-        await this.syncAllBrands(dateStr);
-        this.logger.log(`[Backfill] Hoàn thành đồng bộ tất cả brand cho ngày ${dateStr}`);
-      } catch (error: any) {
-        this.logger.error(
-          `[Backfill] Lỗi khi đồng bộ tất cả brand cho ngày ${dateStr}: ${error?.message || error}`,
-        );
-      }
-      // Tăng 1 ngày
-      current.setDate(current.getDate() + 1);
-    }
-  }
-
-  async syncAllBrands(date: string): Promise<{
-    success: boolean;
-    message: string;
-    ordersCount: number;
-    salesCount: number;
-    customersCount: number;
-    invoiceSuccessCount?: number;
-    invoiceFailureCount?: number;
-    errors?: string[];
-    invoiceErrors?: string[];
-  }> {
-    const brands = ['f3', 'labhair', 'yaman', 'menard']; // Các brand có Zappy API
-    const allErrors: string[] = [];
-    let totalOrdersCount = 0;
-    let totalSalesCount = 0;
-    let totalCustomersCount = 0;
-    let totalInvoiceSuccessCount = 0;
-    let totalInvoiceFailureCount = 0;
-    const totalInvoiceErrors: string[] = [];
-
-    // Delay giữa các brand để giảm tải (1 phút)
-    const delayBetweenBrands = 60000; // 60 seconds (1 minute)
-
-    for (let i = 0; i < brands.length; i++) {
-      const brand = brands[i];
-      try {
-        this.logger.log(`Bắt đầu đồng bộ brand ${brand} (${i + 1}/${brands.length}) cho ngày ${date}`);
-        const result = await this.syncBrand(brand, date);
-        totalOrdersCount += result.ordersCount;
-        totalSalesCount += result.salesCount;
-        totalCustomersCount += result.customersCount;
-        totalInvoiceSuccessCount += result.invoiceSuccessCount || 0;
-        totalInvoiceFailureCount += result.invoiceFailureCount || 0;
-        if (result.invoiceErrors) {
-          totalInvoiceErrors.push(...result.invoiceErrors);
-        }
-        if (result.errors) {
-          allErrors.push(...result.errors);
-        }
-        this.logger.log(`Hoàn thành đồng bộ brand ${brand} cho ngày ${date}`);
-        
-        // Thêm delay trước khi đồng bộ brand tiếp theo (trừ brand cuối cùng)
-        if (i < brands.length - 1) {
-          this.logger.log(`Chờ ${delayBetweenBrands / 1000} giây trước khi đồng bộ brand tiếp theo...`);
-          await new Promise(resolve => setTimeout(resolve, delayBetweenBrands));
-        }
-      } catch (error: any) {
-        const errorMsg = `Lỗi khi đồng bộ ${brand} cho ngày ${date}: ${error?.message || error}`;
-        this.logger.error(errorMsg);
-        allErrors.push(errorMsg);
-        
-        // Vẫn thêm delay ngay cả khi có lỗi để tránh quá tải
-        if (i < brands.length - 1) {
-          this.logger.log(`Chờ ${delayBetweenBrands / 1000} giây trước khi đồng bộ brand tiếp theo...`);
-          await new Promise(resolve => setTimeout(resolve, delayBetweenBrands));
-        }
-      }
-    }
-
-    return {
-      success: allErrors.length === 0,
-      message: allErrors.length === 0
-        ? `Đồng bộ tất cả nhãn hàng thành công cho ngày ${date}`
-        : `Đồng bộ tất cả nhãn hàng hoàn thành với ${allErrors.length} lỗi cho ngày ${date}`,
-      ordersCount: totalOrdersCount,
-      salesCount: totalSalesCount,
-      customersCount: totalCustomersCount,
-      invoiceSuccessCount: totalInvoiceSuccessCount,
-      invoiceFailureCount: totalInvoiceFailureCount,
-      invoiceErrors: totalInvoiceErrors,
-      errors: allErrors.length > 0 ? allErrors : undefined,
-    };
-  }
-
   async syncBrand(brandName: string, date: string): Promise<{
     success: boolean;
     message: string;
@@ -891,31 +779,31 @@ export class SyncService {
       }
 
 
-      // Tự động tạo hóa đơn cho tất cả các đơn hàng vừa đồng bộ (chạy ngầm ở background)
+      // Tạm thời comment: Tự động tạo hóa đơn cho tất cả các đơn hàng vừa đồng bộ (chạy ngầm ở background)
       // Chỉ tạo invoice cho các đơn hàng trong ngày sync (từ orders vừa sync)
       // Lấy docCodes từ các orders vừa sync, sau đó kiểm tra xem có sales được lưu không
-      const orderDocCodes = [...new Set(orders.map(order => order.docCode).filter((code: string) => code))];
+      // const orderDocCodes = [...new Set(orders.map(order => order.docCode).filter((code: string) => code))];
       
       // Kiểm tra xem các đơn hàng này có sales được lưu trong database không
       // (để tránh lỗi khi order không có sales nào được lưu do filter dvt)
-      const savedDocCodes = await this.saleRepository
-        .createQueryBuilder('sale')
-        .select('DISTINCT sale.docCode', 'docCode')
-        .where('sale.docCode IN (:...docCodes)', { docCodes: orderDocCodes })
-        .andWhere('sale.isProcessed = :isProcessed', { isProcessed: false })
-        .getRawMany();
+      // const savedDocCodes = await this.saleRepository
+      //   .createQueryBuilder('sale')
+      //   .select('DISTINCT sale.docCode', 'docCode')
+      //   .where('sale.docCode IN (:...docCodes)', { docCodes: orderDocCodes })
+      //   .andWhere('sale.isProcessed = :isProcessed', { isProcessed: false })
+      //   .getRawMany();
       
-      const docCodes = savedDocCodes.map((item: any) => item.docCode).filter((code: string) => code);
+      // const docCodes = savedDocCodes.map((item: any) => item.docCode).filter((code: string) => code);
       
       // Tạo invoice ở background (không await) để trả về response ngay
-      if (docCodes.length > 0) {
-        this.logger.log(`Bắt đầu tạo hóa đơn ngầm cho ${docCodes.length} đơn hàng...`);
-        
-        // Chạy ở background, không await
-        this.createInvoicesInBackground(docCodes, date).catch((error) => {
-          this.logger.error(`Lỗi khi tạo hóa đơn ngầm: ${error?.message || error}`);
-        });
-      }
+      // if (docCodes.length > 0) {
+      //   this.logger.log(`Bắt đầu tạo hóa đơn ngầm cho ${docCodes.length} đơn hàng...`);
+      //   
+      //   // Chạy ở background, không await
+      //   this.createInvoicesInBackground(docCodes, date).catch((error) => {
+      //     this.logger.error(`Lỗi khi tạo hóa đơn ngầm: ${error?.message || error}`);
+      //   });
+      // }
 
       // Sync checkFaceID data từ API
       try {
@@ -925,10 +813,10 @@ export class SyncService {
         // Không throw error, chỉ log warning vì đây là tính năng bổ sung
       }
 
-      // Trả về response ngay sau khi đồng bộ sale xong (không đợi tạo invoice)
+      // Trả về response ngay sau khi đồng bộ sale xong
       return {
         success: errors.length === 0,
-        message: `Đồng bộ thành công ${orders.length} đơn hàng cho ngày ${date}. Đang tạo hóa đơn ngầm cho ${docCodes.length} đơn hàng...`,
+        message: `Đồng bộ thành công ${orders.length} đơn hàng cho ngày ${date}`,
         ordersCount: orders.length,
         salesCount,
         customersCount,
