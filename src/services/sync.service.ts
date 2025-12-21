@@ -8,6 +8,7 @@ import { DailyCashio } from '../entities/daily-cashio.entity';
 import { CheckFaceId } from '../entities/check-face-id.entity';
 import { StockTransfer } from '../entities/stock-transfer.entity';
 import { ZappyApiService } from './zappy-api.service';
+import { LoyaltyService } from './loyalty.service';
 import { SalesService } from '../modules/sales/sales.service';
 
 @Injectable()
@@ -42,6 +43,7 @@ export class SyncService {
     private stockTransferRepository: Repository<StockTransfer>,
     private httpService: HttpService,
     private zappyApiService: ZappyApiService,
+    private loyaltyService: LoyaltyService,
     @Inject(forwardRef(() => SalesService))
     private salesService: SalesService,
   ) {}
@@ -351,66 +353,34 @@ export class SyncService {
                 const trimmedItemCode = itemCode?.trim();
                 if (!trimmedItemCode) return;
                 
-                let loyaltyProduct: any = null;
-                let isNotFound = false;
+                // Fetch product từ Loyalty API sử dụng LoyaltyService
+                const loyaltyProduct = await this.loyaltyService.checkProduct(trimmedItemCode);
                 
-                // Fetch product từ Loyalty API endpoint /products/code/
-                try {
-                  const response = await this.httpService.axiosRef.get(
-                    `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(trimmedItemCode)}`,
-                    { 
-                      headers: { accept: 'application/json' },
-                      timeout: 5000, // 5 seconds timeout
-                    },
-                  );
-                  // Xử lý response: /products/code/ trả về {message, data: {item: {...}}}
-                  loyaltyProduct = response?.data?.data?.item || response?.data?.data || response?.data;
-                  // Nếu có data hợp lệ, sản phẩm tồn tại
-                  if (loyaltyProduct && (loyaltyProduct.id || loyaltyProduct.code)) {
-                    this.logger.log(`[Loyalty API] Tìm thấy sản phẩm ${trimmedItemCode} tại /products/code/`);
-                    return;
-                  }
-                  // Nếu response 200 nhưng không có data hợp lệ → coi là not found
-                  isNotFound = true;
-                  this.logger.warn(`[Loyalty API] Sản phẩm không tồn tại: ${trimmedItemCode} (Response 200 nhưng không có data hợp lệ) - Sẽ bỏ qua sale item này`);
-                } catch (error: any) {
-                  if (error?.response?.status === 404) {
-                    // 404 → sản phẩm không tồn tại
-                    isNotFound = true;
-                    this.logger.warn(`[Loyalty API] Sản phẩm không tồn tại: ${trimmedItemCode} (404 Not Found) - Sẽ bỏ qua sale item này`);
-                  } else {
-                    // Lỗi khác 404 - không coi là not found, có thể là network error
-                    this.logger.warn(`[Loyalty API] Lỗi khi fetch product ${trimmedItemCode} từ /products/code/: ${error?.message || error?.response?.status || 'Unknown error'}`);
-                    return; // Không phải 404, không đánh dấu not found
-                  }
-                }
-                
-                // Đánh dấu not found khi 404 hoặc response 200 nhưng không có data hợp lệ
-                if (isNotFound) {
+                // Nếu không tìm thấy, đánh dấu not found
+                if (!loyaltyProduct) {
                   notFoundItemCodes.add(trimmedItemCode);
                   this.logger.log(`[Sync] Đã thêm ${trimmedItemCode} vào danh sách bỏ qua (notFoundItemCodes size: ${notFoundItemCodes.size})`);
+                  return;
                 }
                 
                 // Nếu có dữ liệu từ Loyalty API, lưu vào maps
-                if (loyaltyProduct) {
-                  if (loyaltyProduct?.unit) {
-                    productDvtMap.set(itemCode, loyaltyProduct.unit);
-                  }
-                  // Lưu productType từ Loyalty API
-                  if (loyaltyProduct?.productType || loyaltyProduct?.producttype) {
-                    productTypeMap.set(itemCode, loyaltyProduct.productType || loyaltyProduct.producttype);
-                  }
-                  // Lưu materialCode từ Loyalty API
-                  if (loyaltyProduct?.materialCode) {
-                    productMaterialCodeMap.set(itemCode, loyaltyProduct.materialCode);
-                  }
-                  // Lưu trackInventory và trackSerial từ Loyalty API
-                  if (loyaltyProduct?.trackInventory !== undefined) {
-                    productTrackInventoryMap.set(itemCode, loyaltyProduct.trackInventory === true);
-                  }
-                  if (loyaltyProduct?.trackSerial !== undefined) {
-                    productTrackSerialMap.set(itemCode, loyaltyProduct.trackSerial === true);
-                  }
+                if (loyaltyProduct?.unit) {
+                  productDvtMap.set(itemCode, loyaltyProduct.unit);
+                }
+                // Lưu productType từ Loyalty API
+                if (loyaltyProduct?.productType || loyaltyProduct?.producttype) {
+                  productTypeMap.set(itemCode, loyaltyProduct.productType || loyaltyProduct.producttype);
+                }
+                // Lưu materialCode từ Loyalty API
+                if (loyaltyProduct?.materialCode) {
+                  productMaterialCodeMap.set(itemCode, loyaltyProduct.materialCode);
+                }
+                // Lưu trackInventory và trackSerial từ Loyalty API
+                if (loyaltyProduct?.trackInventory !== undefined) {
+                  productTrackInventoryMap.set(itemCode, loyaltyProduct.trackInventory === true);
+                }
+                if (loyaltyProduct?.trackSerial !== undefined) {
+                  productTrackSerialMap.set(itemCode, loyaltyProduct.trackSerial === true);
                 }
               }),
             );

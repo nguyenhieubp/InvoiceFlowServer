@@ -5,6 +5,7 @@ import { SyncService } from '../../services/sync.service';
 import { SyncController } from './sync.controller';
 import { SyncTask } from '../../tasks/sync.task';
 import { ZappyApiService } from '../../services/zappy-api.service';
+import { LoyaltyService } from '../../services/loyalty.service';
 import { SalesModule } from '../sales/sales.module';
 import { Customer } from '../../entities/customer.entity';
 import { Sale } from '../../entities/sale.entity';
@@ -19,7 +20,7 @@ import { StockTransfer } from '../../entities/stock-transfer.entity';
     forwardRef(() => SalesModule),
   ],
   controllers: [SyncController],
-  providers: [SyncService, SyncTask, ZappyApiService],
+  providers: [SyncService, SyncTask, ZappyApiService, LoyaltyService],
   exports: [SyncService],
 })
 export class SyncModule {}

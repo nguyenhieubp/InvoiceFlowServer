@@ -16,6 +16,7 @@ import { ZappyApiService } from '../../services/zappy-api.service';
 import { FastApiService } from '../../services/fast-api.service';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { CategoriesService } from '../categories/categories.service';
+import { LoyaltyService } from '../../services/loyalty.service';
 import { Order, SaleItem } from '../../types/order.types';
 import { CreateStockTransferDto, StockTransferItem } from '../../dto/create-stock-transfer.dto';
 import { ExplainFaceIdDto } from '../../dto/explain-faceid.dto';
@@ -553,33 +554,10 @@ export class SalesService {
 
   /**
    * Fetch products từ Loyalty API
+   * @deprecated Sử dụng loyaltyService.fetchProducts() thay thế
    */
   private async fetchLoyaltyProducts(itemCodes: string[]): Promise<Map<string, any>> {
-    const productMap = new Map<string, any>();
-    if (itemCodes.length === 0) return productMap;
-
-    const productPromises = itemCodes.map(async (itemCode) => {
-      try {
-        const response = await this.httpService.axiosRef.get(
-          `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-          { headers: { accept: 'application/json' } },
-        );
-        const loyaltyProduct = response?.data?.data?.item || response?.data;
-        return { itemCode, loyaltyProduct };
-      } catch (error) {
-        this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
-        return { itemCode, loyaltyProduct: null };
-      }
-    });
-
-    const results = await Promise.all(productPromises);
-    results.forEach(({ itemCode, loyaltyProduct }) => {
-      if (loyaltyProduct) {
-        productMap.set(itemCode, loyaltyProduct);
-      }
-    });
-
-    return productMap;
+    return this.loyaltyService.fetchProducts(itemCodes);
   }
 
   /**
@@ -1021,6 +999,7 @@ export class SalesService {
     private fastApiService: FastApiService,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private categoriesService: CategoriesService,
+    private loyaltyService: LoyaltyService,
   ) { }
 
   async findAll(options: {
@@ -1184,30 +1163,8 @@ export class SalesService {
           )
         );
 
-        const loyaltyProductMap = new Map<string, any>();
-        // Fetch parallel thay vì sequential
-        if (itemCodes.length > 0) {
-          const productPromises = itemCodes.map(async (itemCode) => {
-            try {
-              const response = await this.httpService.axiosRef.get(
-                `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-                { headers: { accept: 'application/json' } },
-              );
-              const loyaltyProduct = response?.data?.data?.item || response?.data;
-              return { itemCode, loyaltyProduct };
-            } catch (error) {
-              this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
-              return { itemCode, loyaltyProduct: null };
-            }
-          });
-
-          const productResults = await Promise.all(productPromises);
-          productResults.forEach(({ itemCode, loyaltyProduct }) => {
-            if (loyaltyProduct) {
-              loyaltyProductMap.set(itemCode, loyaltyProduct);
-            }
-          });
-        }
+        // Fetch products từ Loyalty API sử dụng LoyaltyService
+        const loyaltyProductMap = await this.loyaltyService.fetchProducts(itemCodes);
 
         // Thêm promotionDisplayCode, maKho, maCtkmTangHang và producttype vào các sales items
         const enrichedOrders = paginatedOrders.map((order) => ({
@@ -1758,6 +1715,7 @@ export class SalesService {
   /**
    * Đồng bộ lại đơn lỗi - check lại với Loyalty API
    * Nếu tìm thấy trong Loyalty, cập nhật itemCode (mã vật tư) và statusAsys = true
+   * Xử lý theo batch từ database để tránh load quá nhiều vào memory
    */
   async syncErrorOrders(): Promise<{
     total: number;
@@ -1767,64 +1725,24 @@ export class SalesService {
   }> {
     this.logger.log('[syncErrorOrders] Bắt đầu đồng bộ lại đơn lỗi...');
 
-    // Lấy tất cả sales có statusAsys = false, null, hoặc undefined
-    // Sử dụng Or để match cả false, null, và undefined
-    const errorSales = await this.saleRepository.find({
+    // Đếm tổng số records cần xử lý
+    const totalCount = await this.saleRepository.count({
       where: [
         { statusAsys: false },
         { statusAsys: IsNull() },
       ],
-      order: { createdAt: 'DESC' },
     });
 
-    this.logger.log(`[syncErrorOrders] Tìm thấy ${errorSales.length} đơn lỗi cần check lại`);
+    this.logger.log(`[syncErrorOrders] Tìm thấy ${totalCount} đơn lỗi cần check lại`);
 
     let successCount = 0;
     let failCount = 0;
     const updated: Array<{ id: string; docCode: string; itemCode: string; oldItemCode: string; newItemCode: string }> = [];
 
-    // Xử lý theo batch để tối ưu performance
-    const BATCH_SIZE = 100; // Xử lý 100 sales mỗi batch
+    // Cấu hình batch size
+    const DB_BATCH_SIZE = 500; // Load 500 records từ DB mỗi lần
+    const PROCESS_BATCH_SIZE = 100; // Xử lý 100 sales mỗi batch trong memory
     const CONCURRENT_LIMIT = 10; // Chỉ gọi 10 API cùng lúc để tránh quá tải
-
-    // Helper function để check product từ Loyalty API
-    const checkProduct = async (itemCode: string): Promise<any> => {
-      // Thử endpoint /products/code/ trước
-      try {
-        const response = await this.httpService.axiosRef.get(
-          `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-          {
-            headers: { accept: 'application/json' },
-            timeout: 5000,
-          },
-        );
-        // Parse response: endpoint /products/code/ trả về data.item
-        const product = response?.data?.data?.item || response?.data?.data || response?.data;
-        if (product) {
-          return product;
-        }
-      } catch (error: any) {
-        // Nếu 404, thử fallback
-        if (error?.response?.status === 404) {
-          // Thử fallback /products/old-code/
-          try {
-            const fallbackResponse = await this.httpService.axiosRef.get(
-              `https://loyaltyapi.vmt.vn/products/old-code/${encodeURIComponent(itemCode)}`,
-              {
-                headers: { accept: 'application/json' },
-                timeout: 5000,
-              },
-            );
-            // Parse response: endpoint /products/old-code/ trả về trực tiếp object
-            return fallbackResponse?.data || null;
-          } catch (fallbackError: any) {
-            // Cả 2 endpoint đều không tìm thấy
-            return null;
-          }
-        }
-      }
-      return null;
-    };
 
     // Helper function để xử lý một sale
     const processSale = async (sale: any): Promise<{ success: boolean; update?: { id: string; docCode: string; itemCode: string; oldItemCode: string; newItemCode: string } }> => {
@@ -1834,7 +1752,7 @@ export class SalesService {
           return { success: false };
         }
 
-        const product = await checkProduct(itemCode);
+        const product = await this.loyaltyService.checkProduct(itemCode);
 
         if (product && product.materialCode) {
           // Tìm thấy trong Loyalty - cập nhật
@@ -1876,33 +1794,75 @@ export class SalesService {
       return results;
     };
 
-    // Xử lý từng batch
-    for (let i = 0; i < errorSales.length; i += BATCH_SIZE) {
-      const batch = errorSales.slice(i, i + BATCH_SIZE);
-      this.logger.log(`[syncErrorOrders] Đang xử lý batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(errorSales.length / BATCH_SIZE)} (${batch.length} sales)`);
+    // Xử lý từng batch từ database
+    // Sau mỗi batch, query lại từ đầu vì các records đã xử lý (statusAsys = true) 
+    // sẽ không còn trong query nữa, nên không cần cursor
+    let processedCount = 0;
+    let dbBatchNumber = 0;
 
-      // Xử lý batch với giới hạn concurrent
-      const batchResults = await processBatchConcurrent(batch, CONCURRENT_LIMIT);
+    while (true) {
+      dbBatchNumber++;
+      
+      // Load batch từ database (luôn query từ đầu, vì records đã xử lý sẽ không còn trong query)
+      const dbBatch = await this.saleRepository.find({
+        where: [
+          { statusAsys: false },
+          { statusAsys: IsNull() },
+        ],
+        order: { createdAt: 'DESC' },
+        take: DB_BATCH_SIZE,
+      });
 
-      // Cập nhật counters
-      for (const result of batchResults) {
-        if (result.success && result.update) {
-          successCount++;
-          updated.push(result.update);
-          this.logger.debug(`[syncErrorOrders] ✅ Cập nhật sale ${result.update.id} (${result.update.docCode}): ${result.update.oldItemCode} → ${result.update.newItemCode}`);
-        } else {
-          failCount++;
-        }
+      if (dbBatch.length === 0) {
+        break; // Không còn records nào
       }
 
-      // Log progress
-      this.logger.log(`[syncErrorOrders] Tiến độ: ${Math.min(i + BATCH_SIZE, errorSales.length)}/${errorSales.length} (${successCount} thành công, ${failCount} thất bại)`);
+      this.logger.log(`[syncErrorOrders] Đã load batch ${dbBatchNumber} từ DB: ${dbBatch.length} records (Tổng đã xử lý: ${processedCount}/${totalCount})`);
+
+      // Xử lý batch này theo từng nhóm nhỏ
+      for (let i = 0; i < dbBatch.length; i += PROCESS_BATCH_SIZE) {
+        const processBatch = dbBatch.slice(i, i + PROCESS_BATCH_SIZE);
+        const processBatchNumber = Math.floor(i / PROCESS_BATCH_SIZE) + 1;
+        const totalProcessBatches = Math.ceil(dbBatch.length / PROCESS_BATCH_SIZE);
+        
+        this.logger.log(`[syncErrorOrders] Đang xử lý batch ${processBatchNumber}/${totalProcessBatches} trong DB batch ${dbBatchNumber} (${processBatch.length} sales)`);
+
+        // Xử lý batch với giới hạn concurrent
+        const batchResults = await processBatchConcurrent(processBatch, CONCURRENT_LIMIT);
+
+        // Cập nhật counters
+        for (const result of batchResults) {
+          if (result.success && result.update) {
+            successCount++;
+            updated.push(result.update);
+            this.logger.debug(`[syncErrorOrders] ✅ Cập nhật sale ${result.update.id} (${result.update.docCode}): ${result.update.oldItemCode} → ${result.update.newItemCode}`);
+          } else {
+            failCount++;
+          }
+        }
+
+        processedCount += processBatch.length;
+
+        // Log progress - cập nhật totalCount vì có thể thay đổi khi có records mới
+        const currentTotal = await this.saleRepository.count({
+          where: [
+            { statusAsys: false },
+            { statusAsys: IsNull() },
+          ],
+        });
+        this.logger.log(`[syncErrorOrders] Tiến độ: ${processedCount} đã xử lý, ${currentTotal} còn lại (${successCount} thành công, ${failCount} thất bại)`);
+      }
+
+      // Nếu batch nhỏ hơn DB_BATCH_SIZE, có nghĩa là đã hết records
+      if (dbBatch.length < DB_BATCH_SIZE) {
+        break;
+      }
     }
 
-    this.logger.log(`[syncErrorOrders] Hoàn thành: ${successCount} thành công, ${failCount} thất bại`);
+    this.logger.log(`[syncErrorOrders] Hoàn thành: ${successCount} thành công, ${failCount} thất bại (Tổng: ${processedCount} records)`);
 
     return {
-      total: errorSales.length,
+      total: processedCount,
       success: successCount,
       failed: failCount,
       updated,
@@ -1956,58 +1916,8 @@ export class SalesService {
           continue;
         }
 
-        // Check với Loyalty API - thử /products/code/ trước, nếu không có thì thử /products/old-code/
-        let product: any = null;
-
-        // Thử endpoint /products/code/ trước
-        try {
-          const response = await this.httpService.axiosRef.get(
-            `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-            {
-              headers: { accept: 'application/json' },
-              timeout: 5000,
-            },
-          );
-          // Parse response: endpoint /products/code/ trả về data.item
-          product = response?.data?.data?.item || response?.data?.data || response?.data;
-          if (product) {
-            // Tìm thấy tại /products/code/
-            this.logger.log(`[syncErrorOrderByDocCode] Tìm thấy sản phẩm ${itemCode} tại /products/code/`);
-          }
-        } catch (error: any) {
-          // Nếu 404, thử fallback
-          if (error?.response?.status === 404) {
-            this.logger.warn(`[syncErrorOrderByDocCode] Sản phẩm không tìm thấy tại /products/code/: ${itemCode} (404), thử /products/old-code/...`);
-          } else {
-            // Lỗi khác 404 - không coi là not found
-            this.logger.warn(`[syncErrorOrderByDocCode] Lỗi khi fetch product ${itemCode} từ /products/code/: ${error?.message || error?.response?.status || 'Unknown error'}`);
-          }
-        }
-
-        // Nếu /products/code/ không tìm thấy, thử fallback /products/old-code/
-        if (!product) {
-          try {
-            const fallbackResponse = await this.httpService.axiosRef.get(
-              `https://loyaltyapi.vmt.vn/products/old-code/${encodeURIComponent(itemCode)}`,
-              {
-                headers: { accept: 'application/json' },
-                timeout: 5000,
-              },
-            );
-            // Parse response: endpoint /products/old-code/ trả về trực tiếp object (không có wrapper data.item)
-            product = fallbackResponse?.data || null;
-            if (product) {
-              // Tìm thấy tại fallback endpoint
-              this.logger.log(`[syncErrorOrderByDocCode] Tìm thấy sản phẩm ${itemCode} tại /products/old-code/`);
-            }
-          } catch (fallbackError: any) {
-            if (fallbackError?.response?.status === 404) {
-              this.logger.warn(`[syncErrorOrderByDocCode] Sản phẩm không tìm thấy tại cả /products/code/ và /products/old-code/: ${itemCode}`);
-            } else {
-              this.logger.warn(`[syncErrorOrderByDocCode] Lỗi khi fetch product ${itemCode} từ /products/old-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`);
-            }
-          }
-        }
+        // Check với Loyalty API - sử dụng LoyaltyService
+        const product = await this.loyaltyService.checkProduct(itemCode);
 
         if (product && product.materialCode) {
           // Tìm thấy trong Loyalty - cập nhật
@@ -2132,26 +2042,11 @@ export class SalesService {
       return sale && sale.statusAsys !== false;
     });
 
+    // Fetch products từ Loyalty API sử dụng LoyaltyService
     if (validItemCodes.length > 0) {
-      const productPromises = validItemCodes.map(async (itemCode) => {
-        try {
-          const response = await this.httpService.axiosRef.get(
-            `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-            { headers: { accept: 'application/json' } },
-          );
-          const loyaltyProduct = response?.data?.data?.item || response?.data;
-          return { itemCode, loyaltyProduct };
-        } catch (error) {
-          this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
-          return { itemCode, loyaltyProduct: null };
-        }
-      });
-
-      const productResults = await Promise.all(productPromises);
-      productResults.forEach(({ itemCode, loyaltyProduct }) => {
-        if (loyaltyProduct) {
-          loyaltyProductMap.set(itemCode, loyaltyProduct);
-        }
+      const fetchedProducts = await this.loyaltyService.fetchProducts(validItemCodes);
+      fetchedProducts.forEach((product, itemCode) => {
+        loyaltyProductMap.set(itemCode, product);
       });
     }
 
@@ -2830,70 +2725,11 @@ export class SalesService {
 
           if (orderItemCodes.length > 0) {
             this.logger.log(`[SalesService] Đang check ${orderItemCodes.length} sản phẩm từ Loyalty API cho order ${order.docCode}...`);
+            // Check products từ Loyalty API sử dụng LoyaltyService
             await Promise.all(
               orderItemCodes.map(async (trimmedItemCode) => {
-                let isNotFound = false;
-
-                // Check endpoint /products/code/ trước
-                try {
-                  const response = await this.httpService.axiosRef.get(
-                    `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(trimmedItemCode)}`,
-                    {
-                      headers: { accept: 'application/json' },
-                      timeout: 5000,
-                    },
-                  );
-                  // Parse response: endpoint /products/code/ trả về data.item
-                  const loyaltyProduct = response?.data?.data?.item || response?.data?.data || response?.data;
-                  // Nếu có data, sản phẩm tồn tại → return sớm
-                  if (loyaltyProduct) {
-                    return;
-                  }
-                  // Nếu response 200 nhưng không có data → thử fallback
-                  this.logger.warn(`[SalesService] Response 200 nhưng không có data tại /products/code/: ${trimmedItemCode}, thử /products/old-code/...`);
-                } catch (error: any) {
-                  // Nếu 404 → thử fallback
-                  if (error?.response?.status === 404) {
-                    this.logger.warn(`[SalesService] Sản phẩm không tồn tại tại /products/code/: ${trimmedItemCode} (404), thử /products/old-code/...`);
-                  } else {
-                    // Lỗi khác 404 - không coi là not found, có thể là network error
-                    this.logger.warn(`[SalesService] Lỗi khi fetch product ${trimmedItemCode} từ /products/code/: ${error?.message || error?.response?.status || 'Unknown error'}`);
-                    return; // Không phải 404, không check fallback
-                  }
-                }
-
-                // Nếu đến đây, /products/code/ không tìm thấy → thử fallback /products/old-code/
-                try {
-                  const fallbackResponse = await this.httpService.axiosRef.get(
-                    `https://loyaltyapi.vmt.vn/products/old-code/${encodeURIComponent(trimmedItemCode)}`,
-                    {
-                      headers: { accept: 'application/json' },
-                      timeout: 5000,
-                    },
-                  );
-                  // Parse response: endpoint /products/old-code/ trả về trực tiếp object (không có wrapper data.item)
-                  const loyaltyProduct = fallbackResponse?.data || null;
-                  if (loyaltyProduct) {
-                    // Tìm thấy tại fallback endpoint
-                    this.logger.log(`[SalesService] Tìm thấy sản phẩm ${trimmedItemCode} tại /products/old-code/`);
-                    return;
-                  }
-                  // Nếu fallback response 200 nhưng không có data → đánh dấu not found
-                  isNotFound = true;
-                  this.logger.warn(`[SalesService] Response 200 nhưng không có data tại /products/old-code/: ${trimmedItemCode}`);
-                } catch (fallbackError: any) {
-                  if (fallbackError?.response?.status === 404) {
-                    // Cả 2 endpoint đều 404 → đánh dấu not found
-                    isNotFound = true;
-                    this.logger.warn(`[SalesService] Sản phẩm không tồn tại tại cả /products/code/ và /products/old-code/: ${trimmedItemCode}`);
-                  } else {
-                    // Lỗi khác 404 - không coi là not found
-                    this.logger.warn(`[SalesService] Lỗi khi fetch product ${trimmedItemCode} từ /products/old-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`);
-                  }
-                }
-
-                // Đánh dấu not found nếu cả 2 endpoint đều không tìm thấy
-                if (isNotFound) {
+                const product = await this.loyaltyService.checkProduct(trimmedItemCode);
+                if (!product) {
                   notFoundItemCodes.add(trimmedItemCode);
                   this.logger.log(`[SalesService] Đã thêm ${trimmedItemCode} vào danh sách bỏ qua (notFoundItemCodes size: ${notFoundItemCodes.size})`);
                 }
@@ -3492,28 +3328,21 @@ export class SalesService {
         let productTypeFromLoyalty: string | null = null;
 
         // Luôn fetch từ Loyalty API để lấy trackSerial, trackBatch, trackInventory và productType
-        try {
-          const response = await this.httpService.axiosRef.get(
-            `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(materialCode)}`,
-            { headers: { accept: 'application/json' } },
-          );
-          const loyaltyProduct = response?.data?.data?.item || response?.data;
-          if (loyaltyProduct) {
-            trackSerial = loyaltyProduct.trackSerial === true;
-            trackBatch = loyaltyProduct.trackBatch === true;
-            trackInventory = loyaltyProduct.trackInventory === true;
-            productTypeFromLoyalty = loyaltyProduct.productType || loyaltyProduct.producttype || null;
-            // Update sale với thông tin từ Loyalty API
-            sale.productType = productTypeFromLoyalty;
-            sale.trackInventory = trackInventory;
-            // Update sale.product với thông tin từ Loyalty API
-            if (sale.product) {
-              sale.product.productType = productTypeFromLoyalty;
-              sale.product.producttype = productTypeFromLoyalty;
-              sale.product.trackInventory = trackInventory;
-            }
+        const loyaltyProduct = await this.loyaltyService.checkProduct(materialCode);
+        if (loyaltyProduct) {
+          trackSerial = loyaltyProduct.trackSerial === true;
+          trackBatch = loyaltyProduct.trackBatch === true;
+          trackInventory = loyaltyProduct.trackInventory === true;
+          productTypeFromLoyalty = loyaltyProduct.productType || loyaltyProduct.producttype || null;
+          // Update sale với thông tin từ Loyalty API
+          sale.productType = productTypeFromLoyalty;
+          sale.trackInventory = trackInventory;
+          // Update sale.product với thông tin từ Loyalty API
+          if (sale.product) {
+            sale.product.productType = productTypeFromLoyalty;
+            sale.product.producttype = productTypeFromLoyalty;
+            sale.product.trackInventory = trackInventory;
           }
-        } catch (error) {
         }
 
         const productTypeUpper = productTypeFromLoyalty ? String(productTypeFromLoyalty).toUpperCase().trim() : null;
@@ -4068,21 +3897,14 @@ export class SalesService {
             dvt = product.dvt;
           }
           // Fetch từ Loyalty API để lấy dvt, trackSerial, trackBatch và productType
-          try {
-            const response = await this.httpService.axiosRef.get(
-              `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(item.item_code)}`,
-              { headers: { accept: 'application/json' } },
-            );
-            const loyaltyProduct = response?.data?.data?.item || response?.data;
-            if (loyaltyProduct) {
-              if (loyaltyProduct?.unit) {
-                dvt = loyaltyProduct.unit;
-              }
-              trackSerial = loyaltyProduct.trackSerial === true;
-              trackBatch = loyaltyProduct.trackBatch === true;
-              productTypeFromLoyalty = loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
+          const loyaltyProduct = await this.loyaltyService.checkProduct(item.item_code);
+          if (loyaltyProduct) {
+            if (loyaltyProduct?.unit) {
+              dvt = loyaltyProduct.unit;
             }
-          } catch (error) {
+            trackSerial = loyaltyProduct.trackSerial === true;
+            trackBatch = loyaltyProduct.trackBatch === true;
+            productTypeFromLoyalty = loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
           }
         } catch (error) {
         }
@@ -4919,25 +4741,11 @@ export class SalesService {
         return sale && sale.statusAsys !== false;
       });
 
+      // Fetch products từ Loyalty API sử dụng LoyaltyService
       if (validItemCodes.length > 0) {
-        const productPromises = validItemCodes.map(async (itemCode) => {
-          try {
-            const response = await this.httpService.axiosRef.get(
-              `https://loyaltyapi.vmt.vn/products/code/${encodeURIComponent(itemCode)}`,
-              { headers: { accept: 'application/json' } },
-            );
-            const loyaltyProduct = response?.data?.data?.item || response?.data;
-            return { itemCode, loyaltyProduct };
-          } catch (error) {
-            this.logger.warn(`Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
-            return { itemCode, loyaltyProduct: null };
-          }
-        });
-        const productResults = await Promise.all(productPromises);
-        productResults.forEach(({ itemCode, loyaltyProduct }) => {
-          if (loyaltyProduct) {
-            loyaltyProductMap.set(itemCode, loyaltyProduct);
-          }
+        const fetchedProducts = await this.loyaltyService.fetchProducts(validItemCodes);
+        fetchedProducts.forEach((product, itemCode) => {
+          loyaltyProductMap.set(itemCode, product);
         });
       }
 
