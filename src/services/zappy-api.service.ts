@@ -100,6 +100,42 @@ export class ZappyApiService {
   }
 
   /**
+   * Lấy dữ liệu xuất kho từ Zappy API
+   * @param date - Ngày theo format DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
+   * @param part - Phần dữ liệu cần lấy (1, 2, 3). Nếu không có thì lấy tất cả
+   * @returns Array of stock transfer records
+   */
+  async getDailyStockTrans(date: string, brand?: string, part?: number): Promise<any[]> {
+    try {
+      const baseUrl = this.getBaseUrlForBrand(brand);
+      let url = `${baseUrl}/get_daily_stock_trans?P_DATE=${date}`;
+      
+      // Thêm P_PART nếu có
+      if (part !== undefined && part !== null) {
+        url += `&P_PART=${part}`;
+      }
+
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: { accept: 'application/json' },
+        }),
+      );
+
+      const rawData = response?.data?.data || [];
+      if (!Array.isArray(rawData)) {
+        this.logger.warn(`No stock transfer data found for date ${date}${part ? ` part ${part}` : ''}`);
+        return [];
+      }
+
+      return rawData;
+    } catch (error: any) {
+      this.logger.error(`Error fetching daily stock transfer from Zappy API: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
    * Transform dữ liệu từ Zappy format sang Order format
    */
   private transformZappySalesToOrders(zappySales: any[]): Order[] {

@@ -6,6 +6,7 @@ import { Customer } from '../entities/customer.entity';
 import { Sale } from '../entities/sale.entity';
 import { DailyCashio } from '../entities/daily-cashio.entity';
 import { CheckFaceId } from '../entities/check-face-id.entity';
+import { StockTransfer } from '../entities/stock-transfer.entity';
 import { ZappyApiService } from './zappy-api.service';
 import { SalesService } from '../modules/sales/sales.service';
 
@@ -37,6 +38,8 @@ export class SyncService {
     private dailyCashioRepository: Repository<DailyCashio>,
     @InjectRepository(CheckFaceId)
     private checkFaceIdRepository: Repository<CheckFaceId>,
+    @InjectRepository(StockTransfer)
+    private stockTransferRepository: Repository<StockTransfer>,
     private httpService: HttpService,
     private zappyApiService: ZappyApiService,
     @Inject(forwardRef(() => SalesService))
@@ -1391,6 +1394,413 @@ export class SyncService {
       const errorMsg = `Lỗi khi đồng bộ FaceID cho ngày ${date}: ${error?.message || error}`;
       this.logger.error(errorMsg);
       throw new Error(errorMsg);
+    }
+  }
+
+  /**
+   * Đồng bộ dữ liệu xuất kho từ Zappy API
+   * @param date - Date format: DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard)
+   */
+  async syncStockTransfer(date: string, brand: string): Promise<{
+    success: boolean;
+    message: string;
+    recordsCount: number;
+    savedCount: number;
+    updatedCount: number;
+    errors?: string[];
+  }> {
+    try {
+      this.logger.log(`[Stock Transfer] Bắt đầu đồng bộ dữ liệu xuất kho cho brand ${brand} ngày ${date}`);
+      
+      // Gọi API với P_PART=1,2,3 tuần tự để tránh quá tải
+      const parts = [1, 2, 3];
+      const allStockTransData: any[] = [];
+      
+      for (const part of parts) {
+        try {
+          this.logger.log(`[Stock Transfer] Đang lấy dữ liệu part ${part} cho brand ${brand} ngày ${date}`);
+          const partData = await this.zappyApiService.getDailyStockTrans(date, brand, part);
+          if (partData && partData.length > 0) {
+            allStockTransData.push(...partData);
+            this.logger.log(`[Stock Transfer] Nhận được ${partData.length} records từ part ${part} cho brand ${brand} ngày ${date}`);
+          } else {
+            this.logger.log(`[Stock Transfer] Không có dữ liệu từ part ${part} cho brand ${brand} ngày ${date}`);
+          }
+        } catch (error: any) {
+          this.logger.error(`[Stock Transfer] Lỗi khi lấy dữ liệu part ${part} cho brand ${brand} ngày ${date}: ${error?.message || error}`);
+          // Tiếp tục với part tiếp theo, không throw error
+        }
+      }
+      
+      if (!allStockTransData || allStockTransData.length === 0) {
+        this.logger.log(`[Stock Transfer] Không có dữ liệu xuất kho cho brand ${brand} ngày ${date}`);
+        return {
+          success: true,
+          message: `Không có dữ liệu xuất kho cho brand ${brand} ngày ${date}`,
+          recordsCount: 0,
+          savedCount: 0,
+          updatedCount: 0,
+        };
+      }
+
+      this.logger.log(`[Stock Transfer] Tổng cộng nhận được ${allStockTransData.length} records xuất kho cho brand ${brand} ngày ${date}`);
+      
+      // Deduplicate trong batch: nếu có duplicate compositeKey, chỉ giữ lại record cuối cùng
+      const uniqueStockTransDataMap = new Map<string, any>();
+      for (const item of allStockTransData) {
+        const compositeKey = [
+          item.doccode || '',
+          item.item_code || '',
+          (item.qty || 0).toString(),
+          item.stock_code || '',
+          item.so_code || 'null',
+        ].join('|');
+        uniqueStockTransDataMap.set(compositeKey, item);
+      }
+      const stockTransData = Array.from(uniqueStockTransDataMap.values());
+      
+      if (allStockTransData.length !== stockTransData.length) {
+        this.logger.log(`[Stock Transfer] Đã loại bỏ ${allStockTransData.length - stockTransData.length} records trùng lặp trong batch`);
+      }
+
+      // Parse date từ format "01/11/2025 19:00" sang Date object
+      const parseTransDate = (dateStr: string): Date => {
+        if (!dateStr) return new Date();
+        try {
+          // Format: "01/11/2025 19:00"
+          const [datePart, timePart] = dateStr.split(' ');
+          const [day, month, year] = datePart.split('/');
+          
+          if (timePart) {
+            const [hours, minutes] = timePart.split(':');
+            return new Date(
+              parseInt(year),
+              parseInt(month) - 1,
+              parseInt(day),
+              parseInt(hours),
+              parseInt(minutes),
+            );
+          } else {
+            return new Date(
+              parseInt(year),
+              parseInt(month) - 1,
+              parseInt(day),
+            );
+          }
+        } catch (error) {
+          this.logger.warn(`Failed to parse transDate: ${dateStr}, using current date`);
+          return new Date();
+        }
+      };
+
+      let savedCount = 0;
+      const errors: string[] = [];
+
+      // Xử lý từng record - chỉ insert mới, không update
+      for (const item of stockTransData) {
+        try {
+          // Tạo compositeKey với timestamp để đảm bảo unique mỗi lần sync
+          const timestamp = Date.now();
+          const compositeKey = [
+            item.doccode || '',
+            item.item_code || '',
+            (item.qty || 0).toString(),
+            item.stock_code || '',
+            item.so_code || 'null',
+            timestamp.toString(),
+          ].join('|');
+
+          const stockTransferData: Partial<StockTransfer> = {
+            doctype: item.doctype || '',
+            docCode: item.doccode || '',
+            transDate: parseTransDate(item.transdate),
+            docDesc: item.doc_desc || undefined,
+            branchCode: item.branch_code || '',
+            brandCode: item.brand_code || '',
+            itemCode: item.item_code || '',
+            itemName: item.item_name || '',
+            stockCode: item.stock_code || '',
+            relatedStockCode: item.related_stock_code || undefined,
+            ioType: item.iotype || '',
+            qty: item.qty || 0,
+            batchSerial: item.batchserial || undefined,
+            lineInfo1: item.line_info1 || undefined,
+            lineInfo2: item.line_info2 || undefined,
+            soCode: item.so_code || undefined,
+            syncDate: date,
+            brand: brand,
+            compositeKey: compositeKey,
+          };
+
+          // Chỉ insert mới, không check duplicate
+          const newStockTransfer = this.stockTransferRepository.create(stockTransferData);
+          await this.stockTransferRepository.save(newStockTransfer);
+          savedCount++;
+        } catch (itemError: any) {
+          const errorMsg = `Lỗi khi lưu stock transfer ${item.doccode}/${item.item_code}: ${itemError?.message || itemError}`;
+          this.logger.error(`[Stock Transfer] ${errorMsg}`);
+          errors.push(errorMsg);
+        }
+      }
+
+      this.logger.log(`[Stock Transfer] Đã lưu ${savedCount} records mới cho brand ${brand} ngày ${date}`);
+
+      return {
+        success: errors.length === 0,
+        message: `Đồng bộ thành công ${stockTransData.length} records xuất kho cho brand ${brand} ngày ${date}. Đã lưu ${savedCount} records mới`,
+        recordsCount: stockTransData.length,
+        savedCount,
+        updatedCount: 0,
+        errors: errors.length > 0 ? errors : undefined,
+      };
+    } catch (error: any) {
+      const errorMsg = `Lỗi khi đồng bộ stock transfer cho brand ${brand} ngày ${date}: ${error?.message || error}`;
+      this.logger.error(`[Stock Transfer] ${errorMsg}`);
+      return {
+        success: false,
+        message: errorMsg,
+        recordsCount: 0,
+        savedCount: 0,
+        updatedCount: 0,
+        errors: [errorMsg],
+      };
+    }
+  }
+
+  /**
+   * Đồng bộ dữ liệu xuất kho từ ngày đến ngày
+   * @param dateFrom - Date format: DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param dateTo - Date format: DDMMMYYYY (ví dụ: 30NOV2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard). Nếu không có thì đồng bộ tất cả brands
+   */
+  async syncStockTransferRange(
+    dateFrom: string,
+    dateTo: string,
+    brand?: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    totalRecordsCount: number;
+    totalSavedCount: number;
+    totalUpdatedCount: number;
+    errors?: string[];
+    details?: Array<{
+      date: string;
+      brand: string;
+      recordsCount: number;
+      savedCount: number;
+      updatedCount: number;
+    }>;
+  }> {
+    try {
+      this.logger.log(`[Stock Transfer Range] Bắt đầu đồng bộ dữ liệu xuất kho từ ${dateFrom} đến ${dateTo}${brand ? ` cho brand ${brand}` : ' cho tất cả brands'}`);
+
+      // Parse dates từ DDMMMYYYY sang Date object
+      const parseDate = (dateStr: string): Date => {
+        const day = parseInt(dateStr.substring(0, 2));
+        const monthStr = dateStr.substring(2, 5).toUpperCase();
+        const year = parseInt(dateStr.substring(5, 9));
+        
+        const monthMap: Record<string, number> = {
+          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+        };
+        
+        const month = monthMap[monthStr] || 0;
+        return new Date(year, month, day);
+      };
+
+      const formatToDDMMMYYYY = (d: Date): string => {
+        const day = d.getDate().toString().padStart(2, '0');
+        const monthIdx = d.getMonth();
+        const year = d.getFullYear();
+        const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const monthStr = months[monthIdx];
+        return `${day}${monthStr}${year}`;
+      };
+
+      const startDate = parseDate(dateFrom);
+      const endDate = parseDate(dateTo);
+
+      if (startDate > endDate) {
+        throw new Error('dateFrom phải nhỏ hơn hoặc bằng dateTo');
+      }
+
+      const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
+      let totalRecordsCount = 0;
+      let totalSavedCount = 0;
+      let totalUpdatedCount = 0;
+      const errors: string[] = [];
+      const details: Array<{
+        date: string;
+        brand: string;
+        recordsCount: number;
+        savedCount: number;
+        updatedCount: number;
+      }> = [];
+
+      // Lặp qua từng ngày
+      let currentDate = new Date(startDate.getTime());
+      while (currentDate <= endDate) {
+        const dateStr = formatToDDMMMYYYY(currentDate);
+        
+        // Đồng bộ cho từng brand
+        for (const brandItem of brands) {
+          try {
+            this.logger.log(`[Stock Transfer Range] Đang đồng bộ brand ${brandItem} cho ngày ${dateStr}`);
+            const result = await this.syncStockTransfer(dateStr, brandItem);
+            
+            totalRecordsCount += result.recordsCount;
+            totalSavedCount += result.savedCount;
+            totalUpdatedCount += result.updatedCount;
+            
+            details.push({
+              date: dateStr,
+              brand: brandItem,
+              recordsCount: result.recordsCount,
+              savedCount: result.savedCount,
+              updatedCount: result.updatedCount,
+            });
+
+            if (result.errors && result.errors.length > 0) {
+              errors.push(...result.errors);
+            }
+
+            this.logger.log(`[Stock Transfer Range] Hoàn thành đồng bộ brand ${brandItem} cho ngày ${dateStr}`);
+          } catch (error: any) {
+            const errorMsg = `Lỗi khi đồng bộ stock transfer cho brand ${brandItem} ngày ${dateStr}: ${error?.message || error}`;
+            this.logger.error(`[Stock Transfer Range] ${errorMsg}`);
+            errors.push(errorMsg);
+          }
+        }
+
+        // Tăng 1 ngày
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      this.logger.log(`[Stock Transfer Range] Hoàn thành đồng bộ dữ liệu xuất kho từ ${dateFrom} đến ${dateTo}. Tổng: ${totalRecordsCount} records, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`);
+
+      return {
+        success: errors.length === 0,
+        message: `Đồng bộ thành công dữ liệu xuất kho từ ${dateFrom} đến ${dateTo}. Tổng: ${totalRecordsCount} records, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
+        totalRecordsCount,
+        totalSavedCount,
+        totalUpdatedCount,
+        errors: errors.length > 0 ? errors : undefined,
+        details,
+      };
+    } catch (error: any) {
+      const errorMsg = `Lỗi khi đồng bộ stock transfer range từ ${dateFrom} đến ${dateTo}: ${error?.message || error}`;
+      this.logger.error(`[Stock Transfer Range] ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
+  }
+
+  /**
+   * Lấy danh sách stock transfers với filter và pagination
+   */
+  async getStockTransfers(params: {
+    page?: number;
+    limit?: number;
+    brand?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    branchCode?: string;
+    itemCode?: string;
+    soCode?: string;
+  }): Promise<{
+    success: boolean;
+    data: StockTransfer[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    try {
+      const page = params.page || 1;
+      const limit = params.limit || 10;
+      const skip = (page - 1) * limit;
+
+      const queryBuilder = this.stockTransferRepository.createQueryBuilder('st');
+
+      // Apply filters
+      if (params.brand) {
+        queryBuilder.andWhere('st.brand = :brand', { brand: params.brand });
+      }
+      if (params.branchCode) {
+        queryBuilder.andWhere('st.branchCode = :branchCode', { branchCode: params.branchCode });
+      }
+      if (params.itemCode) {
+        queryBuilder.andWhere('st.itemCode LIKE :itemCode', { itemCode: `%${params.itemCode}%` });
+      }
+      if (params.soCode) {
+        queryBuilder.andWhere('st.soCode = :soCode', { soCode: params.soCode });
+      }
+      if (params.dateFrom) {
+        // Parse DDMMMYYYY to Date
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day);
+        };
+        const fromDate = parseDate(params.dateFrom);
+        queryBuilder.andWhere('st.transDate >= :dateFrom', { dateFrom: fromDate });
+      }
+      if (params.dateTo) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day, 23, 59, 59);
+        };
+        const toDate = parseDate(params.dateTo);
+        queryBuilder.andWhere('st.transDate <= :dateTo', { dateTo: toDate });
+      }
+
+      // Order by transDate DESC
+      queryBuilder.orderBy('st.transDate', 'DESC');
+
+      // Get total count
+      const total = await queryBuilder.getCount();
+
+      // Apply pagination
+      queryBuilder.skip(skip).take(limit);
+
+      // Get data
+      const data = await queryBuilder.getMany();
+
+      const totalPages = Math.ceil(total / limit);
+
+      return {
+        success: true,
+        data,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`Error getting stock transfers: ${error?.message || error}`);
+      throw error;
     }
   }
 }
