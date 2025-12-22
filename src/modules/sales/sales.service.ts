@@ -1126,12 +1126,33 @@ export class SalesService {
             })
           : [];
 
-        // Tạo map stock transfers theo docCode (của order) và itemCode
+        // Fetch products từ Loyalty API sử dụng LoyaltyService (cho cả sales và stock transfers)
+        const stockTransferItemCodes = Array.from(
+          new Set(
+            stockTransfers
+              .map((st) => st.itemCode)
+              .filter((code): code is string => !!code && code.trim() !== '')
+          )
+        );
+        const allItemCodes = Array.from(new Set([...itemCodes, ...stockTransferItemCodes]));
+        const loyaltyProductMap = await this.loyaltyService.fetchProducts(allItemCodes);
+
+        // Tạo map stock transfers theo docCode (của order) và materialCode (Mã hàng từ Loyalty API)
+        // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng)
         const stockTransferMap = new Map<string, StockTransfer[]>();
         for (const transfer of stockTransfers) {
-          // Join theo soCode (của stock transfer) = docCode (của order) + itemCode
+          // Lấy materialCode từ database hoặc từ Loyalty API
+          const transferLoyaltyProduct = transfer.itemCode ? loyaltyProductMap.get(transfer.itemCode) : null;
+          const materialCode = transfer.materialCode || transferLoyaltyProduct?.materialCode;
+          
+          if (!materialCode) {
+            // Bỏ qua nếu không có materialCode (không match được)
+            continue;
+          }
+          
+          // Join theo soCode (của stock transfer) = docCode (của order) + materialCode (Mã hàng)
           const orderDocCode = transfer.soCode || transfer.docCode; // Ưu tiên soCode
-          const key = `${orderDocCode}_${transfer.itemCode || ''}`;
+          const key = `${orderDocCode}_${materialCode}`;
           if (!stockTransferMap.has(key)) {
             stockTransferMap.set(key, []);
           }
@@ -1148,9 +1169,6 @@ export class SalesService {
           }
           stockTransferByDocCodeMap.get(orderDocCode)!.push(transfer);
         }
-
-        // Fetch products từ Loyalty API sử dụng LoyaltyService
-        const loyaltyProductMap = await this.loyaltyService.fetchProducts(itemCodes);
 
         // Thêm promotionDisplayCode, maKho, maCtkmTangHang, producttype và stock transfers vào các sales items
         const enrichedOrders = paginatedOrders.map((order) => ({
@@ -1193,9 +1211,11 @@ export class SalesService {
               }
             }
 
-            // Lấy stock transfers cho sale này (theo docCode + itemCode)
-            const stockTransferKey = `${order.docCode}_${sale.itemCode || ''}`;
-            const saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
+            // Lấy stock transfers cho sale này (theo docCode + materialCode)
+            // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng)
+            const saleMaterialCode = loyaltyProduct?.materialCode;
+            const stockTransferKey = saleMaterialCode ? `${order.docCode}_${saleMaterialCode}` : null;
+            const saleStockTransfers = stockTransferKey ? stockTransferMap.get(stockTransferKey) || [] : [];
 
             return {
               ...sale,
@@ -1540,12 +1560,38 @@ export class SalesService {
         })
       : [];
 
-    // Tạo map stock transfers theo docCode (của order) và itemCode để join chính xác
+    // Lấy itemCodes từ stock transfers để fetch materialCode từ Loyalty API
+    const stockTransferItemCodes = Array.from(
+      new Set(
+        stockTransfers
+          .map((st) => st.itemCode)
+          .filter((code): code is string => !!code && code.trim() !== '')
+      )
+    );
+    const allItemCodes = Array.from(new Set([...itemCodes, ...stockTransferItemCodes]));
+
+    // Fetch products và departments từ Loyalty API (cho cả sales và stock transfers)
+    const [loyaltyProductMap, departmentMap] = await Promise.all([
+      this.fetchLoyaltyProducts(allItemCodes),
+      this.fetchLoyaltyDepartments(branchCodes),
+    ]);
+
+    // Tạo map stock transfers theo docCode (của order) và materialCode (Mã hàng từ Loyalty API)
+    // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng)
     const stockTransferMap = new Map<string, StockTransfer[]>();
     for (const transfer of stockTransfers) {
-      // Join theo soCode (của stock transfer) = docCode (của order) + itemCode
+      // Lấy materialCode từ database hoặc từ Loyalty API
+      const transferLoyaltyProduct = transfer.itemCode ? loyaltyProductMap.get(transfer.itemCode) : null;
+      const materialCode = transfer.materialCode || transferLoyaltyProduct?.materialCode;
+      
+      if (!materialCode) {
+        // Bỏ qua nếu không có materialCode (không match được)
+        continue;
+      }
+      
+      // Join theo soCode (của stock transfer) = docCode (của order) + materialCode (Mã hàng)
       const orderDocCode = transfer.soCode || transfer.docCode; // Ưu tiên soCode
-      const key = `${orderDocCode}_${transfer.itemCode || ''}`;
+      const key = `${orderDocCode}_${materialCode}`;
       if (!stockTransferMap.has(key)) {
         stockTransferMap.set(key, []);
       }
@@ -1563,11 +1609,6 @@ export class SalesService {
       stockTransferByDocCodeMap.get(orderDocCode)!.push(transfer);
     }
 
-    const [loyaltyProductMap, departmentMap] = await Promise.all([
-      this.fetchLoyaltyProducts(itemCodes),
-      this.fetchLoyaltyDepartments(branchCodes),
-    ]);
-
     // Enrich sales với products, departments, stock transfers và tính toán các field phức tạp
     const enrichedSalesMap = new Map<string, any[]>();
     for (const sale of allSalesData) {
@@ -1579,9 +1620,11 @@ export class SalesService {
       const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
       const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
       
-      // Lấy stock transfers cho sale này (theo docCode + itemCode)
-      const stockTransferKey = `${docCode}_${sale.itemCode || ''}`;
-      const saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
+      // Lấy stock transfers cho sale này (theo docCode + materialCode)
+      // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng)
+      const saleMaterialCode = loyaltyProduct?.materialCode;
+      const stockTransferKey = saleMaterialCode ? `${docCode}_${saleMaterialCode}` : null;
+      const saleStockTransfers = stockTransferKey ? stockTransferMap.get(stockTransferKey) || [] : [];
 
       const calculatedFields = this.calculateSaleFields(sale, loyaltyProduct, department, sale.branchCode);
       const order = orderMap.get(sale.docCode);
