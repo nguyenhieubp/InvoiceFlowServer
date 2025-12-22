@@ -41,6 +41,9 @@ export class StockTransfer {
   @Column({ type: 'text' })
   itemName: string; // Joukin_Liệu trình...
 
+  @Column({ nullable: true })
+  materialCode?: string; // Material code từ Loyalty API
+
   @Column()
   stockCode: string; // BFS07
 

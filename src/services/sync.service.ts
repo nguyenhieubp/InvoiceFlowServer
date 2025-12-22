@@ -1465,23 +1465,11 @@ export class SyncService {
 
       this.logger.log(`[Stock Transfer] Tổng cộng nhận được ${allStockTransData.length} records xuất kho cho brand ${brand} ngày ${date}`);
       
-      // Deduplicate trong batch: nếu có duplicate compositeKey, chỉ giữ lại record cuối cùng
-      const uniqueStockTransDataMap = new Map<string, any>();
-      for (const item of allStockTransData) {
-        const compositeKey = [
-          item.doccode || '',
-          item.item_code || '',
-          (item.qty || 0).toString(),
-          item.stock_code || '',
-          item.so_code || 'null',
-        ].join('|');
-        uniqueStockTransDataMap.set(compositeKey, item);
-      }
-      const stockTransData = Array.from(uniqueStockTransDataMap.values());
+      // KHÔNG deduplicate - giữ lại tất cả records để lưu vào database
+      // Mỗi record sẽ có compositeKey unique với timestamp khi lưu
+      const stockTransData = allStockTransData;
       
-      if (allStockTransData.length !== stockTransData.length) {
-        this.logger.log(`[Stock Transfer] Đã loại bỏ ${allStockTransData.length - stockTransData.length} records trùng lặp trong batch`);
-      }
+      this.logger.log(`[Stock Transfer] Giữ lại tất cả ${stockTransData.length} records (không deduplicate)`);
 
       // Parse date từ format "01/11/2025 19:00" sang Date object
       const parseTransDate = (dateStr: string): Date => {
@@ -1513,22 +1501,53 @@ export class SyncService {
         }
       };
 
+      // Fetch materialCode từ Loyalty API cho tất cả itemCode
+      const uniqueItemCodes = Array.from(
+        new Set(
+          stockTransData
+            .map((item) => item.item_code)
+            .filter((code): code is string => !!code && code.trim() !== '')
+        )
+      );
+
+      const materialCodeMap = new Map<string, string>();
+      if (uniqueItemCodes.length > 0) {
+        try {
+          // fetchProducts sẽ tự động thử cả /code/ và /old-code/ cho mỗi itemCode
+          const loyaltyProducts = await this.loyaltyService.fetchProducts(uniqueItemCodes);
+          loyaltyProducts.forEach((product, itemCode) => {
+            if (product?.materialCode) {
+              materialCodeMap.set(itemCode, product.materialCode);
+            }
+          });
+        } catch (error: any) {
+          this.logger.warn(`[Stock Transfer] Lỗi khi fetch materialCode từ Loyalty API: ${error?.message || error}`);
+        }
+      }
+
       let savedCount = 0;
       const errors: string[] = [];
 
       // Xử lý từng record - chỉ insert mới, không update
-      for (const item of stockTransData) {
+      // Mỗi record sẽ có compositeKey unique với timestamp + index để đảm bảo lưu tất cả
+      for (let index = 0; index < stockTransData.length; index++) {
+        const item = stockTransData[index];
         try {
-          // Tạo compositeKey với timestamp để đảm bảo unique mỗi lần sync
+          // Tạo compositeKey với timestamp + index để đảm bảo unique cho mỗi record
+          // Ngay cả khi có nhiều records giống nhau, mỗi record vẫn có unique key
           const timestamp = Date.now();
+          const uniqueId = `${timestamp}_${index}_${Math.random().toString(36).substring(2, 9)}`;
           const compositeKey = [
             item.doccode || '',
             item.item_code || '',
             (item.qty || 0).toString(),
             item.stock_code || '',
             item.so_code || 'null',
-            timestamp.toString(),
+            uniqueId, // Timestamp + index + random để đảm bảo unique
           ].join('|');
+
+          // Lấy materialCode từ Loyalty API
+          const materialCode = item.item_code ? materialCodeMap.get(item.item_code) : undefined;
 
           const stockTransferData: Partial<StockTransfer> = {
             doctype: item.doctype || '',
@@ -1539,6 +1558,7 @@ export class SyncService {
             brandCode: item.brand_code || '',
             itemCode: item.item_code || '',
             itemName: item.item_name || '',
+            materialCode: materialCode || undefined,
             stockCode: item.stock_code || '',
             relatedStockCode: item.related_stock_code || undefined,
             ioType: item.iotype || '',
