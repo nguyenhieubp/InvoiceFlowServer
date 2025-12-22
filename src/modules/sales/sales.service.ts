@@ -2228,16 +2228,43 @@ export class SalesService {
       });
     }
 
+    // Fetch stock transfers để lấy ma_nx (ST* cho xuất kho, RT* cho nhập kho)
+    const stockTransfers = await this.stockTransferRepository.find({
+      where: { soCode: docCode },
+    });
+
+    // Tạo map: itemCode -> stock transfer (phân biệt ST và RT)
+    const stockTransferMapByItem = new Map<string, { st?: StockTransfer; rt?: StockTransfer }>();
+    stockTransfers.forEach((st) => {
+      const itemCode = st.itemCode;
+      if (!stockTransferMapByItem.has(itemCode)) {
+        stockTransferMapByItem.set(itemCode, {});
+      }
+      const itemMap = stockTransferMapByItem.get(itemCode)!;
+      // ST* -> xuất kho (warehouseRelease)
+      if (st.docCode.startsWith('ST')) {
+        itemMap.st = st;
+      }
+      // RT* -> nhập kho (warehouseReceipt)
+      if (st.docCode.startsWith('RT')) {
+        itemMap.rt = st;
+      }
+    });
+
     // Enrich sales với department information và tính maKho (tạm thời, sẽ format sau)
     const enrichedSalesWithDepartment = enrichedSalesWithLoyalty.map((sale) => {
       const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
       const maBp = department?.ma_bp || sale.branchCode || null;
       const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBp);
+      const stockTransferInfo = sale.itemCode ? stockTransferMapByItem.get(sale.itemCode) : null;
 
       return {
         ...sale,
         department: department,
         maKho: calculatedMaKho || sale.maKho || sale.branchCode || null,
+        // Thêm ma_nx từ stock transfer
+        ma_nx_st: stockTransferInfo?.st?.docCode || null, // ST* cho xuất kho
+        ma_nx_rt: stockTransferInfo?.rt?.docCode || null, // RT* cho nhập kho
       };
     });
 
@@ -3444,8 +3471,8 @@ export class SalesService {
         }
 
         // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
-        // Nếu ma_vt (materialCode) khác itemCode, cần fetch lại product bằng materialCode
-        const materialCode = this.getMaterialCode(sale) || sale.itemCode;
+        // Lấy materialCode từ Loyalty API (ưu tiên materialCode từ product, sau đó itemCode)
+        const materialCode = this.getMaterialCode(sale, sale.product) || sale.itemCode;
         let trackSerial: boolean | null = null;
         let trackBatch: boolean | null = null;
         let trackInventory: boolean | null = null;
@@ -3620,9 +3647,15 @@ export class SalesService {
         // Kiểm tra nếu ma_ctkm_th = "TT DAU TU" thì không set km_yn = 1
         const isTTDauTu = maCtkmTangHang && maCtkmTangHang.trim() === 'TT DAU TU';
 
+        // Lấy ma_vt từ materialCode (ưu tiên Loyalty API) - dùng lại materialCode đã fetch ở trên
+        // materialCode đã được lấy từ getMaterialCode(sale) và fetch từ Loyalty API
+        // Nếu có loyaltyProduct, ưu tiên dùng materialCode từ đó
+        const finalMaterialCode = loyaltyProduct?.materialCode || materialCode || sale.product?.maVatTu || sale.itemCode || '';
+
         return {
           // ma_vt: Mã vật tư (String, max 16 ký tự) - Bắt buộc
-          ma_vt: limitString(toString(sale.product?.maVatTu || sale.itemCode || ''), 16),
+          // Dùng materialCode từ Loyalty API (giống như sales invoice)
+          ma_vt: limitString(toString(finalMaterialCode), 16),
           // dvt: Đơn vị tính (String, max 32 ký tự) - Bắt buộc
           dvt: limitString(dvt, 32),
           // loai: Loại (String, max 2 ký tự) - 07-phí,lệ phí; 90-giảm thuế (mặc định rỗng)
@@ -3781,6 +3814,10 @@ export class SalesService {
           loai_gd: limitString(loaiGd, 2),
           // ma_combo: mã combo (String, max 16 ký tự)
           ma_combo: limitString(toString(sale.maCombo, ''), 16),
+          // ma_nx_st: Mã nghiệp vụ xuất kho (ST* từ stock transfer) - dùng cho warehouseRelease
+          ma_nx_st: limitString(toString(sale.ma_nx_st, ''), 32),
+          // ma_nx_rt: Mã nghiệp vụ nhập kho (RT* từ stock transfer) - dùng cho warehouseReceipt
+          ma_nx_rt: limitString(toString(sale.ma_nx_rt, ''), 32),
           // id_goc: ID phiếu gốc (String, max 70 ký tự)
           id_goc: limitString(toString(sale.idGoc, ''), 70),
           // id_goc_ct: Số ct phiếu gốc (String, max 16 ký tự)

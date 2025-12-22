@@ -214,6 +214,37 @@ export class FastApiInvoiceFlowService {
   }
 
   /**
+   * Helper function: Loại bỏ các field undefined, null, hoặc empty string
+   */
+  private cleanWarehousePayload(obj: any): any {
+    if (obj === null || obj === undefined) {
+      return obj;
+    }
+    if (Array.isArray(obj)) {
+      return obj.map(item => this.cleanWarehousePayload(item));
+    }
+    if (typeof obj === 'object') {
+      const cleaned: any = {};
+      for (const [key, value] of Object.entries(obj)) {
+        // Giữ lại các giá trị: 0, false, date objects
+        // Loại bỏ: undefined, null, empty string
+        if (value === undefined || value === null) {
+          // Bỏ qua undefined và null
+          continue;
+        }
+        if (typeof value === 'string' && value === '') {
+          // Bỏ qua empty string
+          continue;
+        }
+        // Giữ lại tất cả giá trị khác (bao gồm 0, false, empty array, date objects)
+        cleaned[key] = this.cleanWarehousePayload(value);
+      }
+      return cleaned;
+    }
+    return obj;
+  }
+
+  /**
    * Build dữ liệu warehouseRelease (xuất kho) từ invoiceData
    */
   private buildWarehouseReleaseData(invoiceData: any): any {
@@ -226,38 +257,51 @@ export class FastApiInvoiceFlowService {
       dien_giai: invoiceData.dien_giai || `Xuất kho cho đơn hàng ${invoiceData.so_ct}`,
       detail: (invoiceData.detail || []).map((item: any) => {
         // Map các field từ invoiceData.detail sang warehouse detail
+        // LƯU Ý: Các field dvt, ma_kho, ma_lo, ma_vt đã được tính đúng trong buildFastApiInvoiceData
+        // từ Loyalty API và các nguồn chính xác, nên chỉ cần lấy trực tiếp từ item
         // Sử dụng gia_ban/tien_hang nếu không có gia_nt/tien_nt
         const giaNt = item.gia_nt || item.gia_ban || 0;
         const tienNt = item.tien_nt || item.tien_hang || 0;
         const pxGiaDd = item.px_gia_dd || item.gia_ban || giaNt || 0;
         
-        return {
+        const detailItem: any = {
+          // ma_vt: Đã được lấy từ materialCode của Loyalty API trong buildFastApiInvoiceData
           ma_vt: item.ma_vt,
+          // dvt: Đã được lấy từ sale.product?.dvt || sale.product?.unit || sale.dvt trong buildFastApiInvoiceData
           dvt: item.dvt,
+          // ma_kho: Đã được tính từ calculateMaKho(ordertype, maBp) trong buildFastApiInvoiceData
           ma_kho: item.ma_kho,
-          ma_lo: item.ma_lo,
           so_luong: item.so_luong,
           px_gia_dd: pxGiaDd,
-          so_serial: item.so_serial,
           gia_nt: giaNt,
           tien_nt: tienNt,
-          ma_nx: item.ma_nx,
-          ma_vv: item.ma_vv,
-          ma_bp: item.ma_bp,
-          so_lsx: item.so_lsx,
-          ma_sp: item.ma_sp,
-          ma_hd: item.ma_hd,
-          ma_phi: item.ma_phi,
-          ma_ku: item.ma_ku,
-          ma_phi_hh: item.ma_phi_hh,
-          ma_phi_ttlk: item.ma_phi_ttlk,
-          tien_hh_nt: item.tien_hh_nt,
-          tien_ttlk_nt: item.tien_ttlk_nt,
+          // Dùng ma_nx_st (ST*) cho warehouseRelease (xuất kho)
+          ma_nx: item.ma_nx_st || item.ma_nx || '1111',
         };
+
+        // Chỉ thêm các field nếu có giá trị (không undefined/null/empty)
+        // ma_lo: Đã được tính từ serial value dựa trên trackBatch/trackSerial trong buildFastApiInvoiceData
+        if (item.ma_lo) detailItem.ma_lo = item.ma_lo;
+        // so_serial: Đã được tính từ serial value dựa trên trackBatch/trackSerial trong buildFastApiInvoiceData
+        if (item.so_serial) detailItem.so_serial = item.so_serial;
+        if (item.ma_vv) detailItem.ma_vv = item.ma_vv;
+        if (item.ma_bp) detailItem.ma_bp = item.ma_bp;
+        if (item.so_lsx) detailItem.so_lsx = item.so_lsx;
+        if (item.ma_sp) detailItem.ma_sp = item.ma_sp;
+        if (item.ma_hd) detailItem.ma_hd = item.ma_hd;
+        if (item.ma_phi) detailItem.ma_phi = item.ma_phi;
+        if (item.ma_ku) detailItem.ma_ku = item.ma_ku;
+        if (item.ma_phi_hh) detailItem.ma_phi_hh = item.ma_phi_hh;
+        if (item.ma_phi_ttlk) detailItem.ma_phi_ttlk = item.ma_phi_ttlk;
+        if (item.tien_hh_nt !== undefined && item.tien_hh_nt !== null) detailItem.tien_hh_nt = item.tien_hh_nt;
+        if (item.tien_ttlk_nt !== undefined && item.tien_ttlk_nt !== null) detailItem.tien_ttlk_nt = item.tien_ttlk_nt;
+
+        return detailItem;
       }),
     };
 
-    return warehouseData;
+    // Clean payload trước khi return
+    return this.cleanWarehousePayload(warehouseData);
   }
 
   /**
@@ -273,30 +317,43 @@ export class FastApiInvoiceFlowService {
       dien_giai: invoiceData.dien_giai || `Nhập kho cho đơn hàng ${invoiceData.so_ct}`,
       detail: (invoiceData.detail || []).map((item: any) => {
         // Map các field từ invoiceData.detail sang warehouse detail
+        // LƯU Ý: Các field dvt, ma_kho, ma_lo, ma_vt đã được tính đúng trong buildFastApiInvoiceData
+        // từ Loyalty API và các nguồn chính xác, nên chỉ cần lấy trực tiếp từ item
         // Sử dụng gia_ban/tien_hang nếu không có gia_nt/tien_nt
         const giaNt = item.gia_nt || item.gia_ban || 0;
         const tienNt = item.tien_nt || item.tien_hang || 0;
         
-        return {
+        const detailItem: any = {
+          // ma_vt: Đã được lấy từ materialCode của Loyalty API trong buildFastApiInvoiceData
           ma_vt: item.ma_vt,
+          // dvt: Đã được lấy từ sale.product?.dvt || sale.product?.unit || sale.dvt trong buildFastApiInvoiceData
           dvt: item.dvt,
+          // ma_kho: Đã được tính từ calculateMaKho(ordertype, maBp) trong buildFastApiInvoiceData
           ma_kho: item.ma_kho,
-          ma_lo: item.ma_lo,
           so_luong: item.so_luong,
-          so_serial: item.so_serial,
           gia_nt: giaNt,
           tien_nt: tienNt,
-          ma_nx: item.ma_nx || '1111',
-          ma_vv: item.ma_vv || '',
-          ma_bp: item.ma_bp || '',
-          so_lsx: item.so_lsx || '',
-          ma_sp: item.ma_sp || '',
-          ma_hd: item.ma_hd || '',
+          // Dùng ma_nx_rt (RT*) cho warehouseReceipt (nhập kho)
+          ma_nx: item.ma_nx_rt || item.ma_nx || '1111',
         };
+
+        // Chỉ thêm các field nếu có giá trị (không undefined/null/empty)
+        // ma_lo: Đã được tính từ serial value dựa trên trackBatch/trackSerial trong buildFastApiInvoiceData
+        if (item.ma_lo) detailItem.ma_lo = item.ma_lo;
+        // so_serial: Đã được tính từ serial value dựa trên trackBatch/trackSerial trong buildFastApiInvoiceData
+        if (item.so_serial) detailItem.so_serial = item.so_serial;
+        if (item.ma_vv) detailItem.ma_vv = item.ma_vv;
+        if (item.ma_bp) detailItem.ma_bp = item.ma_bp;
+        if (item.so_lsx) detailItem.so_lsx = item.so_lsx;
+        if (item.ma_sp) detailItem.ma_sp = item.ma_sp;
+        if (item.ma_hd) detailItem.ma_hd = item.ma_hd;
+
+        return detailItem;
       }),
     };
 
-    return warehouseData;
+    // Clean payload trước khi return
+    return this.cleanWarehousePayload(warehouseData);
   }
 
   /**
