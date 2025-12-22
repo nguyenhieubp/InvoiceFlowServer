@@ -1088,7 +1088,7 @@ export class SyncService {
 
     const dateFormatted = parseDate(date);
     let savedCount = 0;
-    let skippedCount = 0;
+    let updatedCount = 0;
 
     // Gọi API checkFaceID cho mỗi shop_code
     for (const shopCode of shopCodes) {
@@ -1128,18 +1128,6 @@ export class SyncService {
         // Lưu từng checkFaceID record vào database
         for (const item of checkFaceIdData) {
           try {
-            // Kiểm tra xem đã có record với apiId chưa
-            if (item.id) {
-              const existingCheckFaceId = await this.checkFaceIdRepository.findOne({
-                where: { apiId: item.id },
-              });
-
-              if (existingCheckFaceId) {
-                skippedCount++;
-                continue;
-              }
-            }
-
             // Parse dates
             const startTime = item.start_time ? parseDateTime(item.start_time) : null;
             const checking = item.checking ? parseDateTime(item.checking) : null;
@@ -1167,25 +1155,58 @@ export class SyncService {
               }
             }
 
-            const checkFaceIdDataToSave: Partial<CheckFaceId> = {
-              apiId: item.id || undefined,
-              startTime: startTime || undefined,
-              checking: checking || undefined,
-              isFirstInDay: item.is_first_in_day === true || item.is_first_in_day === 1,
-              image: item.image || undefined,
-              partnerCode: partnerCode || undefined,
-              name: item.name || undefined,
-              mobile: item.mobile || undefined,
-              isNv: item.is_nv || undefined,
-              shopCode: item.shop_code || shopCode,
-              shopName: item.shop_name || undefined,
-              camId: item.cam_id || undefined,
-              date: dateObj || new Date(),
-            };
+            // Đảm bảo mobile được lưu đúng (convert sang string và trim)
+            const mobileValue = item.mobile ? String(item.mobile).trim() : undefined;
 
-            const newCheckFaceId = this.checkFaceIdRepository.create(checkFaceIdDataToSave);
-            await this.checkFaceIdRepository.save(newCheckFaceId);
-            savedCount++;
+            // Kiểm tra xem đã có record với apiId chưa - nếu có thì update, không thì insert mới
+            let existingCheckFaceId: CheckFaceId | null = null;
+            if (item.id) {
+              existingCheckFaceId = await this.checkFaceIdRepository.findOne({
+                where: { apiId: item.id },
+              });
+            }
+
+            if (existingCheckFaceId) {
+              // Update record đã tồn tại (đặc biệt là mobile có thể đã bị lưu sai)
+              // Luôn update các field từ API để đảm bảo dữ liệu mới nhất
+              if (startTime) existingCheckFaceId.startTime = startTime;
+              if (checking) existingCheckFaceId.checking = checking;
+              existingCheckFaceId.isFirstInDay = item.is_first_in_day === true || item.is_first_in_day === 1;
+              if (item.image) existingCheckFaceId.image = item.image;
+              if (partnerCode) existingCheckFaceId.partnerCode = partnerCode;
+              if (item.name) existingCheckFaceId.name = item.name;
+              // Luôn update mobile nếu có giá trị từ API (để sửa lỗi bị cắt) - đây là field quan trọng nhất
+              if (mobileValue) existingCheckFaceId.mobile = mobileValue;
+              if (item.is_nv !== undefined) existingCheckFaceId.isNv = item.is_nv;
+              if (item.shop_code) existingCheckFaceId.shopCode = item.shop_code;
+              if (item.shop_name) existingCheckFaceId.shopName = item.shop_name;
+              if (item.cam_id) existingCheckFaceId.camId = item.cam_id;
+              if (dateObj) existingCheckFaceId.date = dateObj;
+              
+              await this.checkFaceIdRepository.save(existingCheckFaceId);
+              updatedCount++;
+            } else {
+              // Insert mới
+              const checkFaceIdDataToSave: Partial<CheckFaceId> = {
+                apiId: item.id || undefined,
+                startTime: startTime || undefined,
+                checking: checking || undefined,
+                isFirstInDay: item.is_first_in_day === true || item.is_first_in_day === 1,
+                image: item.image || undefined,
+                partnerCode: partnerCode || undefined,
+                name: item.name || undefined,
+                mobile: mobileValue, // Đảm bảo lưu đúng mobile từ API
+                isNv: item.is_nv || undefined,
+                shopCode: item.shop_code || shopCode,
+                shopName: item.shop_name || undefined,
+                camId: item.cam_id || undefined,
+                date: dateObj || new Date(),
+              };
+
+              const newCheckFaceId = this.checkFaceIdRepository.create(checkFaceIdDataToSave);
+              await this.checkFaceIdRepository.save(newCheckFaceId);
+              savedCount++;
+            }
           } catch (itemError: any) {
             this.logger.warn(`Failed to save checkFaceID record ${item.id || 'unknown'}: ${itemError?.message || itemError}`);
           }
@@ -1195,7 +1216,7 @@ export class SyncService {
       }
     }
 
-    this.logger.log(`[Sync] Đã lưu ${savedCount} checkFaceID records mới, bỏ qua ${skippedCount} records đã tồn tại`);
+    this.logger.log(`[Sync] Đã lưu ${savedCount} checkFaceID records mới, cập nhật ${updatedCount} records đã tồn tại`);
   }
 
   /**
@@ -1207,7 +1228,7 @@ export class SyncService {
     success: boolean;
     message: string;
     savedCount: number;
-    skippedCount: number;
+    updatedCount: number;
     errors?: string[];
   }> {
     try {
@@ -1229,7 +1250,7 @@ export class SyncService {
 
       const dateFormatted = parseDate(date);
       let savedCount = 0;
-      let skippedCount = 0;
+      let updatedCount = 0;
       const errors: string[] = [];
 
       // Parse date string sang Date object
@@ -1292,18 +1313,6 @@ export class SyncService {
           // Lưu từng checkFaceID record vào database
           for (const item of checkFaceIdData) {
             try {
-              // Kiểm tra xem đã có record với apiId chưa
-              if (item.id) {
-                const existingCheckFaceId = await this.checkFaceIdRepository.findOne({
-                  where: { apiId: item.id },
-                });
-
-                if (existingCheckFaceId) {
-                  skippedCount++;
-                  continue;
-                }
-              }
-
               // Parse dates
               const startTime = item.start_time ? parseDateTime(item.start_time) : null;
               const checking = item.checking ? parseDateTime(item.checking) : null;
@@ -1319,25 +1328,62 @@ export class SyncService {
                 }
               }
 
-              const checkFaceIdDataToSave: Partial<CheckFaceId> = {
-                apiId: item.id || undefined,
-                startTime: startTime || undefined,
-                checking: checking || undefined,
-                isFirstInDay: item.is_first_in_day === true || item.is_first_in_day === 1,
-                image: item.image || undefined,
-                partnerCode: partnerCode || undefined,
-                name: item.name || undefined,
-                mobile: item.mobile || undefined,
-                isNv: item.is_nv || undefined,
-                shopCode: item.shop_code || shopCode || undefined,
-                shopName: item.shop_name || undefined,
-                camId: item.cam_id || undefined,
-                date: startTime ? new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate()) : dateObj,
-              };
+              // Đảm bảo mobile được lưu đúng (convert sang string và trim)
+              const mobileValue = item.mobile ? String(item.mobile).trim() : undefined;
 
-              const newCheckFaceId = this.checkFaceIdRepository.create(checkFaceIdDataToSave);
-              await this.checkFaceIdRepository.save(newCheckFaceId);
-              savedCount++;
+              // Kiểm tra xem đã có record với apiId chưa - nếu có thì update, không thì insert mới
+              let existingCheckFaceId: CheckFaceId | null = null;
+              if (item.id) {
+                existingCheckFaceId = await this.checkFaceIdRepository.findOne({
+                  where: { apiId: item.id },
+                });
+              }
+
+              if (existingCheckFaceId) {
+                // Update record đã tồn tại (đặc biệt là mobile có thể đã bị lưu sai)
+                // Luôn update các field từ API để đảm bảo dữ liệu mới nhất
+                if (startTime) existingCheckFaceId.startTime = startTime;
+                if (checking) existingCheckFaceId.checking = checking;
+                existingCheckFaceId.isFirstInDay = item.is_first_in_day === true || item.is_first_in_day === 1;
+                if (item.image) existingCheckFaceId.image = item.image;
+                if (partnerCode) existingCheckFaceId.partnerCode = partnerCode;
+                if (item.name) existingCheckFaceId.name = item.name;
+                // Luôn update mobile nếu có giá trị từ API (để sửa lỗi bị cắt) - đây là field quan trọng nhất
+                if (mobileValue) existingCheckFaceId.mobile = mobileValue;
+                if (item.is_nv !== undefined) existingCheckFaceId.isNv = item.is_nv;
+                if (item.shop_code) existingCheckFaceId.shopCode = item.shop_code;
+                if (item.shop_name) existingCheckFaceId.shopName = item.shop_name;
+                if (item.cam_id) existingCheckFaceId.camId = item.cam_id;
+                if (startTime) {
+                  existingCheckFaceId.date = new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate());
+                } else if (dateObj) {
+                  existingCheckFaceId.date = dateObj;
+                }
+                
+                await this.checkFaceIdRepository.save(existingCheckFaceId);
+                updatedCount++;
+              } else {
+                // Insert mới
+                const checkFaceIdDataToSave: Partial<CheckFaceId> = {
+                  apiId: item.id || undefined,
+                  startTime: startTime || undefined,
+                  checking: checking || undefined,
+                  isFirstInDay: item.is_first_in_day === true || item.is_first_in_day === 1,
+                  image: item.image || undefined,
+                  partnerCode: partnerCode || undefined,
+                  name: item.name || undefined,
+                  mobile: mobileValue, // Đảm bảo lưu đúng mobile từ API
+                  isNv: item.is_nv || undefined,
+                  shopCode: item.shop_code || shopCode || undefined,
+                  shopName: item.shop_name || undefined,
+                  camId: item.cam_id || undefined,
+                  date: startTime ? new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate()) : dateObj,
+                };
+
+                const newCheckFaceId = this.checkFaceIdRepository.create(checkFaceIdDataToSave);
+                await this.checkFaceIdRepository.save(newCheckFaceId);
+                savedCount++;
+              }
             } catch (itemError: any) {
               const errorMsg = `Failed to save checkFaceID record ${item.id || 'unknown'}: ${itemError?.message || itemError}`;
               this.logger.warn(errorMsg);
@@ -1351,13 +1397,13 @@ export class SyncService {
         }
       }
 
-      this.logger.log(`[Sync FaceID] Đã lưu ${savedCount} checkFaceID records mới, bỏ qua ${skippedCount} records đã tồn tại cho ngày ${date}`);
+      this.logger.log(`[Sync FaceID] Đã lưu ${savedCount} checkFaceID records mới, cập nhật ${updatedCount} records đã tồn tại cho ngày ${date}`);
 
       return {
         success: errors.length === 0,
-        message: `Đồng bộ FaceID thành công cho ngày ${date}. Đã lưu ${savedCount} records mới, bỏ qua ${skippedCount} records đã tồn tại.`,
+        message: `Đồng bộ FaceID thành công cho ngày ${date}. Đã lưu ${savedCount} records mới, cập nhật ${updatedCount} records đã tồn tại.`,
         savedCount,
-        skippedCount,
+        updatedCount,
         errors: errors.length > 0 ? errors : undefined,
       };
     } catch (error: any) {

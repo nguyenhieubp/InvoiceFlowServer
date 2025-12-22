@@ -4364,6 +4364,13 @@ export class SalesService {
   }> {
     try {
       const { page, limit, date, dateFrom, dateTo, orderCode, partnerCode, faceStatus, brandCode } = options;
+      
+      // Log đơn giản để theo dõi - chỉ log khi có filter hoặc page
+      if (page || limit || date || dateFrom || dateTo || orderCode || partnerCode || faceStatus || brandCode) {
+        this.logger.log(
+          `[getAllGiaiTrinhFaceId] Called with filters: page=${page}, limit=${limit}, date=${date}, dateFrom=${dateFrom}, dateTo=${dateTo}, orderCode=${orderCode}, partnerCode=${partnerCode}, faceStatus=${faceStatus}, brandCode=${brandCode}`
+        );
+      }
 
       // Kiểm tra xem có phân trang không (cần cả page và limit, và phải là số hợp lệ)
       const hasPagination = page !== undefined && page !== null && limit !== undefined && limit !== null && !isNaN(page) && !isNaN(limit);
@@ -4459,9 +4466,10 @@ export class SalesService {
 
       const allMobileList = Array.from(allMobiles);
 
-      this.logger.debug(
-        `[getAllGiaiTrinhFaceId] Tìm thấy ${allSalesWithCustomer.length} sales, ${allMobileList.length} mobile numbers với filters: dateFrom=${dateFrom}, dateTo=${dateTo}, brandCode=${brandCode}, orderCode=${orderCode}, partnerCode=${partnerCode}`,
-      );
+      // Log chỉ khi cần debug
+      // this.logger.debug(
+      //   `[getAllGiaiTrinhFaceId] Tìm thấy ${allSalesWithCustomer.length} sales, ${allMobileList.length} mobile numbers với filters: dateFrom=${dateFrom}, dateTo=${dateTo}, brandCode=${brandCode}, orderCode=${orderCode}, partnerCode=${partnerCode}`,
+      // );
 
       // 3) Lấy tất cả checkFaceIds cho các mobile này (theo ngày nếu có)
       // Join bằng: sale.mobile (partner_mobile) = FaceID.mobile
@@ -4502,9 +4510,10 @@ export class SalesService {
 
       const allFaceRows = await checkFaceIdQuery.getMany();
 
-      this.logger.debug(
-        `[getAllGiaiTrinhFaceId] Tìm thấy ${allFaceRows.length} FaceID records với ${normalizedMobiles.length} mobiles`,
-      );
+      // Log chỉ khi cần debug
+      // this.logger.debug(
+      //   `[getAllGiaiTrinhFaceId] Tìm thấy ${allFaceRows.length} FaceID records với ${normalizedMobiles.length} mobiles`,
+      // );
 
       // Map: normalized mobile -> CheckFaceId[]
       const checkFaceIdsByMobile = new Map<string, CheckFaceId[]>();
@@ -4522,24 +4531,42 @@ export class SalesService {
         }
       }
 
-      this.logger.debug(
-        `[getAllGiaiTrinhFaceId] Mapped ${checkFaceIdsByMobile.size} unique mobiles trong FaceID data`,
-      );
+      // Log chỉ khi cần debug
+      // this.logger.debug(
+      //   `[getAllGiaiTrinhFaceId] Mapped ${checkFaceIdsByMobile.size} unique mobiles trong FaceID data`,
+      // );
 
       // 4) Map sales với FaceID để xác định isCheckFaceId cho từng sale
+      // Logic: So sánh đơn hàng với FaceID qua mobile VÀ docDate (giống logic explainFaceId)
       // Map: sale.id -> isCheckFaceId
       const saleFaceIdMap = new Map<string, boolean>();
       let salesWithFaceIdCount = 0;
       for (const sale of allSalesWithCustomer) {
         const saleMobile = sale.mobile ? String(sale.mobile).trim() : (sale.customer?.mobile ? String(sale.customer.mobile).trim() : null);
 
-        // Tìm FaceID chỉ theo mobile
-        let checkFaceIds: CheckFaceId[] = [];
-        if (saleMobile) {
+        // Tìm FaceID theo mobile VÀ docDate (ngày đơn hàng) - giống logic explainFaceId
+        let isCheckFaceId = false;
+        if (saleMobile && sale.docDate) {
           const normalizedMobile = String(saleMobile).trim();
-          checkFaceIds = checkFaceIdsByMobile.get(normalizedMobile) || [];
+          // Format docDate thành YYYY-MM-DD để so sánh
+          const docDateStr = sale.docDate instanceof Date 
+            ? sale.docDate.toISOString().split('T')[0]
+            : new Date(sale.docDate).toISOString().split('T')[0];
+          
+          // Tìm FaceID theo mobile và docDate
+          const matchingFaceIds = (checkFaceIdsByMobile.get(normalizedMobile) || []).filter(
+            (cf) => {
+              if (!cf.date) return false;
+              const faceDateStr = cf.date instanceof Date 
+                ? cf.date.toISOString().split('T')[0]
+                : new Date(cf.date).toISOString().split('T')[0];
+              return faceDateStr === docDateStr;
+            }
+          );
+          
+          isCheckFaceId = matchingFaceIds.length > 0;
         }
-        const isCheckFaceId = checkFaceIds.length > 0;
+        
         if (isCheckFaceId) {
           salesWithFaceIdCount++;
         }
@@ -4549,9 +4576,10 @@ export class SalesService {
         }
       }
 
-      this.logger.debug(
-        `[getAllGiaiTrinhFaceId] Mapped ${salesWithFaceIdCount}/${allSalesWithCustomer.length} sales có FaceID, saleFaceIdMap size: ${saleFaceIdMap.size}`,
-      );
+      // Log chỉ khi cần debug
+      // this.logger.debug(
+      //   `[getAllGiaiTrinhFaceId] Mapped ${salesWithFaceIdCount}/${allSalesWithCustomer.length} sales có FaceID, saleFaceIdMap size: ${saleFaceIdMap.size}`,
+      // );
 
       // 5) Group sales theo docCode để build Order[] (lấy sales làm gốc)
       const ordersMap = new Map<string, Order>();
@@ -4577,6 +4605,15 @@ export class SalesService {
             }
             : null;
 
+          // Lấy thông tin giải trình từ sale đầu tiên (tất cả sales cùng docCode sẽ có cùng giải trình)
+          const isFaceIdExplained = sale.isFaceIdExplained || false;
+          const faceIdExplanationMessage = sale.faceIdExplanationMessage || null;
+          const faceIdExplanationDate = sale.faceIdExplanationDate 
+            ? (sale.faceIdExplanationDate instanceof Date 
+                ? sale.faceIdExplanationDate.toISOString().split('T')[0]
+                : new Date(sale.faceIdExplanationDate).toISOString().split('T')[0])
+            : null;
+
           ordersMap.set(sale.docCode, {
             docCode: sale.docCode,
             docDate: sale.docDate.toISOString(),
@@ -4588,7 +4625,11 @@ export class SalesService {
             totalItems: 0,
             isProcessed: sale.isProcessed,
             sales: [],
-          });
+            // Thông tin giải trình FaceID
+            isFaceIdExplained,
+            faceIdExplanationMessage,
+            faceIdExplanationDate,
+          } as any);
         }
 
         const order = ordersMap.get(sale.docCode)!;
@@ -4636,21 +4677,12 @@ export class SalesService {
         const firstOrder = orders[0];
 
         // Kiểm tra tất cả sales trong orders để xem có FaceID không
-        // Lấy tất cả mobile từ tất cả sales trong orders
-        const allMobilesInOrders = new Set<string>();
+        // Logic: Tính theo đơn hàng (sales), không phải theo FaceID
+        // isCheckFaceId = true nếu có ít nhất 1 sale trong orders có FaceID (qua mobile + docDate)
         let hasFaceIdInOrders = false;
 
         for (const order of orders) {
-          // Lấy mobile từ order.customer.mobile (có thể là sale.mobile hoặc customer.mobile)
-          const orderMobile = (order.customer as any)?.mobile;
-          if (orderMobile) {
-            const normalizedMobile = String(orderMobile).trim();
-            if (normalizedMobile && normalizedMobile.length > 0) {
-              allMobilesInOrders.add(normalizedMobile);
-            }
-          }
-
-          // Kiểm tra từng sale trong order để xem có FaceID không (dùng saleFaceIdMap)
+          // Kiểm tra từng sale trong order để xem có FaceID không (dùng saleFaceIdMap - đã check mobile + docDate)
           for (const saleItem of (order.sales || [])) {
             const saleId = (saleItem as any).id;
             if (saleId && saleFaceIdMap.has(saleId) && saleFaceIdMap.get(saleId)) {
@@ -4661,7 +4693,20 @@ export class SalesService {
           if (hasFaceIdInOrders) break; // Đã tìm thấy trong order này, không cần kiểm tra tiếp
         }
 
-        // Tìm FaceID theo tất cả mobile từ orders
+        // isCheckFaceId = true nếu có ít nhất 1 sale trong orders có FaceID (theo saleFaceIdMap - đã check mobile + docDate)
+        const isCheckFaceId = hasFaceIdInOrders;
+        
+        // Lấy FaceID để hiển thị (không dùng để tính isCheckFaceId)
+        const allMobilesInOrders = new Set<string>();
+        for (const order of orders) {
+          const orderMobile = (order.customer as any)?.mobile;
+          if (orderMobile) {
+            const normalizedMobile = String(orderMobile).trim();
+            if (normalizedMobile && normalizedMobile.length > 0) {
+              allMobilesInOrders.add(normalizedMobile);
+            }
+          }
+        }
         let checkFaceIds: CheckFaceId[] = [];
         for (const mobile of allMobilesInOrders) {
           const normalizedMobile = String(mobile).trim();
@@ -4673,12 +4718,10 @@ export class SalesService {
           }
         }
 
-        // isCheckFaceId = true nếu có ít nhất 1 sale trong orders có FaceID (theo saleFaceIdMap) HOẶC có FaceID khớp theo mobile
-        const isCheckFaceId = hasFaceIdInOrders || checkFaceIds.length > 0;
-
-        this.logger.debug(
-          `[getAllGiaiTrinhFaceId] partnerCode=${partnerCode}, hasFaceIdInOrders=${hasFaceIdInOrders}, checkFaceIds.length=${checkFaceIds.length}, isCheckFaceId=${isCheckFaceId}, faceStatus=${faceStatus}`,
-        );
+        // Log chi tiết cho từng partnerCode - đã tắt để giảm log
+        // this.logger.debug(
+        //   `[getAllGiaiTrinhFaceId] partnerCode=${partnerCode}, hasFaceIdInOrders=${hasFaceIdInOrders}, checkFaceIds.length=${checkFaceIds.length}, isCheckFaceId=${isCheckFaceId}, faceStatus=${faceStatus}`,
+        // );
 
         // Áp dụng filter faceStatus
         if (faceStatus === 'yes' && !isCheckFaceId) {

@@ -38,8 +38,8 @@ export class CheckFaceId {
   @Column({ nullable: true })
   name: string; // name từ API
 
-  @Column({ nullable: true })
-  mobile: string; // mobile từ API
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  mobile: string; // mobile từ API (đảm bảo đủ độ dài cho số điện thoại)
 
   @Column({ nullable: true })
   isNv: number; // is_nv từ API (1, 2, etc.)
