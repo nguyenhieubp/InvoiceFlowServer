@@ -4764,7 +4764,10 @@ export class SalesService {
         throw new BadRequestException('Ngày giải trình không hợp lệ (format: YYYY-MM-DD)');
       }
 
-      // Tìm các CheckFaceId records theo mobile và ngày đơn hàng
+      // Kiểm tra xem đơn hàng có FaceID không (so sánh qua mobile)
+      // Logic: So sánh đơn hàng với FaceID qua mobile
+      // - Nếu khớp (có FaceID) => không làm gì
+      // - Nếu không khớp (không có FaceID) => giải trình cho đơn hàng
       const mobile = String(sale.customer.mobile).trim();
       const checkFaceIds = await this.checkFaceIdRepository
         .createQueryBuilder('checkFaceId')
@@ -4772,20 +4775,38 @@ export class SalesService {
         .andWhere('DATE(checkFaceId.date) = DATE(:orderDate)', { orderDate: sale.docDate })
         .getMany();
 
-      // Update tất cả các CheckFaceId records
-      let updatedCount = 0;
-      for (const checkFaceId of checkFaceIds) {
-        checkFaceId.isExplained = true;
-        checkFaceId.explanationMessage = explanationMessage;
-        checkFaceId.explanationDate = explanationDateObj;
-        await this.checkFaceIdRepository.save(checkFaceId);
-        updatedCount++;
+      // Nếu khớp FaceID (có FaceID) => không làm gì
+      if (checkFaceIds.length > 0) {
+        return {
+          success: true,
+          message: 'Đơn hàng đã có FaceID, không cần giải trình.',
+          updatedCount: 0,
+        };
       }
+
+      // Nếu không khớp FaceID (không có FaceID) => giải trình cho đơn hàng
+      // Tìm tất cả sales của đơn hàng này (cùng docCode)
+      const allSales = await this.saleRepository.find({
+        where: { docCode },
+      });
+
+      if (allSales.length === 0) {
+        throw new NotFoundException(`Không tìm thấy sales với mã đơn: ${docCode}`);
+      }
+
+      // Cập nhật giải trình cho tất cả sales của đơn hàng (save cùng lúc để tối ưu)
+      for (const saleRecord of allSales) {
+        saleRecord.isFaceIdExplained = true;
+        saleRecord.faceIdExplanationMessage = explanationMessage;
+        saleRecord.faceIdExplanationDate = explanationDateObj;
+      }
+      
+      await this.saleRepository.save(allSales);
 
       return {
         success: true,
         message: explanationMessage,
-        updatedCount,
+        updatedCount: allSales.length,
       };
     } catch (error: any) {
       this.logger.error(`[SalesService] explainFaceId error: ${error?.message || error}`);

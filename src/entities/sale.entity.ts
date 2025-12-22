@@ -416,6 +416,16 @@ export class Sale {
   @Column({ nullable: true, unique: true })
   compositeKey?: string; // Composite key tổng hợp: docCode + itemCode + qty + giaBan + disc_amt + grade_discamt + other_discamt + revenue + promCode + serial + customerId + api_id
 
+  // ========== CÁC TRƯỜNG GIẢI TRÌNH FACEID ==========
+  @Column({ type: 'boolean', default: false })
+  isFaceIdExplained?: boolean; // Đã giải trình FaceID chưa
+
+  @Column({ type: 'text', nullable: true })
+  faceIdExplanationMessage?: string; // Thông tin giải trình FaceID
+
+  @Column({ type: 'date', nullable: true })
+  faceIdExplanationDate?: Date; // Ngày giải trình FaceID
+
   @CreateDateColumn()
   createdAt: Date;
 
