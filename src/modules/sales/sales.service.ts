@@ -3612,12 +3612,8 @@ export class SalesService {
 
         const maThe = toString(sale.maThe || sale.mvc_serial, '');
 
-        // Extract chỉ phần số từ ordertype (ví dụ: "01.Thường" -> "01", "02. Làm dịch vụ" -> "02")
-        let loaiGd = '01';
-        if (sale.ordertype) {
-          const match = String(sale.ordertype).match(/^(\d+)/);
-          loaiGd = match ? match[1] : '01';
-        }
+        // loai_gd: Tất cả đều dùng '01'
+        const loaiGd = '01';
 
         const loai = toString(sale.loai || sale.cat1, '');
 
@@ -3913,12 +3909,8 @@ export class SalesService {
       const maKenh = 'ONLINE'; // Fix mã kênh là ONLINE
       const soSeri = firstSale?.kyHieu || firstSale?.branchCode || orderData.branchCode || 'DEFAULT';
 
-      // Extract chỉ phần số từ ordertype (ví dụ: "01.Thường" -> "01")
-      let loaiGd = '01';
-      if (firstSale?.ordertype) {
-        const match = String(firstSale.ordertype).match(/^(\d+)/);
-        loaiGd = match ? match[1] : '01';
-      }
+      // loai_gd: Tất cả đều dùng '01'
+      const loaiGd = '01';
 
       // Lấy ma_dvcs từ department API (ưu tiên), nếu không có thì fallback
       const maDvcs = firstSale?.department?.ma_dvcs
@@ -3932,7 +3924,7 @@ export class SalesService {
         ma_dvcs: maDvcs,
         ma_kh: orderData.customer?.code || '',
         ong_ba: orderData.customer?.name || null,
-        ma_gd: '2',
+        ma_gd: '1',
         ma_tt: null,
         ma_ca: firstSale?.maCa || null,
         hinh_thuc: '0',
@@ -4184,7 +4176,7 @@ export class SalesService {
       ma_dvcs: maDvcs,
       ma_kh: maKh,
       ong_ba: orderData?.customer?.name || null,
-      ma_gd: '2', // Mã giao dịch: 2 - Xuất nội bộ
+      ma_gd: '1', // Mã giao dịch: 1
       ma_nx: maNx, // Thêm ma_nx vào header
       ngay_ct: ngayCt,
       so_ct: firstItem.doccode,

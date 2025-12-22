@@ -109,6 +109,84 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Gọi API salesOrder (đơn hàng bán)
+   */
+  async submitSalesOrder(orderData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Log payload để debug
+      this.logger.debug(`Sales order payload: ${JSON.stringify(orderData, null, 2)}`);
+
+      // Gọi API salesOrder với token
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/salesOrder`,
+          orderData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('Sales order submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`Error submitting sales order: ${error?.message || error}`);
+      if (error?.response) {
+        this.logger.error(`Response status: ${error.response.status}`);
+        this.logger.error(`Response data: ${JSON.stringify(error.response.data)}`);
+        // Log thêm thông tin chi tiết về request
+        if (error.config) {
+          this.logger.error(`Request URL: ${error.config.url}`);
+          this.logger.error(`Request payload: ${JSON.stringify(error.config.data)}`);
+        }
+      }
+
+      // Nếu lỗi 401 (Unauthorized), refresh token và retry
+      if (error?.response?.status === 401) {
+        this.logger.log('Token expired, refreshing and retrying sales order...');
+        const newToken = await this.login();
+        if (newToken) {
+          try {
+            this.logger.debug(`Retry sales order payload: ${JSON.stringify(orderData, null, 2)}`);
+            const retryResponse = await firstValueFrom(
+              this.httpService.post(
+                `${this.baseUrl}/salesOrder`,
+                orderData,
+                {
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${newToken}`,
+                  },
+                },
+              ),
+            );
+            this.logger.log('Sales order submitted successfully (after retry)');
+            return retryResponse.data;
+          } catch (retryError: any) {
+            this.logger.error(`Retry sales order API failed: ${retryError?.message || retryError}`);
+            if (retryError?.response) {
+              this.logger.error(`Retry response status: ${retryError.response.status}`);
+              this.logger.error(`Retry response data: ${JSON.stringify(retryError.response.data)}`);
+            }
+            throw retryError;
+          }
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  /**
    * Gọi API salesInvoice
    */
   async submitSalesInvoice(invoiceData: any): Promise<any> {
