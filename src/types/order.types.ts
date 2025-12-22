@@ -27,6 +27,7 @@ export interface SaleItem {
   description?: string;
   partnerCode?: string;
   ordertype?: string;
+  ordertype_name?: string; // Tên loại đơn hàng từ API (ví dụ: "01.Thường")
   branchCode?: string;
   serial?: string;
   qty?: number;

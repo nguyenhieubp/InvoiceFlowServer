@@ -171,7 +171,8 @@ export class ZappyApiService {
         itemName: zappySale.itemname || undefined,
         description: zappySale.description || undefined,
         partnerCode: zappySale.partner_code || undefined,
-        ordertype: zappySale.ordertype_name || undefined, // Lưu ordertype_name trực tiếp
+        ordertype: zappySale.ordertype || undefined, // Mã loại đơn hàng (nếu có)
+        ordertype_name: zappySale.ordertype_name || undefined, // Tên loại đơn hàng (ví dụ: "01.Thường")
         branchCode: zappySale.branch_code || undefined,
         serial: zappySale.serial || undefined,
         qty: zappySale.qty || 0,

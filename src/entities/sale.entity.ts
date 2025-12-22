@@ -34,6 +34,9 @@ export class Sale {
   @Column({ nullable: true })
   ordertype?: string; // Loại đơn hàng (LAM_DV, NORMAL, etc.)
 
+  @Column({ nullable: true })
+  ordertypeName?: string; // Tên loại đơn hàng (01.Thường, etc.)
+
   @Column({ type: 'text', nullable: true })
   description: string;
 

@@ -2231,16 +2231,43 @@ export class SalesService {
     // Fetch stock transfers để lấy ma_nx (ST* cho xuất kho, RT* cho nhập kho)
     const stockTransfers = await this.stockTransferRepository.find({
       where: { soCode: docCode },
+      order: { itemCode: 'ASC', createdAt: 'ASC' },
     });
 
-    // Tạo map: itemCode -> stock transfer (phân biệt ST và RT)
-    const stockTransferMapByItem = new Map<string, { st?: StockTransfer; rt?: StockTransfer }>();
+    // Enrich stock transfers với materialCode từ Loyalty API
+    const stockTransferItemCodes = Array.from(
+      new Set(
+        stockTransfers
+          .map((st) => st.itemCode)
+          .filter((code): code is string => !!code && code.trim() !== '')
+      )
+    );
+
+    // Fetch materialCode cho stock transfers từ Loyalty API
+    const stockTransferLoyaltyMap = new Map<string, any>();
+    if (stockTransferItemCodes.length > 0) {
+      const fetchedStockTransferProducts = await this.loyaltyService.fetchProducts(stockTransferItemCodes);
+      fetchedStockTransferProducts.forEach((product, itemCode) => {
+        stockTransferLoyaltyMap.set(itemCode, product);
+      });
+    }
+
+    // Tạo map: materialCode -> stock transfer (phân biệt ST và RT)
+    // CHỈ dùng materialCode từ Loyalty API, không fallback về itemCode
+    const stockTransferMapByMaterialCode = new Map<string, { st?: StockTransfer; rt?: StockTransfer }>();
     stockTransfers.forEach((st) => {
-      const itemCode = st.itemCode;
-      if (!stockTransferMapByItem.has(itemCode)) {
-        stockTransferMapByItem.set(itemCode, {});
+      const loyaltyProduct = stockTransferLoyaltyMap.get(st.itemCode);
+      // CHỈ map nếu có materialCode từ Loyalty API
+      const materialCode = loyaltyProduct?.materialCode;
+      if (!materialCode) {
+        // Bỏ qua nếu không có materialCode từ Loyalty API
+        return;
       }
-      const itemMap = stockTransferMapByItem.get(itemCode)!;
+      
+      if (!stockTransferMapByMaterialCode.has(materialCode)) {
+        stockTransferMapByMaterialCode.set(materialCode, {});
+      }
+      const itemMap = stockTransferMapByMaterialCode.get(materialCode)!;
       // ST* -> xuất kho (warehouseRelease)
       if (st.docCode.startsWith('ST')) {
         itemMap.st = st;
@@ -2256,7 +2283,13 @@ export class SalesService {
       const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
       const maBp = department?.ma_bp || sale.branchCode || null;
       const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBp);
-      const stockTransferInfo = sale.itemCode ? stockTransferMapByItem.get(sale.itemCode) : null;
+      
+      // Lấy materialCode từ Loyalty API cho sale - CHỈ match nếu có materialCode
+      const saleLoyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
+      const saleMaterialCode = saleLoyaltyProduct?.materialCode;
+      
+      // CHỈ match theo materialCode từ Loyalty API, không fallback
+      const stockTransferInfo = saleMaterialCode ? stockTransferMapByMaterialCode.get(saleMaterialCode) : null;
 
       return {
         ...sale,

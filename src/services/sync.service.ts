@@ -625,6 +625,7 @@ export class SyncService {
                   existingSale.branchCode = order.branchCode;
                   existingSale.docSourceType = order.docSourceType;
                   if (saleItem.ordertype !== undefined) existingSale.ordertype = saleItem.ordertype;
+                  if (saleItem.ordertype_name !== undefined) existingSale.ordertypeName = saleItem.ordertype_name;
                   if (saleItem.description !== undefined) existingSale.description = saleItem.description;
                   if (saleItem.partnerCode !== undefined) existingSale.partnerCode = saleItem.partnerCode;
                   // Update mobile từ customer tại thời điểm sync
@@ -683,6 +684,7 @@ export class SyncService {
                     branchCode: order.branchCode,
                     docSourceType: order.docSourceType,
                     ordertype: saleItem.ordertype,
+                    ordertypeName: saleItem.ordertype_name,
                     description: saleItem.description,
                     partnerCode: saleItem.partnerCode,
                     mobile: order.customer.mobile || undefined, // Lưu mobile từ customer tại thời điểm bán
@@ -1009,6 +1011,7 @@ export class SyncService {
           if (saleData.kenh) saleDataToCreate.kenh = saleData.kenh;
           if (saleData.prom_code) saleDataToCreate.promCode = saleData.prom_code;
           if (saleData.ordertype) saleDataToCreate.ordertype = saleData.ordertype;
+          if (saleData.ordertype_name) saleDataToCreate.ordertypeName = saleData.ordertype_name;
           
           // Các trường bổ sung từ API
           if (saleData.cat1 !== undefined) saleDataToCreate.cat1 = saleData.cat1;
