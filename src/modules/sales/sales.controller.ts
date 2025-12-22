@@ -152,11 +152,28 @@ export class SalesController {
   }
 
   @Post('sync-from-zappy')
-  async syncFromZappy(@Body('date') date: string) {
+  async syncFromZappy(@Body('date') date: string, @Body('brand') brand?: string) {
     if (!date) {
       throw new BadRequestException('Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 04DEC2025)');
     }
-    return this.salesService.syncFromZappy(date);
+    return this.salesService.syncFromZappy(date, brand);
+  }
+
+  @Post('sync-sales-by-date-range')
+  async syncSalesByDateRange(
+    @Body('startDate') startDate: string,
+    @Body('endDate') endDate: string,
+  ) {
+    if (!startDate || !endDate) {
+      throw new BadRequestException('Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)');
+    }
+    return this.salesService.syncSalesByDateRange(startDate, endDate);
+  }
+
+  @Post('sync-sales-oct-dec-2025')
+  async syncSalesOctDec2025() {
+    // Đồng bộ sale từ 01/10/2025 đến 01/12/2025 cho tất cả các nhãn
+    return this.salesService.syncSalesByDateRange('01OCT2025', '01DEC2025');
   }
 
   @Post('order/:docCode/create-invoice-fast')

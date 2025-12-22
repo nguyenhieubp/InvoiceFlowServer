@@ -2714,9 +2714,10 @@ export class SalesService {
   /**
    * Đồng bộ dữ liệu từ Zappy API và lưu vào database
    * @param date - Ngày theo format DDMMMYYYY (ví dụ: 04DEC2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard). Nếu không có thì dùng default
    * @returns Kết quả đồng bộ
    */
-  async syncFromZappy(date: string): Promise<{
+  async syncFromZappy(date: string, brand?: string): Promise<{
     success: boolean;
     message: string;
     ordersCount: number;
@@ -2727,12 +2728,12 @@ export class SalesService {
 
     try {
       // Lấy dữ liệu từ Zappy API
-      const orders = await this.zappyApiService.getDailySales(date);
+      const orders = await this.zappyApiService.getDailySales(date, brand);
 
       // Lấy dữ liệu cash/voucher từ get_daily_cash để enrich
       let cashData: any[] = [];
       try {
-        cashData = await this.zappyApiService.getDailyCash(date);
+        cashData = await this.zappyApiService.getDailyCash(date, brand);
       } catch (error) {
       }
 
@@ -3023,7 +3024,7 @@ export class SalesService {
 
       return {
         success: errors.length === 0,
-        message: `Đồng bộ thành công ${orders.length} đơn hàng cho ngày ${date}`,
+        message: `Đồng bộ thành công ${orders.length} đơn hàng cho ngày ${date}${brand ? ` (brand: ${brand})` : ''}`,
         ordersCount: orders.length,
         salesCount,
         customersCount,
@@ -3031,6 +3032,140 @@ export class SalesService {
       };
     } catch (error: any) {
       this.logger.error(`Lỗi khi đồng bộ từ Zappy API: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Đồng bộ sale từ khoảng thời gian cho tất cả các nhãn
+   * @param startDate - Ngày bắt đầu theo format DDMMMYYYY (ví dụ: 01OCT2025)
+   * @param endDate - Ngày kết thúc theo format DDMMMYYYY (ví dụ: 01DEC2025)
+   * @returns Kết quả đồng bộ tổng hợp
+   */
+  async syncSalesByDateRange(startDate: string, endDate: string): Promise<{
+    success: boolean;
+    message: string;
+    totalOrdersCount: number;
+    totalSalesCount: number;
+    totalCustomersCount: number;
+    brandResults: Array<{
+      brand: string;
+      ordersCount: number;
+      salesCount: number;
+      customersCount: number;
+      errors?: string[];
+    }>;
+    errors?: string[];
+  }> {
+    const brands = ['f3', 'labhair', 'yaman', 'menard'];
+    const allErrors: string[] = [];
+    const brandResults: Array<{
+      brand: string;
+      ordersCount: number;
+      salesCount: number;
+      customersCount: number;
+      errors?: string[];
+    }> = [];
+
+    let totalOrdersCount = 0;
+    let totalSalesCount = 0;
+    let totalCustomersCount = 0;
+
+    // Parse dates
+    const parseDate = (dateStr: string): Date => {
+      // Format: DDMMMYYYY (ví dụ: 01OCT2025)
+      const day = parseInt(dateStr.substring(0, 2));
+      const monthStr = dateStr.substring(2, 5).toUpperCase();
+      const year = parseInt(dateStr.substring(5, 9));
+      
+      const monthMap: Record<string, number> = {
+        'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3, 'MAY': 4, 'JUN': 5,
+        'JUL': 6, 'AUG': 7, 'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+      };
+      
+      const month = monthMap[monthStr];
+      if (month === undefined) {
+        throw new Error(`Invalid month: ${monthStr}`);
+      }
+      
+      return new Date(year, month, day);
+    };
+
+    const formatDate = (date: Date): string => {
+      const day = date.getDate().toString().padStart(2, '0');
+      const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+      const month = monthNames[date.getMonth()];
+      const year = date.getFullYear();
+      return `${day}${month}${year}`;
+    };
+
+    try {
+      const start = parseDate(startDate);
+      const end = parseDate(endDate);
+
+      // Lặp qua từng brand
+      for (const brand of brands) {
+        this.logger.log(`[syncSalesByDateRange] Bắt đầu đồng bộ brand: ${brand}`);
+        let brandOrdersCount = 0;
+        let brandSalesCount = 0;
+        let brandCustomersCount = 0;
+        const brandErrors: string[] = [];
+
+        // Lặp qua từng ngày trong khoảng thời gian
+        const currentDate = new Date(start);
+        while (currentDate <= end) {
+          const dateStr = formatDate(currentDate);
+          try {
+            this.logger.log(`[syncSalesByDateRange] Đồng bộ ${brand} - ngày ${dateStr}`);
+            const result = await this.syncFromZappy(dateStr, brand);
+            
+            brandOrdersCount += result.ordersCount;
+            brandSalesCount += result.salesCount;
+            brandCustomersCount += result.customersCount;
+            
+            if (result.errors && result.errors.length > 0) {
+              brandErrors.push(...result.errors.map(err => `[${dateStr}] ${err}`));
+            }
+          } catch (error: any) {
+            const errorMsg = `[${brand}] Lỗi khi đồng bộ ngày ${dateStr}: ${error?.message || error}`;
+            this.logger.error(errorMsg);
+            brandErrors.push(errorMsg);
+          }
+
+          // Tăng ngày lên 1
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+        totalOrdersCount += brandOrdersCount;
+        totalSalesCount += brandSalesCount;
+        totalCustomersCount += brandCustomersCount;
+
+        brandResults.push({
+          brand,
+          ordersCount: brandOrdersCount,
+          salesCount: brandSalesCount,
+          customersCount: brandCustomersCount,
+          errors: brandErrors.length > 0 ? brandErrors : undefined,
+        });
+
+        if (brandErrors.length > 0) {
+          allErrors.push(...brandErrors);
+        }
+
+        this.logger.log(`[syncSalesByDateRange] Hoàn thành đồng bộ brand: ${brand} - ${brandOrdersCount} đơn, ${brandSalesCount} sale`);
+      }
+
+      return {
+        success: allErrors.length === 0,
+        message: `Đồng bộ thành công từ ${startDate} đến ${endDate}: ${totalOrdersCount} đơn hàng, ${totalSalesCount} sale, ${totalCustomersCount} khách hàng`,
+        totalOrdersCount,
+        totalSalesCount,
+        totalCustomersCount,
+        brandResults,
+        errors: allErrors.length > 0 ? allErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ sale theo khoảng thời gian: ${error?.message || error}`);
       throw error;
     }
   }
