@@ -30,7 +30,7 @@ import { CategoriesModule } from '../categories/categories.module';
   ],
   controllers: [SalesController],
   providers: [SalesService, InvoicePrintService, ZappyApiService, FastApiService, FastApiInvoiceFlowService, LoyaltyService],
-  exports: [SalesService],
+  exports: [SalesService, FastApiInvoiceFlowService],
 })
 export class SalesModule {}
 

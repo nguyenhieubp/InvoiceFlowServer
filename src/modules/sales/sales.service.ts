@@ -3216,6 +3216,17 @@ export class SalesService {
   /**
    * Build invoice data cho Fast API (format mới)
    */
+  /**
+   * Build invoice data cho warehouse (public method để dùng trong cron job)
+   */
+  async buildInvoiceDataForWarehouse(docCode: string): Promise<any> {
+    const orderData = await this.findByOrderCode(docCode);
+    if (!orderData || !orderData.sales || orderData.sales.length === 0) {
+      throw new Error(`Order ${docCode} not found or has no sales`);
+    }
+    return this.buildFastApiInvoiceData(orderData);
+  }
+
   private async buildFastApiInvoiceData(orderData: any): Promise<any> {
     try {
       const toNumber = (value: any, defaultValue: number = 0): number => {

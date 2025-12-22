@@ -214,7 +214,127 @@ export class FastApiInvoiceFlowService {
   }
 
   /**
-   * Thực hiện tạo invoice - tạo Customer trước, sau đó tạo Sales Invoice
+   * Build dữ liệu warehouseRelease (xuất kho) từ invoiceData
+   */
+  private buildWarehouseReleaseData(invoiceData: any): any {
+    const warehouseData: any = {
+      ma_dvcs: invoiceData.ma_dvcs,
+      ma_kh: invoiceData.ma_kh,
+      ong_ba: invoiceData.ong_ba || invoiceData.ten_kh || '',
+      ngay_ct: invoiceData.ngay_ct,
+      so_ct: invoiceData.so_ct,
+      dien_giai: invoiceData.dien_giai || `Xuất kho cho đơn hàng ${invoiceData.so_ct}`,
+      detail: (invoiceData.detail || []).map((item: any) => {
+        // Map các field từ invoiceData.detail sang warehouse detail
+        // Sử dụng gia_ban/tien_hang nếu không có gia_nt/tien_nt
+        const giaNt = item.gia_nt || item.gia_ban || 0;
+        const tienNt = item.tien_nt || item.tien_hang || 0;
+        const pxGiaDd = item.px_gia_dd || item.gia_ban || giaNt || 0;
+        
+        return {
+          ma_vt: item.ma_vt,
+          dvt: item.dvt,
+          ma_kho: item.ma_kho,
+          ma_lo: item.ma_lo,
+          so_luong: item.so_luong,
+          px_gia_dd: pxGiaDd,
+          so_serial: item.so_serial,
+          gia_nt: giaNt,
+          tien_nt: tienNt,
+          ma_nx: item.ma_nx,
+          ma_vv: item.ma_vv,
+          ma_bp: item.ma_bp,
+          so_lsx: item.so_lsx,
+          ma_sp: item.ma_sp,
+          ma_hd: item.ma_hd,
+          ma_phi: item.ma_phi,
+          ma_ku: item.ma_ku,
+          ma_phi_hh: item.ma_phi_hh,
+          ma_phi_ttlk: item.ma_phi_ttlk,
+          tien_hh_nt: item.tien_hh_nt,
+          tien_ttlk_nt: item.tien_ttlk_nt,
+        };
+      }),
+    };
+
+    return warehouseData;
+  }
+
+  /**
+   * Build dữ liệu warehouseReceipt (nhập kho) từ invoiceData
+   */
+  private buildWarehouseReceiptData(invoiceData: any): any {
+    const warehouseData: any = {
+      ma_dvcs: invoiceData.ma_dvcs,
+      ma_kh: invoiceData.ma_kh,
+      ong_ba: invoiceData.ong_ba || invoiceData.ten_kh || '',
+      ngay_ct: invoiceData.ngay_ct,
+      so_ct: invoiceData.so_ct,
+      dien_giai: invoiceData.dien_giai || `Nhập kho cho đơn hàng ${invoiceData.so_ct}`,
+      detail: (invoiceData.detail || []).map((item: any) => {
+        // Map các field từ invoiceData.detail sang warehouse detail
+        // Sử dụng gia_ban/tien_hang nếu không có gia_nt/tien_nt
+        const giaNt = item.gia_nt || item.gia_ban || 0;
+        const tienNt = item.tien_nt || item.tien_hang || 0;
+        
+        return {
+          ma_vt: item.ma_vt,
+          dvt: item.dvt,
+          ma_kho: item.ma_kho,
+          ma_lo: item.ma_lo,
+          so_luong: item.so_luong,
+          so_serial: item.so_serial,
+          gia_nt: giaNt,
+          tien_nt: tienNt,
+          ma_nx: item.ma_nx || '1111',
+          ma_vv: item.ma_vv || '',
+          ma_bp: item.ma_bp || '',
+          so_lsx: item.so_lsx || '',
+          ma_sp: item.ma_sp || '',
+          ma_hd: item.ma_hd || '',
+        };
+      }),
+    };
+
+    return warehouseData;
+  }
+
+  /**
+   * Gọi API warehouseRelease (xuất kho) với ioType: O
+   */
+  async createWarehouseRelease(invoiceData: any): Promise<any> {
+    this.logger.log(`[Flow] Creating warehouse release for order ${invoiceData.so_ct || 'N/A'}`);
+    try {
+      const warehouseData = this.buildWarehouseReleaseData(invoiceData);
+      const result = await this.fastApiService.submitWarehouseRelease(warehouseData, 'O');
+      this.logger.log(`[Flow] Warehouse release created successfully for order ${invoiceData.so_ct || 'N/A'}`);
+      return result;
+    } catch (error: any) {
+      this.logger.warn(`[Flow] Warehouse release failed but continuing: ${error?.message || error}`);
+      // Không throw error để không chặn luồng tạo invoice
+      return null;
+    }
+  }
+
+  /**
+   * Gọi API warehouseReceipt (nhập kho) với ioType: I
+   */
+  async createWarehouseReceipt(invoiceData: any): Promise<any> {
+    this.logger.log(`[Flow] Creating warehouse receipt for order ${invoiceData.so_ct || 'N/A'}`);
+    try {
+      const warehouseData = this.buildWarehouseReceiptData(invoiceData);
+      const result = await this.fastApiService.submitWarehouseReceipt(warehouseData, 'I');
+      this.logger.log(`[Flow] Warehouse receipt created successfully for order ${invoiceData.so_ct || 'N/A'}`);
+      return result;
+    } catch (error: any) {
+      this.logger.warn(`[Flow] Warehouse receipt failed but continuing: ${error?.message || error}`);
+      // Không throw error để không chặn luồng tạo invoice
+      return null;
+    }
+  }
+
+  /**
+   * Thực hiện tạo invoice - tạo Customer, warehouseRelease, warehouseReceipt, sau đó tạo Sales Invoice
    */
   async executeFullInvoiceFlow(invoiceData: {
     ma_kh: string;
@@ -246,7 +366,13 @@ export class FastApiInvoiceFlowService {
         });
       }
 
-      // Step 2: Tạo salesInvoice
+      // Step 2: Tạo warehouseRelease (xuất kho) với ioType: O
+      await this.createWarehouseRelease(invoiceData);
+
+      // Step 3: Tạo warehouseReceipt (nhập kho) với ioType: I
+      await this.createWarehouseReceipt(invoiceData);
+
+      // Step 4: Tạo salesInvoice
       const result = await this.createSalesInvoice(invoiceData);
 
       this.logger.log(`[Flow] Invoice creation completed successfully for order ${invoiceData.so_ct || 'N/A'}`);

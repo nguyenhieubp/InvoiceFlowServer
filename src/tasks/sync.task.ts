@@ -1,12 +1,24 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SyncService } from '../services/sync.service';
+import { SalesService } from '../modules/sales/sales.service';
+import { FastApiInvoiceFlowService } from '../services/fast-api-invoice-flow.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Sale } from '../entities/sale.entity';
 
 @Injectable()
 export class SyncTask {
   private readonly logger = new Logger(SyncTask.name);
 
-  constructor(private readonly syncService: SyncService) {}
+  constructor(
+    private readonly syncService: SyncService,
+    @Inject(forwardRef(() => SalesService))
+    private readonly salesService: SalesService,
+    private readonly fastApiInvoiceFlowService: FastApiInvoiceFlowService,
+    @InjectRepository(Sale)
+    private saleRepository: Repository<Sale>,
+  ) {}
 
   /**
    * Helper function: Format ngày hôm qua thành format DDMMMYYYY
@@ -116,6 +128,95 @@ export class SyncTask {
       this.logger.log('Hoàn thành đồng bộ FaceID tự động lúc 2h sáng');
     } catch (error) {
       this.logger.error(`Lỗi khi đồng bộ FaceID tự động lúc 2h sáng: ${error.message}`);
+    }
+  }
+
+  // Chạy mỗi ngày lúc 2:00 AM - Tạo hóa đơn nhập xuất kho cho các đơn hàng ngày T-1
+  // @Cron('0 2 * * *', {
+  //   name: 'daily-warehouse-invoice-2am',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
+  async handleDailyWarehouseInvoice2AM() {
+    this.logger.log('Bắt đầu tạo hóa đơn nhập xuất kho tự động lúc 2h sáng (scheduled task)...');
+    try {
+      // Lấy ngày T-1
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      yesterday.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(yesterday);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      // Lấy các đơn hàng trong ngày T-1 chưa xử lý
+      const unprocessedSales = await this.saleRepository
+        .createQueryBuilder('sale')
+        .where('sale.isProcessed = :isProcessed', { isProcessed: false })
+        .andWhere('sale.docDate >= :yesterday', { yesterday })
+        .andWhere('sale.docDate < :tomorrow', { tomorrow })
+        .orderBy('sale.docDate', 'DESC')
+        .addOrderBy('sale.docCode', 'ASC')
+        .getMany();
+
+      if (unprocessedSales.length === 0) {
+        this.logger.log('Không có đơn hàng nào trong ngày T-1 cần tạo hóa đơn nhập xuất kho');
+        return;
+      }
+
+      // Group by docCode
+      const orderMap = new Map<string, Sale[]>();
+      for (const sale of unprocessedSales) {
+        const docCode = sale.docCode;
+        if (!orderMap.has(docCode)) {
+          orderMap.set(docCode, []);
+        }
+        orderMap.get(docCode)!.push(sale);
+      }
+
+      const docCodes = Array.from(orderMap.keys());
+      this.logger.log(`Tìm thấy ${docCodes.length} đơn hàng trong ngày T-1 cần tạo hóa đơn nhập xuất kho`);
+
+      let successCount = 0;
+      let failureCount = 0;
+
+      // Xử lý từng đơn hàng
+      for (const docCode of docCodes) {
+        try {
+          this.logger.log(`[Warehouse Invoice] Đang tạo hóa đơn nhập xuất kho cho đơn hàng: ${docCode}`);
+          
+          // Build invoice data
+          const invoiceData = await this.salesService.buildInvoiceDataForWarehouse(docCode);
+          
+          // Lấy order data để lấy customer info
+          const orderData = await this.salesService.findByOrderCode(docCode);
+          
+          // Tạo warehouseRelease (xuất kho) với ioType: O
+          await this.fastApiInvoiceFlowService.createWarehouseRelease({
+            ...invoiceData,
+            customer: orderData.customer,
+            ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+          });
+
+          // Tạo warehouseReceipt (nhập kho) với ioType: I
+          await this.fastApiInvoiceFlowService.createWarehouseReceipt({
+            ...invoiceData,
+            customer: orderData.customer,
+            ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+          });
+
+          successCount++;
+          this.logger.log(`[Warehouse Invoice] ✓ Tạo hóa đơn nhập xuất kho thành công cho đơn hàng: ${docCode}`);
+        } catch (error: any) {
+          failureCount++;
+          this.logger.error(
+            `[Warehouse Invoice] ✗ Lỗi khi tạo hóa đơn nhập xuất kho cho đơn hàng ${docCode}: ${error?.message || error}`,
+          );
+        }
+      }
+
+      this.logger.log(
+        `[Warehouse Invoice] Hoàn thành tạo hóa đơn nhập xuất kho: ${successCount} thành công, ${failureCount} thất bại`,
+      );
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi tạo hóa đơn nhập xuất kho tự động: ${error?.message || error}`);
     }
   }
 
