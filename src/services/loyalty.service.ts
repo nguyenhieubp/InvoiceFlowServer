@@ -11,7 +11,8 @@ export class LoyaltyService {
 
   /**
    * Kiểm tra và fetch product từ Loyalty API
-   * Thử endpoint /material-catalogs/code/ trước, nếu không có thì thử /material-catalogs/old-code/
+   * Thử endpoint /material-catalogs/code/ trước, nếu không có thì thử /material-catalogs/old-code/,
+   * cuối cùng thử /material-catalogs/material-code/
    * @param itemCode - Mã sản phẩm cần kiểm tra
    * @returns Product object nếu tìm thấy, null nếu không tìm thấy
    */
@@ -72,11 +73,36 @@ export class LoyaltyService {
         return product;
       }
     } catch (fallbackError: any) {
-      // Cả 2 endpoint đều không tìm thấy
+      // Nếu 404, thử fallback tiếp theo
       if (fallbackError?.response?.status === 404) {
-        this.logger.debug(`[LoyaltyService] Sản phẩm không tìm thấy tại /material-catalogs/old-code/: ${trimmedItemCode} (404)`);
+        this.logger.debug(`[LoyaltyService] Sản phẩm không tìm thấy tại /material-catalogs/old-code/: ${trimmedItemCode} (404), thử /material-catalogs/material-code/...`);
       } else {
         this.logger.warn(`[LoyaltyService] Lỗi khi fetch product ${trimmedItemCode} từ /material-catalogs/old-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`);
+      }
+    }
+
+    // Nếu cả 2 endpoint trên không tìm thấy, thử fallback cuối cùng /material-catalogs/material-code/
+    try {
+      const materialCodeResponse = await this.httpService.axiosRef.get(
+        `${this.LOYALTY_API_BASE_URL}/material-catalogs/material-code/${encodeURIComponent(trimmedItemCode)}`,
+        {
+          headers: { accept: 'application/json' },
+          timeout: this.REQUEST_TIMEOUT,
+        },
+      );
+
+      // Parse response: endpoint /material-catalogs/material-code/ trả về trực tiếp object
+      const product = materialCodeResponse?.data;
+      if (product && (product.id || product.code)) {
+        this.logger.debug(`[LoyaltyService] Tìm thấy sản phẩm ${trimmedItemCode} tại /material-catalogs/material-code/`);
+        return product;
+      }
+    } catch (materialCodeError: any) {
+      // Cả 3 endpoint đều không tìm thấy
+      if (materialCodeError?.response?.status === 404) {
+        this.logger.debug(`[LoyaltyService] Sản phẩm không tìm thấy tại /material-catalogs/material-code/: ${trimmedItemCode} (404)`);
+      } else {
+        this.logger.warn(`[LoyaltyService] Lỗi khi fetch product ${trimmedItemCode} từ /material-catalogs/material-code/: ${materialCodeError?.message || materialCodeError?.response?.status || 'Unknown error'}`);
       }
     }
 
