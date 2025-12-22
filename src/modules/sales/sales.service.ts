@@ -10,6 +10,7 @@ import { Invoice } from '../../entities/invoice.entity';
 import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
 import { CheckFaceId } from '../../entities/check-face-id.entity';
+import { StockTransfer } from '../../entities/stock-transfer.entity';
 import { InvoicePrintService } from '../../services/invoice-print.service';
 import { InvoiceService } from '../../services/invoice.service';
 import { ZappyApiService } from '../../services/zappy-api.service';
@@ -958,11 +959,38 @@ export class SalesService {
       }
     });
 
+    // Fetch stock transfers để thêm thông tin xuất kho
+    // Join theo soCode (của stock transfer) = docCode (của order)
+    const stockTransfers = await this.stockTransferRepository.find({
+      where: { soCode: In(docCodes) },
+    });
+
+    const stockTransferMap = new Map<string, StockTransfer[]>();
+    docCodes.forEach(docCode => {
+      // Join theo soCode (của stock transfer) = docCode (của order)
+      const matchingTransfers = stockTransfers.filter(st => st.soCode === docCode);
+      if (matchingTransfers.length > 0) {
+        stockTransferMap.set(docCode, matchingTransfers);
+      }
+    });
+
     return orders.map(order => {
       const cashioRecords = cashioMap.get(order.docCode) || [];
       const ecoinCashio = cashioRecords.find(c => c.fop_syscode === 'ECOIN');
       const voucherCashio = cashioRecords.find(c => c.fop_syscode === 'VOUCHER');
       const selectedCashio = ecoinCashio || voucherCashio || cashioRecords[0] || null;
+
+      // Lấy thông tin xuất kho cho đơn hàng này
+      const orderStockTransfers = stockTransferMap.get(order.docCode) || [];
+      
+      // Tính tổng hợp thông tin xuất kho
+      const stockTransferSummary = {
+        totalItems: orderStockTransfers.length, // Số dòng xuất kho
+        totalQty: orderStockTransfers.reduce((sum, st) => sum + Math.abs(Number(st.qty || 0)), 0), // Tổng số lượng xuất (lấy giá trị tuyệt đối)
+        uniqueItems: new Set(orderStockTransfers.map(st => st.itemCode)).size, // Số sản phẩm khác nhau
+        stockCodes: Array.from(new Set(orderStockTransfers.map(st => st.stockCode).filter(Boolean))), // Danh sách mã kho
+        hasStockTransfer: orderStockTransfers.length > 0, // Có xuất kho hay không
+      };
 
       return {
         ...order,
@@ -973,6 +1001,9 @@ export class SalesService {
         cashioMasterCode: selectedCashio?.master_code || null,
         cashioTotalIn: selectedCashio?.total_in || null,
         cashioTotalOut: selectedCashio?.total_out || null,
+        // Thông tin xuất kho
+        stockTransferInfo: stockTransferSummary,
+        stockTransfers: orderStockTransfers.length > 0 ? orderStockTransfers : (order.stockTransfers || []), // Giữ lại stockTransfers nếu đã có
       };
     });
   }
@@ -992,6 +1023,8 @@ export class SalesService {
     private dailyCashioRepository: Repository<DailyCashio>,
     @InjectRepository(CheckFaceId)
     private checkFaceIdRepository: Repository<CheckFaceId>,
+    @InjectRepository(StockTransfer)
+    private stockTransferRepository: Repository<StockTransfer>,
     private invoicePrintService: InvoicePrintService,
     private invoiceService: InvoiceService,
     private httpService: HttpService,
@@ -1163,12 +1196,45 @@ export class SalesService {
           )
         );
 
+        // Fetch stock transfers theo soCode (mã đơn hàng) từ paginated orders
+        // Join theo soCode (của stock transfer) = docCode (của order)
+        const paginatedDocCodes = Array.from(new Set(paginatedOrders.map(order => order.docCode).filter(Boolean)));
+        const stockTransfers = paginatedDocCodes.length > 0 
+          ? await this.stockTransferRepository.find({
+              where: { soCode: In(paginatedDocCodes) },
+            })
+          : [];
+
+        // Tạo map stock transfers theo docCode (của order) và itemCode
+        const stockTransferMap = new Map<string, StockTransfer[]>();
+        for (const transfer of stockTransfers) {
+          // Join theo soCode (của stock transfer) = docCode (của order) + itemCode
+          const orderDocCode = transfer.soCode || transfer.docCode; // Ưu tiên soCode
+          const key = `${orderDocCode}_${transfer.itemCode || ''}`;
+          if (!stockTransferMap.has(key)) {
+            stockTransferMap.set(key, []);
+          }
+          stockTransferMap.get(key)!.push(transfer);
+        }
+
+        // Tạo map stock transfers theo docCode của order (để có thể lấy tất cả transfers của một đơn)
+        const stockTransferByDocCodeMap = new Map<string, StockTransfer[]>();
+        for (const transfer of stockTransfers) {
+          // Join theo soCode (của stock transfer) = docCode (của order)
+          const orderDocCode = transfer.soCode || transfer.docCode; // Ưu tiên soCode
+          if (!stockTransferByDocCodeMap.has(orderDocCode)) {
+            stockTransferByDocCodeMap.set(orderDocCode, []);
+          }
+          stockTransferByDocCodeMap.get(orderDocCode)!.push(transfer);
+        }
+
         // Fetch products từ Loyalty API sử dụng LoyaltyService
         const loyaltyProductMap = await this.loyaltyService.fetchProducts(itemCodes);
 
-        // Thêm promotionDisplayCode, maKho, maCtkmTangHang và producttype vào các sales items
+        // Thêm promotionDisplayCode, maKho, maCtkmTangHang, producttype và stock transfers vào các sales items
         const enrichedOrders = paginatedOrders.map((order) => ({
           ...order,
+          stockTransfers: stockTransferByDocCodeMap.get(order.docCode) || [],
           sales: order.sales?.map((sale) => {
             const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
             const maBp = department?.ma_bp || sale.branchCode || null;
@@ -1206,6 +1272,10 @@ export class SalesService {
               }
             }
 
+            // Lấy stock transfers cho sale này (theo docCode + itemCode)
+            const stockTransferKey = `${order.docCode}_${sale.itemCode || ''}`;
+            const saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
+
             return {
               ...sale,
               promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
@@ -1220,6 +1290,7 @@ export class SalesService {
                 // Đảm bảo productType từ Loyalty API được giữ lại
                 productType: loyaltyProduct.productType || loyaltyProduct.producttype || null,
               } : (sale.product || null),
+              stockTransfers: saleStockTransfers,
             };
           }) || [],
         }));
@@ -1474,6 +1545,7 @@ export class SalesService {
       totalItems: number;
       isProcessed: boolean;
       sales: any[];
+      stockTransfers?: StockTransfer[];
     }>();
 
     // Đã đếm totalSaleItems từ count query ở trên
@@ -1539,12 +1611,43 @@ export class SalesService {
       )
     );
 
+    // Fetch stock transfers theo soCode (mã đơn hàng) - stock transfer có soCode = docCode của order
+    const docCodes = Array.from(new Set(allSalesData.map(sale => sale.docCode).filter(Boolean)));
+    const stockTransfers = docCodes.length > 0 
+      ? await this.stockTransferRepository.find({
+          where: { soCode: In(docCodes) },
+        })
+      : [];
+
+    // Tạo map stock transfers theo docCode (của order) và itemCode để join chính xác
+    const stockTransferMap = new Map<string, StockTransfer[]>();
+    for (const transfer of stockTransfers) {
+      // Join theo soCode (của stock transfer) = docCode (của order) + itemCode
+      const orderDocCode = transfer.soCode || transfer.docCode; // Ưu tiên soCode
+      const key = `${orderDocCode}_${transfer.itemCode || ''}`;
+      if (!stockTransferMap.has(key)) {
+        stockTransferMap.set(key, []);
+      }
+      stockTransferMap.get(key)!.push(transfer);
+    }
+
+    // Tạo map stock transfers theo docCode của order (để có thể lấy tất cả transfers của một đơn)
+    const stockTransferByDocCodeMap = new Map<string, StockTransfer[]>();
+    for (const transfer of stockTransfers) {
+      // Join theo soCode (của stock transfer) = docCode (của order)
+      const orderDocCode = transfer.soCode || transfer.docCode; // Ưu tiên soCode
+      if (!stockTransferByDocCodeMap.has(orderDocCode)) {
+        stockTransferByDocCodeMap.set(orderDocCode, []);
+      }
+      stockTransferByDocCodeMap.get(orderDocCode)!.push(transfer);
+    }
+
     const [loyaltyProductMap, departmentMap] = await Promise.all([
       this.fetchLoyaltyProducts(itemCodes),
       this.fetchLoyaltyDepartments(branchCodes),
     ]);
 
-    // Enrich sales với products, departments và tính toán các field phức tạp
+    // Enrich sales với products, departments, stock transfers và tính toán các field phức tạp
     const enrichedSalesMap = new Map<string, any[]>();
     for (const sale of allSalesData) {
       const docCode = sale.docCode;
@@ -1554,18 +1657,28 @@ export class SalesService {
 
       const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
       const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
+      
+      // Lấy stock transfers cho sale này (theo docCode + itemCode)
+      const stockTransferKey = `${docCode}_${sale.itemCode || ''}`;
+      const saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
+
       const calculatedFields = this.calculateSaleFields(sale, loyaltyProduct, department, sale.branchCode);
       const order = orderMap.get(sale.docCode);
       const enrichedSale = this.formatSaleForFrontend(sale, loyaltyProduct, department, calculatedFields, order);
+      
+      // Thêm stock transfers vào sale
+      enrichedSale.stockTransfers = saleStockTransfers;
 
       enrichedSalesMap.get(docCode)!.push(enrichedSale);
     }
 
-    // Gắn enriched sales vào orders
+    // Gắn enriched sales vào orders và thêm stock transfers tổng hợp cho order
     for (const [docCode, sales] of enrichedSalesMap.entries()) {
       const order = orderMap.get(docCode);
       if (order) {
         order.sales = sales;
+        // Thêm tất cả stock transfers của đơn hàng này
+        order.stockTransfers = stockTransferByDocCodeMap.get(docCode) || [];
       }
     }
 
