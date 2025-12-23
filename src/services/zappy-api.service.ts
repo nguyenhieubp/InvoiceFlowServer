@@ -100,6 +100,179 @@ export class ZappyApiService {
   }
 
   /**
+   * Lấy dữ liệu báo cáo nộp quỹ cuối ca từ ERP API
+   * @param date - Ngày theo format DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
+   * @returns Array of shift end cash records
+   */
+  async getShiftEndCash(date: string, brand?: string): Promise<any[]> {
+    try {
+      const baseUrl = this.getBaseUrlForBrand(brand);
+      const url = `${baseUrl}/get_shift_end_cash?P_DATE=${date}`;
+
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: { accept: 'application/json' },
+        }),
+      );
+
+      const rawData = response?.data?.data || [];
+      if (!Array.isArray(rawData)) {
+        this.logger.warn(`No shift end cash data found for date ${date}`);
+        return [];
+      }
+
+      return rawData;
+    } catch (error: any) {
+      this.logger.error(`Error fetching shift end cash from API: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy dữ liệu danh sách CTKM (Promotion) từ API
+   * @param dateFrom - Ngày bắt đầu theo format DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param dateTo - Ngày kết thúc theo format DDMMMYYYY (ví dụ: 30NOV2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
+   * @returns Array of promotion records
+   */
+  async getPromotion(dateFrom: string, dateTo: string, brand?: string): Promise<any[]> {
+    try {
+      const baseUrl = this.getBaseUrlForBrand(brand);
+      const url = `${baseUrl}/get_promotion?P_FDATE=${dateFrom}&P_TDATE=${dateTo}`;
+
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: { accept: 'application/json' },
+        }),
+      );
+
+      const rawData = response?.data?.data || [];
+      if (!Array.isArray(rawData)) {
+        this.logger.warn(`No promotion data found for date range ${dateFrom} - ${dateTo}`);
+        return [];
+      }
+
+      return rawData;
+    } catch (error: any) {
+      this.logger.error(`Error fetching promotion from API: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy chi tiết lines của một promotion
+   * @param promotionId - ID của promotion (ví dụ: 609741)
+   * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
+   * @returns Object chứa i_lines và v_lines
+   */
+  async getPromotionLine(promotionId: number, brand?: string): Promise<any> {
+    try {
+      const baseUrl = this.getBaseUrlForBrand(brand);
+      const url = `${baseUrl}/get_1promotion_line?P_ID=${promotionId}`;
+
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: { accept: 'application/json' },
+        }),
+      );
+
+      const rawData = response?.data?.data?.[0] || {};
+      return rawData;
+    } catch (error: any) {
+      this.logger.error(`Error fetching promotion line from API: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy dữ liệu danh sách Voucher Issue từ API
+   * @param dateFrom - Ngày bắt đầu theo format DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param dateTo - Ngày kết thúc theo format DDMMMYYYY (ví dụ: 30NOV2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
+   * @returns Array of voucher issue records
+   */
+  async getVoucherIssue(dateFrom: string, dateTo: string, brand?: string): Promise<any[]> {
+    try {
+      const baseUrl = this.getBaseUrlForBrand(brand);
+      const url = `${baseUrl}/get_voucher_issue?P_FDATE=${dateFrom}&P_TDATE=${dateTo}`;
+
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: { accept: 'application/json' },
+        }),
+      );
+
+      const rawData = response?.data?.data || [];
+      if (!Array.isArray(rawData)) {
+        this.logger.warn(`No voucher issue data found for date range ${dateFrom} - ${dateTo}`);
+        return [];
+      }
+
+      return rawData;
+    } catch (error: any) {
+      this.logger.error(`Error fetching voucher issue from API: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy chi tiết của một voucher issue
+   * @param voucherIssueId - ID của voucher issue (ví dụ: 10206)
+   * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
+   * @returns Object chứa chi tiết voucher issue
+   */
+  async getVoucherIssueDetail(voucherIssueId: number, brand?: string): Promise<any> {
+    try {
+      const baseUrl = this.getBaseUrlForBrand(brand);
+      const url = `${baseUrl}/get_1voucher_issue?P_ID=${voucherIssueId}`;
+
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: { accept: 'application/json' },
+        }),
+      );
+
+      const rawData = response?.data?.data?.[0] || {};
+      return rawData;
+    } catch (error: any) {
+      this.logger.error(`Error fetching voucher issue detail from API: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy dữ liệu tách gộp BOM (Repack Formula) từ ERP API
+   * @param dateFrom - Ngày bắt đầu theo format DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param dateTo - Ngày kết thúc theo format DDMMMYYYY (ví dụ: 30NOV2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
+   * @returns Array of repack formula records
+   */
+  async getRepackFormula(dateFrom: string, dateTo: string, brand?: string): Promise<any[]> {
+    try {
+      const baseUrl = this.getBaseUrlForBrand(brand);
+      const url = `${baseUrl}/get_repack_formula?P_FDATE=${dateFrom}&P_TDATE=${dateTo}`;
+
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: { accept: 'application/json' },
+        }),
+      );
+
+      const rawData = response?.data?.data || [];
+      if (!Array.isArray(rawData)) {
+        this.logger.warn(`No repack formula data found for date range ${dateFrom} - ${dateTo}`);
+        return [];
+      }
+
+      return rawData;
+    } catch (error: any) {
+      this.logger.error(`Error fetching repack formula from API: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
    * Lấy dữ liệu xuất kho từ Zappy API
    * @param date - Ngày theo format DDMMMYYYY (ví dụ: 01NOV2025)
    * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default

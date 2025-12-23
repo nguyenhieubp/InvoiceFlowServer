@@ -12,10 +12,18 @@ import { Sale } from '../../entities/sale.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
 import { CheckFaceId } from '../../entities/check-face-id.entity';
 import { StockTransfer } from '../../entities/stock-transfer.entity';
+import { ShiftEndCash } from '../../entities/shift-end-cash.entity';
+import { ShiftEndCashLine } from '../../entities/shift-end-cash-line.entity';
+import { RepackFormula } from '../../entities/repack-formula.entity';
+import { RepackFormulaItem } from '../../entities/repack-formula-item.entity';
+import { Promotion } from '../../entities/promotion.entity';
+import { PromotionLine } from '../../entities/promotion-line.entity';
+import { VoucherIssue } from '../../entities/voucher-issue.entity';
+import { VoucherIssueDetail } from '../../entities/voucher-issue-detail.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Customer, Sale, DailyCashio, CheckFaceId, StockTransfer]),
+    TypeOrmModule.forFeature([Customer, Sale, DailyCashio, CheckFaceId, StockTransfer, ShiftEndCash, ShiftEndCashLine, RepackFormula, RepackFormulaItem, Promotion, PromotionLine, VoucherIssue, VoucherIssueDetail]),
     HttpModule,
     forwardRef(() => SalesModule),
   ],

@@ -7,6 +7,14 @@ import { Sale } from '../entities/sale.entity';
 import { DailyCashio } from '../entities/daily-cashio.entity';
 import { CheckFaceId } from '../entities/check-face-id.entity';
 import { StockTransfer } from '../entities/stock-transfer.entity';
+import { ShiftEndCash } from '../entities/shift-end-cash.entity';
+import { ShiftEndCashLine } from '../entities/shift-end-cash-line.entity';
+import { RepackFormula } from '../entities/repack-formula.entity';
+import { RepackFormulaItem } from '../entities/repack-formula-item.entity';
+import { Promotion } from '../entities/promotion.entity';
+import { PromotionLine } from '../entities/promotion-line.entity';
+import { VoucherIssue } from '../entities/voucher-issue.entity';
+import { VoucherIssueDetail } from '../entities/voucher-issue-detail.entity';
 import { ZappyApiService } from './zappy-api.service';
 import { LoyaltyService } from './loyalty.service';
 import { SalesService } from '../modules/sales/sales.service';
@@ -41,6 +49,22 @@ export class SyncService {
     private checkFaceIdRepository: Repository<CheckFaceId>,
     @InjectRepository(StockTransfer)
     private stockTransferRepository: Repository<StockTransfer>,
+    @InjectRepository(ShiftEndCash)
+    private shiftEndCashRepository: Repository<ShiftEndCash>,
+    @InjectRepository(ShiftEndCashLine)
+    private shiftEndCashLineRepository: Repository<ShiftEndCashLine>,
+    @InjectRepository(RepackFormula)
+    private repackFormulaRepository: Repository<RepackFormula>,
+    @InjectRepository(RepackFormulaItem)
+    private repackFormulaItemRepository: Repository<RepackFormulaItem>,
+    @InjectRepository(Promotion)
+    private promotionRepository: Repository<Promotion>,
+    @InjectRepository(PromotionLine)
+    private promotionLineRepository: Repository<PromotionLine>,
+    @InjectRepository(VoucherIssue)
+    private voucherIssueRepository: Repository<VoucherIssue>,
+    @InjectRepository(VoucherIssueDetail)
+    private voucherIssueDetailRepository: Repository<VoucherIssueDetail>,
     private httpService: HttpService,
     private zappyApiService: ZappyApiService,
     private loyaltyService: LoyaltyService,
@@ -1845,6 +1869,2082 @@ export class SyncService {
       };
     } catch (error: any) {
       this.logger.error(`Error getting stock transfers: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Đồng bộ báo cáo nộp quỹ cuối ca từ ERP API
+   * @param date - Ngày theo format DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard). Nếu không có thì đồng bộ tất cả brands
+   * @returns Kết quả đồng bộ
+   */
+  async syncShiftEndCash(date: string, brand?: string): Promise<{
+    success: boolean;
+    message: string;
+    recordsCount: number;
+    savedCount: number;
+    updatedCount: number;
+    errors?: string[];
+  }> {
+    try {
+      const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
+      let totalRecordsCount = 0;
+      let totalSavedCount = 0;
+      let totalUpdatedCount = 0;
+      const allErrors: string[] = [];
+
+      for (const brandName of brands) {
+        try {
+          this.logger.log(`[ShiftEndCash] Đang đồng bộ ${brandName} cho ngày ${date}`);
+          
+          // Lấy dữ liệu từ API
+          const shiftEndCashData = await this.zappyApiService.getShiftEndCash(date, brandName);
+          
+          if (!shiftEndCashData || shiftEndCashData.length === 0) {
+            this.logger.log(`[ShiftEndCash] Không có dữ liệu cho ${brandName} - ngày ${date}`);
+            continue;
+          }
+
+          let brandSavedCount = 0;
+          let brandUpdatedCount = 0;
+          const brandErrors: string[] = [];
+
+          // Parse date string sang Date object
+          const parseDateString = (dateStr: string | null | undefined): Date | null => {
+            if (!dateStr) return null;
+            try {
+              // Format: "01/11/2025 10:16" hoặc ISO string
+              if (dateStr.includes('T') || dateStr.includes('Z')) {
+                return new Date(dateStr);
+              }
+              // Format: "01/11/2025 10:16"
+              const parts = dateStr.split(' ');
+              const datePart = parts[0]; // "01/11/2025"
+              const timePart = parts[1] || '00:00'; // "10:16"
+              const [day, month, year] = datePart.split('/');
+              const [hours, minutes] = timePart.split(':');
+              return new Date(
+                parseInt(year),
+                parseInt(month) - 1,
+                parseInt(day),
+                parseInt(hours) || 0,
+                parseInt(minutes) || 0,
+              );
+            } catch (error) {
+              this.logger.warn(`Failed to parse date: ${dateStr}`);
+              return null;
+            }
+          };
+
+          // Xử lý từng record
+          for (const record of shiftEndCashData) {
+            try {
+              // Kiểm tra xem đã có record với api_id và brand này chưa
+              const existingRecord = await this.shiftEndCashRepository.findOne({
+                where: { api_id: record.id, brand: brandName },
+              });
+
+              // Parse dates
+              const openat = record.openat ? new Date(record.openat) : null;
+              const closedat = record.closedat ? new Date(record.closedat) : null;
+              const docdate = parseDateString(record.docdate);
+              const gl_date = parseDateString(record.gl_date);
+              const enteredat = parseDateString(record.enteredat);
+
+              if (existingRecord) {
+                // Update existing record
+                existingRecord.draw_code = record.draw_code || existingRecord.draw_code;
+                existingRecord.status = record.status || existingRecord.status;
+                existingRecord.teller_code = record.teller_code || existingRecord.teller_code;
+                existingRecord.openat = openat || existingRecord.openat;
+                existingRecord.closedat = closedat || existingRecord.closedat;
+                existingRecord.shift_status = record.shift_status || existingRecord.shift_status;
+                existingRecord.docdate = docdate || existingRecord.docdate;
+                existingRecord.gl_date = gl_date || existingRecord.gl_date;
+                existingRecord.description = record.description || existingRecord.description;
+                existingRecord.total = record.total ? Number(record.total) : existingRecord.total;
+                existingRecord.enteredat = enteredat || existingRecord.enteredat;
+                existingRecord.enteredby = record.enteredby || existingRecord.enteredby;
+                existingRecord.sync_date = date;
+
+                // Xóa các lines cũ và tạo mới
+                if (record.lines && Array.isArray(record.lines)) {
+                  await this.shiftEndCashLineRepository.delete({ shiftEndCashId: existingRecord.id });
+                  
+                  const linesToCreate = record.lines.map((line: any) => ({
+                    shiftEndCashId: existingRecord.id,
+                    fop_code: line.fop_code || undefined,
+                    fop_name: line.fop_name || undefined,
+                    system_amt: line.system_amt ? Number(line.system_amt) : 0,
+                    sys_acct_code: line.sys_acct_code || undefined,
+                    actual_amt: line.actual_amt ? Number(line.actual_amt) : 0,
+                    actual_acct_code: line.actual_acct_code || undefined,
+                    diff_amount: line.diff_amount ? Number(line.diff_amount) : 0,
+                    diff_acct_code: line.diff_acct_code || undefined,
+                    template_id: line.template_id ? Number(line.template_id) : undefined,
+                  }));
+                  const lines = this.shiftEndCashLineRepository.create(linesToCreate);
+                  await this.shiftEndCashLineRepository.save(lines);
+                }
+
+                await this.shiftEndCashRepository.save(existingRecord);
+                brandUpdatedCount++;
+              } else {
+                // Tạo record mới
+                const newRecord = this.shiftEndCashRepository.create({
+                  api_id: record.id,
+                  draw_code: record.draw_code || '',
+                  status: record.status || null,
+                  teller_code: record.teller_code || null,
+                  openat: openat,
+                  closedat: closedat,
+                  shift_status: record.shift_status || null,
+                  docdate: docdate,
+                  gl_date: gl_date,
+                  description: record.description || null,
+                  total: record.total ? Number(record.total) : 0,
+                  enteredat: enteredat,
+                  enteredby: record.enteredby || null,
+                  sync_date: date,
+                  brand: brandName,
+                } as any);
+
+                const savedRecord = (await this.shiftEndCashRepository.save(newRecord)) as unknown as ShiftEndCash;
+
+                // Tạo lines
+                if (record.lines && Array.isArray(record.lines)) {
+                  const linesToCreate = record.lines.map((line: any) => ({
+                    shiftEndCashId: savedRecord.id,
+                    fop_code: line.fop_code || undefined,
+                    fop_name: line.fop_name || undefined,
+                    system_amt: line.system_amt ? Number(line.system_amt) : 0,
+                    sys_acct_code: line.sys_acct_code || undefined,
+                    actual_amt: line.actual_amt ? Number(line.actual_amt) : 0,
+                    actual_acct_code: line.actual_acct_code || undefined,
+                    diff_amount: line.diff_amount ? Number(line.diff_amount) : 0,
+                    diff_acct_code: line.diff_acct_code || undefined,
+                    template_id: line.template_id ? Number(line.template_id) : undefined,
+                  }));
+                  const lines = this.shiftEndCashLineRepository.create(linesToCreate as any);
+                  await this.shiftEndCashLineRepository.save(lines);
+                }
+
+                brandSavedCount++;
+              }
+            } catch (recordError: any) {
+              const errorMsg = `[${brandName}] Lỗi khi xử lý record ${record.id || record.draw_code}: ${recordError?.message || recordError}`;
+              this.logger.error(errorMsg);
+              brandErrors.push(errorMsg);
+            }
+          }
+
+          totalRecordsCount += shiftEndCashData.length;
+          totalSavedCount += brandSavedCount;
+          totalUpdatedCount += brandUpdatedCount;
+          allErrors.push(...brandErrors);
+
+          this.logger.log(`[ShiftEndCash] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`);
+        } catch (brandError: any) {
+          const errorMsg = `[${brandName}] Lỗi khi đồng bộ shift end cash: ${brandError?.message || brandError}`;
+          this.logger.error(errorMsg);
+          allErrors.push(errorMsg);
+        }
+      }
+
+      return {
+        success: allErrors.length === 0,
+        message: `Đồng bộ thành công ${totalRecordsCount} báo cáo nộp quỹ cuối ca: ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
+        recordsCount: totalRecordsCount,
+        savedCount: totalSavedCount,
+        updatedCount: totalUpdatedCount,
+        errors: allErrors.length > 0 ? allErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ shift end cash: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy danh sách báo cáo nộp quỹ cuối ca với filter và pagination
+   */
+  async getShiftEndCash(params: {
+    page?: number;
+    limit?: number;
+    brand?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    branchCode?: string;
+    drawCode?: string;
+  }): Promise<{
+    success: boolean;
+    data: any[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    try {
+      const page = params.page || 1;
+      const limit = params.limit || 10;
+      const skip = (page - 1) * limit;
+
+      const queryBuilder = this.shiftEndCashRepository
+        .createQueryBuilder('sec')
+        .leftJoinAndSelect('sec.lines', 'lines')
+        .orderBy('sec.docdate', 'DESC')
+        .addOrderBy('sec.draw_code', 'ASC');
+
+      // Filter by brand
+      if (params.brand) {
+        queryBuilder.andWhere('sec.brand = :brand', { brand: params.brand });
+      }
+
+      // Filter by branchCode (extract from draw_code)
+      if (params.branchCode) {
+        queryBuilder.andWhere('sec.draw_code LIKE :branchCode', { branchCode: `${params.branchCode}%` });
+      }
+
+      // Filter by drawCode
+      if (params.drawCode) {
+        queryBuilder.andWhere('sec.draw_code = :drawCode', { drawCode: params.drawCode });
+      }
+
+      // Filter by dateFrom
+      if (params.dateFrom) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day);
+        };
+        const fromDate = parseDate(params.dateFrom);
+        queryBuilder.andWhere('sec.docdate >= :dateFrom', { dateFrom: fromDate });
+      }
+
+      // Filter by dateTo
+      if (params.dateTo) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day, 23, 59, 59);
+        };
+        const toDate = parseDate(params.dateTo);
+        queryBuilder.andWhere('sec.docdate <= :dateTo', { dateTo: toDate });
+      }
+
+      // Get total count
+      const total = await queryBuilder.getCount();
+
+      // Apply pagination
+      queryBuilder.skip(skip).take(limit);
+
+      // Get data
+      const data = await queryBuilder.getMany();
+
+      const totalPages = Math.ceil(total / limit);
+
+      return {
+        success: true,
+        data,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`Error getting shift end cash: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Đồng bộ FaceID theo khoảng thời gian
+   * @param startDate - Ngày bắt đầu (format: DDMMMYYYY, ví dụ: 01OCT2025)
+   * @param endDate - Ngày kết thúc (format: DDMMMYYYY, ví dụ: 31OCT2025)
+   * @param shopCodes - Optional array of shop codes
+   * @returns Kết quả đồng bộ
+   */
+  async syncFaceIdByDateRange(
+    startDate: string,
+    endDate: string,
+    shopCodes?: string[],
+  ): Promise<{
+    success: boolean;
+    message: string;
+    totalSavedCount: number;
+    totalUpdatedCount: number;
+    errors?: string[];
+  }> {
+    try {
+      // Parse dates
+      const parseDate = (dateStr: string): Date => {
+        const day = parseInt(dateStr.substring(0, 2));
+        const monthStr = dateStr.substring(2, 5).toUpperCase();
+        const year = parseInt(dateStr.substring(5, 9));
+        const monthMap: Record<string, number> = {
+          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+        };
+        const month = monthMap[monthStr] || 0;
+        return new Date(year, month, day);
+      };
+
+      const formatDate = (date: Date): string => {
+        const day = date.getDate().toString().padStart(2, '0');
+        const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const month = months[date.getMonth()];
+        const year = date.getFullYear();
+        return `${day}${month}${year}`;
+      };
+
+      const start = parseDate(startDate);
+      const end = parseDate(endDate);
+
+      if (start > end) {
+        throw new Error('Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc');
+      }
+
+      let totalSavedCount = 0;
+      let totalUpdatedCount = 0;
+      const allErrors: string[] = [];
+
+      // Lặp qua từng ngày trong khoảng thời gian
+      const currentDate = new Date(start);
+      while (currentDate <= end) {
+        const dateStr = formatDate(currentDate);
+        try {
+          this.logger.log(`[syncFaceIdByDateRange] Đồng bộ FaceID - ngày ${dateStr}`);
+          const result = await this.syncFaceIdByDate(dateStr, shopCodes);
+          
+          totalSavedCount += result.savedCount;
+          totalUpdatedCount += result.updatedCount;
+          
+          if (result.errors && result.errors.length > 0) {
+            allErrors.push(...result.errors.map(err => `[${dateStr}] ${err}`));
+          }
+        } catch (error: any) {
+          const errorMsg = `Lỗi khi đồng bộ FaceID ngày ${dateStr}: ${error?.message || error}`;
+          this.logger.error(errorMsg);
+          allErrors.push(errorMsg);
+        }
+
+        // Tăng ngày lên 1
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      return {
+        success: allErrors.length === 0,
+        message: `Đồng bộ FaceID thành công từ ${startDate} đến ${endDate}: ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
+        totalSavedCount,
+        totalUpdatedCount,
+        errors: allErrors.length > 0 ? allErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ FaceID theo khoảng thời gian: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Đồng bộ báo cáo nộp quỹ cuối ca theo khoảng thời gian
+   * @param startDate - Ngày bắt đầu (format: DDMMMYYYY, ví dụ: 01OCT2025)
+   * @param endDate - Ngày kết thúc (format: DDMMMYYYY, ví dụ: 31OCT2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   * @returns Kết quả đồng bộ
+   */
+  async syncShiftEndCashByDateRange(
+    startDate: string,
+    endDate: string,
+    brand?: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    totalRecordsCount: number;
+    totalSavedCount: number;
+    totalUpdatedCount: number;
+    brandResults?: Array<{
+      brand: string;
+      recordsCount: number;
+      savedCount: number;
+      updatedCount: number;
+      errors?: string[];
+    }>;
+    errors?: string[];
+  }> {
+    try {
+      // Parse dates
+      const parseDate = (dateStr: string): Date => {
+        const day = parseInt(dateStr.substring(0, 2));
+        const monthStr = dateStr.substring(2, 5).toUpperCase();
+        const year = parseInt(dateStr.substring(5, 9));
+        const monthMap: Record<string, number> = {
+          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+        };
+        const month = monthMap[monthStr] || 0;
+        return new Date(year, month, day);
+      };
+
+      const formatDate = (date: Date): string => {
+        const day = date.getDate().toString().padStart(2, '0');
+        const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const month = months[date.getMonth()];
+        const year = date.getFullYear();
+        return `${day}${month}${year}`;
+      };
+
+      const start = parseDate(startDate);
+      const end = parseDate(endDate);
+
+      if (start > end) {
+        throw new Error('Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc');
+      }
+
+      const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
+      let totalRecordsCount = 0;
+      let totalSavedCount = 0;
+      let totalUpdatedCount = 0;
+      const allErrors: string[] = [];
+      const brandResults: Array<{
+        brand: string;
+        recordsCount: number;
+        savedCount: number;
+        updatedCount: number;
+        errors?: string[];
+      }> = [];
+
+      for (const brandName of brands) {
+        try {
+          this.logger.log(`[syncShiftEndCashByDateRange] Bắt đầu đồng bộ brand: ${brandName}`);
+          let brandRecordsCount = 0;
+          let brandSavedCount = 0;
+          let brandUpdatedCount = 0;
+          const brandErrors: string[] = [];
+
+          // Lặp qua từng ngày trong khoảng thời gian
+          const currentDate = new Date(start);
+          while (currentDate <= end) {
+            const dateStr = formatDate(currentDate);
+            try {
+              this.logger.log(`[syncShiftEndCashByDateRange] Đồng bộ ${brandName} - ngày ${dateStr}`);
+              const result = await this.syncShiftEndCash(dateStr, brandName);
+              
+              brandRecordsCount += result.recordsCount;
+              brandSavedCount += result.savedCount;
+              brandUpdatedCount += result.updatedCount;
+              
+              if (result.errors && result.errors.length > 0) {
+                brandErrors.push(...result.errors.map(err => `[${dateStr}] ${err}`));
+              }
+            } catch (error: any) {
+              const errorMsg = `[${brandName}] Lỗi khi đồng bộ ngày ${dateStr}: ${error?.message || error}`;
+              this.logger.error(errorMsg);
+              brandErrors.push(errorMsg);
+            }
+
+            // Tăng ngày lên 1
+            currentDate.setDate(currentDate.getDate() + 1);
+          }
+
+          totalRecordsCount += brandRecordsCount;
+          totalSavedCount += brandSavedCount;
+          totalUpdatedCount += brandUpdatedCount;
+          allErrors.push(...brandErrors);
+
+          brandResults.push({
+            brand: brandName,
+            recordsCount: brandRecordsCount,
+            savedCount: brandSavedCount,
+            updatedCount: brandUpdatedCount,
+            errors: brandErrors.length > 0 ? brandErrors : undefined,
+          });
+
+          this.logger.log(`[syncShiftEndCashByDateRange] Hoàn thành đồng bộ brand: ${brandName} - ${brandRecordsCount} báo cáo`);
+        } catch (error: any) {
+          const errorMsg = `[${brandName}] Lỗi khi đồng bộ shift end cash: ${error?.message || error}`;
+          this.logger.error(errorMsg);
+          allErrors.push(errorMsg);
+        }
+      }
+
+      return {
+        success: allErrors.length === 0,
+        message: `Đồng bộ báo cáo nộp quỹ cuối ca thành công từ ${startDate} đến ${endDate}: ${totalRecordsCount} báo cáo, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
+        totalRecordsCount,
+        totalSavedCount,
+        totalUpdatedCount,
+        brandResults: brandResults.length > 0 ? brandResults : undefined,
+        errors: allErrors.length > 0 ? allErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ shift end cash theo khoảng thời gian: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Đồng bộ dữ liệu tách gộp BOM (Repack Formula) từ API
+   * @param dateFrom - Ngày bắt đầu (format: DDMMMYYYY, ví dụ: 01NOV2025)
+   * @param dateTo - Ngày kết thúc (format: DDMMMYYYY, ví dụ: 30NOV2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   * @returns Kết quả đồng bộ
+   */
+  async syncRepackFormula(
+    dateFrom: string,
+    dateTo: string,
+    brand?: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    recordsCount: number;
+    savedCount: number;
+    updatedCount: number;
+    errors?: string[];
+  }> {
+    try {
+      const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
+      let totalRecordsCount = 0;
+      let totalSavedCount = 0;
+      let totalUpdatedCount = 0;
+      const allErrors: string[] = [];
+
+      for (const brandName of brands) {
+        try {
+          this.logger.log(`[RepackFormula] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`);
+          
+          // Lấy dữ liệu từ API
+          const repackFormulaData = await this.zappyApiService.getRepackFormula(dateFrom, dateTo, brandName);
+          
+          if (!repackFormulaData || repackFormulaData.length === 0) {
+            this.logger.log(`[RepackFormula] Không có dữ liệu cho ${brandName} - khoảng ${dateFrom} - ${dateTo}`);
+            continue;
+          }
+
+          let brandSavedCount = 0;
+          let brandUpdatedCount = 0;
+          const brandErrors: string[] = [];
+
+          // Parse date string sang Date object
+          const parseDateString = (dateStr: string | null | undefined): Date | null => {
+            if (!dateStr) return null;
+            try {
+              // Format: "05/11/2025 00:00" hoặc ISO string
+              if (dateStr.includes('T') || dateStr.includes('Z')) {
+                return new Date(dateStr);
+              }
+              // Format: "05/11/2025 00:00"
+              const parts = dateStr.split(' ');
+              const datePart = parts[0]; // "05/11/2025"
+              const timePart = parts[1] || '00:00'; // "00:00"
+              const [day, month, year] = datePart.split('/');
+              const [hours, minutes] = timePart.split(':');
+              return new Date(
+                parseInt(year),
+                parseInt(month) - 1,
+                parseInt(day),
+                parseInt(hours) || 0,
+                parseInt(minutes) || 0,
+              );
+            } catch (error) {
+              this.logger.warn(`Không thể parse date: ${dateStr}`);
+              return null;
+            }
+          };
+
+          for (const formulaData of repackFormulaData) {
+            try {
+              // Kiểm tra xem đã tồn tại chưa (dựa trên api_id và brand)
+              const existingRecord = await this.repackFormulaRepository.findOne({
+                where: {
+                  api_id: formulaData.id,
+                  brand: brandName,
+                },
+              });
+
+              const validFromdate = parseDateString(formulaData.valid_fromdate);
+              const validTodate = parseDateString(formulaData.valid_todate);
+              const enteredat = parseDateString(formulaData.enteredat);
+
+              if (existingRecord) {
+                // Cập nhật record đã tồn tại
+                existingRecord.name = formulaData.name || existingRecord.name;
+                existingRecord.check_qty_constraint = formulaData.check_qty_constraint || existingRecord.check_qty_constraint;
+                existingRecord.depr_pct = formulaData.depr_pct !== undefined ? formulaData.depr_pct : existingRecord.depr_pct;
+                existingRecord.branch_codes = formulaData.branch_codes !== undefined ? formulaData.branch_codes : existingRecord.branch_codes;
+                existingRecord.repack_cat_name = formulaData.repack_cat_name || existingRecord.repack_cat_name;
+                existingRecord.valid_fromdate = validFromdate || existingRecord.valid_fromdate;
+                existingRecord.valid_todate = validTodate !== null ? validTodate : existingRecord.valid_todate;
+                existingRecord.enteredby = formulaData.enteredby || existingRecord.enteredby;
+                existingRecord.enteredat = enteredat || existingRecord.enteredat;
+                existingRecord.locked = formulaData.locked || existingRecord.locked;
+                existingRecord.sync_date_from = dateFrom;
+                existingRecord.sync_date_to = dateTo;
+
+                // Xóa các items cũ
+                await this.repackFormulaItemRepository.delete({ repackFormulaId: existingRecord.id });
+
+                // Tạo lại items từ from_items và to_items
+                const items: RepackFormulaItem[] = [];
+                if (formulaData.from_items && Array.isArray(formulaData.from_items)) {
+                  for (const fromItem of formulaData.from_items) {
+                    const item = this.repackFormulaItemRepository.create({
+                      repackFormula: existingRecord,
+                      item_type: 'from',
+                      itemcode: fromItem.itemcode || null,
+                      qty: fromItem.qty !== undefined ? fromItem.qty : 0,
+                    });
+                    items.push(item);
+                  }
+                }
+                if (formulaData.to_items && Array.isArray(formulaData.to_items)) {
+                  for (const toItem of formulaData.to_items) {
+                    const item = this.repackFormulaItemRepository.create({
+                      repackFormula: existingRecord,
+                      item_type: 'to',
+                      itemcode: toItem.itemcode || null,
+                      qty: toItem.qty !== undefined ? toItem.qty : 0,
+                    });
+                    items.push(item);
+                  }
+                }
+
+                existingRecord.items = items;
+                await this.repackFormulaRepository.save(existingRecord);
+                brandUpdatedCount++;
+              } else {
+                // Tạo record mới
+                const newRecord = this.repackFormulaRepository.create({
+                  api_id: formulaData.id,
+                  name: formulaData.name || undefined,
+                  check_qty_constraint: formulaData.check_qty_constraint || undefined,
+                  depr_pct: formulaData.depr_pct !== undefined ? formulaData.depr_pct : 0,
+                  branch_codes: formulaData.branch_codes !== undefined ? formulaData.branch_codes : undefined,
+                  repack_cat_name: formulaData.repack_cat_name || undefined,
+                  valid_fromdate: validFromdate || undefined,
+                  valid_todate: validTodate || undefined,
+                  enteredby: formulaData.enteredby || undefined,
+                  enteredat: enteredat || undefined,
+                  locked: formulaData.locked || undefined,
+                  sync_date_from: dateFrom,
+                  sync_date_to: dateTo,
+                  brand: brandName,
+                });
+
+                const savedRecord = (await this.repackFormulaRepository.save(newRecord)) as unknown as RepackFormula;
+
+                // Tạo items từ from_items và to_items
+                const items: RepackFormulaItem[] = [];
+                if (formulaData.from_items && Array.isArray(formulaData.from_items)) {
+                  for (const fromItem of formulaData.from_items) {
+                    const item = this.repackFormulaItemRepository.create({
+                      repackFormula: savedRecord,
+                      item_type: 'from',
+                      itemcode: fromItem.itemcode || undefined,
+                      qty: fromItem.qty !== undefined ? fromItem.qty : 0,
+                    });
+                    items.push(item);
+                  }
+                }
+                if (formulaData.to_items && Array.isArray(formulaData.to_items)) {
+                  for (const toItem of formulaData.to_items) {
+                    const item = this.repackFormulaItemRepository.create({
+                      repackFormula: savedRecord,
+                      item_type: 'to',
+                      itemcode: toItem.itemcode || undefined,
+                      qty: toItem.qty !== undefined ? toItem.qty : 0,
+                    });
+                    items.push(item);
+                  }
+                }
+
+                if (items.length > 0) {
+                  await this.repackFormulaItemRepository.save(items);
+                }
+
+                brandSavedCount++;
+              }
+              totalRecordsCount++;
+            } catch (error: any) {
+              const errorMsg = `Lỗi khi xử lý repack formula id ${formulaData.id}: ${error?.message || error}`;
+              this.logger.error(errorMsg);
+              brandErrors.push(errorMsg);
+            }
+          }
+
+          totalSavedCount += brandSavedCount;
+          totalUpdatedCount += brandUpdatedCount;
+          allErrors.push(...brandErrors);
+
+          this.logger.log(`[RepackFormula] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`);
+        } catch (error: any) {
+          const errorMsg = `[${brandName}] Lỗi khi đồng bộ repack formula: ${error?.message || error}`;
+          this.logger.error(errorMsg);
+          allErrors.push(errorMsg);
+        }
+      }
+
+      return {
+        success: allErrors.length === 0,
+        message: `Đồng bộ tách gộp BOM thành công: ${totalRecordsCount} công thức, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
+        recordsCount: totalRecordsCount,
+        savedCount: totalSavedCount,
+        updatedCount: totalUpdatedCount,
+        errors: allErrors.length > 0 ? allErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ repack formula: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Đồng bộ tách gộp BOM theo khoảng thời gian
+   * @param startDate - Ngày bắt đầu (format: DDMMMYYYY, ví dụ: 01OCT2025)
+   * @param endDate - Ngày kết thúc (format: DDMMMYYYY, ví dụ: 31OCT2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   * @returns Kết quả đồng bộ
+   */
+  async syncRepackFormulaByDateRange(
+    startDate: string,
+    endDate: string,
+    brand?: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    totalRecordsCount: number;
+    totalSavedCount: number;
+    totalUpdatedCount: number;
+    brandResults?: Array<{
+      brand: string;
+      recordsCount: number;
+      savedCount: number;
+      updatedCount: number;
+      errors?: string[];
+    }>;
+    errors?: string[];
+  }> {
+    try {
+      // Parse dates
+      const parseDate = (dateStr: string): Date => {
+        const day = parseInt(dateStr.substring(0, 2));
+        const monthStr = dateStr.substring(2, 5).toUpperCase();
+        const year = parseInt(dateStr.substring(5, 9));
+        const monthMap: Record<string, number> = {
+          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+        };
+        const month = monthMap[monthStr] || 0;
+        return new Date(year, month, day);
+      };
+
+      const start = parseDate(startDate);
+      const end = parseDate(endDate);
+
+      if (start > end) {
+        throw new Error('Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc');
+      }
+
+      const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
+      let totalRecordsCount = 0;
+      let totalSavedCount = 0;
+      let totalUpdatedCount = 0;
+      const allErrors: string[] = [];
+      const brandResults: Array<{
+        brand: string;
+        recordsCount: number;
+        savedCount: number;
+        updatedCount: number;
+        errors?: string[];
+      }> = [];
+
+      // API này nhận date range, không cần lặp từng ngày
+      // Gọi trực tiếp với startDate và endDate
+      for (const brandName of brands) {
+        try {
+          this.logger.log(`[syncRepackFormulaByDateRange] Bắt đầu đồng bộ brand: ${brandName}`);
+          let brandRecordsCount = 0;
+          let brandSavedCount = 0;
+          let brandUpdatedCount = 0;
+          const brandErrors: string[] = [];
+
+          try {
+            this.logger.log(`[syncRepackFormulaByDateRange] Đồng bộ ${brandName} - khoảng ${startDate} - ${endDate}`);
+            const result = await this.syncRepackFormula(startDate, endDate, brandName);
+            
+            brandRecordsCount = result.recordsCount;
+            brandSavedCount = result.savedCount;
+            brandUpdatedCount = result.updatedCount;
+            
+            if (result.errors && result.errors.length > 0) {
+              brandErrors.push(...result.errors);
+            }
+          } catch (error: any) {
+            const errorMsg = `[${brandName}] Lỗi khi đồng bộ khoảng ${startDate} - ${endDate}: ${error?.message || error}`;
+            this.logger.error(errorMsg);
+            brandErrors.push(errorMsg);
+          }
+
+          totalRecordsCount += brandRecordsCount;
+          totalSavedCount += brandSavedCount;
+          totalUpdatedCount += brandUpdatedCount;
+          allErrors.push(...brandErrors);
+
+          brandResults.push({
+            brand: brandName,
+            recordsCount: brandRecordsCount,
+            savedCount: brandSavedCount,
+            updatedCount: brandUpdatedCount,
+            errors: brandErrors.length > 0 ? brandErrors : undefined,
+          });
+
+          this.logger.log(`[syncRepackFormulaByDateRange] Hoàn thành đồng bộ brand: ${brandName} - ${brandRecordsCount} công thức`);
+        } catch (error: any) {
+          const errorMsg = `[${brandName}] Lỗi khi đồng bộ repack formula: ${error?.message || error}`;
+          this.logger.error(errorMsg);
+          allErrors.push(errorMsg);
+        }
+      }
+
+      return {
+        success: allErrors.length === 0,
+        message: `Đồng bộ tách gộp BOM thành công từ ${startDate} đến ${endDate}: ${totalRecordsCount} công thức, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
+        totalRecordsCount,
+        totalSavedCount,
+        totalUpdatedCount,
+        brandResults: brandResults.length > 0 ? brandResults : undefined,
+        errors: allErrors.length > 0 ? allErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ repack formula theo khoảng thời gian: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy danh sách tách gộp BOM với filter và pagination
+   */
+  async getRepackFormula(params: {
+    page?: number;
+    limit?: number;
+    brand?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    repackCatName?: string;
+    itemcode?: string;
+  }): Promise<{
+    success: boolean;
+    data: any[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    try {
+      const page = params.page || 1;
+      const limit = params.limit || 10;
+      const skip = (page - 1) * limit;
+
+      const queryBuilder = this.repackFormulaRepository
+        .createQueryBuilder('rf')
+        .leftJoinAndSelect('rf.items', 'items')
+        .orderBy('rf.valid_fromdate', 'DESC')
+        .addOrderBy('rf.name', 'ASC');
+
+      // Filter by brand
+      if (params.brand) {
+        queryBuilder.andWhere('rf.brand = :brand', { brand: params.brand });
+      }
+
+      // Filter by repack_cat_name
+      if (params.repackCatName) {
+        queryBuilder.andWhere('rf.repack_cat_name = :repackCatName', { repackCatName: params.repackCatName });
+      }
+
+      // Filter by itemcode (trong items)
+      if (params.itemcode) {
+        queryBuilder.andWhere('items.itemcode = :itemcode', { itemcode: params.itemcode });
+      }
+
+      // Filter by dateFrom
+      if (params.dateFrom) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day);
+        };
+        const fromDate = parseDate(params.dateFrom);
+        queryBuilder.andWhere('rf.valid_fromdate >= :dateFrom', { dateFrom: fromDate });
+      }
+
+      // Filter by dateTo
+      if (params.dateTo) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day, 23, 59, 59);
+        };
+        const toDate = parseDate(params.dateTo);
+        queryBuilder.andWhere('rf.valid_fromdate <= :dateTo', { dateTo: toDate });
+      }
+
+      // Get total count
+      const total = await queryBuilder.getCount();
+
+      // Apply pagination
+      queryBuilder.skip(skip).take(limit);
+
+      // Get data
+      const data = await queryBuilder.getMany();
+
+      const totalPages = Math.ceil(total / limit);
+
+      return {
+        success: true,
+        data,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`Error getting repack formula: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Đồng bộ dữ liệu danh sách CTKM (Promotion) từ API
+   * @param dateFrom - Ngày bắt đầu (format: DDMMMYYYY, ví dụ: 01NOV2025)
+   * @param dateTo - Ngày kết thúc (format: DDMMMYYYY, ví dụ: 30NOV2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   * @returns Kết quả đồng bộ
+   */
+  async syncPromotion(
+    dateFrom: string,
+    dateTo: string,
+    brand?: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    recordsCount: number;
+    savedCount: number;
+    updatedCount: number;
+    errors?: string[];
+  }> {
+    try {
+      const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
+      let totalRecordsCount = 0;
+      let totalSavedCount = 0;
+      let totalUpdatedCount = 0;
+      const allErrors: string[] = [];
+
+      for (const brandName of brands) {
+        try {
+          this.logger.log(`[Promotion] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`);
+          
+          // Lấy danh sách promotion từ API
+          const promotionData = await this.zappyApiService.getPromotion(dateFrom, dateTo, brandName);
+          
+          if (!promotionData || promotionData.length === 0) {
+            this.logger.log(`[Promotion] Không có dữ liệu cho ${brandName} - khoảng ${dateFrom} - ${dateTo}`);
+            continue;
+          }
+
+          let brandSavedCount = 0;
+          let brandUpdatedCount = 0;
+          const brandErrors: string[] = [];
+
+          // Parse date string sang Date object
+          const parseDateString = (dateStr: string | null | undefined): Date | null => {
+            if (!dateStr || typeof dateStr !== 'string') return null;
+            try {
+              const trimmed = dateStr.trim();
+              if (!trimmed) return null;
+
+              // Format: "07/11/2025 21:29" hoặc ISO string
+              if (trimmed.includes('T') || trimmed.includes('Z')) {
+                const isoDate = new Date(trimmed);
+                if (isNaN(isoDate.getTime())) {
+                  this.logger.warn(`Invalid ISO date: ${dateStr}`);
+                  return null;
+                }
+                return isoDate;
+              }
+              
+              // Format: "07/11/2025 21:29"
+              const parts = trimmed.split(' ');
+              const datePart = parts[0]; // "07/11/2025"
+              const timePart = parts[1] || '00:00'; // "21:29"
+              
+              if (!datePart || !datePart.includes('/')) {
+                this.logger.warn(`Invalid date format (no /): ${dateStr}`);
+                return null;
+              }
+              
+              const [day, month, year] = datePart.split('/');
+              const [hours, minutes] = timePart.split(':');
+              
+              // Validate các giá trị
+              const yearNum = parseInt(year, 10);
+              const monthNum = parseInt(month, 10);
+              const dayNum = parseInt(day, 10);
+              const hoursNum = parseInt(hours || '0', 10);
+              const minutesNum = parseInt(minutes || '0', 10);
+              
+              if (isNaN(yearNum) || isNaN(monthNum) || isNaN(dayNum)) {
+                this.logger.warn(`Invalid date values: ${dateStr} (year: ${year}, month: ${month}, day: ${day})`);
+                return null;
+              }
+              
+              if (monthNum < 1 || monthNum > 12) {
+                this.logger.warn(`Invalid month: ${monthNum} in ${dateStr}`);
+                return null;
+              }
+              
+              if (dayNum < 1 || dayNum > 31) {
+                this.logger.warn(`Invalid day: ${dayNum} in ${dateStr}`);
+                return null;
+              }
+              
+              const date = new Date(
+                yearNum,
+                monthNum - 1,
+                dayNum,
+                isNaN(hoursNum) ? 0 : hoursNum,
+                isNaN(minutesNum) ? 0 : minutesNum,
+              );
+              
+              // Kiểm tra Date có hợp lệ không
+              if (isNaN(date.getTime())) {
+                this.logger.warn(`Invalid Date object created from: ${dateStr}`);
+                return null;
+              }
+              
+              return date;
+            } catch (error) {
+              this.logger.warn(`Không thể parse date: ${dateStr} - ${error}`);
+              return null;
+            }
+          };
+
+          for (const promoData of promotionData) {
+            // Đảm bảo api_id là number
+            const apiId = typeof promoData.id === 'number' ? promoData.id : parseInt(String(promoData.id), 10);
+            
+            if (isNaN(apiId)) {
+              this.logger.warn(`Invalid api_id for promotion: ${promoData.id}`);
+              continue;
+            }
+            
+            try {
+
+              // Kiểm tra xem đã tồn tại chưa (dựa trên api_id và brand)
+              const existingRecord = await this.promotionRepository.findOne({
+                where: {
+                  api_id: apiId,
+                  brand: brandName,
+                },
+              });
+
+              const fromdate = parseDateString(promoData.fromdate);
+              const todate = parseDateString(promoData.todate);
+              const enteredat = parseDateString(promoData.enteredat);
+
+              if (existingRecord) {
+                this.logger.log(`[Promotion] Cập nhật promotion ${apiId} (${promoData.code || 'N/A'}) cho brand ${brandName}`);
+                // Cập nhật record đã tồn tại
+                existingRecord.code = promoData.code || existingRecord.code;
+                existingRecord.seq = promoData.seq !== undefined ? promoData.seq : existingRecord.seq;
+                existingRecord.name = promoData.name || existingRecord.name;
+                existingRecord.fromdate = fromdate || existingRecord.fromdate;
+                existingRecord.todate = todate !== null ? todate : existingRecord.todate;
+                existingRecord.ptype = promoData.ptype || existingRecord.ptype;
+                existingRecord.pricetype = promoData.pricetype || existingRecord.pricetype;
+                existingRecord.brand_code = promoData.brand_code || existingRecord.brand_code;
+                existingRecord.locked = promoData.locked || existingRecord.locked;
+                existingRecord.status = promoData.status || existingRecord.status;
+                existingRecord.enteredby = promoData.enteredby || existingRecord.enteredby;
+                existingRecord.enteredat = enteredat || existingRecord.enteredat;
+                existingRecord.sync_date_from = dateFrom;
+                existingRecord.sync_date_to = dateTo;
+
+                // Xóa các lines cũ
+                await this.promotionLineRepository.delete({ promotionId: existingRecord.id });
+
+                // Lấy chi tiết lines từ API
+                let lines: PromotionLine[] = [];
+                try {
+                  const lineData = await this.zappyApiService.getPromotionLine(promoData.id, brandName);
+                  
+                  // Tạo lại lines từ i_lines và v_lines
+                  lines = [];
+                  if (lineData.i_lines && Array.isArray(lineData.i_lines)) {
+                    for (const iLine of lineData.i_lines) {
+                      const line = this.promotionLineRepository.create({
+                        promotion: existingRecord,
+                        line_type: 'i_lines',
+                        seq: iLine.seq !== undefined ? iLine.seq : undefined,
+                        buy_items: iLine.buy_items || undefined,
+                        buy_qty: iLine.buy_qty !== undefined ? iLine.buy_qty : 0,
+                        buy_type: iLine.buy_type || undefined,
+                        buy_combined_qty: iLine.buy_combined_qty !== undefined ? iLine.buy_combined_qty : undefined,
+                        prom_group: iLine.prom_group || undefined,
+                        card_pattern: iLine.card_pattern || undefined,
+                        get_items: iLine.get_items || undefined,
+                        get_item_price: iLine.get_item_price !== undefined ? iLine.get_item_price : undefined,
+                        get_qty: iLine.get_qty !== undefined ? iLine.get_qty : 0,
+                        get_discamt: iLine.get_discamt !== undefined ? iLine.get_discamt : undefined,
+                        get_max_discamt: iLine.get_max_discamt !== undefined ? iLine.get_max_discamt : 0,
+                        get_discpct: iLine.get_discpct !== undefined ? iLine.get_discpct : undefined,
+                        get_item_option: iLine.get_item_option || undefined,
+                        svc_card_months: iLine.svc_card_months !== undefined ? iLine.svc_card_months : undefined,
+                        guideline: iLine.guideline || undefined,
+                      });
+                      lines.push(line);
+                    }
+                  }
+                  if (lineData.v_lines && Array.isArray(lineData.v_lines)) {
+                    for (const vLine of lineData.v_lines) {
+                      const line = this.promotionLineRepository.create({
+                        promotion: existingRecord,
+                        line_type: 'v_lines',
+                        seq: vLine.seq !== undefined ? vLine.seq : undefined,
+                        buy_items: vLine.buy_items || undefined,
+                        buy_qty: vLine.buy_qty !== undefined ? vLine.buy_qty : 0,
+                        buy_type: vLine.buy_type || undefined,
+                        buy_combined_qty: vLine.buy_combined_qty !== undefined ? vLine.buy_combined_qty : undefined,
+                        prom_group: vLine.prom_group || undefined,
+                        card_pattern: vLine.card_pattern || undefined,
+                        get_items: vLine.get_items || undefined,
+                        get_item_price: vLine.get_item_price !== undefined ? vLine.get_item_price : undefined,
+                        get_qty: vLine.get_qty !== undefined ? vLine.get_qty : 0,
+                        get_discamt: vLine.get_discamt !== undefined ? vLine.get_discamt : undefined,
+                        get_max_discamt: vLine.get_max_discamt !== undefined ? vLine.get_max_discamt : 0,
+                        get_discpct: vLine.get_discpct !== undefined ? vLine.get_discpct : undefined,
+                        get_item_option: vLine.get_item_option || undefined,
+                        svc_card_months: vLine.svc_card_months !== undefined ? vLine.svc_card_months : undefined,
+                        guideline: vLine.guideline || undefined,
+                      });
+                      lines.push(line);
+                    }
+                  }
+
+                  if (lines.length > 0) {
+                    await this.promotionLineRepository.save(lines);
+                  }
+                } catch (lineError: any) {
+                  this.logger.warn(`Không thể lấy lines cho promotion ${apiId}: ${lineError?.message || lineError}`);
+                  // Vẫn tiếp tục, không throw error
+                }
+
+                existingRecord.lines = lines;
+                await this.promotionRepository.save(existingRecord);
+                brandUpdatedCount++;
+              } else {
+                // Tạo record mới
+                this.logger.log(`[Promotion] Tạo mới promotion ${apiId} (${promoData.code || 'N/A'}) cho brand ${brandName}`);
+                const newRecord = this.promotionRepository.create({
+                  api_id: apiId,
+                  code: promoData.code || undefined,
+                  seq: promoData.seq !== undefined ? promoData.seq : undefined,
+                  name: promoData.name || undefined,
+                  fromdate: fromdate || undefined,
+                  todate: todate || undefined,
+                  ptype: promoData.ptype || undefined,
+                  pricetype: promoData.pricetype || undefined,
+                  brand_code: promoData.brand_code || undefined,
+                  locked: promoData.locked || undefined,
+                  status: promoData.status || undefined,
+                  enteredby: promoData.enteredby || undefined,
+                  enteredat: enteredat || undefined,
+                  sync_date_from: dateFrom,
+                  sync_date_to: dateTo,
+                  brand: brandName,
+                });
+
+                const savedRecord = (await this.promotionRepository.save(newRecord)) as unknown as Promotion;
+
+                // Lấy chi tiết lines từ API
+                try {
+                  const lineData = await this.zappyApiService.getPromotionLine(apiId, brandName);
+                  
+                  // Tạo lines từ i_lines và v_lines
+                  const lines: PromotionLine[] = [];
+                  if (lineData.i_lines && Array.isArray(lineData.i_lines)) {
+                    for (const iLine of lineData.i_lines) {
+                      const line = this.promotionLineRepository.create({
+                        promotion: savedRecord,
+                        line_type: 'i_lines',
+                        seq: iLine.seq !== undefined ? iLine.seq : undefined,
+                        buy_items: iLine.buy_items || undefined,
+                        buy_qty: iLine.buy_qty !== undefined ? iLine.buy_qty : 0,
+                        buy_type: iLine.buy_type || undefined,
+                        buy_combined_qty: iLine.buy_combined_qty !== undefined ? iLine.buy_combined_qty : undefined,
+                        prom_group: iLine.prom_group || undefined,
+                        card_pattern: iLine.card_pattern || undefined,
+                        get_items: iLine.get_items || undefined,
+                        get_item_price: iLine.get_item_price !== undefined ? iLine.get_item_price : undefined,
+                        get_qty: iLine.get_qty !== undefined ? iLine.get_qty : 0,
+                        get_discamt: iLine.get_discamt !== undefined ? iLine.get_discamt : undefined,
+                        get_max_discamt: iLine.get_max_discamt !== undefined ? iLine.get_max_discamt : 0,
+                        get_discpct: iLine.get_discpct !== undefined ? iLine.get_discpct : undefined,
+                        get_item_option: iLine.get_item_option || undefined,
+                        svc_card_months: iLine.svc_card_months !== undefined ? iLine.svc_card_months : undefined,
+                        guideline: iLine.guideline || undefined,
+                      });
+                      lines.push(line);
+                    }
+                  }
+                  if (lineData.v_lines && Array.isArray(lineData.v_lines)) {
+                    for (const vLine of lineData.v_lines) {
+                      const line = this.promotionLineRepository.create({
+                        promotion: savedRecord,
+                        line_type: 'v_lines',
+                        seq: vLine.seq !== undefined ? vLine.seq : undefined,
+                        buy_items: vLine.buy_items || undefined,
+                        buy_qty: vLine.buy_qty !== undefined ? vLine.buy_qty : 0,
+                        buy_type: vLine.buy_type || undefined,
+                        buy_combined_qty: vLine.buy_combined_qty !== undefined ? vLine.buy_combined_qty : undefined,
+                        prom_group: vLine.prom_group || undefined,
+                        card_pattern: vLine.card_pattern || undefined,
+                        get_items: vLine.get_items || undefined,
+                        get_item_price: vLine.get_item_price !== undefined ? vLine.get_item_price : undefined,
+                        get_qty: vLine.get_qty !== undefined ? vLine.get_qty : 0,
+                        get_discamt: vLine.get_discamt !== undefined ? vLine.get_discamt : undefined,
+                        get_max_discamt: vLine.get_max_discamt !== undefined ? vLine.get_max_discamt : 0,
+                        get_discpct: vLine.get_discpct !== undefined ? vLine.get_discpct : undefined,
+                        get_item_option: vLine.get_item_option || undefined,
+                        svc_card_months: vLine.svc_card_months !== undefined ? vLine.svc_card_months : undefined,
+                        guideline: vLine.guideline || undefined,
+                      });
+                      lines.push(line);
+                    }
+                  }
+
+                  if (lines.length > 0) {
+                    await this.promotionLineRepository.save(lines);
+                  }
+                } catch (lineError: any) {
+                  this.logger.warn(`Không thể lấy lines cho promotion ${apiId}: ${lineError?.message || lineError}`);
+                  // Vẫn tiếp tục, không throw error
+                }
+
+                brandSavedCount++;
+              }
+              totalRecordsCount++;
+            } catch (error: any) {
+              const errorMsg = `Lỗi khi xử lý promotion id ${apiId}: ${error?.message || error}`;
+              this.logger.error(errorMsg);
+              brandErrors.push(errorMsg);
+            }
+          }
+
+          totalSavedCount += brandSavedCount;
+          totalUpdatedCount += brandUpdatedCount;
+          allErrors.push(...brandErrors);
+
+          this.logger.log(`[Promotion] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`);
+        } catch (error: any) {
+          const errorMsg = `[${brandName}] Lỗi khi đồng bộ promotion: ${error?.message || error}`;
+          this.logger.error(errorMsg);
+          allErrors.push(errorMsg);
+        }
+      }
+
+      return {
+        success: allErrors.length === 0,
+        message: `Đồng bộ danh sách CTKM thành công: ${totalRecordsCount} chương trình, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
+        recordsCount: totalRecordsCount,
+        savedCount: totalSavedCount,
+        updatedCount: totalUpdatedCount,
+        errors: allErrors.length > 0 ? allErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ promotion: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Đồng bộ danh sách CTKM theo khoảng thời gian
+   * @param startDate - Ngày bắt đầu (format: DDMMMYYYY, ví dụ: 01OCT2025)
+   * @param endDate - Ngày kết thúc (format: DDMMMYYYY, ví dụ: 31OCT2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   * @returns Kết quả đồng bộ
+   */
+  async syncPromotionByDateRange(
+    startDate: string,
+    endDate: string,
+    brand?: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    totalRecordsCount: number;
+    totalSavedCount: number;
+    totalUpdatedCount: number;
+    brandResults?: Array<{
+      brand: string;
+      recordsCount: number;
+      savedCount: number;
+      updatedCount: number;
+      errors?: string[];
+    }>;
+    errors?: string[];
+  }> {
+    try {
+      const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
+      let totalRecordsCount = 0;
+      let totalSavedCount = 0;
+      let totalUpdatedCount = 0;
+      const allErrors: string[] = [];
+      const brandResults: Array<{
+        brand: string;
+        recordsCount: number;
+        savedCount: number;
+        updatedCount: number;
+        errors?: string[];
+      }> = [];
+
+      // API này nhận date range, không cần lặp từng ngày
+      // Gọi trực tiếp với startDate và endDate
+      for (const brandName of brands) {
+        try {
+          this.logger.log(`[syncPromotionByDateRange] Bắt đầu đồng bộ brand: ${brandName}`);
+          let brandRecordsCount = 0;
+          let brandSavedCount = 0;
+          let brandUpdatedCount = 0;
+          const brandErrors: string[] = [];
+
+          try {
+            this.logger.log(`[syncPromotionByDateRange] Đồng bộ ${brandName} - khoảng ${startDate} - ${endDate}`);
+            const result = await this.syncPromotion(startDate, endDate, brandName);
+            
+            brandRecordsCount = result.recordsCount;
+            brandSavedCount = result.savedCount;
+            brandUpdatedCount = result.updatedCount;
+            
+            if (result.errors && result.errors.length > 0) {
+              brandErrors.push(...result.errors);
+            }
+          } catch (error: any) {
+            const errorMsg = `[${brandName}] Lỗi khi đồng bộ khoảng ${startDate} - ${endDate}: ${error?.message || error}`;
+            this.logger.error(errorMsg);
+            brandErrors.push(errorMsg);
+          }
+
+          totalRecordsCount += brandRecordsCount;
+          totalSavedCount += brandSavedCount;
+          totalUpdatedCount += brandUpdatedCount;
+          allErrors.push(...brandErrors);
+
+          brandResults.push({
+            brand: brandName,
+            recordsCount: brandRecordsCount,
+            savedCount: brandSavedCount,
+            updatedCount: brandUpdatedCount,
+            errors: brandErrors.length > 0 ? brandErrors : undefined,
+          });
+
+          this.logger.log(`[syncPromotionByDateRange] Hoàn thành đồng bộ brand: ${brandName} - ${brandRecordsCount} chương trình`);
+        } catch (error: any) {
+          const errorMsg = `[${brandName}] Lỗi khi đồng bộ promotion: ${error?.message || error}`;
+          this.logger.error(errorMsg);
+          allErrors.push(errorMsg);
+        }
+      }
+
+      return {
+        success: allErrors.length === 0,
+        message: `Đồng bộ danh sách CTKM thành công từ ${startDate} đến ${endDate}: ${totalRecordsCount} chương trình, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
+        totalRecordsCount,
+        totalSavedCount,
+        totalUpdatedCount,
+        brandResults: brandResults.length > 0 ? brandResults : undefined,
+        errors: allErrors.length > 0 ? allErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ promotion theo khoảng thời gian: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy danh sách CTKM với filter và pagination
+   */
+  async getPromotion(params: {
+    page?: number;
+    limit?: number;
+    brand?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    ptype?: string;
+    status?: string;
+    code?: string;
+  }): Promise<{
+    success: boolean;
+    data: any[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    try {
+      const page = params.page || 1;
+      const limit = params.limit || 10;
+      const skip = (page - 1) * limit;
+
+      const queryBuilder = this.promotionRepository
+        .createQueryBuilder('p')
+        .leftJoinAndSelect('p.lines', 'lines')
+        .orderBy('p.fromdate', 'DESC')
+        .addOrderBy('p.code', 'ASC');
+
+      // Filter by brand
+      if (params.brand) {
+        queryBuilder.andWhere('p.brand = :brand', { brand: params.brand });
+      }
+
+      // Filter by ptype
+      if (params.ptype) {
+        queryBuilder.andWhere('p.ptype = :ptype', { ptype: params.ptype });
+      }
+
+      // Filter by status
+      if (params.status) {
+        queryBuilder.andWhere('p.status = :status', { status: params.status });
+      }
+
+      // Filter by code
+      if (params.code) {
+        queryBuilder.andWhere('p.code LIKE :code', { code: `%${params.code}%` });
+      }
+
+      // Filter by dateFrom
+      if (params.dateFrom) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day);
+        };
+        const fromDate = parseDate(params.dateFrom);
+        queryBuilder.andWhere('p.fromdate >= :dateFrom', { dateFrom: fromDate });
+      }
+
+      // Filter by dateTo
+      if (params.dateTo) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day, 23, 59, 59);
+        };
+        const toDate = parseDate(params.dateTo);
+        queryBuilder.andWhere('p.fromdate <= :dateTo', { dateTo: toDate });
+      }
+
+      // Get total count
+      const total = await queryBuilder.getCount();
+
+      // Apply pagination
+      queryBuilder.skip(skip).take(limit);
+
+      // Get data
+      const data = await queryBuilder.getMany();
+
+      const totalPages = Math.ceil(total / limit);
+
+      return {
+        success: true,
+        data,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`Error getting promotion: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Đồng bộ dữ liệu danh sách Voucher Issue từ API
+   * @param dateFrom - Ngày bắt đầu (format: DDMMMYYYY, ví dụ: 01NOV2025)
+   * @param dateTo - Ngày kết thúc (format: DDMMMYYYY, ví dụ: 30NOV2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   * @returns Kết quả đồng bộ
+   */
+  async syncVoucherIssue(
+    dateFrom: string,
+    dateTo: string,
+    brand?: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    recordsCount: number;
+    savedCount: number;
+    updatedCount: number;
+    errors?: string[];
+  }> {
+    try {
+      const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
+      let totalRecordsCount = 0;
+      let totalSavedCount = 0;
+      let totalUpdatedCount = 0;
+      const allErrors: string[] = [];
+
+      for (const brandName of brands) {
+        try {
+          this.logger.log(`[VoucherIssue] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`);
+          
+          // Lấy danh sách voucher issue từ API
+          const voucherIssueData = await this.zappyApiService.getVoucherIssue(dateFrom, dateTo, brandName);
+          
+          if (!voucherIssueData || voucherIssueData.length === 0) {
+            this.logger.log(`[VoucherIssue] Không có dữ liệu cho ${brandName} - khoảng ${dateFrom} - ${dateTo}`);
+            continue;
+          }
+
+          let brandSavedCount = 0;
+          let brandUpdatedCount = 0;
+          const brandErrors: string[] = [];
+
+          // Parse date string sang Date object (sử dụng hàm parseDateString từ syncPromotion)
+          const parseDateString = (dateStr: string | null | undefined): Date | null => {
+            if (!dateStr || typeof dateStr !== 'string') return null;
+            try {
+              const trimmed = dateStr.trim();
+              if (!trimmed) return null;
+
+              if (trimmed.includes('T') || trimmed.includes('Z')) {
+                const isoDate = new Date(trimmed);
+                if (isNaN(isoDate.getTime())) {
+                  this.logger.warn(`Invalid ISO date: ${dateStr}`);
+                  return null;
+                }
+                return isoDate;
+              }
+              
+              const parts = trimmed.split(' ');
+              const datePart = parts[0];
+              const timePart = parts[1] || '00:00';
+              
+              if (!datePart || !datePart.includes('/')) {
+                this.logger.warn(`Invalid date format (no /): ${dateStr}`);
+                return null;
+              }
+              
+              const [day, month, year] = datePart.split('/');
+              const [hours, minutes] = timePart.split(':');
+              
+              const yearNum = parseInt(year, 10);
+              const monthNum = parseInt(month, 10);
+              const dayNum = parseInt(day, 10);
+              const hoursNum = parseInt(hours || '0', 10);
+              const minutesNum = parseInt(minutes || '0', 10);
+              
+              if (isNaN(yearNum) || isNaN(monthNum) || isNaN(dayNum)) {
+                this.logger.warn(`Invalid date values: ${dateStr}`);
+                return null;
+              }
+              
+              if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31) {
+                this.logger.warn(`Invalid month/day: ${dateStr}`);
+                return null;
+              }
+              
+              const date = new Date(
+                yearNum,
+                monthNum - 1,
+                dayNum,
+                isNaN(hoursNum) ? 0 : hoursNum,
+                isNaN(minutesNum) ? 0 : minutesNum,
+              );
+              
+              if (isNaN(date.getTime())) {
+                this.logger.warn(`Invalid Date object created from: ${dateStr}`);
+                return null;
+              }
+              
+              return date;
+            } catch (error) {
+              this.logger.warn(`Không thể parse date: ${dateStr} - ${error}`);
+              return null;
+            }
+          };
+
+          for (const voucherData of voucherIssueData) {
+            // Đảm bảo api_id là number
+            const apiId = typeof voucherData.id === 'number' ? voucherData.id : parseInt(String(voucherData.id), 10);
+            
+            if (isNaN(apiId)) {
+              this.logger.warn(`Invalid api_id for voucher issue: ${voucherData.id}`);
+              continue;
+            }
+            
+            try {
+              // Kiểm tra xem đã tồn tại chưa (dựa trên api_id và brand)
+              const existingRecord = await this.voucherIssueRepository.findOne({
+                where: {
+                  api_id: apiId,
+                  brand: brandName,
+                },
+              });
+
+              const docdate = parseDateString(voucherData.docdate);
+              const validFromdate = parseDateString(voucherData.valid_fromdate);
+              const validTodate = parseDateString(voucherData.valid_todate);
+              const enteredat = parseDateString(voucherData.enteredat);
+
+              if (existingRecord) {
+                this.logger.log(`[VoucherIssue] Cập nhật voucher issue ${apiId} (${voucherData.code || 'N/A'}) cho brand ${brandName}`);
+                
+                // Cập nhật record đã tồn tại
+                existingRecord.code = voucherData.code || existingRecord.code;
+                existingRecord.status_lov = voucherData.status_lov || existingRecord.status_lov;
+                existingRecord.docdate = docdate || existingRecord.docdate;
+                existingRecord.description = voucherData.description || existingRecord.description;
+                existingRecord.brand_code = voucherData.brand_code || existingRecord.brand_code;
+                existingRecord.apply_for_branch_types = voucherData.apply_for_branch_types || existingRecord.apply_for_branch_types;
+                existingRecord.val = voucherData.val !== undefined && voucherData.val !== null ? voucherData.val : existingRecord.val;
+                existingRecord.percent = voucherData.percent !== undefined && voucherData.percent !== null ? voucherData.percent : (existingRecord.percent ?? 0);
+                existingRecord.max_value = voucherData.max_value !== undefined && voucherData.max_value !== null ? voucherData.max_value : existingRecord.max_value;
+                existingRecord.saletype = voucherData.saletype || existingRecord.saletype;
+                existingRecord.enable_precost = voucherData.enable_precost || existingRecord.enable_precost;
+                existingRecord.supplier_support_fee = voucherData.supplier_support_fee !== undefined && voucherData.supplier_support_fee !== null ? voucherData.supplier_support_fee : existingRecord.supplier_support_fee;
+                existingRecord.valid_fromdate = validFromdate || existingRecord.valid_fromdate;
+                existingRecord.valid_todate = validTodate !== null ? validTodate : existingRecord.valid_todate;
+                existingRecord.valid_days_from_so = voucherData.valid_days_from_so !== undefined && voucherData.valid_days_from_so !== null ? voucherData.valid_days_from_so : existingRecord.valid_days_from_so;
+                existingRecord.check_ownership = voucherData.check_ownership || existingRecord.check_ownership;
+                existingRecord.allow_cashback = voucherData.allow_cashback || existingRecord.allow_cashback;
+                existingRecord.prom_for_employee = voucherData.prom_for_employee || existingRecord.prom_for_employee;
+                existingRecord.bonus_for_sale_employee = voucherData.bonus_for_sale_employee || existingRecord.bonus_for_sale_employee;
+                existingRecord.so_percent = voucherData.so_percent !== undefined && voucherData.so_percent !== null ? voucherData.so_percent : existingRecord.so_percent;
+                existingRecord.r_total_scope = voucherData.r_total_scope || existingRecord.r_total_scope;
+                existingRecord.ecode_item_code = voucherData.ecode_item_code !== undefined ? voucherData.ecode_item_code : existingRecord.ecode_item_code;
+                existingRecord.voucher_item_code = voucherData.voucher_item_code || existingRecord.voucher_item_code;
+                existingRecord.voucher_item_name = voucherData.voucher_item_name || existingRecord.voucher_item_name;
+                existingRecord.cost_for_gl = voucherData.cost_for_gl !== undefined && voucherData.cost_for_gl !== null ? voucherData.cost_for_gl : existingRecord.cost_for_gl;
+                existingRecord.buy_items_by_date_range = voucherData.buy_items_by_date_range || existingRecord.buy_items_by_date_range;
+                existingRecord.buy_items_option_name = voucherData.buy_items_option_name || existingRecord.buy_items_option_name;
+                existingRecord.disable_bonus_point_for_sale = voucherData.disable_bonus_point_for_sale || existingRecord.disable_bonus_point_for_sale;
+                existingRecord.disable_bonus_point = voucherData.disable_bonus_point || existingRecord.disable_bonus_point;
+                existingRecord.for_mkt_kol = voucherData.for_mkt_kol || existingRecord.for_mkt_kol;
+                existingRecord.for_mkt_prom = voucherData.for_mkt_prom || existingRecord.for_mkt_prom;
+                existingRecord.allow_apply_for_promoted_so = voucherData.allow_apply_for_promoted_so || existingRecord.allow_apply_for_promoted_so;
+                existingRecord.campaign_code = voucherData.campaign_code !== undefined ? voucherData.campaign_code : existingRecord.campaign_code;
+                existingRecord.sl_max_sudung_cho_1_kh = voucherData.sl_max_sudung_cho_1_kh !== undefined ? voucherData.sl_max_sudung_cho_1_kh : existingRecord.sl_max_sudung_cho_1_kh;
+                existingRecord.is_locked = voucherData.is_locked || existingRecord.is_locked;
+                existingRecord.enteredat = enteredat || existingRecord.enteredat;
+                existingRecord.enteredby = voucherData.enteredby || existingRecord.enteredby;
+                existingRecord.material_type = voucherData.material_type || existingRecord.material_type;
+                existingRecord.applyfor_wso = voucherData.applyfor_wso !== undefined ? voucherData.applyfor_wso : existingRecord.applyfor_wso;
+                existingRecord.sync_date_from = dateFrom;
+                existingRecord.sync_date_to = dateTo;
+
+                // Xóa các details cũ
+                await this.voucherIssueDetailRepository.delete({ voucherIssueId: existingRecord.id });
+
+                // Lấy chi tiết từ API
+                let details: VoucherIssueDetail[] = [];
+                try {
+                  const detailData = await this.zappyApiService.getVoucherIssueDetail(apiId, brandName);
+                  
+                  // Lưu toàn bộ detail_data dạng JSON
+                  if (detailData) {
+                    const detail = this.voucherIssueDetailRepository.create({
+                      voucherIssue: existingRecord,
+                      detail_data: detailData,
+                    });
+                    details.push(detail);
+                  }
+                  
+                  if (details.length > 0) {
+                    await this.voucherIssueDetailRepository.save(details);
+                  }
+                } catch (detailError: any) {
+                  this.logger.warn(`Không thể lấy details cho voucher issue ${apiId}: ${detailError?.message || detailError}`);
+                  // Vẫn tiếp tục, không throw error
+                }
+
+                existingRecord.details = details;
+                await this.voucherIssueRepository.save(existingRecord);
+                brandUpdatedCount++;
+              } else {
+                // Tạo record mới
+                this.logger.log(`[VoucherIssue] Tạo mới voucher issue ${apiId} (${voucherData.code || 'N/A'}) cho brand ${brandName}`);
+                const newRecord = this.voucherIssueRepository.create({
+                  api_id: apiId,
+                  code: voucherData.code || undefined,
+                  status_lov: voucherData.status_lov || undefined,
+                  docdate: docdate || undefined,
+                  description: voucherData.description || undefined,
+                  brand_code: voucherData.brand_code || undefined,
+                  apply_for_branch_types: voucherData.apply_for_branch_types || undefined,
+                  val: voucherData.val !== undefined && voucherData.val !== null ? voucherData.val : 0,
+                  percent: voucherData.percent !== undefined && voucherData.percent !== null ? voucherData.percent : 0,
+                  max_value: voucherData.max_value !== undefined && voucherData.max_value !== null ? voucherData.max_value : 0,
+                  saletype: voucherData.saletype || undefined,
+                  enable_precost: voucherData.enable_precost || undefined,
+                  supplier_support_fee: voucherData.supplier_support_fee !== undefined && voucherData.supplier_support_fee !== null ? voucherData.supplier_support_fee : 0,
+                  valid_fromdate: validFromdate || undefined,
+                  valid_todate: validTodate || undefined,
+                  valid_days_from_so: voucherData.valid_days_from_so !== undefined && voucherData.valid_days_from_so !== null ? voucherData.valid_days_from_so : 0,
+                  check_ownership: voucherData.check_ownership || undefined,
+                  allow_cashback: voucherData.allow_cashback || undefined,
+                  prom_for_employee: voucherData.prom_for_employee || undefined,
+                  bonus_for_sale_employee: voucherData.bonus_for_sale_employee || undefined,
+                  so_percent: voucherData.so_percent !== undefined && voucherData.so_percent !== null ? voucherData.so_percent : undefined,
+                  r_total_scope: voucherData.r_total_scope || undefined,
+                  ecode_item_code: voucherData.ecode_item_code !== undefined ? voucherData.ecode_item_code : undefined,
+                  voucher_item_code: voucherData.voucher_item_code || undefined,
+                  voucher_item_name: voucherData.voucher_item_name || undefined,
+                  cost_for_gl: voucherData.cost_for_gl !== undefined && voucherData.cost_for_gl !== null ? voucherData.cost_for_gl : 0,
+                  buy_items_by_date_range: voucherData.buy_items_by_date_range || undefined,
+                  buy_items_option_name: voucherData.buy_items_option_name || undefined,
+                  disable_bonus_point_for_sale: voucherData.disable_bonus_point_for_sale || undefined,
+                  disable_bonus_point: voucherData.disable_bonus_point || undefined,
+                  for_mkt_kol: voucherData.for_mkt_kol || undefined,
+                  for_mkt_prom: voucherData.for_mkt_prom || undefined,
+                  allow_apply_for_promoted_so: voucherData.allow_apply_for_promoted_so || undefined,
+                  campaign_code: voucherData.campaign_code !== undefined ? voucherData.campaign_code : undefined,
+                  sl_max_sudung_cho_1_kh: voucherData.sl_max_sudung_cho_1_kh !== undefined && voucherData.sl_max_sudung_cho_1_kh !== null ? voucherData.sl_max_sudung_cho_1_kh : 0,
+                  is_locked: voucherData.is_locked || undefined,
+                  enteredat: enteredat || undefined,
+                  enteredby: voucherData.enteredby || undefined,
+                  material_type: voucherData.material_type || undefined,
+                  applyfor_wso: voucherData.applyfor_wso !== undefined ? voucherData.applyfor_wso : undefined,
+                  sync_date_from: dateFrom,
+                  sync_date_to: dateTo,
+                  brand: brandName,
+                });
+
+                const savedRecord = (await this.voucherIssueRepository.save(newRecord)) as unknown as VoucherIssue;
+
+                // Lấy chi tiết từ API
+                try {
+                  const detailData = await this.zappyApiService.getVoucherIssueDetail(apiId, brandName);
+                  
+                  // Lưu toàn bộ detail_data dạng JSON
+                  if (detailData) {
+                    const detail = this.voucherIssueDetailRepository.create({
+                      voucherIssue: savedRecord,
+                      detail_data: detailData,
+                    });
+                    await this.voucherIssueDetailRepository.save(detail);
+                  }
+                } catch (detailError: any) {
+                  this.logger.warn(`Không thể lấy details cho voucher issue ${apiId}: ${detailError?.message || detailError}`);
+                  // Vẫn tiếp tục, không throw error
+                }
+
+                brandSavedCount++;
+              }
+              totalRecordsCount++;
+            } catch (error: any) {
+              const errorMsg = `Lỗi khi xử lý voucher issue id ${apiId}: ${error?.message || error}`;
+              this.logger.error(errorMsg);
+              brandErrors.push(errorMsg);
+            }
+          }
+
+          totalSavedCount += brandSavedCount;
+          totalUpdatedCount += brandUpdatedCount;
+          allErrors.push(...brandErrors);
+
+          this.logger.log(`[VoucherIssue] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`);
+        } catch (error: any) {
+          const errorMsg = `[${brandName}] Lỗi khi đồng bộ voucher issue: ${error?.message || error}`;
+          this.logger.error(errorMsg);
+          allErrors.push(errorMsg);
+        }
+      }
+
+      return {
+        success: allErrors.length === 0,
+        message: `Đồng bộ danh sách Voucher Issue thành công: ${totalRecordsCount} voucher, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
+        recordsCount: totalRecordsCount,
+        savedCount: totalSavedCount,
+        updatedCount: totalUpdatedCount,
+        errors: allErrors.length > 0 ? allErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ voucher issue: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Đồng bộ danh sách Voucher Issue theo khoảng thời gian
+   * @param startDate - Ngày bắt đầu (format: DDMMMYYYY, ví dụ: 01OCT2025)
+   * @param endDate - Ngày kết thúc (format: DDMMMYYYY, ví dụ: 31OCT2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   * @returns Kết quả đồng bộ
+   */
+  async syncVoucherIssueByDateRange(
+    startDate: string,
+    endDate: string,
+    brand?: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    totalRecordsCount: number;
+    totalSavedCount: number;
+    totalUpdatedCount: number;
+    brandResults?: Array<{
+      brand: string;
+      recordsCount: number;
+      savedCount: number;
+      updatedCount: number;
+      errors?: string[];
+    }>;
+    errors?: string[];
+  }> {
+    try {
+      const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
+      let totalRecordsCount = 0;
+      let totalSavedCount = 0;
+      let totalUpdatedCount = 0;
+      const allErrors: string[] = [];
+      const brandResults: Array<{
+        brand: string;
+        recordsCount: number;
+        savedCount: number;
+        updatedCount: number;
+        errors?: string[];
+      }> = [];
+
+      // API này nhận date range, không cần lặp từng ngày
+      for (const brandName of brands) {
+        try {
+          this.logger.log(`[syncVoucherIssueByDateRange] Bắt đầu đồng bộ brand: ${brandName}`);
+          let brandRecordsCount = 0;
+          let brandSavedCount = 0;
+          let brandUpdatedCount = 0;
+          const brandErrors: string[] = [];
+
+          try {
+            this.logger.log(`[syncVoucherIssueByDateRange] Đồng bộ ${brandName} - khoảng ${startDate} - ${endDate}`);
+            const result = await this.syncVoucherIssue(startDate, endDate, brandName);
+            
+            brandRecordsCount = result.recordsCount;
+            brandSavedCount = result.savedCount;
+            brandUpdatedCount = result.updatedCount;
+            
+            if (result.errors && result.errors.length > 0) {
+              brandErrors.push(...result.errors);
+            }
+          } catch (error: any) {
+            const errorMsg = `[${brandName}] Lỗi khi đồng bộ khoảng ${startDate} - ${endDate}: ${error?.message || error}`;
+            this.logger.error(errorMsg);
+            brandErrors.push(errorMsg);
+          }
+
+          totalRecordsCount += brandRecordsCount;
+          totalSavedCount += brandSavedCount;
+          totalUpdatedCount += brandUpdatedCount;
+          allErrors.push(...brandErrors);
+
+          brandResults.push({
+            brand: brandName,
+            recordsCount: brandRecordsCount,
+            savedCount: brandSavedCount,
+            updatedCount: brandUpdatedCount,
+            errors: brandErrors.length > 0 ? brandErrors : undefined,
+          });
+
+          this.logger.log(`[syncVoucherIssueByDateRange] Hoàn thành đồng bộ brand: ${brandName} - ${brandRecordsCount} voucher`);
+        } catch (error: any) {
+          const errorMsg = `[${brandName}] Lỗi khi đồng bộ voucher issue: ${error?.message || error}`;
+          this.logger.error(errorMsg);
+          allErrors.push(errorMsg);
+        }
+      }
+
+      return {
+        success: allErrors.length === 0,
+        message: `Đồng bộ danh sách Voucher Issue thành công từ ${startDate} đến ${endDate}: ${totalRecordsCount} voucher, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
+        totalRecordsCount,
+        totalSavedCount,
+        totalUpdatedCount,
+        brandResults: brandResults.length > 0 ? brandResults : undefined,
+        errors: allErrors.length > 0 ? allErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ voucher issue theo khoảng thời gian: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy danh sách Voucher Issue với filter và pagination
+   */
+  async getVoucherIssue(params: {
+    page?: number;
+    limit?: number;
+    brand?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    status?: string;
+    code?: string;
+    materialType?: string;
+  }): Promise<{
+    success: boolean;
+    data: any[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    try {
+      const page = params.page || 1;
+      const limit = params.limit || 10;
+      const skip = (page - 1) * limit;
+
+      const queryBuilder = this.voucherIssueRepository
+        .createQueryBuilder('vi')
+        .leftJoinAndSelect('vi.details', 'details')
+        .orderBy('vi.docdate', 'DESC')
+        .addOrderBy('vi.code', 'ASC');
+
+      // Filter by brand
+      if (params.brand) {
+        queryBuilder.andWhere('vi.brand = :brand', { brand: params.brand });
+      }
+
+      // Filter by status
+      if (params.status) {
+        queryBuilder.andWhere('vi.status_lov = :status', { status: params.status });
+      }
+
+      // Filter by code
+      if (params.code) {
+        queryBuilder.andWhere('vi.code LIKE :code', { code: `%${params.code}%` });
+      }
+
+      // Filter by material_type
+      if (params.materialType) {
+        queryBuilder.andWhere('vi.material_type = :materialType', { materialType: params.materialType });
+      }
+
+      // Filter by dateFrom
+      if (params.dateFrom) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day);
+        };
+        const fromDate = parseDate(params.dateFrom);
+        queryBuilder.andWhere('vi.docdate >= :dateFrom', { dateFrom: fromDate });
+      }
+
+      // Filter by dateTo
+      if (params.dateTo) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day, 23, 59, 59);
+        };
+        const toDate = parseDate(params.dateTo);
+        queryBuilder.andWhere('vi.docdate <= :dateTo', { dateTo: toDate });
+      }
+
+      // Get total count
+      const total = await queryBuilder.getCount();
+
+      // Apply pagination
+      queryBuilder.skip(skip).take(limit);
+
+      // Get data
+      const data = await queryBuilder.getMany();
+
+      const totalPages = Math.ceil(total / limit);
+
+      return {
+        success: true,
+        data,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`Error getting voucher issue: ${error?.message || error}`);
       throw error;
     }
   }

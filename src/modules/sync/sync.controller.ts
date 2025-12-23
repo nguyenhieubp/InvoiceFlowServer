@@ -201,6 +201,389 @@ export class SyncController {
   }
 
   /**
+   * Đồng bộ FaceID theo khoảng thời gian
+   * @param startDate - Date format: DDMMMYYYY (ví dụ: 01OCT2025)
+   * @param endDate - Date format: DDMMMYYYY (ví dụ: 31OCT2025)
+   * @param shopCodes - Optional array of shop codes
+   */
+  @Post('faceid/range')
+  async syncFaceIdByDateRange(
+    @Body('startDate') startDate: string,
+    @Body('endDate') endDate: string,
+    @Body('shopCodes') shopCodes?: string[],
+  ) {
+    if (!startDate || !endDate) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const result = await this.syncService.syncFaceIdByDateRange(startDate, endDate, shopCodes);
+      return {
+        ...result,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi đồng bộ FaceID theo khoảng thời gian',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Đồng bộ báo cáo nộp quỹ cuối ca theo khoảng thời gian
+   * @param startDate - Date format: DDMMMYYYY (ví dụ: 01OCT2025)
+   * @param endDate - Date format: DDMMMYYYY (ví dụ: 31OCT2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   */
+  @Post('shift-end-cash/range')
+  async syncShiftEndCashByDateRange(
+    @Body('startDate') startDate: string,
+    @Body('endDate') endDate: string,
+    @Body('brand') brand?: string,
+  ) {
+    if (!startDate || !endDate) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const result = await this.syncService.syncShiftEndCashByDateRange(startDate, endDate, brand);
+      return {
+        ...result,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi đồng bộ báo cáo nộp quỹ cuối ca theo khoảng thời gian',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Đồng bộ báo cáo nộp quỹ cuối ca
+   * @param date - Date format: DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   */
+  @Post('shift-end-cash')
+  async syncShiftEndCash(@Body('date') date: string, @Body('brand') brand?: string) {
+    if (!date) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 01NOV2025)',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const result = await this.syncService.syncShiftEndCash(date, brand);
+      return {
+        ...result,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi đồng bộ báo cáo nộp quỹ cuối ca',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Đồng bộ tách gộp BOM theo khoảng thời gian
+   * @param startDate - Date format: DDMMMYYYY (ví dụ: 01OCT2025)
+   * @param endDate - Date format: DDMMMYYYY (ví dụ: 31OCT2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   */
+  @Post('repack-formula/range')
+  async syncRepackFormulaByDateRange(
+    @Body('startDate') startDate: string,
+    @Body('endDate') endDate: string,
+    @Body('brand') brand?: string,
+  ) {
+    if (!startDate || !endDate) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const result = await this.syncService.syncRepackFormulaByDateRange(startDate, endDate, brand);
+      return {
+        ...result,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi đồng bộ tách gộp BOM theo khoảng thời gian',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Đồng bộ danh sách CTKM theo khoảng thời gian
+   * @param startDate - Date format: DDMMMYYYY (ví dụ: 01OCT2025)
+   * @param endDate - Date format: DDMMMYYYY (ví dụ: 31OCT2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   */
+  @Post('promotion/range')
+  async syncPromotionByDateRange(
+    @Body('startDate') startDate: string,
+    @Body('endDate') endDate: string,
+    @Body('brand') brand?: string,
+  ) {
+    if (!startDate || !endDate) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const result = await this.syncService.syncPromotionByDateRange(startDate, endDate, brand);
+      return {
+        ...result,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi đồng bộ danh sách CTKM theo khoảng thời gian',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Đồng bộ danh sách Voucher Issue theo khoảng thời gian
+   * @param startDate - Date format: DDMMMYYYY (ví dụ: 01OCT2025)
+   * @param endDate - Date format: DDMMMYYYY (ví dụ: 31OCT2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   */
+  @Post('voucher-issue/range')
+  async syncVoucherIssueByDateRange(
+    @Body('startDate') startDate: string,
+    @Body('endDate') endDate: string,
+    @Body('brand') brand?: string,
+  ) {
+    if (!startDate || !endDate) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const result = await this.syncService.syncVoucherIssueByDateRange(startDate, endDate, brand);
+      return {
+        ...result,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi đồng bộ danh sách Voucher Issue theo khoảng thời gian',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Lấy danh sách Voucher Issue với filter và pagination
+   */
+  @Get('voucher-issue')
+  async getVoucherIssue(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('brand') brand?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('status') status?: string,
+    @Query('code') code?: string,
+    @Query('materialType') materialType?: string,
+  ) {
+    try {
+      const result = await this.syncService.getVoucherIssue({
+        page: page ? parseInt(page, 10) : 1,
+        limit: limit ? parseInt(limit, 10) : 10,
+        brand,
+        dateFrom,
+        dateTo,
+        status,
+        code,
+        materialType,
+      });
+      return result;
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi lấy danh sách Voucher Issue',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Lấy danh sách CTKM với filter và pagination
+   */
+  @Get('promotion')
+  async getPromotion(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('brand') brand?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('ptype') ptype?: string,
+    @Query('status') status?: string,
+    @Query('code') code?: string,
+  ) {
+    try {
+      const result = await this.syncService.getPromotion({
+        page: page ? parseInt(page, 10) : 1,
+        limit: limit ? parseInt(limit, 10) : 10,
+        brand,
+        dateFrom,
+        dateTo,
+        ptype,
+        status,
+        code,
+      });
+      return result;
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi lấy danh sách CTKM',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Lấy danh sách tách gộp BOM với filter và pagination
+   */
+  @Get('repack-formula')
+  async getRepackFormula(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('brand') brand?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('repackCatName') repackCatName?: string,
+    @Query('itemcode') itemcode?: string,
+  ) {
+    try {
+      const result = await this.syncService.getRepackFormula({
+        page: page ? parseInt(page, 10) : 1,
+        limit: limit ? parseInt(limit, 10) : 10,
+        brand,
+        dateFrom,
+        dateTo,
+        repackCatName,
+        itemcode,
+      });
+      return result;
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi lấy danh sách tách gộp BOM',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Lấy danh sách báo cáo nộp quỹ cuối ca với filter và pagination
+   */
+  @Get('shift-end-cash')
+  async getShiftEndCash(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('brand') brand?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('branchCode') branchCode?: string,
+    @Query('drawCode') drawCode?: string,
+  ) {
+    try {
+      const result = await this.syncService.getShiftEndCash({
+        page: page ? parseInt(page, 10) : 1,
+        limit: limit ? parseInt(limit, 10) : 10,
+        brand,
+        dateFrom,
+        dateTo,
+        branchCode,
+        drawCode,
+      });
+      return result;
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi lấy danh sách báo cáo nộp quỹ cuối ca',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
    * Lấy danh sách stock transfers với filter và pagination
    */
   @Get('stock-transfers')
