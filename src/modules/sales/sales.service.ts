@@ -28,6 +28,20 @@ export class SalesService {
   private readonly logger = new Logger(SalesService.name);
 
   /**
+   * Normalize mã khách hàng: Bỏ prefix "NV" nếu có
+   * VD: "NV8480" => "8480", "KH123" => "KH123"
+   */
+  private normalizeMaKh(maKh: string | null | undefined): string {
+    if (!maKh) return '';
+    const trimmed = String(maKh).trim();
+    // Bỏ prefix "NV" nếu có (case insensitive)
+    if (trimmed.length > 2 && trimmed.substring(0, 2).toUpperCase() === 'NV') {
+      return trimmed.substring(2);
+    }
+    return trimmed;
+  }
+
+  /**
    * Xử lý promotion code: cắt phần sau dấu "-" để lấy code hiển thị
    */
   private getPromotionDisplayCode(promCode: string | null | undefined): string | null {
@@ -836,6 +850,8 @@ export class SalesService {
       muaHangGiamGiaDisplay: muaHangGiamGiaDisplay,
       giaBan: giaBan, // Đảm bảo giaBan đã được tính toán
       promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
+      // Đảm bảo ordertypeName được trả về (từ database hoặc từ ordertype nếu ordertypeName không có)
+      ordertypeName: sale.ordertypeName || sale.ordertype || null,
       // Các field display từ calculateDisplayFields
       ...displayFields,
       producttype: loyaltyProduct?.producttype || loyaltyProduct?.productType || sale.productType || null,
@@ -878,7 +894,7 @@ export class SalesService {
       }
     });
 
-    // Fetch stock transfers để thêm thông tin xuất kho
+    // Fetch stock transfers để thêm thông tin stock transfer
     // Join theo soCode (của stock transfer) = docCode (của order)
     const stockTransfers = await this.stockTransferRepository.find({
       where: { soCode: In(docCodes) },
@@ -899,16 +915,16 @@ export class SalesService {
       const voucherCashio = cashioRecords.find(c => c.fop_syscode === 'VOUCHER');
       const selectedCashio = ecoinCashio || voucherCashio || cashioRecords[0] || null;
 
-      // Lấy thông tin xuất kho cho đơn hàng này
+      // Lấy thông tin stock transfer cho đơn hàng này
       const orderStockTransfers = stockTransferMap.get(order.docCode) || [];
       
-      // Tính tổng hợp thông tin xuất kho
+      // Tính tổng hợp thông tin stock transfer
       const stockTransferSummary = {
-        totalItems: orderStockTransfers.length, // Số dòng xuất kho
-        totalQty: orderStockTransfers.reduce((sum, st) => sum + Math.abs(Number(st.qty || 0)), 0), // Tổng số lượng xuất (lấy giá trị tuyệt đối)
+        totalItems: orderStockTransfers.length, // Số dòng stock transfer
+        totalQty: orderStockTransfers.reduce((sum, st) => sum + Math.abs(Number(st.qty || 0)), 0), // Tổng số lượng (lấy giá trị tuyệt đối)
         uniqueItems: new Set(orderStockTransfers.map(st => st.itemCode)).size, // Số sản phẩm khác nhau
         stockCodes: Array.from(new Set(orderStockTransfers.map(st => st.stockCode).filter(Boolean))), // Danh sách mã kho
-        hasStockTransfer: orderStockTransfers.length > 0, // Có xuất kho hay không
+        hasStockTransfer: orderStockTransfers.length > 0, // Có stock transfer hay không
       };
 
       return {
@@ -920,7 +936,7 @@ export class SalesService {
         cashioMasterCode: selectedCashio?.master_code || null,
         cashioTotalIn: selectedCashio?.total_in || null,
         cashioTotalOut: selectedCashio?.total_out || null,
-        // Thông tin xuất kho
+        // Thông tin stock transfer
         stockTransferInfo: stockTransferSummary,
         stockTransfers: orderStockTransfers.length > 0 
           ? orderStockTransfers.map(st => this.formatStockTransferForFrontend(st))
@@ -2181,7 +2197,7 @@ export class SalesService {
       });
     }
 
-    // Fetch stock transfers để lấy ma_nx (ST* cho xuất kho, RT* cho nhập kho)
+    // Fetch stock transfers để lấy ma_nx (ST* và RT* từ stock transfer)
     const stockTransfers = await this.stockTransferRepository.find({
       where: { soCode: docCode },
       order: { itemCode: 'ASC', createdAt: 'ASC' },
@@ -2229,14 +2245,14 @@ export class SalesService {
         stockTransferMapBySoCodeAndMaterialCode.set(key, {});
       }
       const itemMap = stockTransferMapBySoCodeAndMaterialCode.get(key)!;
-      // ST* -> xuất kho (warehouseRelease) - dùng array để lưu tất cả
+      // ST* - dùng array để lưu tất cả
       if (st.docCode.startsWith('ST')) {
         if (!itemMap.st) {
           itemMap.st = [];
         }
         itemMap.st.push(st);
       }
-      // RT* -> nhập kho (warehouseReceipt) - dùng array để lưu tất cả
+      // RT* - dùng array để lưu tất cả
       if (st.docCode.startsWith('RT')) {
         if (!itemMap.rt) {
           itemMap.rt = [];
@@ -2272,8 +2288,8 @@ export class SalesService {
         department: department,
         maKho: finalMaKho,
         // Thêm ma_nx từ stock transfer (lấy từ record đầu tiên)
-        ma_nx_st: firstSt?.docCode || null, // ST* cho xuất kho
-        ma_nx_rt: firstRt?.docCode || null, // RT* cho nhập kho
+        ma_nx_st: firstSt?.docCode || null, // ST* - mã nghiệp vụ từ stock transfer
+        ma_nx_rt: firstRt?.docCode || null, // RT* - mã nghiệp vụ từ stock transfer
       };
     });
 
@@ -2500,10 +2516,6 @@ export class SalesService {
       throw error;
     }
   }
-
-  /**
-   * Lưu phiếu xuất kho vào bảng warehouse_releases
-   */
 
   private async markOrderAsProcessed(docCode: string): Promise<void> {
     // Tìm tất cả các sale có cùng docCode
@@ -3383,16 +3395,6 @@ export class SalesService {
   /**
    * Build invoice data cho Fast API (format mới)
    */
-  /**
-   * Build invoice data cho warehouse (public method để dùng trong cron job)
-   */
-  async buildInvoiceDataForWarehouse(docCode: string): Promise<any> {
-    const orderData = await this.findByOrderCode(docCode);
-    if (!orderData || !orderData.sales || orderData.sales.length === 0) {
-      throw new Error(`Order ${docCode} not found or has no sales`);
-    }
-    return this.buildFastApiInvoiceData(orderData);
-  }
 
   private async buildFastApiInvoiceData(orderData: any): Promise<any> {
     try {
@@ -3950,9 +3952,9 @@ export class SalesService {
           loai_gd: limitString(loaiGd, 2),
           // ma_combo: mã combo (String, max 16 ký tự)
           ma_combo: limitString(toString(sale.maCombo, ''), 16),
-          // ma_nx_st: Mã nghiệp vụ xuất kho (ST* từ stock transfer) - dùng cho warehouseRelease
+          // ma_nx_st: Mã nghiệp vụ (ST* từ stock transfer)
           ma_nx_st: limitString(toString(sale.ma_nx_st, ''), 32),
-          // ma_nx_rt: Mã nghiệp vụ nhập kho (RT* từ stock transfer) - dùng cho warehouseReceipt
+          // ma_nx_rt: Mã nghiệp vụ (RT* từ stock transfer)
           ma_nx_rt: limitString(toString(sale.ma_nx_rt, ''), 32),
           // id_goc: ID phiếu gốc (String, max 70 ký tự)
           id_goc: limitString(toString(sale.idGoc, ''), 70),
@@ -4029,7 +4031,7 @@ export class SalesService {
       return {
         action: 0,
         ma_dvcs: maDvcs,
-        ma_kh: orderData.customer?.code || '',
+        ma_kh: this.normalizeMaKh(orderData.customer?.code),
         ong_ba: orderData.customer?.name || null,
         ma_gd: '1',
         ma_tt: null,
@@ -4063,7 +4065,7 @@ export class SalesService {
   }
 
   /**
-   * Tạo phiếu xuất kho từ STOCK_TRANSFER data
+   * Tạo stock transfer từ STOCK_TRANSFER data
    */
   async createStockTransfer(createDto: CreateStockTransferDto): Promise<any> {
     try {
@@ -4158,8 +4160,8 @@ export class SalesService {
       maDvcs = firstItem.branch_code || '';
     }
 
-    // Lấy ma_kh từ order
-    const maKh = orderData?.customer?.code || '';
+    // Lấy ma_kh từ order và normalize (bỏ prefix "NV" nếu có)
+    const maKh = this.normalizeMaKh(orderData?.customer?.code);
 
     // Map iotype sang ma_nx (mã nhập xuất)
     // iotype: 'O' = xuất, 'I' = nhập
@@ -4293,10 +4295,6 @@ export class SalesService {
       detail: detail,
     };
   }
-
-  /**
-   * Build warehouse release data cho Fast API
-   */
 
   /**
    * Lấy checkFaceID data theo partner_code và date
