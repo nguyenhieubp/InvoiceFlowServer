@@ -54,16 +54,30 @@ export class ZappyApiService {
         return [];
       }
 
-      // Chỉ lấy các dòng có doctype là "SALE_ORDER", bỏ qua các loại khác (SALE_RETURN, etc.)
-      const saleOrdersOnly = rawData.filter((item) => item.doctype === 'SALE_ORDER');
+      // Lấy tất cả các doctype (SALE_ORDER, SALE_RETURN, etc.), nhưng bỏ qua itemCode = "TRUTONKEEP"
+      const filteredData = rawData.filter((item) => {
+        const itemCode = item.itemcode || item.itemCode || '';
+        const normalizedItemCode = String(itemCode).trim().toUpperCase();
+        // Bỏ qua các item có itemcode = "TRUTONKEEP"
+        if (normalizedItemCode === 'TRUTONKEEP') {
+          return false;
+        }
+        return true;
+      });
       
-      if (saleOrdersOnly.length === 0) {
-        this.logger.warn(`No SALE_ORDER data found for date ${date} (filtered from ${rawData.length} total items)`);
+      if (filteredData.length === 0) {
+        this.logger.warn(`No sales data found for date ${date} after filtering (filtered from ${rawData.length} total items)`);
         return [];
       }
 
+      // Log số lượng đã filter
+      const trutonkeepCount = rawData.length - filteredData.length;
+      if (trutonkeepCount > 0) {
+        this.logger.log(`Filtered out ${trutonkeepCount} items with itemCode = "TRUTONKEEP"`);
+      }
+
       // Transform dữ liệu từ Zappy format sang Order format
-      return this.transformZappySalesToOrders(saleOrdersOnly);
+      return this.transformZappySalesToOrders(filteredData);
     } catch (error: any) {
       this.logger.error(`Error fetching daily sales from Zappy API: ${error?.message || error}`);
       throw error;

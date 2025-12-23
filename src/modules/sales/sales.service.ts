@@ -3348,6 +3348,24 @@ export class SalesService {
         throw new NotFoundException(`Order ${docCode} not found or has no sales`);
       }
 
+      // Kiểm tra loại đơn hàng: "02. Làm dịch vụ" hoặc "02.Làm dịch vụ"
+      const sales = orderData.sales || [];
+      const normalizeOrderType = (ordertypeName: string | null | undefined): string => {
+        if (!ordertypeName) return '';
+        return String(ordertypeName).trim().toLowerCase();
+      };
+
+      const hasServiceOrder = sales.some((s: any) => {
+        const normalized = normalizeOrderType(s.ordertypeName || s.ordertype);
+        return normalized === '02. làm dịch vụ' || normalized === '02.làm dịch vụ';
+      });
+
+      // Nếu là đơn dịch vụ, chạy flow dịch vụ
+      if (hasServiceOrder) {
+        return await this.executeServiceOrderFlow(orderData, docCode);
+      }
+
+      // Nếu không phải đơn dịch vụ, chạy flow bình thường (01.Thường)
       // Validate điều kiện tạo hóa đơn (sử dụng service riêng để dễ mở rộng)
       const validationResult = this.invoiceValidationService.validateOrderForInvoice({
         docCode,
@@ -3552,6 +3570,311 @@ export class SalesService {
 
       throw error;
     }
+  }
+
+  /**
+   * Xử lý flow tạo hóa đơn cho đơn hàng dịch vụ (02. Làm dịch vụ)
+   * Flow:
+   * 1. Customer (tạo/cập nhật)
+   * 2. SalesOrder (tất cả dòng: I, S, V...)
+   * 3. SalesInvoice (chỉ dòng productType = 'S')
+   * 4. GxtInvoice (S → detail, I → ndetail)
+   */
+  private async executeServiceOrderFlow(orderData: any, docCode: string): Promise<any> {
+    try {
+      this.logger.log(`[ServiceOrderFlow] Bắt đầu xử lý đơn dịch vụ ${docCode}`);
+
+      const sales = orderData.sales || [];
+      if (sales.length === 0) {
+        throw new Error(`Đơn hàng ${docCode} không có sale item nào`);
+      }
+
+      // Step 1: Tạo/cập nhật Customer
+      if (orderData.customer?.code) {
+        await this.fastApiInvoiceFlowService.createOrUpdateCustomer({
+          ma_kh: this.normalizeMaKh(orderData.customer.code),
+          ten_kh: orderData.customer.name || '',
+          dia_chi: orderData.customer.address || undefined,
+          dien_thoai: orderData.customer.mobile || orderData.customer.phone || undefined,
+          so_cccd: orderData.customer.idnumber || undefined,
+          ngay_sinh: orderData.customer.birthday
+            ? this.formatDateYYYYMMDD(orderData.customer.birthday)
+            : undefined,
+          gioi_tinh: orderData.customer.sexual || undefined,
+        });
+      }
+
+      // Build invoice data cho tất cả sales (dùng để tạo SalesOrder)
+      const invoiceData = await this.buildFastApiInvoiceData(orderData);
+
+      // Step 2: Tạo SalesOrder cho TẤT CẢ dòng (I, S, V...)
+      this.logger.log(`[ServiceOrderFlow] Tạo SalesOrder cho ${sales.length} dòng`);
+      await this.fastApiInvoiceFlowService.createSalesOrder({
+        ...invoiceData,
+        customer: orderData.customer,
+        ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+      });
+
+      // Step 3: Tạo SalesInvoice CHỈ cho productType = 'S'
+      const serviceLines = sales.filter((s: any) => {
+        const productType = (s.producttype ).toUpperCase().trim();
+        return productType === 'S';
+      });
+
+      let salesInvoiceResult: any = null;
+      if (serviceLines.length > 0) {
+        this.logger.log(`[ServiceOrderFlow] Tạo SalesInvoice cho ${serviceLines.length} dòng dịch vụ (productType = 'S')`);
+
+        // Build invoice data chỉ cho service lines
+        const serviceInvoiceData = await this.buildFastApiInvoiceDataForServiceLines(orderData, serviceLines);
+
+        salesInvoiceResult = await this.fastApiInvoiceFlowService.createSalesInvoice({
+          ...serviceInvoiceData,
+          customer: orderData.customer,
+          ten_kh: orderData.customer?.name || serviceInvoiceData.ong_ba || '',
+        });
+      } else {
+        this.logger.log(`[ServiceOrderFlow] Không có dòng dịch vụ (productType = 'S'), bỏ qua SalesInvoice`);
+      }
+
+      // Step 4: Tạo GxtInvoice (S → detail, I → ndetail)
+      const importLines = sales.filter((s: any) => {
+        const productType = (s.producttype || s.productType || '').toUpperCase().trim();
+        return productType === 'S';
+      });
+
+      const exportLines = sales.filter((s: any) => {
+        const productType = (s.producttype || s.productType || '').toUpperCase().trim();
+        return productType === 'I';
+      });
+
+      // Log để đảm bảo tất cả dòng đều được xử lý
+      this.logger.log(
+        `[ServiceOrderFlow] Tổng số dòng: ${sales.length}, ` +
+        `Dòng S (nhập): ${importLines.length}, ` +
+        `Dòng I (xuất): ${exportLines.length}, ` +
+        `Dòng khác: ${sales.length - importLines.length - exportLines.length}`
+      );
+
+      let gxtInvoiceResult: any = null;
+      if (importLines.length > 0 || exportLines.length > 0) {
+        this.logger.log(
+          `[ServiceOrderFlow] Tạo GxtInvoice: ${importLines.length} dòng nhập (S) → detail, ${exportLines.length} dòng xuất (I) → ndetail`
+        );
+
+        const gxtInvoiceData = await this.buildGxtInvoiceData(orderData, importLines, exportLines);
+        
+        // Log payload để verify
+        this.logger.log(
+          `[ServiceOrderFlow] GxtInvoice payload: detail có ${gxtInvoiceData.detail?.length || 0} dòng, ` +
+          `ndetail có ${gxtInvoiceData.ndetail?.length || 0} dòng`
+        );
+        
+        gxtInvoiceResult = await this.fastApiService.submitGxtInvoice(gxtInvoiceData);
+      } else {
+        this.logger.log(`[ServiceOrderFlow] Không có dòng S hoặc I, bỏ qua GxtInvoice`);
+      }
+
+      // Lưu vào bảng kê hóa đơn
+      const responseStatus = salesInvoiceResult ? 1 : 0;
+      const responseMessage = salesInvoiceResult
+        ? `Tạo hóa đơn dịch vụ ${docCode} thành công`
+        : `Tạo SalesOrder thành công, không có dòng dịch vụ để tạo SalesInvoice`;
+
+      await this.saveFastApiInvoice({
+        docCode,
+        maDvcs: invoiceData.ma_dvcs,
+        maKh: invoiceData.ma_kh,
+        tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+        ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
+        status: responseStatus,
+        message: responseMessage,
+        guid: null,
+        fastApiResponse: JSON.stringify({
+          salesOrder: 'success',
+          salesInvoice: salesInvoiceResult,
+          gxtInvoice: gxtInvoiceResult,
+        }),
+      });
+
+      // Đánh dấu đơn hàng là đã xử lý
+      await this.markOrderAsProcessed(docCode);
+
+      return {
+        success: true,
+        message: responseMessage,
+        result: {
+          salesOrder: 'success',
+          salesInvoice: salesInvoiceResult,
+          gxtInvoice: gxtInvoiceResult,
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`[ServiceOrderFlow] Lỗi khi xử lý đơn dịch vụ ${docCode}: ${error?.message || error}`);
+
+      // Lưu lỗi vào bảng kê hóa đơn
+      const invoiceData = await this.buildFastApiInvoiceData(orderData).catch(() => ({
+        ma_dvcs: orderData.branchCode || '',
+        ma_kh: this.normalizeMaKh(orderData.customer?.code),
+        ong_ba: orderData.customer?.name || '',
+        ngay_ct: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+      }));
+
+      await this.saveFastApiInvoice({
+        docCode,
+        maDvcs: invoiceData.ma_dvcs || orderData.branchCode || '',
+        maKh: invoiceData.ma_kh || this.normalizeMaKh(orderData.customer?.code),
+        tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+        ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
+        status: 0,
+        message: error?.message || 'Tạo hóa đơn dịch vụ thất bại',
+        guid: null,
+        fastApiResponse: JSON.stringify(error?.response?.data || error),
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Build invoice data chỉ cho service lines (productType = 'S')
+   */
+  private async buildFastApiInvoiceDataForServiceLines(orderData: any, serviceLines: any[]): Promise<any> {
+    // Tạo orderData mới chỉ chứa service lines
+    const serviceOrderData = {
+      ...orderData,
+      sales: serviceLines,
+    };
+
+    // Dùng lại logic buildFastApiInvoiceData nhưng với orderData đã filter
+    return await this.buildFastApiInvoiceData(serviceOrderData);
+  }
+
+  /**
+   * Build GxtInvoice data (Phiếu tạo gộp – xuất tách)
+   * - detail: các dòng productType = 'S' (nhập)
+   * - ndetail: các dòng productType = 'I' (xuất)
+   */
+  private async buildGxtInvoiceData(orderData: any, importLines: any[], exportLines: any[]): Promise<any> {
+    const formatDateISO = (date: Date | string): string => {
+      const d = typeof date === 'string' ? new Date(date) : date;
+      if (isNaN(d.getTime())) {
+        throw new Error('Invalid date');
+      }
+      return d.toISOString();
+    };
+
+    let docDate: Date;
+    if (orderData.docDate instanceof Date) {
+      docDate = orderData.docDate;
+    } else if (typeof orderData.docDate === 'string') {
+      docDate = new Date(orderData.docDate);
+      if (isNaN(docDate.getTime())) {
+        docDate = new Date();
+      }
+    } else {
+      docDate = new Date();
+    }
+
+    const ngayCt = formatDateISO(docDate);
+    const ngayLct = formatDateISO(docDate);
+
+    const firstSale = orderData.sales?.[0] || {};
+    const maDvcs =
+      firstSale?.department?.ma_dvcs ||
+      firstSale?.department?.ma_dvcs_ht ||
+      orderData.customer?.brand ||
+      orderData.branchCode ||
+      '';
+
+    // Helper để build detail/ndetail item
+    const buildLineItem = async (sale: any, index: number): Promise<any> => {
+      const toNumber = (value: any, defaultValue: number = 0): number => {
+        if (value === null || value === undefined || value === '') {
+          return defaultValue;
+        }
+        const num = Number(value);
+        return isNaN(num) ? defaultValue : num;
+      };
+
+      const toString = (value: any, defaultValue: string = ''): string => {
+        if (value === null || value === undefined || value === '') {
+          return defaultValue;
+        }
+        return String(value);
+      };
+
+      const limitString = (value: string, maxLength: number): string => {
+        if (!value) return '';
+        const str = String(value);
+        return str.length > maxLength ? str.substring(0, maxLength) : str;
+      };
+
+      const qty = toNumber(sale.qty, 0);
+      const giaBan = toNumber(sale.giaBan, 0);
+      const tienHang = toNumber(sale.tienHang || sale.linetotal || sale.revenue, 0);
+      const giaNt2 = giaBan > 0 ? giaBan : (qty > 0 ? tienHang / qty : 0);
+      const tienNt2 = qty * giaNt2;
+
+      // Lấy materialCode từ Loyalty API
+      const materialCode = this.getMaterialCode(sale, sale.product) || sale.itemCode || '';
+      const dvt = toString(sale.product?.dvt || sale.product?.unit || sale.dvt, 'Cái');
+      const maLo = toString(sale.maLo || sale.ma_lo, '');
+      const maBp = toString(
+        sale.department?.ma_bp || sale.branchCode || orderData.branchCode,
+        ''
+      );
+
+      return {
+        ma_vt: limitString(materialCode, 16),
+        dvt: limitString(dvt, 32),
+        ma_lo: limitString(maLo, 16),
+        so_luong: Math.abs(qty), // Lấy giá trị tuyệt đối
+        gia_nt2: Number(giaNt2),
+        tien_nt2: Number(tienNt2),
+        ma_nx: 'NX01', // Fix cứng theo yêu cầu
+        ma_bp: limitString(maBp, 8),
+      };
+    };
+
+    // Build detail (nhập - productType = 'S')
+    const detail = await Promise.all(importLines.map((sale, index) => buildLineItem(sale, index)));
+
+    // Build ndetail (xuất - productType = 'I')
+    const ndetail = await Promise.all(exportLines.map((sale, index) => buildLineItem(sale, index)));
+
+    // Lấy kho nhập và kho xuất (có thể cần map từ branch/department)
+    // Tạm thời dùng branchCode làm kho mặc định
+    const maKhoN = firstSale?.maKho || orderData.branchCode || '';
+    const maKhoX = firstSale?.maKho || orderData.branchCode || '';
+
+    return {
+      ma_dvcs: maDvcs,
+      ma_kho_n: maKhoN,
+      ma_kho_x: maKhoX,
+      ong_ba: orderData.customer?.name || '',
+      ma_gd: '2', // 1 = Tạo gộp, 2 = Xuất tách (có thể thay đổi theo rule)
+      ngay_ct: ngayCt,
+      ngay_lct: ngayLct,
+      so_ct: `${orderData.docCode}-GXT`,
+      dien_giai: orderData.docCode || '',
+      detail: detail,
+      ndetail: ndetail,
+    };
+  }
+
+  /**
+   * Format date thành YYYYMMDD
+   */
+  private formatDateYYYYMMDD(date: Date | string): string {
+    const d = typeof date === 'string' ? new Date(date) : date;
+    if (isNaN(d.getTime())) {
+      return '';
+    }
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}${month}${day}`;
   }
 
   /**

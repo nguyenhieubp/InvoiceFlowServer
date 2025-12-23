@@ -763,6 +763,75 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
 
 
   /**
+   * Gọi API gxtInvoice (Phiếu tạo gộp – xuất tách)
+   * @param gxtInvoiceData - Dữ liệu phiếu tạo gộp/xuất tách
+   */
+  async submitGxtInvoice(gxtInvoiceData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Log payload để debug
+      this.logger.debug(`GxtInvoice payload: ${JSON.stringify(gxtInvoiceData, null, 2)}`);
+
+      // Gọi API gxtInvoice với token
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/gxtInvoice`,
+          gxtInvoiceData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('GxtInvoice submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`Error submitting gxtInvoice: ${error?.message || error}`);
+      if (error?.response) {
+        this.logger.error(`Response status: ${error.response.status}`);
+        this.logger.error(`Response data: ${JSON.stringify(error.response.data)}`);
+      }
+
+      // Nếu lỗi 401 (Unauthorized), refresh token và retry
+      if (error?.response?.status === 401) {
+        this.logger.log('Token expired, refreshing and retrying gxtInvoice...');
+        const newToken = await this.login();
+        if (newToken) {
+          try {
+            const retryResponse = await firstValueFrom(
+              this.httpService.post(
+                `${this.baseUrl}/gxtInvoice`,
+                gxtInvoiceData,
+                {
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${newToken}`,
+                  },
+                },
+              ),
+            );
+            this.logger.log('GxtInvoice submitted successfully (after retry)');
+            return retryResponse.data;
+          } catch (retryError: any) {
+            this.logger.error(`Retry gxtInvoice API failed: ${retryError?.message || retryError}`);
+            throw retryError;
+          }
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  /**
    * Cleanup khi module bị destroy
    */
   onModuleDestroy() {
