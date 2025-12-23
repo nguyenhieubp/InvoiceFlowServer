@@ -766,6 +766,68 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
    * Gọi API gxtInvoice (Phiếu tạo gộp – xuất tách)
    * @param gxtInvoiceData - Dữ liệu phiếu tạo gộp/xuất tách
    */
+  async submitSalesReturn(salesReturnData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Log payload để debug
+      this.logger.debug(`Sales return payload: ${JSON.stringify(salesReturnData, null, 2)}`);
+
+      // Gọi API salesReturn với token
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/salesReturn`,
+          salesReturnData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('Sales return submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`Error submitting sales return: ${error?.message || error}`);
+
+      // Nếu lỗi 401 (Unauthorized), refresh token và retry
+      if (error?.response?.status === 401) {
+        this.logger.log('Token expired, refreshing and retrying...');
+        const newToken = await this.login();
+        if (newToken) {
+          // Retry với token mới
+          try {
+            const retryResponse = await firstValueFrom(
+              this.httpService.post(
+                `${this.baseUrl}/salesReturn`,
+                salesReturnData,
+                {
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${newToken}`,
+                  },
+                },
+              ),
+            );
+            this.logger.log('Sales return submitted successfully after token refresh');
+            return retryResponse.data;
+          } catch (retryError: any) {
+            this.logger.error(`Error submitting sales return after retry: ${retryError?.message || retryError}`);
+            throw retryError;
+          }
+        }
+      }
+
+      throw error;
+    }
+  }
+
   async submitGxtInvoice(gxtInvoiceData: any): Promise<any> {
     try {
       // Lấy token (tự động refresh nếu cần)

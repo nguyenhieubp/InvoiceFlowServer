@@ -45,9 +45,11 @@ export class FastApiInvoiceFlowService {
    * Tạo đơn hàng bán (salesOrder) trong Fast API
    * 2.3/ Đơn hàng bán
    * JSON body giống hóa đơn bán hàng (salesInvoice)
+   * @param orderData - Dữ liệu đơn hàng
+   * @param action - Action: 0 (mặc định) cho đơn hàng bán, 1 cho đơn hàng trả lại
    */
-  async createSalesOrder(orderData: any): Promise<any> {
-    this.logger.log(`[Flow] Creating sales order ${orderData.so_ct}...`);
+  async createSalesOrder(orderData: any, action: number = 0): Promise<any> {
+    this.logger.log(`[Flow] Creating sales order ${orderData.so_ct} with action=${action}...`);
     try {
       // Build payload giống như salesInvoice (JSON body giống hóa đơn bán hàng)
       // Sử dụng cùng logic build như createSalesInvoice
@@ -80,7 +82,7 @@ export class FastApiInvoiceFlowService {
       // - customer: không cần gửi lên salesOrder API
       // - ten_kh: không cần thiết trong salesOrder API
       const cleanOrderData: any = {
-        action: 0, // Luôn set = 0 cho API đơn hàng bán
+        action: action, // 0 cho đơn hàng bán, 1 cho đơn hàng trả lại
         ma_dvcs: orderData.ma_dvcs,
         ma_kh: orderData.ma_kh,
         ong_ba: orderData.ong_ba ?? null,
@@ -303,6 +305,53 @@ export class FastApiInvoiceFlowService {
       return result;
     } catch (error: any) {
       this.logger.error(`[Flow] Failed to create sales invoice ${invoiceData.so_ct}: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Tạo phiếu tạo gộp – xuất tách (gxtInvoice) trong Fast API
+   * Sử dụng cho đơn dịch vụ: detail (nhập - productType = 'S'), ndetail (xuất - productType = 'I')
+   */
+  async createGxtInvoice(gxtInvoiceData: any): Promise<any> {
+    this.logger.log(`[Flow] Creating gxt invoice ${gxtInvoiceData.so_ct || 'N/A'}...`);
+    try {
+      // Helper function để loại bỏ các field null, undefined, hoặc empty string
+      const removeEmptyFields = (obj: any): any => {
+        if (obj === null || obj === undefined) {
+          return obj;
+        }
+        if (Array.isArray(obj)) {
+          return obj.map(item => removeEmptyFields(item));
+        }
+        if (typeof obj === 'object') {
+          const cleaned: any = {};
+          for (const [key, value] of Object.entries(obj)) {
+            // Giữ lại các giá trị: 0, false, empty array, date objects
+            const shouldKeep = value !== null && value !== undefined && value !== '';
+            if (shouldKeep) {
+              cleaned[key] = removeEmptyFields(value);
+            }
+          }
+          return cleaned;
+        }
+        return obj;
+      };
+
+      // Log payload để debug
+      this.logger.debug(`[Flow] GxtInvoice payload: ${JSON.stringify(gxtInvoiceData, null, 2)}`);
+
+      const finalPayload = removeEmptyFields(gxtInvoiceData);
+      
+      const result = await this.fastApiService.submitGxtInvoice(finalPayload);
+      this.logger.log(`[Flow] GxtInvoice ${gxtInvoiceData.so_ct || 'N/A'} created successfully`);
+      return result;
+    } catch (error: any) {
+      this.logger.error(`[Flow] Failed to create gxt invoice ${gxtInvoiceData.so_ct || 'N/A'}: ${error?.message || error}`);
+      if (error?.response) {
+        this.logger.error(`[Flow] GxtInvoice error response status: ${error.response.status}`);
+        this.logger.error(`[Flow] GxtInvoice error response data: ${JSON.stringify(error.response.data)}`);
+      }
       throw error;
     }
   }

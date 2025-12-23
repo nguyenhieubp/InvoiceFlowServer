@@ -3060,6 +3060,29 @@ export class SalesService {
                   existingSale.giaBan = saleItem.giaBan || existingSale.giaBan;
                   existingSale.itemName = saleItem.itemName || existingSale.itemName;
                   existingSale.ordertype = saleItem.ordertype || existingSale.ordertype;
+                  // Luôn update ordertypeName từ Zappy API
+                  // Xử lý: trim nếu là string, set undefined nếu empty hoặc null
+                  let finalOrderTypeName: string | undefined = undefined;
+                  if (saleItem.ordertype_name !== undefined && saleItem.ordertype_name !== null) {
+                    if (typeof saleItem.ordertype_name === 'string') {
+                      const trimmed = saleItem.ordertype_name.trim();
+                      finalOrderTypeName = trimmed !== '' ? trimmed : undefined;
+                    } else {
+                      finalOrderTypeName = String(saleItem.ordertype_name).trim() || undefined;
+                    }
+                  }
+                  // Log để debug
+                  this.logger.log(
+                    `[SalesService] ordertype_name cho sale ${order.docCode}/${saleItem.itemCode}: ` +
+                    `raw="${saleItem.ordertype_name}" (type: ${typeof saleItem.ordertype_name}), final="${finalOrderTypeName}"`
+                  );
+                  if (existingSale.ordertypeName !== finalOrderTypeName) {
+                    this.logger.log(
+                      `[SalesService] Update ordertypeName cho sale ${order.docCode}/${saleItem.itemCode}: ` +
+                      `"${existingSale.ordertypeName}" → "${finalOrderTypeName}"`
+                    );
+                  }
+                  existingSale.ordertypeName = finalOrderTypeName;
                   existingSale.branchCode = saleItem.branchCode || existingSale.branchCode;
                   existingSale.promCode = saleItem.promCode || existingSale.promCode;
                   existingSale.serial = saleItem.serial !== undefined ? saleItem.serial : existingSale.serial;
@@ -3105,12 +3128,30 @@ export class SalesService {
                   await this.saleRepository.save(existingSale);
                 } else {
                   // Tạo sale mới
+                  // Tính toán ordertypeName trước
+                  let finalOrderTypeNameForNew: string | undefined = undefined;
+                  if (saleItem.ordertype_name !== undefined && saleItem.ordertype_name !== null) {
+                    if (typeof saleItem.ordertype_name === 'string') {
+                      const trimmed = saleItem.ordertype_name.trim();
+                      finalOrderTypeNameForNew = trimmed !== '' ? trimmed : undefined;
+                    } else {
+                      finalOrderTypeNameForNew = String(saleItem.ordertype_name).trim() || undefined;
+                    }
+                  }
+                  // Log để debug
+                  this.logger.log(
+                    `[SalesService] Tạo mới sale ${order.docCode}/${saleItem.itemCode}: ` +
+                    `ordertype_name raw="${saleItem.ordertype_name}" (type: ${typeof saleItem.ordertype_name}), final="${finalOrderTypeNameForNew}"`
+                  );
                   const newSale = this.saleRepository.create({
                     docCode: order.docCode,
                     docDate: new Date(order.docDate),
                     branchCode: order.branchCode,
                     docSourceType: order.docSourceType,
                     ordertype: saleItem.ordertype,
+                    // Luôn lưu ordertypeName, kể cả khi là undefined (để lưu từ Zappy API)
+                    // Nếu ordertypeName là empty string, set thành undefined
+                    ordertypeName: finalOrderTypeNameForNew,
                     description: saleItem.description,
                     partnerCode: saleItem.partnerCode,
                     itemCode: saleItem.itemCode || '',
@@ -3363,6 +3404,210 @@ export class SalesService {
       // Nếu là đơn dịch vụ, chạy flow dịch vụ
       if (hasServiceOrder) {
         return await this.executeServiceOrderFlow(orderData, docCode);
+      }
+
+      // Kiểm tra case SALE_RETURN không có stock transfer
+      const firstSale = orderData.sales && orderData.sales.length > 0 ? orderData.sales[0] : null;
+      const docSourceType = firstSale?.docSourceType || orderData.docSourceType;
+      const isSaleReturn = docSourceType === 'SALE_RETURN';
+
+      if (isSaleReturn) {
+        // Kiểm tra xem có stock transfer không
+        const stockTransfers = await this.stockTransferRepository.find({
+          where: { soCode: docCode },
+        });
+
+        // Nếu có stock transfer, gọi API salesReturn
+        if (stockTransfers && stockTransfers.length > 0) {
+          this.logger.log(`[SALE_RETURN] Đơn hàng ${docCode} là SALE_RETURN và có stock transfer, gọi API salesReturn`);
+
+          // Build salesReturn data
+          const salesReturnData = await this.buildSalesReturnData(orderData, stockTransfers);
+
+          // Tạo/cập nhật customer trước
+          if (orderData.customer) {
+            await this.fastApiInvoiceFlowService.createOrUpdateCustomer({
+              ma_kh: this.normalizeMaKh(orderData.customer.code),
+              ten_kh: orderData.customer.name || '',
+              dia_chi: orderData.customer.address || undefined,
+              ngay_sinh: orderData.customer.birthday ? new Date(orderData.customer.birthday).toISOString().split('T')[0] : undefined,
+              so_cccd: orderData.customer.idnumber || undefined,
+              e_mail: undefined,
+              gioi_tinh: orderData.customer.sexual || undefined,
+              dien_thoai: orderData.customer.mobile || undefined,
+            });
+          }
+
+          // Gọi API salesReturn
+          let result: any;
+          try {
+            result = await this.fastApiService.submitSalesReturn(salesReturnData);
+
+            // Lưu vào bảng kê hóa đơn
+            const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
+            const responseMessage = Array.isArray(result) && result.length > 0 
+              ? (result[0].message || 'Tạo hàng bán trả lại thành công')
+              : 'Tạo hàng bán trả lại thành công';
+            const responseGuid = Array.isArray(result) && result.length > 0 && Array.isArray(result[0].guid) 
+              ? result[0].guid[0] 
+              : (Array.isArray(result) && result.length > 0 ? result[0].guid : null);
+
+            await this.saveFastApiInvoice({
+              docCode,
+              maDvcs: salesReturnData.ma_dvcs,
+              maKh: salesReturnData.ma_kh,
+              tenKh: orderData.customer?.name || salesReturnData.ong_ba || '',
+              ngayCt: salesReturnData.ngay_ct ? new Date(salesReturnData.ngay_ct) : new Date(),
+              status: responseStatus,
+              message: responseMessage,
+              guid: responseGuid || null,
+              fastApiResponse: JSON.stringify(result),
+            });
+
+            return {
+              success: responseStatus === 1,
+              message: responseMessage,
+              result: result,
+            };
+          } catch (error: any) {
+            // Lấy thông báo lỗi chính xác từ Fast API response
+            let errorMessage = 'Tạo hàng bán trả lại thất bại';
+
+            if (error?.response?.data) {
+              const errorData = error.response.data;
+              if (Array.isArray(errorData) && errorData.length > 0) {
+                errorMessage = errorData[0].message || errorData[0].error || errorMessage;
+              } else if (errorData.message) {
+                errorMessage = errorData.message;
+              } else if (errorData.error) {
+                errorMessage = errorData.error;
+              } else if (typeof errorData === 'string') {
+                errorMessage = errorData;
+              }
+            } else if (error?.message) {
+              errorMessage = error.message;
+            }
+
+            // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
+            await this.saveFastApiInvoice({
+              docCode,
+              maDvcs: salesReturnData.ma_dvcs,
+              maKh: salesReturnData.ma_kh,
+              tenKh: orderData.customer?.name || salesReturnData.ong_ba || '',
+              ngayCt: salesReturnData.ngay_ct ? new Date(salesReturnData.ngay_ct) : new Date(),
+              status: 0,
+              message: errorMessage,
+              guid: null,
+              fastApiResponse: JSON.stringify(error?.response?.data || error),
+            });
+
+            this.logger.error(`SALE_RETURN order creation failed for order ${docCode}: ${errorMessage}`);
+
+            return {
+              success: false,
+              message: errorMessage,
+              result: error?.response?.data || error,
+            };
+          }
+        }
+        
+        // Nếu không có stock transfer (không có nhập/xuất kho), chỉ gọi API salesOrder với action = 1
+        if (!stockTransfers || stockTransfers.length === 0) {
+          this.logger.log(`[SALE_RETURN] Đơn hàng ${docCode} là SALE_RETURN và không có stock transfer, chỉ gọi API salesOrder với action=1`);
+
+          // Build invoice data để lấy thông tin cần thiết
+          const invoiceData = await this.buildFastApiInvoiceData(orderData);
+
+          // Tạo/cập nhật customer trước
+          if (orderData.customer) {
+            await this.fastApiInvoiceFlowService.createOrUpdateCustomer({
+              ma_kh: this.normalizeMaKh(orderData.customer.code),
+              ten_kh: orderData.customer.name || '',
+              dia_chi: orderData.customer.address || undefined,
+              ngay_sinh: orderData.customer.birthday ? new Date(orderData.customer.birthday).toISOString().split('T')[0] : undefined,
+              so_cccd: orderData.customer.idnumber || undefined,
+              e_mail: undefined,
+              gioi_tinh: orderData.customer.sexual || undefined,
+              dien_thoai: orderData.customer.mobile || undefined,
+            });
+          }
+
+          // Gọi API salesOrder với action = 1
+          let result: any;
+          try {
+            result = await this.fastApiInvoiceFlowService.createSalesOrder({
+              ...invoiceData,
+              customer: orderData.customer,
+              ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+            }, 1); // action = 1 cho đơn hàng trả lại
+
+            // Lưu vào bảng kê hóa đơn
+            const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
+            const responseMessage = Array.isArray(result) && result.length > 0 
+              ? (result[0].message || 'Tạo đơn hàng trả lại thành công')
+              : 'Tạo đơn hàng trả lại thành công';
+            const responseGuid = Array.isArray(result) && result.length > 0 && Array.isArray(result[0].guid) 
+              ? result[0].guid[0] 
+              : (Array.isArray(result) && result.length > 0 ? result[0].guid : null);
+
+            await this.saveFastApiInvoice({
+              docCode,
+              maDvcs: invoiceData.ma_dvcs,
+              maKh: invoiceData.ma_kh,
+              tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+              ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
+              status: responseStatus,
+              message: responseMessage,
+              guid: responseGuid || null,
+              fastApiResponse: JSON.stringify(result),
+            });
+
+            return {
+              success: responseStatus === 1,
+              message: responseMessage,
+              result: result,
+            };
+          } catch (error: any) {
+            // Lấy thông báo lỗi chính xác từ Fast API response
+            let errorMessage = 'Tạo đơn hàng trả lại thất bại';
+
+            if (error?.response?.data) {
+              const errorData = error.response.data;
+              if (Array.isArray(errorData) && errorData.length > 0) {
+                errorMessage = errorData[0].message || errorData[0].error || errorMessage;
+              } else if (errorData.message) {
+                errorMessage = errorData.message;
+              } else if (errorData.error) {
+                errorMessage = errorData.error;
+              } else if (typeof errorData === 'string') {
+                errorMessage = errorData;
+              }
+            } else if (error?.message) {
+              errorMessage = error.message;
+            }
+
+            // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
+            await this.saveFastApiInvoice({
+              docCode,
+              maDvcs: invoiceData.ma_dvcs,
+              maKh: invoiceData.ma_kh,
+              tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+              ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
+              status: 0,
+              message: errorMessage,
+              guid: null,
+              fastApiResponse: JSON.stringify(error?.response?.data || error),
+            });
+
+            this.logger.error(`SALE_RETURN order creation failed for order ${docCode}: ${errorMessage}`);
+
+            return {
+              success: false,
+              message: errorMessage,
+              result: error?.response?.data || error,
+            };
+          }
+        }
       }
 
       // Nếu không phải đơn dịch vụ, chạy flow bình thường (01.Thường)
@@ -3670,7 +3915,7 @@ export class SalesService {
           `ndetail có ${gxtInvoiceData.ndetail?.length || 0} dòng`
         );
         
-        gxtInvoiceResult = await this.fastApiService.submitGxtInvoice(gxtInvoiceData);
+        gxtInvoiceResult = await this.fastApiInvoiceFlowService.createGxtInvoice(gxtInvoiceData);
       } else {
         this.logger.log(`[ServiceOrderFlow] Không có dòng S hoặc I, bỏ qua GxtInvoice`);
       }
@@ -3856,7 +4101,7 @@ export class SalesService {
       ma_gd: '2', // 1 = Tạo gộp, 2 = Xuất tách (có thể thay đổi theo rule)
       ngay_ct: ngayCt,
       ngay_lct: ngayLct,
-      so_ct: `${orderData.docCode}-GXT`,
+      so_ct: orderData.docCode || '',
       dien_giai: orderData.docCode || '',
       detail: detail,
       ndetail: ndetail,
@@ -4701,6 +4946,111 @@ export class SalesService {
         customer: orderData?.customer ? { code: orderData.customer.code, name: orderData.customer.name } : null,
       })}`);
       throw new Error(`Failed to build invoice data: ${error?.message || error}`);
+    }
+  }
+
+  /**
+   * Build salesReturn data cho Fast API (Hàng bán trả lại)
+   * Tương tự như buildFastApiInvoiceData nhưng có thêm các field đặc biệt cho salesReturn
+   */
+  private async buildSalesReturnData(orderData: any, stockTransfers: StockTransfer[]): Promise<any> {
+    try {
+      // Sử dụng lại logic từ buildFastApiInvoiceData để build detail
+      const invoiceData = await this.buildFastApiInvoiceData(orderData);
+
+      // Format ngày theo ISO 8601
+      const formatDateISO = (date: Date | string): string => {
+        const d = typeof date === 'string' ? new Date(date) : date;
+        if (isNaN(d.getTime())) {
+          throw new Error('Invalid date');
+        }
+        return d.toISOString();
+      };
+
+      // Lấy ngày hóa đơn gốc (ngay_ct0) - có thể lấy từ sale đầu tiên hoặc orderData
+      const firstSale = orderData.sales?.[0] || {};
+      let ngayCt0: string | null = null;
+      let soCt0: string | null = null;
+
+      // Tìm hóa đơn gốc từ stock transfer hoặc sale
+      // Nếu có stock transfer, có thể lấy từ soCode hoặc docCode
+      if (stockTransfers && stockTransfers.length > 0) {
+        const firstStockTransfer = stockTransfers[0];
+        // soCode thường là mã đơn hàng gốc
+        soCt0 = firstStockTransfer.soCode || orderData.docCode || null;
+        // Ngày có thể lấy từ stock transfer hoặc orderData
+        if (firstStockTransfer.transDate) {
+          ngayCt0 = formatDateISO(firstStockTransfer.transDate);
+        } else if (orderData.docDate) {
+          ngayCt0 = formatDateISO(orderData.docDate);
+        }
+      } else {
+        // Nếu không có stock transfer, lấy từ orderData
+        soCt0 = orderData.docCode || null;
+        if (orderData.docDate) {
+          ngayCt0 = formatDateISO(orderData.docDate);
+        }
+      }
+
+      // Format ngày hiện tại
+      let docDate: Date;
+      if (orderData.docDate instanceof Date) {
+        docDate = orderData.docDate;
+      } else if (typeof orderData.docDate === 'string') {
+        docDate = new Date(orderData.docDate);
+        if (isNaN(docDate.getTime())) {
+          docDate = new Date();
+        }
+      } else {
+        docDate = new Date();
+      }
+
+      const ngayCt = formatDateISO(docDate);
+      const ngayLct = formatDateISO(docDate);
+
+      // Lấy ma_dvcs
+      const maDvcs = firstSale?.department?.ma_dvcs
+        || firstSale?.department?.ma_dvcs_ht
+        || orderData.customer?.brand
+        || orderData.branchCode
+        || '';
+
+      // Lấy so_seri
+      const soSeri = firstSale?.kyHieu || firstSale?.branchCode || orderData.branchCode || 'DEFAULT';
+
+      // Build detail từ invoiceData.detail, thêm các field đặc biệt cho salesReturn
+      const detail = (invoiceData.detail || []).map((item: any) => {
+        return {
+          ...item,
+          // Thêm các field đặc biệt cho salesReturn
+          tk_ck: item.tk_ck || null, // Tài khoản chiết khấu
+          tk_dt: item.tk_dt || '511', // Tài khoản trả lại (mặc định 511)
+          tk_gv: item.tk_gv || '632', // Tài khoản giá vốn (mặc định 632)
+        };
+      });
+
+      return {
+        ma_dvcs: maDvcs,
+        ma_kh: invoiceData.ma_kh,
+        ong_ba: invoiceData.ong_ba,
+        ma_gd: '1', // Mã giao dịch (mặc định 1 - Hàng bán trả lại)
+        ma_ca: firstSale?.maCa || null,
+        tk_co: '131', // Tài khoản có (mặc định 131)
+        so_ct0: soCt0, // Số hóa đơn gốc
+        ngay_ct0: ngayCt0, // Ngày hóa đơn gốc
+        dien_giai: orderData.docCode || null,
+        ngay_lct: ngayLct,
+        ngay_ct: ngayCt,
+        so_ct: orderData.docCode || '',
+        so_seri: soSeri,
+        ma_nt: 'VND',
+        ty_gia: 1.0,
+        ma_nvbh: firstSale?.saleperson_id?.toString() || null,
+        detail: detail,
+      };
+    } catch (error: any) {
+      this.logger.error(`Error building sales return data: ${error?.message || error}`);
+      throw new Error(`Failed to build sales return data: ${error?.message || error}`);
     }
   }
 
