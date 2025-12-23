@@ -493,17 +493,18 @@ export class SyncService {
                 }
                 
                 // Lấy productType: Ưu tiên từ Zappy API (producttype), nếu không có thì lấy từ Loyalty API
+                // Kiểm tra cả producttype (chữ thường) và productType (camelCase) từ Zappy API
                 const productTypeFromZappy = saleItem.producttype || saleItem.productType || null;
                 const productTypeFromLoyalty = productTypeMap.get(saleItem.itemCode || '');
                 const productType = productTypeFromZappy || productTypeFromLoyalty || null;
                 
                 // Debug log để kiểm tra productType
                 if (productTypeFromZappy) {
-                  this.logger.debug(`[Sync] Sale ${order.docCode}/${saleItem.itemCode}: productType từ Zappy API = "${productTypeFromZappy}"`);
+                  this.logger.log(`[Sync] Sale ${order.docCode}/${saleItem.itemCode}: productType từ Zappy API = "${productTypeFromZappy}" (saleItem.producttype="${saleItem.producttype}", saleItem.productType="${saleItem.productType}")`);
                 } else if (productTypeFromLoyalty) {
                   this.logger.debug(`[Sync] Sale ${order.docCode}/${saleItem.itemCode}: productType từ Loyalty API = "${productTypeFromLoyalty}"`);
                 } else {
-                  this.logger.debug(`[Sync] Sale ${order.docCode}/${saleItem.itemCode}: Không có productType từ cả Zappy và Loyalty API`);
+                  this.logger.warn(`[Sync] Sale ${order.docCode}/${saleItem.itemCode}: Không có productType từ cả Zappy và Loyalty API (saleItem.producttype="${saleItem.producttype}", saleItem.productType="${saleItem.productType}")`);
                 }
                 
                 // Lấy dvt từ saleItem hoặc từ Loyalty API, nếu không có thì mặc định là "cái"
@@ -744,7 +745,9 @@ export class SyncService {
                     qty: saleItem.qty || 0,
                     revenue: saleItem.revenue || 0,
                     linetotal: saleItem.linetotal || saleItem.revenue || 0,
-                    productType: productType || undefined,
+                    // Luôn lưu productType, kể cả khi là null (để lưu từ Zappy API)
+                    // Nếu productType là empty string, set thành null
+                    productType: productType && productType.trim() !== '' ? productType.trim() : null,
                     tienHang: saleItem.tienHang || saleItem.linetotal || saleItem.revenue || 0,
                     giaBan: saleItem.giaBan || 0,
                     promCode: saleItem.promCode,

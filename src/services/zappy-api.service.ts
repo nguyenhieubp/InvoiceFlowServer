@@ -363,7 +363,9 @@ export class ZappyApiService {
         order_source: zappySale.so_source || undefined,
         partner_name: zappySale.partner_name || undefined,
         // Các trường khác
-        producttype: zappySale.producttype || undefined,
+        // Lưu producttype từ Zappy API (có thể là "I", "S", "V", etc.)
+        // Giữ nguyên giá trị, kể cả khi là empty string (để sync service xử lý)
+        producttype: zappySale.producttype !== undefined && zappySale.producttype !== null ? zappySale.producttype : undefined,
         pkg_code: zappySale.pkg_code || undefined,
         social_page_id: zappySale.social_page_id || undefined,
         sp_email: zappySale.sp_email || undefined,

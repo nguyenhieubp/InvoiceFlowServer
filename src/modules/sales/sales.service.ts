@@ -29,6 +29,20 @@ export class SalesService {
   private readonly logger = new Logger(SalesService.name);
 
   /**
+   * Validate integer value để tránh NaN
+   */
+  private validateInteger(value: any): number | undefined {
+    if (value === null || value === undefined) {
+      return undefined;
+    }
+    const num = Number(value);
+    if (isNaN(num) || !isFinite(num)) {
+      return undefined;
+    }
+    return Math.floor(num);
+  }
+
+  /**
    * Normalize mã khách hàng: Bỏ prefix "NV" nếu có
    * VD: "NV8480" => "8480", "KH123" => "KH123"
    */
@@ -855,8 +869,9 @@ export class SalesService {
       ordertypeName: sale.ordertypeName || sale.ordertype || null,
       // Các field display từ calculateDisplayFields
       ...displayFields,
-      producttype: loyaltyProduct?.producttype || loyaltyProduct?.productType || sale.productType || null,
-      productType: loyaltyProduct?.productType || loyaltyProduct?.producttype || sale.productType || null,
+      // Ưu tiên productType từ Zappy API (I, S, V) trước Loyalty API (DIVU, VOUC, etc.)
+      producttype: sale.productType || sale.producttype || loyaltyProduct?.producttype || loyaltyProduct?.productType || null,
+      productType: sale.productType || sale.producttype || loyaltyProduct?.productType || loyaltyProduct?.producttype || null,
       product: loyaltyProduct ? {
         ...loyaltyProduct,
         producttype: loyaltyProduct.producttype || loyaltyProduct.productType || null,
@@ -2993,6 +3008,30 @@ export class SalesService {
                   this.logger.warn(`[SalesService] Sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - Sản phẩm không tồn tại trong Loyalty API (404), sẽ lưu với statusAsys = false`);
                 }
 
+                // Lấy productType: Ưu tiên từ Zappy API (producttype), nếu không có thì lấy từ Loyalty API
+                // Kiểm tra cả producttype (chữ thường) và productType (camelCase) từ Zappy API
+                const productTypeFromZappy = saleItem.producttype || saleItem.productType || null;
+                // Fetch productType từ Loyalty API nếu chưa có từ Zappy (đã có sẵn trong notFoundItemCodes check)
+                let productTypeFromLoyalty: string | null = null;
+                if (!productTypeFromZappy && itemCode && !notFoundItemCodes.has(itemCode)) {
+                  try {
+                    const loyaltyProduct = await this.loyaltyService.checkProduct(itemCode);
+                    if (loyaltyProduct) {
+                      productTypeFromLoyalty = loyaltyProduct.productType || loyaltyProduct.producttype || null;
+                    }
+                  } catch (error) {
+                    // Ignore error, sẽ dùng null
+                  }
+                }
+                const productType = productTypeFromZappy || productTypeFromLoyalty || null;
+                
+                // Debug log để kiểm tra productType
+                if (productTypeFromZappy) {
+                  this.logger.debug(`[SalesService] Sale ${order.docCode}/${saleItem.itemCode}: productType từ Zappy API = "${productTypeFromZappy}"`);
+                } else if (productTypeFromLoyalty) {
+                  this.logger.debug(`[SalesService] Sale ${order.docCode}/${saleItem.itemCode}: productType từ Loyalty API = "${productTypeFromLoyalty}"`);
+                }
+
                 // Kiểm tra xem sale đã tồn tại chưa (dựa trên docCode, itemCode)
                 const existingSale = await this.saleRepository.findOne({
                   where: {
@@ -3031,7 +3070,8 @@ export class SalesService {
                   existingSale.chietKhauMuaHangGiamGia = saleItem.chietKhauMuaHangGiamGia !== undefined ? saleItem.chietKhauMuaHangGiamGia : existingSale.chietKhauMuaHangGiamGia;
                   existingSale.paid_by_voucher_ecode_ecoin_bp = saleItem.paid_by_voucher_ecode_ecoin_bp || existingSale.paid_by_voucher_ecode_ecoin_bp;
                   existingSale.maCa = saleItem.shift_code || existingSale.maCa;
-                  existingSale.saleperson_id = saleItem.saleperson_id || existingSale.saleperson_id;
+                  // Validate saleperson_id để tránh NaN
+                  existingSale.saleperson_id = this.validateInteger(saleItem.saleperson_id) ?? existingSale.saleperson_id;
                   existingSale.partnerCode = saleItem.partnerCode || existingSale.partnerCode;
                   existingSale.partner_name = saleItem.partner_name || existingSale.partner_name;
                   existingSale.order_source = saleItem.order_source || existingSale.order_source;
@@ -3044,6 +3084,16 @@ export class SalesService {
                   existingSale.catcode1 = saleItem.catcode1 !== undefined ? saleItem.catcode1 : existingSale.catcode1;
                   existingSale.catcode2 = saleItem.catcode2 !== undefined ? saleItem.catcode2 : existingSale.catcode2;
                   existingSale.catcode3 = saleItem.catcode3 !== undefined ? saleItem.catcode3 : existingSale.catcode3;
+                  // Luôn update productType, kể cả khi là null (để cập nhật từ Zappy API)
+                  // Nếu productType là empty string, set thành null
+                  const finalProductType = productType && productType.trim() !== '' ? productType.trim() : null;
+                  if (existingSale.productType !== finalProductType) {
+                    this.logger.debug(
+                      `[SalesService] Update productType cho sale ${order.docCode}/${saleItem.itemCode}: ` +
+                      `"${existingSale.productType}" → "${finalProductType}"`
+                    );
+                  }
+                  existingSale.productType = finalProductType;
                   // Enrich voucher data
                   if (voucherRefno) {
                     existingSale.voucherDp1 = voucherRefno;
@@ -3079,7 +3129,8 @@ export class SalesService {
                     chietKhauMuaHangGiamGia: saleItem.chietKhauMuaHangGiamGia,
                     paid_by_voucher_ecode_ecoin_bp: saleItem.paid_by_voucher_ecode_ecoin_bp,
                     maCa: saleItem.shift_code,
-                    saleperson_id: saleItem.saleperson_id,
+                    // Validate saleperson_id để tránh NaN
+                    saleperson_id: this.validateInteger(saleItem.saleperson_id),
                     partner_name: saleItem.partner_name,
                     order_source: saleItem.order_source,
                     // Lưu mvc_serial vào maThe
@@ -3091,6 +3142,9 @@ export class SalesService {
                     catcode1: saleItem.catcode1,
                     catcode2: saleItem.catcode2,
                     catcode3: saleItem.catcode3,
+                    // Luôn lưu productType, kể cả khi là null (để lưu từ Zappy API)
+                    // Nếu productType là empty string, set thành null
+                    productType: productType && productType.trim() !== '' ? productType.trim() : null,
                     // Enrich voucher data từ get_daily_cash
                     voucherDp1: voucherRefno,
                     thanhToanVoucher: voucherAmount && voucherAmount > 0 ? voucherAmount : undefined,
