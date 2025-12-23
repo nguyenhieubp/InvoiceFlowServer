@@ -12,6 +12,7 @@ import { ZappyApiService } from '../../services/zappy-api.service';
 import { FastApiService } from '../../services/fast-api.service';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { LoyaltyService } from '../../services/loyalty.service';
+import { InvoiceValidationService } from '../../services/invoice-validation.service';
 import { Invoice } from '../../entities/invoice.entity';
 import { InvoiceItem } from '../../entities/invoice-item.entity';
 import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
@@ -29,7 +30,7 @@ import { CategoriesModule } from '../categories/categories.module';
     CategoriesModule,
   ],
   controllers: [SalesController],
-  providers: [SalesService, InvoicePrintService, ZappyApiService, FastApiService, FastApiInvoiceFlowService, LoyaltyService],
+  providers: [SalesService, InvoicePrintService, ZappyApiService, FastApiService, FastApiInvoiceFlowService, LoyaltyService, InvoiceValidationService],
   exports: [SalesService, FastApiInvoiceFlowService],
 })
 export class SalesModule {}

@@ -18,6 +18,7 @@ import { FastApiService } from '../../services/fast-api.service';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { CategoriesService } from '../categories/categories.service';
 import { LoyaltyService } from '../../services/loyalty.service';
+import { InvoiceValidationService } from '../../services/invoice-validation.service';
 import { Order, SaleItem } from '../../types/order.types';
 import { CreateStockTransferDto, StockTransferItem } from '../../dto/create-stock-transfer.dto';
 import { ExplainFaceIdDto } from '../../dto/explain-faceid.dto';
@@ -918,13 +919,87 @@ export class SalesService {
       // Lấy thông tin stock transfer cho đơn hàng này
       const orderStockTransfers = stockTransferMap.get(order.docCode) || [];
       
-      // Tính tổng hợp thông tin stock transfer
+      // Debug: Log tất cả stock transfers để kiểm tra
+      if (orderStockTransfers.length > 0) {
+        this.logger.debug(
+          `[StockTransfer] Đơn hàng ${order.docCode}: Tìm thấy ${orderStockTransfers.length} records. ` +
+          `Chi tiết: ${orderStockTransfers.map(st => `docCode=${st.docCode}, itemCode=${st.itemCode}, qty=${st.qty}, stockCode=${st.stockCode}`).join('; ')}`
+        );
+      }
+      
+      // Lọc chỉ lấy các stock transfer XUẤT KHO (SALE_STOCKOUT) với qty < 0
+      // Bỏ qua các stock transfer nhập lại (RETURN) với qty > 0
+      const stockOutTransfers = orderStockTransfers.filter((st) => {
+        // Chỉ lấy các record có doctype = 'SALE_STOCKOUT' hoặc qty < 0 (xuất kho)
+        const isStockOut = st.doctype === 'SALE_STOCKOUT' || Number(st.qty || 0) < 0;
+        return isStockOut;
+      });
+      
+      // Deduplicate stock transfers để tránh tính trùng
+      // Group theo docCode + itemCode + stockCode + qty để đảm bảo chỉ tính một lần cho mỗi combination
+      // (có thể có duplicate records trong database với id khác nhau nhưng cùng docCode, itemCode, stockCode, qty)
+      const uniqueStockTransfersMap = new Map<string, StockTransfer>();
+      stockOutTransfers.forEach((st) => {
+        // Tạo key từ docCode + itemCode + stockCode + qty (giữ nguyên dấu âm để phân biệt ST và RT)
+        // KHÔNG dùng Math.abs vì ST (qty=-11) và RT (qty=11) là 2 chứng từ khác nhau
+        const qty = Number(st.qty || 0);
+        const key = `${st.docCode || ''}_${st.itemCode || ''}_${st.stockCode || ''}_${qty}`;
+        
+        // Chỉ lưu nếu chưa có key này, hoặc nếu có thì giữ record có id (ưu tiên record có id)
+        if (!uniqueStockTransfersMap.has(key)) {
+          uniqueStockTransfersMap.set(key, st);
+        } else {
+          // Nếu đã có, chỉ thay thế nếu record hiện tại có id và record cũ không có id
+          const existing = uniqueStockTransfersMap.get(key)!;
+          if (st.id && !existing.id) {
+            uniqueStockTransfersMap.set(key, st);
+          }
+        }
+      });
+      const uniqueStockTransfers = Array.from(uniqueStockTransfersMap.values());
+      
+      // Debug log chi tiết
+      this.logger.debug(
+        `[StockTransfer] Đơn hàng ${order.docCode}: ` +
+        `orderStockTransfers=${orderStockTransfers.length}, ` +
+        `stockOutTransfers=${stockOutTransfers.length}, ` +
+        `uniqueStockTransfers=${uniqueStockTransfers.length}. ` +
+        `Chi tiết uniqueStockTransfers: ${uniqueStockTransfers.map(st => `docCode=${st.docCode}, doctype=${st.doctype}, qty=${st.qty}`).join('; ')}`
+      );
+      
+      // Debug log nếu có duplicate hoặc có RT records bị loại bỏ
+      if (orderStockTransfers.length > stockOutTransfers.length) {
+        const returnCount = orderStockTransfers.length - stockOutTransfers.length;
+        this.logger.debug(
+          `[StockTransfer] Đơn hàng ${order.docCode}: Loại bỏ ${returnCount} records nhập lại (RETURN), chỉ tính ${stockOutTransfers.length} records xuất kho (ST)`
+        );
+      }
+      if (stockOutTransfers.length > uniqueStockTransfers.length) {
+        this.logger.warn(
+          `[StockTransfer] Đơn hàng ${order.docCode}: ${stockOutTransfers.length} records xuất kho → ${uniqueStockTransfers.length} unique (đã loại bỏ ${stockOutTransfers.length - uniqueStockTransfers.length} duplicates)`
+        );
+      }
+      
+      // Tính tổng hợp thông tin stock transfer (chỉ tính từ unique records XUẤT KHO)
+      // Lấy giá trị tuyệt đối của qty (vì qty xuất kho là số âm, nhưng số lượng xuất là số dương)
+      const totalQty = uniqueStockTransfers.reduce((sum, st) => {
+        const qty = Math.abs(Number(st.qty || 0));
+        this.logger.debug(
+          `[StockTransfer] Tính totalQty: docCode=${st.docCode}, qty=${st.qty}, abs(qty)=${qty}, sum=${sum} → ${sum + qty}`
+        );
+        return sum + qty;
+      }, 0);
+      
+      this.logger.debug(
+        `[StockTransfer] Đơn hàng ${order.docCode}: uniqueStockTransfers.length=${uniqueStockTransfers.length}, totalQty=${totalQty}`
+      );
+      
       const stockTransferSummary = {
-        totalItems: orderStockTransfers.length, // Số dòng stock transfer
-        totalQty: orderStockTransfers.reduce((sum, st) => sum + Math.abs(Number(st.qty || 0)), 0), // Tổng số lượng (lấy giá trị tuyệt đối)
-        uniqueItems: new Set(orderStockTransfers.map(st => st.itemCode)).size, // Số sản phẩm khác nhau
-        stockCodes: Array.from(new Set(orderStockTransfers.map(st => st.stockCode).filter(Boolean))), // Danh sách mã kho
-        hasStockTransfer: orderStockTransfers.length > 0, // Có stock transfer hay không
+        totalItems: uniqueStockTransfers.length, // Số dòng stock transfer xuất kho (sau khi deduplicate)
+        totalQty: totalQty, // Tổng số lượng xuất kho (lấy giá trị tuyệt đối vì qty xuất kho là số âm)
+        uniqueItems: new Set(uniqueStockTransfers.map(st => st.itemCode)).size, // Số sản phẩm khác nhau
+        stockCodes: Array.from(new Set(uniqueStockTransfers.map(st => st.stockCode).filter(Boolean))), // Danh sách mã kho
+        hasStockTransfer: uniqueStockTransfers.length > 0, // Có stock transfer xuất kho hay không
       };
 
       return {
@@ -938,8 +1013,8 @@ export class SalesService {
         cashioTotalOut: selectedCashio?.total_out || null,
         // Thông tin stock transfer
         stockTransferInfo: stockTransferSummary,
-        stockTransfers: orderStockTransfers.length > 0 
-          ? orderStockTransfers.map(st => this.formatStockTransferForFrontend(st))
+        stockTransfers: uniqueStockTransfers.length > 0 
+          ? uniqueStockTransfers.map(st => this.formatStockTransferForFrontend(st))
           : (order.stockTransfers || []).map((st: any) => this.formatStockTransferForFrontend(st)), // Format để trả về materialCode
       };
     });
@@ -970,6 +1045,7 @@ export class SalesService {
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private categoriesService: CategoriesService,
     private loyaltyService: LoyaltyService,
+    private invoiceValidationService: InvoiceValidationService,
   ) { }
 
   async findAll(options: {
@@ -3218,6 +3294,32 @@ export class SalesService {
         throw new NotFoundException(`Order ${docCode} not found or has no sales`);
       }
 
+      // Validate điều kiện tạo hóa đơn (sử dụng service riêng để dễ mở rộng)
+      const validationResult = this.invoiceValidationService.validateOrderForInvoice({
+        docCode,
+        sales: orderData.sales,
+      });
+
+      if (!validationResult.success) {
+        // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
+        await this.saveFastApiInvoice({
+          docCode,
+          maDvcs: orderData.branchCode || '',
+          maKh: orderData.customer?.code || '',
+          tenKh: orderData.customer?.name || '',
+          ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+          status: 0,
+          message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
+          guid: null,
+          fastApiResponse: undefined,
+        });
+
+        return {
+          success: false,
+          message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
+          result: null,
+        };
+      }
 
       // Build invoice data
       const invoiceData = await this.buildFastApiInvoiceData(orderData);
@@ -3451,19 +3553,122 @@ export class SalesService {
         throw new Error(`Đơn hàng ${orderData.docCode} không có sale item nào, bỏ qua không đồng bộ`);
       }
 
-      // Xử lý từng sale với index để tính dong
-      const detail = await Promise.all(allSales.map(async (sale: any, index: number) => {
-        const tienHang = toNumber(sale.tienHang || sale.linetotal || sale.revenue, 0);
-        const qty = toNumber(sale.qty, 0);
-        let giaBan = toNumber(sale.giaBan, 0);
-        if (tienHang > 0 && qty > 0) {
-          giaBan = tienHang / qty;
+      // Kiểm tra ordertype của đơn hàng (lấy từ sale đầu tiên)
+      const firstSaleForOrderType = allSales[0];
+      const ordertypeName = firstSaleForOrderType?.ordertypeName || firstSaleForOrderType?.ordertype || '';
+      const normalizedOrderType = String(ordertypeName).trim();
+      const isNormalOrder = normalizedOrderType === '01.Thường' || normalizedOrderType === '01. Thường';
+
+      // Với đơn hàng "01.Thường": Lấy stock transfers để tính số lượng xuất kho
+      // Với các đơn hàng khác: Dùng số lượng từ sale
+      let stockTransferMapBySoCodeAndMaterialCode: Map<string, { st?: StockTransfer[]; rt?: StockTransfer[] }> = new Map();
+      if (isNormalOrder) {
+        // Fetch stock transfers cho đơn hàng này
+        const stockTransfers = await this.stockTransferRepository.find({
+          where: { soCode: orderData.docCode },
+          order: { itemCode: 'ASC', createdAt: 'ASC' },
+        });
+
+        // Fetch materialCode từ Loyalty API cho các itemCode trong stock transfers
+        const stockTransferItemCodes = Array.from(
+          new Set(
+            stockTransfers
+              .map((st) => st.itemCode)
+              .filter((code): code is string => !!code && code.trim() !== '')
+          )
+        );
+
+        const stockTransferLoyaltyMap = new Map<string, any>();
+        if (stockTransferItemCodes.length > 0) {
+          const fetchedProducts = await this.loyaltyService.fetchProducts(stockTransferItemCodes);
+          fetchedProducts.forEach((product, itemCode) => {
+            stockTransferLoyaltyMap.set(itemCode, product);
+          });
         }
 
-        // Tính toán các chiết khấu
-        const ck01_nt = toNumber(sale.other_discamt || sale.chietKhauMuaHangGiamGia, 0);
-        const ck02_nt = toNumber(sale.chietKhauCkTheoChinhSach, 0);
-        const ck03_nt = toNumber(sale.chietKhauMuaHangCkVip || sale.grade_discamt, 0);
+        // Tạo map: soCode_materialCode -> stock transfer (phân biệt ST và RT)
+        stockTransfers.forEach((st) => {
+          const materialCode = st.materialCode || stockTransferLoyaltyMap.get(st.itemCode)?.materialCode;
+          if (!materialCode) {
+            return;
+          }
+
+          const soCode = st.soCode || st.docCode || orderData.docCode;
+          const key = `${soCode}_${materialCode}`;
+
+          if (!stockTransferMapBySoCodeAndMaterialCode.has(key)) {
+            stockTransferMapBySoCodeAndMaterialCode.set(key, {});
+          }
+          const itemMap = stockTransferMapBySoCodeAndMaterialCode.get(key)!;
+
+          // ST* - xuất kho (qty < 0)
+          if (st.docCode.startsWith('ST') || Number(st.qty || 0) < 0) {
+            if (!itemMap.st) {
+              itemMap.st = [];
+            }
+            itemMap.st.push(st);
+          }
+          // RT* - nhập lại (qty > 0)
+          if (st.docCode.startsWith('RT') || Number(st.qty || 0) > 0) {
+            if (!itemMap.rt) {
+              itemMap.rt = [];
+            }
+            itemMap.rt.push(st);
+          }
+        });
+      }
+
+      // Xử lý từng sale với index để tính dong
+      const detail = await Promise.all(allSales.map(async (sale: any, index: number) => {
+        // Lấy materialCode từ sale (đã được enrich từ Loyalty API)
+        const saleMaterialCode = sale.product?.materialCode || sale.product?.maVatTu || sale.product?.maERP;
+        
+        // Với đơn hàng "01.Thường": Lấy số lượng từ stock transfer xuất kho
+        // Với các đơn hàng khác: Dùng số lượng từ sale
+        let qty = toNumber(sale.qty, 0);
+        const saleQty = toNumber(sale.qty, 0); // Lưu qty gốc từ sale để tính tỷ lệ phân bổ
+        let allocationRatio = 1; // Tỷ lệ phân bổ (mặc định = 1 nếu không có stock transfer)
+        
+        if (isNormalOrder && saleMaterialCode) {
+          const key = `${orderData.docCode}_${saleMaterialCode}`;
+          const stockTransferInfo = stockTransferMapBySoCodeAndMaterialCode.get(key);
+          const firstSt = stockTransferInfo?.st && stockTransferInfo.st.length > 0 ? stockTransferInfo.st[0] : null;
+          
+          if (firstSt && saleQty > 0) {
+            // Lấy số lượng từ stock transfer xuất kho (lấy giá trị tuyệt đối vì qty xuất kho là số âm)
+            qty = Math.abs(Number(firstSt.qty || 0));
+            
+            // Tính tỷ lệ phân bổ: qty (từ stock transfer) / saleQty (từ sale)
+            // Ví dụ: mua 2 xuất 1 → tỷ lệ = 1/2 = 0.5
+            allocationRatio = qty / saleQty;
+          }
+        }
+
+        const tienHang = toNumber(sale.tienHang || sale.linetotal || sale.revenue, 0);
+        let giaBan = toNumber(sale.giaBan, 0);
+        
+        // Tính gia_ban từ tien_hang và saleQty (luôn dùng qty từ sale để tính giá)
+        if (giaBan === 0 && tienHang > 0 && saleQty > 0) {
+          giaBan = tienHang / saleQty;
+        }
+        
+        // Với đơn hàng "01.Thường": Tính lại tien_hang = qty (từ stock transfer) * gia_ban (từ sale)
+        // Với các đơn hàng khác: Giữ nguyên tien_hang từ sale
+        let tienHangGoc = tienHang;
+        if (isNormalOrder && allocationRatio !== 1) {
+          // Tính lại tien_hang = qty (từ stock transfer) * gia_ban (từ sale)
+          if (qty > 0 && giaBan > 0) {
+            tienHangGoc = qty * giaBan;
+          } else {
+            // Fallback: phân bổ theo tỷ lệ
+            tienHangGoc = tienHang * allocationRatio;
+          }
+        }
+
+        // Tính toán các chiết khấu (dùng let để có thể phân bổ lại cho "01.Thường")
+        let ck01_nt = toNumber(sale.other_discamt || sale.chietKhauMuaHangGiamGia, 0);
+        let ck02_nt = toNumber(sale.chietKhauCkTheoChinhSach, 0);
+        let ck03_nt = toNumber(sale.chietKhauMuaHangCkVip || sale.grade_discamt, 0);
 
         // Tính VIP type nếu có chiết khấu VIP
         // Lấy brand từ orderData để phân biệt logic VIP
@@ -3473,7 +3678,7 @@ export class SalesService {
         // Tính maCk03 - dùng hàm chung (lấy loyaltyProduct từ sale.product)
         const maCk03 = this.calculateMuaHangCkVip(sale, sale.product, brand, 'buildFastApiInvoiceData');
         // ma_ck04: Thanh toán coupon
-        const ck04_nt = toNumber(sale.chietKhauThanhToanCoupon || sale.chietKhau09, 0);
+        let ck04_nt = toNumber(sale.chietKhauThanhToanCoupon || sale.chietKhau09, 0);
         // ma_ck15: Voucher DP1 dự phòng - Ưu tiên kiểm tra trước
         let ck15_nt_voucherDp1 = toNumber(sale.chietKhauVoucherDp1, 0);
         const paidByVoucher = toNumber(sale.chietKhauThanhToanVoucher || sale.paid_by_voucher_ecode_ecoin_bp, 0);
@@ -3517,7 +3722,7 @@ export class SalesService {
         // Chỉ map vào ck05_nt nếu không có voucher dự phòng (ck15_nt_voucherDp1 = 0)
         // Nếu có voucherAmountToMove (chuyển từ DP sang chính), dùng giá trị đó
         // Nếu không, dùng paidByVoucher
-        const ck05_nt = ck15_nt_voucherDp1 > 0 ? 0 : (voucherAmountToMove > 0 ? voucherAmountToMove : paidByVoucher);
+        let ck05_nt = ck15_nt_voucherDp1 > 0 ? 0 : (voucherAmountToMove > 0 ? voucherAmountToMove : paidByVoucher);
         // Tính ma_ck05 giống frontend - truyền customer từ orderData nếu sale chưa có
         const saleWithCustomer = {
           ...sale,
@@ -3526,12 +3731,12 @@ export class SalesService {
         };
         const maCk05Value = this.calculateMaCk05(saleWithCustomer);
         const formattedMaCk05 = this.formatVoucherCode(maCk05Value);
-        const ck06_nt = 0; // Dự phòng 1 - không sử dụng
-        const ck07_nt = toNumber(sale.chietKhauVoucherDp2, 0);
-        const ck08_nt = toNumber(sale.chietKhauVoucherDp3, 0);
+        const ck06_nt = 0; // Dự phòng 1 - không sử dụng (không phân bổ vì = 0)
+        let ck07_nt = toNumber(sale.chietKhauVoucherDp2, 0);
+        let ck08_nt = toNumber(sale.chietKhauVoucherDp3, 0);
         // Các chiết khấu từ 09-22 mặc định là 0
-        const ck09_nt = toNumber(sale.chietKhau09, 0);
-        const ck10_nt = toNumber(sale.chietKhau10, 0);
+        let ck09_nt = toNumber(sale.chietKhau09, 0);
+        let ck10_nt = toNumber(sale.chietKhau10, 0);
         // ck11_nt: Thanh toán TK tiền ảo
         // Chỉ map ECOIN nếu sale item có v_paid > 0 (từ paid_by_voucher_ecode_ecoin_bp hoặc chietKhauThanhToanTkTienAo)
         // Không map ECOIN cho items có v_paid = 0
@@ -3547,39 +3752,82 @@ export class SalesService {
             ck11_nt = toNumber(ecoinCashio.total_in, 0);
           }
         }
-        const ck12_nt = toNumber(sale.chietKhau12, 0);
-        const ck13_nt = toNumber(sale.chietKhau13, 0);
-        const ck14_nt = toNumber(sale.chietKhau14, 0);
-        const ck15_nt = ck15_nt_voucherDp1 > 0 ? ck15_nt_voucherDp1 : toNumber(sale.chietKhau15, 0);
-        const ck16_nt = toNumber(sale.chietKhau16, 0);
-        const ck17_nt = toNumber(sale.chietKhau17, 0);
-        const ck18_nt = toNumber(sale.chietKhau18, 0);
-        const ck19_nt = toNumber(sale.chietKhau19, 0);
-        const ck20_nt = toNumber(sale.chietKhau20, 0);
-        const ck21_nt = toNumber(sale.chietKhau21, 0);
-        const ck22_nt = toNumber(sale.chietKhau22, 0);
+        let ck12_nt = toNumber(sale.chietKhau12, 0);
+        let ck13_nt = toNumber(sale.chietKhau13, 0);
+        let ck14_nt = toNumber(sale.chietKhau14, 0);
+        let ck15_nt = ck15_nt_voucherDp1 > 0 ? ck15_nt_voucherDp1 : toNumber(sale.chietKhau15, 0);
+        let ck16_nt = toNumber(sale.chietKhau16, 0);
+        let ck17_nt = toNumber(sale.chietKhau17, 0);
+        let ck18_nt = toNumber(sale.chietKhau18, 0);
+        let ck19_nt = toNumber(sale.chietKhau19, 0);
+        let ck20_nt = toNumber(sale.chietKhau20, 0);
+        let ck21_nt = toNumber(sale.chietKhau21, 0);
+        let ck22_nt = toNumber(sale.chietKhau22, 0);
 
-        // Tính tổng chiết khấu
+        // Với đơn hàng "01.Thường": Phân bổ lại tất cả các khoản tiền theo tỷ lệ số lượng từ stock transfer
+        // Tỷ lệ phân bổ = qty (từ stock transfer) / saleQty (từ sale)
+        // Ví dụ: mua 2 xuất 1 → tỷ lệ = 1/2 = 0.5 → tất cả các khoản tiền nhân với 0.5
+        if (isNormalOrder && allocationRatio !== 1 && allocationRatio > 0) {
+          // Phân bổ lại tất cả các chiết khấu
+          ck01_nt = ck01_nt * allocationRatio;
+          ck02_nt = ck02_nt * allocationRatio;
+          ck03_nt = ck03_nt * allocationRatio;
+          ck04_nt = ck04_nt * allocationRatio;
+          ck05_nt = ck05_nt * allocationRatio;
+          ck07_nt = ck07_nt * allocationRatio;
+          ck08_nt = ck08_nt * allocationRatio;
+          ck09_nt = ck09_nt * allocationRatio;
+          ck10_nt = ck10_nt * allocationRatio;
+          ck11_nt = ck11_nt * allocationRatio;
+          ck12_nt = ck12_nt * allocationRatio;
+          ck13_nt = ck13_nt * allocationRatio;
+          ck14_nt = ck14_nt * allocationRatio;
+          ck15_nt = ck15_nt * allocationRatio;
+          ck16_nt = ck16_nt * allocationRatio;
+          ck17_nt = ck17_nt * allocationRatio;
+          ck18_nt = ck18_nt * allocationRatio;
+          ck19_nt = ck19_nt * allocationRatio;
+          ck20_nt = ck20_nt * allocationRatio;
+          ck21_nt = ck21_nt * allocationRatio;
+          ck22_nt = ck22_nt * allocationRatio;
+          
+          this.logger.debug(
+            `[Invoice] Đơn hàng ${orderData.docCode}, sale item ${sale.itemCode}: ` +
+            `Phân bổ lại tất cả các khoản tiền theo tỷ lệ ${allocationRatio} (qty stock transfer=${qty} / qty sale=${saleQty})`
+          );
+        }
+
+        // Tính tổng chiết khấu (sau khi đã phân bổ nếu có)
         const tongChietKhau = ck01_nt + ck02_nt + ck03_nt + ck04_nt + ck05_nt + ck06_nt + ck07_nt + ck08_nt +
           ck09_nt + ck10_nt + ck11_nt + ck12_nt + ck13_nt + ck14_nt + ck15_nt + ck16_nt +
           ck17_nt + ck18_nt + ck19_nt + ck20_nt + ck21_nt + ck22_nt;
 
-        // tien_hang phải là giá gốc (trước chiết khấu)
-        // Ưu tiên: mn_linetotal > linetotal > tienHang > (revenue + tongChietKhau)
-        let tienHangGoc = toNumber((sale as any).mn_linetotal || sale.linetotal || sale.tienHang, 0);
-        if (tienHangGoc === 0) {
-          // Nếu không có giá gốc, tính từ revenue + chiết khấu
-          tienHangGoc = tienHang + tongChietKhau;
-        }
+        // Với đơn hàng "01.Thường": tien_hang đã được tính từ qty (stock transfer) * giaBan ở trên
+        // Với các đơn hàng khác: Tính tien_hang từ sale như bình thường
+        if (!isNormalOrder) {
+          // tien_hang phải là giá gốc (trước chiết khấu)
+          // Ưu tiên: mn_linetotal > linetotal > tienHang > (revenue + tongChietKhau)
+          tienHangGoc = toNumber((sale as any).mn_linetotal || sale.linetotal || sale.tienHang, 0);
+          if (tienHangGoc === 0) {
+            // Nếu không có giá gốc, tính từ revenue + chiết khấu
+            tienHangGoc = tienHang + tongChietKhau;
+          }
 
-        // Tính gia_ban: giá gốc (trước chiết khấu)
-        // Nếu sale.giaBan đã có giá trị, dùng nó (đó là giá gốc)
-        // Nếu không, tính từ tienHangGoc
-        if (giaBan === 0 && qty > 0) {
-          giaBan = tienHangGoc / qty;
-        } else if (giaBan === 0 && tienHangGoc > 0 && qty > 0) {
-          // Fallback: nếu không có chiết khấu, dùng tienHangGoc / qty
-          giaBan = tienHangGoc / qty;
+          // Tính gia_ban: giá gốc (trước chiết khấu)
+          // Nếu sale.giaBan đã có giá trị, dùng nó (đó là giá gốc)
+          // Nếu không, tính từ tienHangGoc
+          if (giaBan === 0 && qty > 0) {
+            giaBan = tienHangGoc / qty;
+          } else if (giaBan === 0 && tienHangGoc > 0 && qty > 0) {
+            // Fallback: nếu không có chiết khấu, dùng tienHangGoc / qty
+            giaBan = tienHangGoc / qty;
+          }
+        } else {
+          // Với đơn hàng "01.Thường": tienHangGoc đã được tính từ qty * giaBan ở trên
+          // Chỉ cần đảm bảo giaBan đã có giá trị
+          if (giaBan === 0 && qty > 0 && tienHangGoc > 0) {
+            giaBan = tienHangGoc / qty;
+          }
         }
 
         // Helper function để đảm bảo giá trị luôn là string, không phải null/undefined
@@ -3791,6 +4039,15 @@ export class SalesService {
         // Kiểm tra nếu ma_ctkm_th = "TT DAU TU" thì không set km_yn = 1
         const isTTDauTu = maCtkmTangHang && maCtkmTangHang.trim() === 'TT DAU TU';
 
+        // Với đơn hàng "01.Thường": Phân bổ lại tiền thuế và tiền trợ giá theo tỷ lệ số lượng từ stock transfer
+        let tienThue = toNumber(sale.tienThue, 0);
+        let dtTgNt = toNumber(sale.dtTgNt, 0);
+        
+        if (isNormalOrder && allocationRatio !== 1 && allocationRatio > 0) {
+          tienThue = tienThue * allocationRatio;
+          dtTgNt = dtTgNt * allocationRatio;
+        }
+
         // Lấy ma_vt từ materialCode (ưu tiên Loyalty API) - dùng lại materialCode đã fetch ở trên
         // materialCode đã được lấy từ getMaterialCode(sale) và fetch từ Loyalty API
         // Nếu có loyaltyProduct, ưu tiên dùng materialCode từ đó
@@ -3931,15 +4188,15 @@ export class SalesService {
           ma_ck22: limitString(toString(sale.maCk22, ''), 32),
           // ck22_nt: Tiền (Decimal)
           ck22_nt: Number(ck22_nt),
-          // dt_tg_nt: Tiền trợ giá (Decimal)
-          dt_tg_nt: Number(toNumber(sale.dtTgNt, 0)),
+          // dt_tg_nt: Tiền trợ giá (Decimal) - đã được phân bổ nếu là "01.Thường"
+          dt_tg_nt: Number(dtTgNt),
           // ma_thue: Mã thuế (String, max 8 ký tự) - Bắt buộc
           // Nếu không có mã thuế, set thành "00" thay vì "10"
           ma_thue: limitString(toString(sale.maThue, '00'), 8),
-          // thue_suat: Thuế suất (Decimal)
+          // thue_suat: Thuế suất (Decimal) - không phân bổ (tỷ lệ %)
           thue_suat: Number(toNumber(sale.thueSuat, 0)),
-          // tien_thue: Tiền thuế (Decimal)
-          tien_thue: Number(toNumber(sale.tienThue, 0)),
+          // tien_thue: Tiền thuế (Decimal) - đã được phân bổ nếu là "01.Thường"
+          tien_thue: Number(tienThue),
           // tk_thue: Tài khoản thuế (String, max 16 ký tự)
           tk_thue: limitString(toString(sale.tkThueCo, ''), 16),
           // tk_cpbh: Tài khoản chiết khấu km (String, max 16 ký tự)
