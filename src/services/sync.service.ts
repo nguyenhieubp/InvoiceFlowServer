@@ -492,8 +492,20 @@ export class SyncService {
                   }
                 }
                 
-                // Lấy productType từ Loyalty API
-                const productType = productTypeMap.get(saleItem.itemCode || '');
+                // Lấy productType: Ưu tiên từ Zappy API (producttype), nếu không có thì lấy từ Loyalty API
+                const productTypeFromZappy = saleItem.producttype || saleItem.productType || null;
+                const productTypeFromLoyalty = productTypeMap.get(saleItem.itemCode || '');
+                const productType = productTypeFromZappy || productTypeFromLoyalty || null;
+                
+                // Debug log để kiểm tra productType
+                if (productTypeFromZappy) {
+                  this.logger.debug(`[Sync] Sale ${order.docCode}/${saleItem.itemCode}: productType từ Zappy API = "${productTypeFromZappy}"`);
+                } else if (productTypeFromLoyalty) {
+                  this.logger.debug(`[Sync] Sale ${order.docCode}/${saleItem.itemCode}: productType từ Loyalty API = "${productTypeFromLoyalty}"`);
+                } else {
+                  this.logger.debug(`[Sync] Sale ${order.docCode}/${saleItem.itemCode}: Không có productType từ cả Zappy và Loyalty API`);
+                }
+                
                 // Lấy dvt từ saleItem hoặc từ Loyalty API, nếu không có thì mặc định là "cái"
                 const dvt = saleItem.dvt || productDvtMap.get(saleItem.itemCode || '') || 'cái';
 
@@ -667,7 +679,16 @@ export class SyncService {
                   existingSale.qty = saleItem.qty || 0;
                   existingSale.revenue = saleItem.revenue || 0;
                   existingSale.linetotal = saleItem.linetotal || saleItem.revenue || 0;
-                  existingSale.productType = productType || undefined;
+                  // Luôn update productType, kể cả khi là null (để cập nhật từ Zappy API)
+                  // Nếu productType là empty string, set thành null
+                  const finalProductType = productType && productType.trim() !== '' ? productType.trim() : null;
+                  if (existingSale.productType !== finalProductType) {
+                    this.logger.debug(
+                      `[Sync] Update productType cho sale ${order.docCode}/${saleItem.itemCode}: ` +
+                      `"${existingSale.productType}" → "${finalProductType}"`
+                    );
+                  }
+                  existingSale.productType = finalProductType;
                   existingSale.tienHang = saleItem.tienHang || saleItem.linetotal || saleItem.revenue || 0;
                   existingSale.giaBan = saleItem.giaBan || 0;
                   if (saleItem.promCode !== undefined) existingSale.promCode = saleItem.promCode;

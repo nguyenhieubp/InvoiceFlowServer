@@ -3805,22 +3805,22 @@ export class SalesService {
         // Với đơn hàng "01.Thường": tien_hang đã được tính từ qty (stock transfer) * giaBan ở trên
         // Với các đơn hàng khác: Tính tien_hang từ sale như bình thường
         if (!isNormalOrder) {
-          // tien_hang phải là giá gốc (trước chiết khấu)
-          // Ưu tiên: mn_linetotal > linetotal > tienHang > (revenue + tongChietKhau)
+        // tien_hang phải là giá gốc (trước chiết khấu)
+        // Ưu tiên: mn_linetotal > linetotal > tienHang > (revenue + tongChietKhau)
           tienHangGoc = toNumber((sale as any).mn_linetotal || sale.linetotal || sale.tienHang, 0);
-          if (tienHangGoc === 0) {
-            // Nếu không có giá gốc, tính từ revenue + chiết khấu
-            tienHangGoc = tienHang + tongChietKhau;
-          }
+        if (tienHangGoc === 0) {
+          // Nếu không có giá gốc, tính từ revenue + chiết khấu
+          tienHangGoc = tienHang + tongChietKhau;
+        }
 
-          // Tính gia_ban: giá gốc (trước chiết khấu)
-          // Nếu sale.giaBan đã có giá trị, dùng nó (đó là giá gốc)
-          // Nếu không, tính từ tienHangGoc
-          if (giaBan === 0 && qty > 0) {
-            giaBan = tienHangGoc / qty;
-          } else if (giaBan === 0 && tienHangGoc > 0 && qty > 0) {
-            // Fallback: nếu không có chiết khấu, dùng tienHangGoc / qty
-            giaBan = tienHangGoc / qty;
+        // Tính gia_ban: giá gốc (trước chiết khấu)
+        // Nếu sale.giaBan đã có giá trị, dùng nó (đó là giá gốc)
+        // Nếu không, tính từ tienHangGoc
+        if (giaBan === 0 && qty > 0) {
+          giaBan = tienHangGoc / qty;
+        } else if (giaBan === 0 && tienHangGoc > 0 && qty > 0) {
+          // Fallback: nếu không có chiết khấu, dùng tienHangGoc / qty
+          giaBan = tienHangGoc / qty;
           }
         } else {
           // Với đơn hàng "01.Thường": tienHangGoc đã được tính từ qty * giaBan ở trên

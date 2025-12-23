@@ -80,7 +80,7 @@ export class FastApiInvoiceFlowService {
       // - customer: không cần gửi lên salesOrder API
       // - ten_kh: không cần thiết trong salesOrder API
       const cleanOrderData: any = {
-        action: orderData.action ?? 0,
+        action: 0, // Luôn set = 0 cho API đơn hàng bán
         ma_dvcs: orderData.ma_dvcs,
         ma_kh: orderData.ma_kh,
         ong_ba: orderData.ong_ba ?? null,
@@ -258,7 +258,7 @@ export class FastApiInvoiceFlowService {
       // - customer: không cần gửi lên salesInvoice API
       // - ten_kh: không cần thiết trong salesInvoice API
       const cleanInvoiceData: any = {
-        action: invoiceData.action ?? 0,
+        action: 0, // Luôn set = 0 cho API hóa đơn bán hàng
         ma_dvcs: invoiceData.ma_dvcs,
         ma_kh: invoiceData.ma_kh,
         ong_ba: invoiceData.ong_ba ?? null,
