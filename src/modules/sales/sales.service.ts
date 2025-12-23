@@ -2901,8 +2901,14 @@ export class SalesService {
           if (order.sales && order.sales.length > 0) {
             for (const saleItem of order.sales) {
               try {
-                // Kiểm tra xem sản phẩm có tồn tại trong Loyalty API không
+                // Bỏ qua các item có itemcode = "TRUTONKEEP"
                 const itemCode = saleItem.itemCode?.trim();
+                if (itemCode && itemCode.toUpperCase() === 'TRUTONKEEP') {
+                  this.logger.log(`[SalesService] Bỏ qua sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - itemcode = TRUTONKEEP`);
+                  continue;
+                }
+                
+                // Kiểm tra xem sản phẩm có tồn tại trong Loyalty API không
                 const isNotFound = itemCode && notFoundItemCodes.has(itemCode);
                 // Set statusAsys: false nếu không tồn tại (404), true nếu tồn tại
                 const statusAsys = !isNotFound;
