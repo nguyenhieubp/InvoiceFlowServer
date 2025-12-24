@@ -319,24 +319,24 @@ export class FastApiInvoiceFlowService {
     try {
       // Helper function để loại bỏ các field null, undefined, hoặc empty string
       const removeEmptyFields = (obj: any): any => {
-        if (obj === null || obj === undefined) {
-          return obj;
-        }
-        if (Array.isArray(obj)) {
+    if (obj === null || obj === undefined) {
+      return obj;
+    }
+    if (Array.isArray(obj)) {
           return obj.map(item => removeEmptyFields(item));
-        }
-        if (typeof obj === 'object') {
-          const cleaned: any = {};
-          for (const [key, value] of Object.entries(obj)) {
+    }
+    if (typeof obj === 'object') {
+      const cleaned: any = {};
+      for (const [key, value] of Object.entries(obj)) {
             // Giữ lại các giá trị: 0, false, empty array, date objects
             const shouldKeep = value !== null && value !== undefined && value !== '';
             if (shouldKeep) {
               cleaned[key] = removeEmptyFields(value);
             }
-          }
-          return cleaned;
-        }
-        return obj;
+      }
+      return cleaned;
+    }
+    return obj;
       };
 
       // Log payload để debug

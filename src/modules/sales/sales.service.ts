@@ -309,6 +309,7 @@ export class SalesService {
   /**
    * Tính mã kho từ ordertype + ma_bp (bộ phận)
    * Format: prefix + ma_bp (ví dụ: "L" + "MH10" = "LMH10", "B" + "MH10" = "BMH10")
+   * @deprecated Không dùng nữa, dùng getMaKhoFromStockTransfer thay thế
    */
   private calculateMaKho(
     ordertype: string | null | undefined,
@@ -319,6 +320,45 @@ export class SalesService {
       return null;
     }
     return prefix + maBp;
+  }
+
+  /**
+   * Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
+   * Logic: Match stock transfer theo itemCode và soCode, lấy stockCode
+   * @param sale - Sale object có itemCode
+   * @param docCode - Mã đơn hàng (docCode)
+   * @param stockTransfers - Danh sách stock transfers
+   * @param saleMaterialCode - MaterialCode từ Loyalty API (optional, để match chính xác hơn)
+   * @param stockTransferMap - Map stock transfers theo key (optional, để tối ưu performance)
+   * @returns Mã kho từ stockCode của stock transfer, hoặc fallback về sale.maKho hoặc sale.branchCode
+   */
+  private getMaKhoFromStockTransfer(
+    sale: any,
+    docCode: string,
+    stockTransfers: StockTransfer[],
+    saleMaterialCode?: string | null,
+    stockTransferMap?: Map<string, StockTransfer[]>
+  ): string | null {
+    let matchedStockTransfer: StockTransfer | null = null;
+
+    // Ưu tiên match theo materialCode nếu có stockTransferMap
+    if (saleMaterialCode && stockTransferMap) {
+      const stockTransferKey = `${docCode}_${saleMaterialCode}`;
+      const matchedTransfers = stockTransferMap.get(stockTransferKey) || [];
+      if (matchedTransfers.length > 0) {
+        matchedStockTransfer = matchedTransfers[0];
+      }
+    }
+
+    // Nếu không match được theo materialCode, match trực tiếp theo itemCode và soCode
+    if (!matchedStockTransfer && sale.itemCode) {
+      matchedStockTransfer = stockTransfers.find(
+        (st) => st.soCode === docCode && st.itemCode === sale.itemCode
+      ) || null;
+    }
+
+    // Lấy mã kho từ stockCode (Mã kho xuất) của stock transfer
+    return matchedStockTransfer?.stockCode || sale.maKho || sale.branchCode || null;
   }
 
   /**
@@ -1284,7 +1324,6 @@ export class SalesService {
           sales: order.sales?.map((sale) => {
             const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
             const maBp = department?.ma_bp || sale.branchCode || null;
-            const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBp);
             const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
 
             // Tính toán maCtkmTangHang: nếu là hàng tặng (giaBan = 0 và tienHang = 0 và revenue = 0)
@@ -1318,17 +1357,29 @@ export class SalesService {
               }
             }
 
-            // Lấy stock transfers cho sale này (theo docCode + materialCode)
-            // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng)
+            // Lấy stock transfers cho sale này (theo docCode + materialCode hoặc itemCode)
+            // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng) hoặc itemCode
             const saleMaterialCode = loyaltyProduct?.materialCode;
-            const stockTransferKey = saleMaterialCode ? `${order.docCode}_${saleMaterialCode}` : null;
-            const saleStockTransfers = stockTransferKey ? stockTransferMap.get(stockTransferKey) || [] : [];
+            let saleStockTransfers: StockTransfer[] = [];
+            if (saleMaterialCode) {
+              const stockTransferKey = `${order.docCode}_${saleMaterialCode}`;
+              saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
+            }
+            // Nếu không match được theo materialCode, match trực tiếp theo itemCode
+            if (saleStockTransfers.length === 0 && sale.itemCode) {
+              saleStockTransfers = stockTransfers.filter(
+                (st) => st.soCode === order.docCode && st.itemCode === sale.itemCode
+              );
+            }
+            
+            // Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
+            const maKho = this.getMaKhoFromStockTransfer(sale, order.docCode, stockTransfers, saleMaterialCode, stockTransferMap);
 
             return {
               ...sale,
               promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
               department: department,
-              maKho: calculatedMaKho || sale.maKho || sale.branchCode || null,
+              maKho: maKho,
               maCtkmTangHang: maCtkmTangHang,
               // Lấy producttype từ Loyalty API (không còn trong database)
               producttype: loyaltyProduct?.producttype || loyaltyProduct?.productType || null,
@@ -1727,13 +1778,28 @@ export class SalesService {
       const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
       const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
       
-      // Lấy stock transfers cho sale này (theo docCode + materialCode)
-      // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng)
+      // Lấy stock transfers cho sale này (theo docCode + materialCode hoặc itemCode)
+      // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng) hoặc itemCode
       const saleMaterialCode = loyaltyProduct?.materialCode;
-      const stockTransferKey = saleMaterialCode ? `${docCode}_${saleMaterialCode}` : null;
-      const saleStockTransfers = stockTransferKey ? stockTransferMap.get(stockTransferKey) || [] : [];
-
+      let saleStockTransfers: StockTransfer[] = [];
+      if (saleMaterialCode) {
+        const stockTransferKey = `${docCode}_${saleMaterialCode}`;
+        saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
+      }
+      // Nếu không match được theo materialCode, match trực tiếp theo itemCode
+      if (saleStockTransfers.length === 0 && sale.itemCode) {
+        saleStockTransfers = stockTransfers.filter(
+          (st) => st.soCode === docCode && st.itemCode === sale.itemCode
+        );
+      }
+      
+      // Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
+      const maKhoFromStockTransfer = this.getMaKhoFromStockTransfer(sale, docCode, stockTransfers, saleMaterialCode, stockTransferMap);
+      
       const calculatedFields = this.calculateSaleFields(sale, loyaltyProduct, department, sale.branchCode);
+      // Override maKho từ calculatedFields bằng maKho từ stock transfer
+      calculatedFields.maKho = maKhoFromStockTransfer;
+      
       const order = orderMap.get(sale.docCode);
       const enrichedSale = this.formatSaleForFrontend(sale, loyaltyProduct, department, calculatedFields, order);
       
@@ -2357,20 +2423,18 @@ export class SalesService {
       const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
       const maBp = department?.ma_bp || sale.branchCode || null;
       
-      // Lấy materialCode từ Loyalty API cho sale (Mã hàng)
+      // Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
       const saleLoyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
       const saleMaterialCode = saleLoyaltyProduct?.materialCode;
+      const finalMaKho = this.getMaKhoFromStockTransfer(sale, docCode, stockTransfers, saleMaterialCode);
       
-      // Match stock transfer theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng)
-      const key = saleMaterialCode ? `${docCode}_${saleMaterialCode}` : null;
-      const stockTransferInfo = key ? stockTransferMapBySoCodeAndMaterialCode.get(key) : null;
-      
-      // Lấy stock transfer đầu tiên từ array (hoặc có thể merge nếu cần)
-      // Lấy ma_kho từ stock transfer (stockCode) - CHỈ dùng từ stock transfer, không dùng quy tắc cũ
-      const firstSt = stockTransferInfo?.st && stockTransferInfo.st.length > 0 ? stockTransferInfo.st[0] : null;
-      const firstRt = stockTransferInfo?.rt && stockTransferInfo.rt.length > 0 ? stockTransferInfo.rt[0] : null;
-      // Chỉ dùng mã kho từ stock transfer (stockCode), không tính từ ordertype + maBp nữa
-      const finalMaKho = firstSt?.stockCode || firstRt?.stockCode || sale.maKho || sale.branchCode || null;
+      // Lấy ma_nx từ stock transfer (phân biệt ST và RT)
+      // Match stock transfer để lấy ma_nx
+      const matchedStockTransfer = stockTransfers.find(
+        (st) => st.soCode === docCode && st.itemCode === sale.itemCode
+      );
+      const firstSt = matchedStockTransfer && matchedStockTransfer.docCode.startsWith('ST') ? matchedStockTransfer : null;
+      const firstRt = matchedStockTransfer && matchedStockTransfer.docCode.startsWith('RT') ? matchedStockTransfer : null;
 
       return {
         ...sale,
