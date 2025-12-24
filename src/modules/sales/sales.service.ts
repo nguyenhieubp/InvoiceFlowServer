@@ -333,13 +333,13 @@ export class SalesService {
    * @param stockTransferMap - Map stock transfers theo key (optional, để tối ưu performance)
    * @returns Mã kho từ stockCode của stock transfer, hoặc fallback về sale.maKho hoặc sale.branchCode
    */
-  private getMaKhoFromStockTransfer(
+  private async getMaKhoFromStockTransfer(
     sale: any,
     docCode: string,
     stockTransfers: StockTransfer[],
     saleMaterialCode?: string | null,
     stockTransferMap?: Map<string, StockTransfer[]>
-  ): string | null {
+  ): Promise<string> {
     let matchedStockTransfer: StockTransfer | null = null;
 
     // Xử lý đặc biệt cho đơn trả lại (RT): chuyển RT -> SO (mã đơn mua gốc) hoặc RT -> ST (mã xuất kho)
@@ -394,7 +394,25 @@ export class SalesService {
     }
 
     // Lấy mã kho từ stockCode (Mã kho xuất) của stock transfer
-    return matchedStockTransfer?.stockCode || sale.maKho || sale.branchCode || null;
+    const stockCode = matchedStockTransfer?.stockCode || '';
+    
+    // Nếu không có stockCode, trả về rỗng
+    if (!stockCode || stockCode.trim() === '') {
+      return '';
+    }
+
+    // Map mã kho qua API warehouse-code-mappings
+    try {
+      const maMoi = await this.categoriesService.mapWarehouseCode(stockCode);
+      
+      // Nếu có maMoi (mapped = true) → dùng maMoi
+      // Nếu không có maMoi (mapped = false) → dùng giá trị gốc từ stock_transfers
+      return maMoi || stockCode;
+    } catch (error: any) {
+      // Nếu có lỗi khi gọi API mapping, fallback về giá trị gốc
+      this.logger.error(`Error mapping warehouse code ${stockCode}: ${error?.message || error}`);
+      return stockCode;
+    }
   }
 
   /**
@@ -1433,10 +1451,10 @@ export class SalesService {
         );
 
         // Thêm promotionDisplayCode, maKho, maCtkmTangHang, producttype và stock transfers vào các sales items
-        const enrichedOrders = paginatedOrders.map((order) => ({
+        const enrichedOrders = await Promise.all(paginatedOrders.map(async (order) => ({
           ...order,
           stockTransfers: (stockTransferByDocCodeMap.get(order.docCode) || []).map(st => this.formatStockTransferForFrontend(st)),
-          sales: order.sales?.map((sale) => {
+          sales: await Promise.all((order.sales || []).map(async (sale) => {
             const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
             const maBp = department?.ma_bp || sale.branchCode || null;
             const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
@@ -1488,7 +1506,7 @@ export class SalesService {
             }
             
             // Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
-            const maKho = this.getMaKhoFromStockTransfer(sale, order.docCode, stockTransfers, saleMaterialCode, stockTransferMap);
+            const maKho = await this.getMaKhoFromStockTransfer(sale, order.docCode, stockTransfers, saleMaterialCode, stockTransferMap);
 
             return {
               ...sale,
@@ -1506,8 +1524,8 @@ export class SalesService {
               } : (sale.product || null),
               stockTransfers: saleStockTransfers.map(st => this.formatStockTransferForFrontend(st)),
             };
-          }) || [],
-        }));
+          })) || [],
+        })));
 
         return {
           data: enrichedOrders,
@@ -1885,7 +1903,7 @@ export class SalesService {
       }
       
       // Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
-      const maKhoFromStockTransfer = this.getMaKhoFromStockTransfer(sale, docCode, stockTransfers, saleMaterialCode, stockTransferMap);
+      const maKhoFromStockTransfer = await this.getMaKhoFromStockTransfer(sale, docCode, stockTransfers, saleMaterialCode, stockTransferMap);
       
       const calculatedFields = this.calculateSaleFields(sale, loyaltyProduct, department, sale.branchCode);
       // Override maKho từ calculatedFields bằng maKho từ stock transfer
@@ -2512,14 +2530,14 @@ export class SalesService {
     });
 
     // Enrich sales với department information và lấy maKho từ stock transfer
-    const enrichedSalesWithDepartment = enrichedSalesWithLoyalty.map((sale) => {
+    const enrichedSalesWithDepartment = await Promise.all(enrichedSalesWithLoyalty.map(async (sale) => {
       const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
       const maBp = department?.ma_bp || sale.branchCode || null;
       
       // Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
       const saleLoyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
       const saleMaterialCode = saleLoyaltyProduct?.materialCode;
-      const finalMaKho = this.getMaKhoFromStockTransfer(sale, docCode, stockTransfers, saleMaterialCode);
+      const finalMaKho = await this.getMaKhoFromStockTransfer(sale, docCode, stockTransfers, saleMaterialCode);
       
       // Lấy ma_nx từ stock transfer (phân biệt ST và RT)
       // Match stock transfer để lấy ma_nx
@@ -2537,7 +2555,7 @@ export class SalesService {
         ma_nx_st: firstSt?.docCode || null, // ST* - mã nghiệp vụ từ stock transfer
         ma_nx_rt: firstRt?.docCode || null, // RT* - mã nghiệp vụ từ stock transfer
       };
-    });
+    }));
 
     // Tính tổng doanh thu của đơn hàng
     const totalRevenue = sales.reduce((sum, sale) => sum + Number(sale.revenue), 0);
@@ -3551,12 +3569,23 @@ export class SalesService {
       const docSourceTypeRaw = firstSale?.docSourceType || orderData.docSourceType || '';
       const docSourceType = docSourceTypeRaw ? String(docSourceTypeRaw).trim().toUpperCase() : '';
       
+      // Xử lý SALE_RETURN
       if (docSourceType === 'SALE_RETURN') {
         return await this.handleSaleReturnFlow(orderData, docCode);
       }
 
+      // Xử lý SALE_ORDER không có stock transfer
+      if (docSourceType === 'SALE_ORDER') {
+        const saleOrderResult = await this.handleSaleOrderWithoutStockTransfer(orderData, docCode);
+        // Nếu có kết quả (không có stock transfer), trả về kết quả
+        if (saleOrderResult !== null) {
+          return saleOrderResult;
+        }
+        // Nếu null (có stock transfer), tiếp tục flow bình thường
+      }
+
       // ============================================
-      // BƯỚC 2: Kiểm tra các case khác (sau khi đã loại trừ SALE_RETURN)
+      // BƯỚC 2: Kiểm tra các case khác (sau khi đã loại trừ SALE_RETURN và SALE_ORDER)
       // ============================================
 
       // SAU ĐÓ: Kiểm tra loại đơn hàng: "02. Làm dịch vụ" hoặc "02.Làm dịch vụ"
@@ -4150,17 +4179,22 @@ export class SalesService {
       const normalizedOrderType = String(ordertypeName).trim();
       const isNormalOrder = normalizedOrderType === '01.Thường' || normalizedOrderType === '01. Thường';
 
+      // Luôn fetch stock transfers để lấy mã kho (không chỉ cho "01.Thường")
       // Với đơn hàng "01.Thường": Lấy stock transfers để tính số lượng xuất kho
       // Với các đơn hàng khác: Dùng số lượng từ sale
       let stockTransferMapBySoCodeAndMaterialCode: Map<string, { st?: StockTransfer[]; rt?: StockTransfer[] }> = new Map();
+      let allStockTransfers: StockTransfer[] = [];
+      
+      // Luôn fetch stock transfers để lấy mã kho
+      const docCodesForStockTransfer = this.getDocCodesForStockTransfer([orderData.docCode]);
+      allStockTransfers = await this.stockTransferRepository.find({
+        where: { soCode: In(docCodesForStockTransfer) },
+        order: { itemCode: 'ASC', createdAt: 'ASC' },
+      });
+
+      // Chỉ build map cho đơn hàng "01.Thường" (để tính số lượng)
       if (isNormalOrder) {
-        // Fetch stock transfers cho đơn hàng này
-        // Xử lý đặc biệt cho đơn trả lại: fetch cả theo mã đơn gốc (SO)
-        const docCodesForStockTransfer = this.getDocCodesForStockTransfer([orderData.docCode]);
-        const stockTransfers = await this.stockTransferRepository.find({
-          where: { soCode: In(docCodesForStockTransfer) },
-          order: { itemCode: 'ASC', createdAt: 'ASC' },
-        });
+        const stockTransfers = allStockTransfers;
 
         // Fetch materialCode từ Loyalty API cho các itemCode trong stock transfers
         const stockTransferItemCodes = Array.from(
@@ -4444,16 +4478,18 @@ export class SalesService {
         // Nếu không có thì dùng 'Cái' làm mặc định (Fast API yêu cầu field này phải có giá trị)
         const dvt = toString(sale.product?.dvt || sale.product?.unit || sale.dvt, 'Cái');
 
-        // Tính mã kho từ ordertype + ma_bp (bộ phận)
-        // Nếu không tính được thì fallback về sale.maKho hoặc branchCode
-        const maBpForMaKho = sale.department?.ma_bp || sale.branchCode || orderData.branchCode || '';
-        const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBpForMaKho);
-        let maKho = toString(calculatedMaKho || sale.maKho || sale.branchCode, '');
-
-        // FIX: Nếu ma_bp = "MSO1" và có mã kho, fix cứng mã kho = "BMHT2"
-        if (maBpForMaKho === 'MSO1' && maKho) {
-          maKho = 'BMHT2';
+        // Lấy mã kho từ stock_transfers (chỉ lấy từ stock_transfers, không có thì để rỗng)
+        // saleMaterialCode đã được khai báo ở trên (dòng 4234)
+        // Tạo map đơn giản cho getMaKhoFromStockTransfer: docCode_materialCode -> StockTransfer[]
+        const stockTransferMapForMaKho = new Map<string, StockTransfer[]>();
+        if (saleMaterialCode) {
+          const key = `${orderData.docCode}_${saleMaterialCode}`;
+          const stockTransferInfo = stockTransferMapBySoCodeAndMaterialCode.get(key);
+          if (stockTransferInfo?.st && stockTransferInfo.st.length > 0) {
+            stockTransferMapForMaKho.set(key, stockTransferInfo.st);
+          }
         }
+        const maKho = await this.getMaKhoFromStockTransfer(sale, orderData.docCode, allStockTransfers, saleMaterialCode, stockTransferMapForMaKho);
 
         // Debug: Log maLo value từ sale
         if (index === 0) {
@@ -4646,7 +4682,8 @@ export class SalesService {
         // Nếu có loyaltyProduct, ưu tiên dùng materialCode từ đó
         const finalMaterialCode = loyaltyProduct?.materialCode || materialCode || sale.product?.maVatTu || sale.itemCode || '';
 
-        return {
+        // Build detail item, chỉ thêm ma_kho nếu có giá trị (không rỗng)
+        const detailItem: any = {
           // ma_vt: Mã vật tư (String, max 16 ký tự) - Bắt buộc
           // Dùng materialCode từ Loyalty API (giống như sales invoice)
           ma_vt: limitString(toString(finalMaterialCode), 16),
@@ -4656,8 +4693,15 @@ export class SalesService {
           loai: limitString(loai, 2),
           // ma_ctkm_th: Mã ctkm tặng hàng (String, max 32 ký tự)
           ma_ctkm_th: limitString(maCtkmTangHang, 32),
-          // ma_kho: Mã kho (String, max 16 ký tự) - Bắt buộc
-          ma_kho: limitString(maKho, 16),
+        };
+
+        // Chỉ thêm ma_kho nếu có giá trị (không rỗng)
+        if (maKho && maKho.trim() !== '') {
+          detailItem.ma_kho = limitString(maKho, 16);
+        }
+
+        // Thêm các field còn lại
+        Object.assign(detailItem, {
           // so_luong: Số lượng (Decimal)
           so_luong: Number(qty),
           // gia_ban: Giá bán (Decimal) - giá gốc trước chiết khấu
@@ -4824,7 +4868,9 @@ export class SalesService {
           id_goc_ngay: sale.idGocNgay ? formatDateISO(new Date(sale.idGocNgay)) : formatDateISO(new Date()),
           // id_goc_dv: Đơn vị phiếu gốc (String, max 8 ký tự)
           id_goc_dv: limitString(toString(sale.idGocDv, ''), 8),
-        };
+        });
+
+        return detailItem;
       }));
 
 
@@ -5178,6 +5224,103 @@ export class SalesService {
    * Case 1: Có stock transfer → Gọi API salesReturn
    * Case 2: Không có stock transfer → Gọi API salesOrder với action=1
    */
+  /**
+   * Xử lý SALE_ORDER không có stock transfer
+   * Gọi API salesOrder với action: 1
+   */
+  private async handleSaleOrderWithoutStockTransfer(orderData: any, docCode: string): Promise<any> {
+    // Kiểm tra xem có stock transfer không
+    const docCodesForStockTransfer = this.getDocCodesForStockTransfer([docCode]);
+    const stockTransfers = await this.stockTransferRepository.find({
+      where: { soCode: In(docCodesForStockTransfer) },
+    });
+
+    // Nếu có stock transfer, không xử lý ở đây (sẽ xử lý ở flow bình thường)
+    if (stockTransfers && stockTransfers.length > 0) {
+      // Có stock transfer, không xử lý ở đây, để flow bình thường xử lý
+      return null;
+    }
+
+    // Không có stock transfer → Gọi API salesOrder với action: 1
+    const invoiceData = await this.buildFastApiInvoiceData(orderData);
+
+    // Gọi API salesOrder với action = 1 (không cần tạo/cập nhật customer)
+    let result: any;
+    try {
+      result = await this.fastApiInvoiceFlowService.createSalesOrder({
+        ...invoiceData,
+        customer: orderData.customer,
+        ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+      }, 1); // action = 1 cho đơn hàng không có stock transfer
+
+      // Lưu vào bảng kê hóa đơn
+      const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
+      const responseMessage = Array.isArray(result) && result.length > 0 
+        ? (result[0].message || 'Tạo đơn hàng thành công')
+        : 'Tạo đơn hàng thành công';
+      const responseGuid = Array.isArray(result) && result.length > 0 && Array.isArray(result[0].guid) 
+        ? result[0].guid[0] 
+        : (Array.isArray(result) && result.length > 0 ? result[0].guid : null);
+
+      await this.saveFastApiInvoice({
+        docCode,
+        maDvcs: invoiceData.ma_dvcs,
+        maKh: invoiceData.ma_kh,
+        tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+        ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
+        status: responseStatus,
+        message: responseMessage,
+        guid: responseGuid || null,
+        fastApiResponse: JSON.stringify(result),
+      });
+
+      return {
+        success: responseStatus === 1,
+        message: responseMessage,
+        result: result,
+      };
+    } catch (error: any) {
+      // Lấy thông báo lỗi chính xác từ Fast API response
+      let errorMessage = 'Tạo đơn hàng thất bại';
+
+      if (error?.response?.data) {
+        const errorData = error.response.data;
+        if (Array.isArray(errorData) && errorData.length > 0) {
+          errorMessage = errorData[0].message || errorData[0].error || errorMessage;
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.error) {
+          errorMessage = errorData.error;
+        } else if (typeof errorData === 'string') {
+          errorMessage = errorData;
+        }
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+
+      // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
+      await this.saveFastApiInvoice({
+        docCode,
+        maDvcs: invoiceData.ma_dvcs,
+        maKh: invoiceData.ma_kh,
+        tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+        ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
+        status: 0,
+        message: errorMessage,
+        guid: null,
+        fastApiResponse: JSON.stringify(error?.response?.data || error),
+      });
+
+      this.logger.error(`SALE_ORDER without stock transfer creation failed for order ${docCode}: ${errorMessage}`);
+
+      return {
+        success: false,
+        message: errorMessage,
+        result: error?.response?.data || error,
+      };
+    }
+  }
+
   private async handleSaleReturnFlow(orderData: any, docCode: string): Promise<any> {
     // Kiểm tra xem có stock transfer không
     // Xử lý đặc biệt cho đơn trả lại: fetch cả theo mã đơn gốc (SO)
@@ -5264,85 +5407,25 @@ export class SalesService {
       }
     }
 
-    // Case 2: Không có stock transfer → Gọi API salesOrder với action=1
-    // Build invoice data để lấy thông tin cần thiết
-    const invoiceData = await this.buildFastApiInvoiceData(orderData);
+    // Case 2: Không có stock transfer → Không xử lý (bỏ qua)
+    // SALE_RETURN không có stock transfer không cần xử lý
+    await this.saveFastApiInvoice({
+      docCode,
+      maDvcs: orderData.branchCode || '',
+      maKh: orderData.customer?.code || '',
+      tenKh: orderData.customer?.name || '',
+      ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+      status: 0,
+      message: 'SALE_RETURN không có stock transfer - không cần xử lý',
+      guid: null,
+      fastApiResponse: undefined,
+    });
 
-    // Gọi API salesOrder với action = 1 (không cần tạo/cập nhật customer)
-    let result: any;
-    try {
-      result = await this.fastApiInvoiceFlowService.createSalesOrder({
-        ...invoiceData,
-        customer: orderData.customer,
-        ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-      }, 1); // action = 1 cho đơn hàng trả lại
-
-      // Lưu vào bảng kê hóa đơn
-      const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
-      const responseMessage = Array.isArray(result) && result.length > 0 
-        ? (result[0].message || 'Tạo đơn hàng trả lại thành công')
-        : 'Tạo đơn hàng trả lại thành công';
-      const responseGuid = Array.isArray(result) && result.length > 0 && Array.isArray(result[0].guid) 
-        ? result[0].guid[0] 
-        : (Array.isArray(result) && result.length > 0 ? result[0].guid : null);
-
-      await this.saveFastApiInvoice({
-        docCode,
-        maDvcs: invoiceData.ma_dvcs,
-        maKh: invoiceData.ma_kh,
-        tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
-        ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
-        status: responseStatus,
-        message: responseMessage,
-        guid: responseGuid || null,
-        fastApiResponse: JSON.stringify(result),
-      });
-
-      return {
-        success: responseStatus === 1,
-        message: responseMessage,
-        result: result,
-      };
-    } catch (error: any) {
-      // Lấy thông báo lỗi chính xác từ Fast API response
-      let errorMessage = 'Tạo đơn hàng trả lại thất bại';
-
-      if (error?.response?.data) {
-        const errorData = error.response.data;
-        if (Array.isArray(errorData) && errorData.length > 0) {
-          errorMessage = errorData[0].message || errorData[0].error || errorMessage;
-        } else if (errorData.message) {
-          errorMessage = errorData.message;
-        } else if (errorData.error) {
-          errorMessage = errorData.error;
-        } else if (typeof errorData === 'string') {
-          errorMessage = errorData;
-        }
-      } else if (error?.message) {
-        errorMessage = error.message;
-      }
-
-      // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
-      await this.saveFastApiInvoice({
-        docCode,
-        maDvcs: invoiceData.ma_dvcs,
-        maKh: invoiceData.ma_kh,
-        tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
-        ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
-        status: 0,
-        message: errorMessage,
-        guid: null,
-        fastApiResponse: JSON.stringify(error?.response?.data || error),
-      });
-
-      this.logger.error(`SALE_RETURN order creation failed for order ${docCode}: ${errorMessage}`);
-
-      return {
-        success: false,
-        message: errorMessage,
-        result: error?.response?.data || error,
-      };
-    }
+    return {
+      success: false,
+      message: 'SALE_RETURN không có stock transfer - không cần xử lý',
+      result: null,
+    };
   }
 
   /**

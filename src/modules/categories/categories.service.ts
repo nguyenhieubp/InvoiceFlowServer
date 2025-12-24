@@ -1073,6 +1073,26 @@ export class CategoriesService {
     });
   }
 
+  /**
+   * Map mã kho cũ sang mã mới
+   * @param maCu - Mã kho cũ
+   * @returns Mã mới nếu tìm thấy, null nếu không tìm thấy
+   */
+  async mapWarehouseCode(maCu: string | null | undefined): Promise<string | null> {
+    if (!maCu || maCu.trim() === '') {
+      return null;
+    }
+
+    const mapping = await this.warehouseCodeMappingRepository.findOne({
+      where: { 
+        maCu: maCu.trim(),
+        trangThai: 'active', // Chỉ lấy mapping đang active
+      },
+    });
+
+    return mapping ? mapping.maMoi : null;
+  }
+
   async createWarehouseCodeMapping(createDto: CreateWarehouseCodeMappingDto): Promise<WarehouseCodeMapping> {
     // Kiểm tra xem maCu đã tồn tại chưa
     const existing = await this.warehouseCodeMappingRepository.findOne({

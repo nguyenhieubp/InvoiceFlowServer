@@ -251,14 +251,35 @@ export class CategoriesController {
     });
   }
 
-  @Get('warehouse-code-mappings/:id')
-  async findOneWarehouseCodeMapping(@Param('id') id: string) {
-    return this.categoriesService.findOneWarehouseCodeMapping(id);
+  // Các route cụ thể phải đặt TRƯỚC route có parameter :id để tránh conflict
+  @Post('warehouse-code-mappings/map')
+  async mapWarehouseCode(@Body() body: { maCu: string }) {
+    const maMoi = await this.categoriesService.mapWarehouseCode(body.maCu);
+    return {
+      maCu: body.maCu,
+      maMoi: maMoi,
+      mapped: maMoi !== null,
+    };
+  }
+
+  @Get('warehouse-code-mappings/map')
+  async mapWarehouseCodeGet(@Query('maCu') maCu: string) {
+    const maMoi = await this.categoriesService.mapWarehouseCode(maCu);
+    return {
+      maCu: maCu,
+      maMoi: maMoi,
+      mapped: maMoi !== null,
+    };
   }
 
   @Get('warehouse-code-mappings/ma-cu/:maCu')
   async findWarehouseCodeMappingByMaCu(@Param('maCu') maCu: string) {
     return this.categoriesService.findWarehouseCodeMappingByMaCu(maCu);
+  }
+
+  @Get('warehouse-code-mappings/:id')
+  async findOneWarehouseCodeMapping(@Param('id') id: string) {
+    return this.categoriesService.findOneWarehouseCodeMapping(id);
   }
 
   @Post('warehouse-code-mappings')
