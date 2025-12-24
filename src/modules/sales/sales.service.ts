@@ -3605,6 +3605,125 @@ export class SalesService {
         return await this.executeServiceOrderFlow(orderData, docCode);
       }
 
+      // Kiểm tra đơn hàng "03. Đổi điểm" - gọi Fast/salesOrder
+      const hasDoiDiemOrder = sales.some((s: any) => {
+        const ordertypeName = s.ordertypeName || s.ordertype || '';
+        return ordertypeName.includes('03. Đổi điểm') ||
+          ordertypeName.includes('03.Đổi điểm') ||
+          ordertypeName.includes('03.  Đổi điểm');
+      });
+
+      // Nếu là đơn "03. Đổi điểm", gọi Fast/salesOrder và Fast/salesInvoice
+      if (hasDoiDiemOrder) {
+        const invoiceData = await this.buildFastApiInvoiceData(orderData);
+        try {
+          // Bước 1: Gọi Fast/salesOrder với action = 1
+          const salesOrderResult = await this.fastApiInvoiceFlowService.createSalesOrder({
+            ...invoiceData,
+            customer: orderData.customer,
+            ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+          }, 1); // action = 1 cho đơn "03. Đổi điểm"
+
+          // Bước 2: Gọi Fast/salesInvoice sau khi salesOrder thành công
+          let salesInvoiceResult: any = null;
+          try {
+            salesInvoiceResult = await this.fastApiInvoiceFlowService.createSalesInvoice({
+              ...invoiceData,
+              customer: orderData.customer,
+              ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+            });
+          } catch (salesInvoiceError: any) {
+            // Nếu salesInvoice thất bại, log lỗi nhưng vẫn lưu kết quả salesOrder
+            let salesInvoiceErrorMessage = 'Tạo sales invoice thất bại (03. Đổi điểm)';
+            if (salesInvoiceError?.response?.data) {
+              const errorData = salesInvoiceError.response.data;
+              if (Array.isArray(errorData) && errorData.length > 0) {
+                salesInvoiceErrorMessage = errorData[0].message || errorData[0].error || salesInvoiceErrorMessage;
+              } else if (errorData.message) {
+                salesInvoiceErrorMessage = errorData.message;
+              } else if (errorData.error) {
+                salesInvoiceErrorMessage = errorData.error;
+              } else if (typeof errorData === 'string') {
+                salesInvoiceErrorMessage = errorData;
+              }
+            } else if (salesInvoiceError?.message) {
+              salesInvoiceErrorMessage = salesInvoiceError.message;
+            }
+            this.logger.error(`03. Đổi điểm sales invoice creation failed for order ${docCode}: ${salesInvoiceErrorMessage}`);
+          }
+
+          // Lưu vào bảng kê hóa đơn
+          const responseStatus = salesInvoiceResult ? 1 : (salesOrderResult ? 0 : 0);
+          const responseMessage = salesInvoiceResult
+            ? 'Tạo sales order và sales invoice thành công (03. Đổi điểm)'
+            : salesOrderResult
+            ? 'Tạo sales order thành công, nhưng sales invoice thất bại (03. Đổi điểm)'
+            : 'Tạo sales order và sales invoice thất bại (03. Đổi điểm)';
+
+          await this.saveFastApiInvoice({
+            docCode,
+            maDvcs: orderData.branchCode || invoiceData.ma_dvcs || '',
+            maKh: orderData.customer?.code || invoiceData.ma_kh || '',
+            tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+            ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+            status: responseStatus,
+            message: responseMessage,
+            guid: salesInvoiceResult?.guid || salesOrderResult?.guid || null,
+            fastApiResponse: JSON.stringify({
+              salesOrder: salesOrderResult,
+              salesInvoice: salesInvoiceResult,
+            }),
+          });
+
+          return {
+            success: !!salesInvoiceResult,
+            message: salesInvoiceResult
+              ? `Tạo sales order và sales invoice thành công cho đơn hàng ${docCode} (03. Đổi điểm)`
+              : `Tạo sales order thành công nhưng sales invoice thất bại cho đơn hàng ${docCode} (03. Đổi điểm)`,
+            result: {
+              salesOrder: salesOrderResult,
+              salesInvoice: salesInvoiceResult,
+            },
+          };
+        } catch (error: any) {
+          let errorMessage = 'Tạo sales order thất bại (03. Đổi điểm)';
+          if (error?.response?.data) {
+            const errorData = error.response.data;
+            if (Array.isArray(errorData) && errorData.length > 0) {
+              errorMessage = errorData[0].message || errorData[0].error || errorMessage;
+            } else if (errorData.message) {
+              errorMessage = errorData.message;
+            } else if (errorData.error) {
+              errorMessage = errorData.error;
+            } else if (typeof errorData === 'string') {
+              errorMessage = errorData;
+            }
+          } else if (error?.message) {
+            errorMessage = error.message;
+          }
+
+          this.logger.error(`03. Đổi điểm order creation failed for order ${docCode}: ${errorMessage}`);
+
+          await this.saveFastApiInvoice({
+            docCode,
+            maDvcs: orderData.branchCode || '',
+            maKh: orderData.customer?.code || '',
+            tenKh: orderData.customer?.name || '',
+            ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+            status: 0,
+            message: errorMessage,
+            guid: null,
+            fastApiResponse: error?.response?.data ? JSON.stringify(error.response.data) : undefined,
+          });
+
+          return {
+            success: false,
+            message: errorMessage,
+            result: error?.response?.data || error,
+          };
+        }
+      }
+
       // Nếu không phải đơn dịch vụ, chạy flow bình thường (01.Thường)
       // Validate điều kiện tạo hóa đơn (sử dụng service riêng để dễ mở rộng)
       const validationResult = this.invoiceValidationService.validateOrderForInvoice({
@@ -4274,15 +4393,27 @@ export class SalesService {
         const tienHang = toNumber(sale.tienHang || sale.linetotal || sale.revenue, 0);
         let giaBan = toNumber(sale.giaBan, 0);
         
-        // Tính gia_ban từ tien_hang và saleQty (luôn dùng qty từ sale để tính giá)
-        if (giaBan === 0 && tienHang > 0 && saleQty > 0) {
-          giaBan = tienHang / saleQty;
+        // Kiểm tra đơn hàng "03. Đổi điểm" trước khi tính toán giá
+        const ordertypeNameForDoiDiem = sale.ordertype || '';
+        const isDoiDiem = ordertypeNameForDoiDiem.includes('03. Đổi điểm') ||
+          ordertypeNameForDoiDiem.includes('03.Đổi điểm') ||
+          ordertypeNameForDoiDiem.includes('03.  Đổi điểm');
+        
+        // Nếu là đơn "03. Đổi điểm": set gia_ban = 0, tien_hang = 0
+        if (isDoiDiem) {
+          giaBan = 0;
+        } else {
+          // Tính gia_ban từ tien_hang và saleQty (luôn dùng qty từ sale để tính giá)
+          if (giaBan === 0 && tienHang > 0 && saleQty > 0) {
+            giaBan = tienHang / saleQty;
+          }
         }
         
         // Với đơn hàng "01.Thường": Tính lại tien_hang = qty (từ stock transfer) * gia_ban (từ sale)
         // Với các đơn hàng khác: Giữ nguyên tien_hang từ sale
-        let tienHangGoc = tienHang;
-        if (isNormalOrder && allocationRatio !== 1) {
+        // Nếu là đơn "03. Đổi điểm": set tien_hang = 0
+        let tienHangGoc = isDoiDiem ? 0 : tienHang;
+        if (!isDoiDiem && isNormalOrder && allocationRatio !== 1) {
           // Tính lại tien_hang = qty (từ stock transfer) * gia_ban (từ sale)
           if (qty > 0 && giaBan > 0) {
             tienHangGoc = qty * giaBan;
@@ -4662,8 +4793,13 @@ export class SalesService {
         }
 
         // Nếu là hàng tặng, không set ma_ck01 (Mã CTKM mua hàng giảm giá)
-        // Nếu không phải hàng tặng, set ma_ck01 từ promCode như cũ
-        const maCk01 = isTangHang ? '' : (sale.promCode ? sale.promCode : '');
+        // Nếu là đơn "03. Đổi điểm": set ma_ck01 = "TT DIEM DO" và ck01_nt = 0
+        // Nếu không phải hàng tặng và không phải "03. Đổi điểm", set ma_ck01 từ promCode như cũ
+        let maCk01 = isTangHang ? '' : (sale.promCode ? sale.promCode : '');
+        if (isDoiDiem) {
+          maCk01 = 'TT DIEM DO';
+          ck01_nt = 0;
+        }
 
         // Kiểm tra nếu ma_ctkm_th = "TT DAU TU" thì không set km_yn = 1
         const isTTDauTu = maCtkmTangHang && maCtkmTangHang.trim() === 'TT DAU TU';

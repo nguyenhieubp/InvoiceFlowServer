@@ -16,6 +16,67 @@ export class FastApiInvoiceFlowService {
   ) {}
 
   /**
+   * Helper: Loại bỏ các field null, undefined, hoặc empty string
+   * Giữ lại ma_lo và so_serial ngay cả khi null hoặc empty
+   */
+  private removeEmptyFields(obj: any, keepMaLoAndSerial: boolean = true): any {
+    if (obj === null || obj === undefined) {
+      return obj;
+    }
+    if (Array.isArray(obj)) {
+      return obj.map(item => this.removeEmptyFields(item, keepMaLoAndSerial));
+    }
+    if (typeof obj === 'object') {
+      const cleaned: any = {};
+      for (const [key, value] of Object.entries(obj)) {
+        const shouldKeep = value !== null && value !== undefined && value !== '' 
+          || (keepMaLoAndSerial && (key === 'ma_lo' || key === 'so_serial'));
+        if (shouldKeep) {
+          cleaned[key] = this.removeEmptyFields(value, keepMaLoAndSerial);
+        }
+      }
+      return cleaned;
+    }
+    return obj;
+  }
+
+  /**
+   * Helper: Build clean payload cho salesOrder và salesInvoice
+   */
+  private buildCleanPayload(orderData: any, action: number = 0): any {
+    return {
+      action,
+      ma_dvcs: orderData.ma_dvcs,
+      ma_kh: orderData.ma_kh,
+      ong_ba: orderData.ong_ba ?? null,
+      ma_gd: orderData.ma_gd ?? '1',
+      ma_tt: orderData.ma_tt ?? null,
+      ma_ca: orderData.ma_ca ?? null,
+      hinh_thuc: orderData.hinh_thuc ?? '0',
+      dien_giai: orderData.dien_giai ?? null,
+      ngay_lct: orderData.ngay_lct,
+      ngay_ct: orderData.ngay_ct,
+      so_ct: orderData.so_ct,
+      so_seri: orderData.so_seri,
+      ma_nt: orderData.ma_nt ?? 'VND',
+      ty_gia: typeof orderData.ty_gia === 'number' ? orderData.ty_gia : parseFloat(orderData.ty_gia) || 1.0,
+      ma_bp: orderData.ma_bp,
+      tk_thue_no: orderData.tk_thue_no ?? '131111',
+      ma_kenh: orderData.ma_kenh ?? 'ONLINE',
+      loai_gd: '01',
+      detail: (orderData.detail || []).map((item: any) => {
+        const { product, ...cleanItem } = item;
+        const result: any = { ...cleanItem };
+        // Giữ lại ma_lo và so_serial (kể cả null)
+        if ('ma_lo' in item) result.ma_lo = item.ma_lo;
+        if ('so_serial' in item) result.so_serial = item.so_serial;
+        return result;
+      }),
+      cbdetail: null,
+    };
+  }
+
+  /**
    * Tạo/cập nhật khách hàng trong Fast API
    * 2.1/ Danh mục khách hàng
    */
@@ -51,75 +112,8 @@ export class FastApiInvoiceFlowService {
   async createSalesOrder(orderData: any, action: number = 0): Promise<any> {
     this.logger.log(`[Flow] Creating sales order ${orderData.so_ct} with action=${action}...`);
     try {
-      // Build payload giống như salesInvoice (JSON body giống hóa đơn bán hàng)
-      // Sử dụng cùng logic build như createSalesInvoice
-      const removeEmptyFields = (obj: any): any => {
-        if (obj === null || obj === undefined) {
-          return obj;
-        }
-        if (Array.isArray(obj)) {
-          return obj.map(item => removeEmptyFields(item));
-        }
-        if (typeof obj === 'object') {
-          const cleaned: any = {};
-          for (const [key, value] of Object.entries(obj)) {
-            // Giữ lại các giá trị: 0, false, empty array, date objects
-            // Đặc biệt: giữ lại ma_lo và so_serial ngay cả khi null hoặc empty
-            const shouldKeep = value !== null && value !== undefined && value !== '' 
-              || key === 'ma_lo' || key === 'so_serial';
-            if (shouldKeep) {
-              cleaned[key] = removeEmptyFields(value);
-            }
-          }
-          return cleaned;
-        }
-        return obj;
-      };
-
-      // Build payload giống như createSalesInvoice (JSON body giống hóa đơn bán hàng)
-      // Loại bỏ các field không cần thiết khỏi payload trước khi gửi lên API
-      // - product: không cần gửi lên salesOrder API
-      // - customer: không cần gửi lên salesOrder API
-      // - ten_kh: không cần thiết trong salesOrder API
-      const cleanOrderData: any = {
-        action: action, // 0 cho đơn hàng bán, 1 cho đơn hàng trả lại
-        ma_dvcs: orderData.ma_dvcs,
-        ma_kh: orderData.ma_kh,
-        ong_ba: orderData.ong_ba ?? null,
-        ma_gd: orderData.ma_gd ?? '1',
-        ma_tt: orderData.ma_tt ?? null,
-        ma_ca: orderData.ma_ca ?? null,
-        hinh_thuc: orderData.hinh_thuc ?? '0',
-        dien_giai: orderData.dien_giai ?? null,
-        ngay_lct: orderData.ngay_lct,
-        ngay_ct: orderData.ngay_ct,
-        so_ct: orderData.so_ct,
-        so_seri: orderData.so_seri,
-        ma_nt: orderData.ma_nt ?? 'VND',
-        ty_gia: typeof orderData.ty_gia === 'number' ? orderData.ty_gia : parseFloat(orderData.ty_gia) || 1.0,
-        ma_bp: orderData.ma_bp,
-        tk_thue_no: orderData.tk_thue_no ?? '131111',
-        ma_kenh: orderData.ma_kenh ?? 'ONLINE',
-        loai_gd: '01',
-        detail: (orderData.detail || []).map((item: any) => {
-          // Loại bỏ product và các field không cần thiết khỏi mỗi detail item
-          // Nhưng giữ lại ma_lo và so_serial (có thể là null nhưng vẫn cần giữ)
-          const { product, ...cleanItem } = item;
-          // Đảm bảo ma_lo và so_serial được giữ lại (ngay cả khi null)
-          const result: any = { ...cleanItem };
-          // Nếu có ma_lo hoặc so_serial trong item gốc, giữ lại (kể cả null)
-          if ('ma_lo' in item) {
-            result.ma_lo = item.ma_lo;
-          }
-          if ('so_serial' in item) {
-            result.so_serial = item.so_serial;
-          }
-          return result;
-        }) || [],
-        cbdetail: null,
-      };
-
-      const finalPayload = removeEmptyFields(cleanOrderData);
+      const cleanOrderData = this.buildCleanPayload(orderData, action);
+      const finalPayload = this.removeEmptyFields(cleanOrderData);
       
       const result = await this.fastApiService.submitSalesOrder(finalPayload);
       this.logger.log(`[Flow] Sales order ${orderData.so_ct} created successfully`);
@@ -137,6 +131,7 @@ export class FastApiInvoiceFlowService {
   /**
    * Tạo hóa đơn bán hàng trong Fast API
    * 2.4/ Hóa đơn bán hàng
+   * FAST 2.4
    */
   async createSalesInvoice(invoiceData: any): Promise<any> {
     this.logger.log(`[Flow] Creating sales invoice ${invoiceData.so_ct}...`);
@@ -221,81 +216,9 @@ export class FastApiInvoiceFlowService {
         throw new BadRequestException(errorMessage);
       }
 
-      // Helper function để loại bỏ các field null, undefined, hoặc empty string
-      // Nhưng giữ lại ma_lo và so_serial (có thể là null nhưng vẫn cần gửi lên API)
-      const removeEmptyFields = (obj: any): any => {
-        if (obj === null || obj === undefined) {
-          return obj;
-        }
-        if (Array.isArray(obj)) {
-          return obj.map(item => removeEmptyFields(item));
-        }
-        if (typeof obj === 'object') {
-          const cleaned: any = {};
-          for (const [key, value] of Object.entries(obj)) {
-            // Giữ lại các giá trị: 0, false, empty array, date objects
-            // Đặc biệt: giữ lại ma_lo và so_serial ngay cả khi null hoặc empty
-            const shouldKeep = value !== null && value !== undefined && value !== '' 
-              || key === 'ma_lo' || key === 'so_serial';
-            if (shouldKeep) {
-              cleaned[key] = removeEmptyFields(value);
-            }
-          }
-          return cleaned;
-        }
-        return obj;
-      };
-
-      // menard - TTM
-      // f3 - FBV
-      // chando - CDV
-      // labhair - LHV
-      // yaman - BTH
-
-      // Loại bỏ các field không cần thiết khỏi payload trước khi gửi lên API
-      // - product: không cần gửi lên salesInvoice API
-      // - customer: không cần gửi lên salesInvoice API
-      // - ten_kh: không cần thiết trong salesInvoice API
-      const cleanInvoiceData: any = {
-        action: 0, // Luôn set = 0 cho API hóa đơn bán hàng
-        ma_dvcs: invoiceData.ma_dvcs,
-        ma_kh: invoiceData.ma_kh,
-        ong_ba: invoiceData.ong_ba ?? null,
-        ma_gd: invoiceData.ma_gd ?? '1',
-        ma_tt: invoiceData.ma_tt ?? null,
-        ma_ca: invoiceData.ma_ca ?? null,
-        hinh_thuc: invoiceData.hinh_thuc ?? '0',
-        dien_giai: invoiceData.dien_giai ?? null,
-        ngay_lct: invoiceData.ngay_lct,
-        ngay_ct: invoiceData.ngay_ct,
-        so_ct: invoiceData.so_ct,
-        so_seri: invoiceData.so_seri,
-        ma_nt: invoiceData.ma_nt ?? 'VND',
-        ty_gia: typeof invoiceData.ty_gia === 'number' ? invoiceData.ty_gia : parseFloat(invoiceData.ty_gia) || 1.0,
-        ma_bp: invoiceData.ma_bp,
-        tk_thue_no: invoiceData.tk_thue_no ?? '131111',
-        ma_kenh: invoiceData.ma_kenh ?? 'ONLINE',
-        loai_gd: '01',
-        detail: invoiceData.detail?.map((item: any) => {
-          // Loại bỏ product và các field không cần thiết khỏi mỗi detail item
-          // Nhưng giữ lại ma_lo và so_serial (có thể là null nhưng vẫn cần giữ)
-          const { product, ...cleanItem } = item;
-          // Đảm bảo ma_lo và so_serial được giữ lại (ngay cả khi null)
-          const result: any = { ...cleanItem };
-          // Nếu có ma_lo hoặc so_serial trong item gốc, giữ lại (kể cả null)
-          if ('ma_lo' in item) {
-            result.ma_lo = item.ma_lo;
-          }
-          if ('so_serial' in item) {
-            result.so_serial = item.so_serial;
-          }
-          return result;
-        }) || [],
-        cbdetail: null,
-      };
-
-      // Loại bỏ các field null, undefined, hoặc empty string trước khi gửi
-      const finalPayload = removeEmptyFields(cleanInvoiceData);
+      // Build clean payload (giống salesOrder nhưng action luôn = 0)
+      const cleanInvoiceData = this.buildCleanPayload(invoiceData, 0);
+      const finalPayload = this.removeEmptyFields(cleanInvoiceData);
       
       const result = await this.fastApiService.submitSalesInvoice(finalPayload);
       this.logger.log(`[Flow] Sales invoice ${invoiceData.so_ct} created successfully`);
@@ -309,33 +232,13 @@ export class FastApiInvoiceFlowService {
   /**
    * Tạo hàng bán trả lại (salesReturn) trong Fast API
    * 2.15/ Hàng bán trả lại
+   * FAST 2.15
    * Sử dụng cho SALE_RETURN có stock transfer
    */
   async createSalesReturn(salesReturnData: any): Promise<any> {
     this.logger.log(`[Flow] Creating sales return ${salesReturnData.so_ct || 'N/A'}...`);
     try {
-      // Helper function để loại bỏ các field null, undefined, hoặc empty string
-      const removeEmptyFields = (obj: any): any => {
-    if (obj === null || obj === undefined) {
-      return obj;
-    }
-    if (Array.isArray(obj)) {
-          return obj.map(item => removeEmptyFields(item));
-    }
-    if (typeof obj === 'object') {
-      const cleaned: any = {};
-      for (const [key, value] of Object.entries(obj)) {
-            // Giữ lại các giá trị: 0, false, empty array, date objects
-            const shouldKeep = value !== null && value !== undefined && value !== '';
-            if (shouldKeep) {
-              cleaned[key] = removeEmptyFields(value);
-            }
-      }
-      return cleaned;
-    }
-    return obj;
-      };
-      const finalPayload = removeEmptyFields(salesReturnData);
+      const finalPayload = this.removeEmptyFields(salesReturnData, false);
       
       const result = await this.fastApiService.submitSalesReturn(finalPayload);
       this.logger.log(`[Flow] Sales return ${salesReturnData.so_ct || 'N/A'} created successfully`);
@@ -353,36 +256,13 @@ export class FastApiInvoiceFlowService {
   /**
    * Tạo phiếu tạo gộp – xuất tách (gxtInvoice) trong Fast API
    * Sử dụng cho đơn dịch vụ: detail (nhập - productType = 'S'), ndetail (xuất - productType = 'I')
+   * FAST 2.10
    */
   async createGxtInvoice(gxtInvoiceData: any): Promise<any> {
     this.logger.log(`[Flow] Creating gxt invoice ${gxtInvoiceData.so_ct || 'N/A'}...`);
     try {
-      // Helper function để loại bỏ các field null, undefined, hoặc empty string
-      const removeEmptyFields = (obj: any): any => {
-        if (obj === null || obj === undefined) {
-          return obj;
-        }
-        if (Array.isArray(obj)) {
-          return obj.map(item => removeEmptyFields(item));
-        }
-        if (typeof obj === 'object') {
-          const cleaned: any = {};
-          for (const [key, value] of Object.entries(obj)) {
-            // Giữ lại các giá trị: 0, false, empty array, date objects
-            const shouldKeep = value !== null && value !== undefined && value !== '';
-            if (shouldKeep) {
-              cleaned[key] = removeEmptyFields(value);
-            }
-          }
-          return cleaned;
-        }
-        return obj;
-      };
-
-      // Log payload để debug
       this.logger.debug(`[Flow] GxtInvoice payload: ${JSON.stringify(gxtInvoiceData, null, 2)}`);
-
-      const finalPayload = removeEmptyFields(gxtInvoiceData);
+      const finalPayload = this.removeEmptyFields(gxtInvoiceData, false);
       
       const result = await this.fastApiService.submitGxtInvoice(finalPayload);
       this.logger.log(`[Flow] GxtInvoice ${gxtInvoiceData.so_ct || 'N/A'} created successfully`);
@@ -431,13 +311,19 @@ export class FastApiInvoiceFlowService {
       }
 
       // Step 2: Tạo salesOrder (đơn hàng bán)
-      await this.createSalesOrder(invoiceData);
+      const resultSalesOrder = await this.createSalesOrder(invoiceData);
+      if (!resultSalesOrder) {
+        throw new Error('Failed to create sales order');
+      }
 
       // Step 3: Tạo salesInvoice (hóa đơn bán hàng)
-      const result = await this.createSalesInvoice(invoiceData);
+      const resultSalesInvoice = await this.createSalesInvoice(invoiceData);
+      if (!resultSalesInvoice) {
+        throw new Error('Failed to create sales invoice');
+      }
 
       this.logger.log(`[Flow] Invoice creation completed successfully for order ${invoiceData.so_ct || 'N/A'}`);
-      return result;
+      return resultSalesInvoice;
     } catch (error: any) {
       this.logger.error(`[Flow] Invoice creation failed: ${error?.message || error}`);
       throw error;
