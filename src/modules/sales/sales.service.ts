@@ -323,6 +323,16 @@ export class SalesService {
   }
 
   /**
+   * Helper: Kiểm tra xem đơn hàng có phải "03. Đổi điểm" không
+   */
+  private isDoiDiemOrder(ordertype: string | null | undefined, ordertypeName: string | null | undefined): boolean {
+    const ordertypeValue = ordertype || ordertypeName || '';
+    return ordertypeValue.includes('03. Đổi điểm') ||
+      ordertypeValue.includes('03.Đổi điểm') ||
+      ordertypeValue.includes('03.  Đổi điểm');
+  }
+
+  /**
    * Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
    * Logic: Match stock transfer theo itemCode và soCode, lấy stockCode
    * Xử lý đặc biệt cho đơn trả lại (RT): chuyển RT -> SO hoặc RT -> ST để match
@@ -879,6 +889,10 @@ export class SalesService {
     const brand = order?.customer?.brand || order?.brand || sale?.customer?.brand || '';
     const normalizedBrand = this.normalizeBrand(brand);
 
+    // Kiểm tra đơn "03. Đổi điểm"
+    const ordertypeNameForDisplayFields = sale.ordertypeName || sale.ordertype || '';
+    const isDoiDiemForDisplayFields = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
+
     // thanhToanCouponDisplay
     const maCoupon = sale.maCk04 || (sale.thanhToanCoupon && sale.thanhToanCoupon > 0 ? 'COUPON' : null);
     const thanhToanCouponDisplay = maCoupon || null;
@@ -888,9 +902,14 @@ export class SalesService {
     const chietKhauThanhToanCouponDisplay = chietKhauCoupon > 0 ? chietKhauCoupon : null;
 
     // thanhToanVoucherDisplay và chietKhauThanhToanVoucherDisplay
+    // Nếu là đơn "03. Đổi điểm": set = null và 0
     let thanhToanVoucherDisplay: string | null = null;
     let chietKhauThanhToanVoucherDisplay: number | null = null;
-    if (!hasEcoin(order)) {
+    if (isDoiDiemForDisplayFields) {
+      // Đơn "03. Đổi điểm": không hiển thị voucher
+      thanhToanVoucherDisplay = null;
+      chietKhauThanhToanVoucherDisplay = null;
+    } else if (!hasEcoin(order)) {
       const chietKhauVoucherDp1 = Number(sale.chietKhauVoucherDp1 ?? 0) || 0;
       const pkgCode = sale.pkg_code || sale.pkgCode || null;
       const promCode = sale.promCode || null;
@@ -1041,13 +1060,22 @@ export class SalesService {
     }
 
     // Tính toán muaHangGiamGiaDisplay
+    // Nếu là đơn "03. Đổi điểm": set muaHangGiamGiaDisplay = "TT DIEM DO"
+    // Nếu không phải hàng tặng và không phải "03. Đổi điểm": dùng promCode
+    const isDoiDiemForDisplay = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
+    
     let muaHangGiamGiaDisplay: string | null = null;
-    if (!calculatedFields.isTangHang) {
+    if (isDoiDiemForDisplay) {
+      muaHangGiamGiaDisplay = 'TT DIEM DO';
+    } else if (!calculatedFields.isTangHang) {
       muaHangGiamGiaDisplay = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
     }
 
     // Tính toán các field display phức tạp
     const displayFields = this.calculateDisplayFields(sale, order || { customer: sale.customer, cashioData: sale.cashioData, cashioFopSyscode: sale.cashioFopSyscode, cashioTotalIn: sale.cashioTotalIn, brand: sale.brand }, loyaltyProduct, department);
+
+    // Nếu là đơn "03. Đổi điểm": set other_discamt = 0 (chiết khấu mua hàng giảm giá)
+    const other_discamt = isDoiDiemForDisplay ? 0 : (sale.other_discamt ?? sale.chietKhauMuaHangGiamGia ?? 0);
 
     return {
       ...sale,
@@ -1060,6 +1088,8 @@ export class SalesService {
       isDichVu: calculatedFields.isDichVu,
       promCodeDisplay: calculatedFields.promCodeDisplay,
       muaHangGiamGiaDisplay: muaHangGiamGiaDisplay,
+      other_discamt: other_discamt, // Set = 0 cho đơn "03. Đổi điểm"
+      chietKhauMuaHangGiamGia: other_discamt, // Set = 0 cho đơn "03. Đổi điểm"
       giaBan: giaBan, // Đảm bảo giaBan đã được tính toán
       promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
       // Đảm bảo ordertypeName được trả về (từ database hoặc từ ordertype nếu ordertypeName không có)
@@ -3606,12 +3636,9 @@ export class SalesService {
       }
 
       // Kiểm tra đơn hàng "03. Đổi điểm" - gọi Fast/salesOrder
-      const hasDoiDiemOrder = sales.some((s: any) => {
-        const ordertypeName = s.ordertypeName || s.ordertype || '';
-        return ordertypeName.includes('03. Đổi điểm') ||
-          ordertypeName.includes('03.Đổi điểm') ||
-          ordertypeName.includes('03.  Đổi điểm');
-      });
+      const hasDoiDiemOrder = sales.some((s: any) => 
+        this.isDoiDiemOrder(s.ordertype, s.ordertypeName)
+      );
 
       // Nếu là đơn "03. Đổi điểm", gọi Fast/salesOrder và Fast/salesInvoice
       if (hasDoiDiemOrder) {
@@ -4394,7 +4421,8 @@ export class SalesService {
         let giaBan = toNumber(sale.giaBan, 0);
         
         // Kiểm tra đơn hàng "03. Đổi điểm" trước khi tính toán giá
-        const ordertypeNameForDoiDiem = sale.ordertype || '';
+        // Kiểm tra cả ordertype và ordertypeName
+        const ordertypeNameForDoiDiem = sale.ordertype || sale.ordertypeName || '';
         const isDoiDiem = ordertypeNameForDoiDiem.includes('03. Đổi điểm') ||
           ordertypeNameForDoiDiem.includes('03.Đổi điểm') ||
           ordertypeNameForDoiDiem.includes('03.  Đổi điểm');
@@ -4480,15 +4508,28 @@ export class SalesService {
         // Chỉ map vào ck05_nt nếu không có voucher dự phòng (ck15_nt_voucherDp1 = 0)
         // Nếu có voucherAmountToMove (chuyển từ DP sang chính), dùng giá trị đó
         // Nếu không, dùng paidByVoucher
+        // Nếu là đơn "03. Đổi điểm": bỏ ma_ck05 và ck05_nt (set = 0 và '')
         let ck05_nt = ck15_nt_voucherDp1 > 0 ? 0 : (voucherAmountToMove > 0 ? voucherAmountToMove : paidByVoucher);
-        // Tính ma_ck05 giống frontend - truyền customer từ orderData nếu sale chưa có
-        const saleWithCustomer = {
-          ...sale,
-          customer: sale.customer || orderData.customer,
-          brand: sale.customer?.brand || orderData.customer?.brand || sale?.brand || orderData?.brand,
-        };
-        const maCk05Value = this.calculateMaCk05(saleWithCustomer);
-        const formattedMaCk05 = this.formatVoucherCode(maCk05Value);
+        let maCk05Value: string | null = null;
+        let formattedMaCk05: string | null = null;
+        
+        // Nếu là đơn "03. Đổi điểm": bỏ ma_ck05 và ck05_nt
+        const isDoiDiemForCk05 = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
+        
+        if (isDoiDiem || isDoiDiemForCk05) {
+          ck05_nt = 0;
+          maCk05Value = null;
+          formattedMaCk05 = null;
+        } else {
+          // Tính ma_ck05 giống frontend - truyền customer từ orderData nếu sale chưa có
+          const saleWithCustomer = {
+            ...sale,
+            customer: sale.customer || orderData.customer,
+            brand: sale.customer?.brand || orderData.customer?.brand || sale?.brand || orderData?.brand,
+          };
+          maCk05Value = this.calculateMaCk05(saleWithCustomer);
+          formattedMaCk05 = this.formatVoucherCode(maCk05Value);
+        }
         const ck06_nt = 0; // Dự phòng 1 - không sử dụng (không phân bổ vì = 0)
         let ck07_nt = toNumber(sale.chietKhauVoucherDp2, 0);
         let ck08_nt = toNumber(sale.chietKhauVoucherDp3, 0);
@@ -4525,7 +4566,8 @@ export class SalesService {
         // Với đơn hàng "01.Thường": Phân bổ lại tất cả các khoản tiền theo tỷ lệ số lượng từ stock transfer
         // Tỷ lệ phân bổ = qty (từ stock transfer) / saleQty (từ sale)
         // Ví dụ: mua 2 xuất 1 → tỷ lệ = 1/2 = 0.5 → tất cả các khoản tiền nhân với 0.5
-        if (isNormalOrder && allocationRatio !== 1 && allocationRatio > 0) {
+        // Lưu ý: Không phân bổ lại cho đơn "03. Đổi điểm" (đã set ck05_nt = 0)
+        if (isNormalOrder && allocationRatio !== 1 && allocationRatio > 0 && !isDoiDiem && !isDoiDiemForCk05) {
           // Phân bổ lại tất cả các chiết khấu
           ck01_nt = ck01_nt * allocationRatio;
           ck02_nt = ck02_nt * allocationRatio;
@@ -4795,8 +4837,10 @@ export class SalesService {
         // Nếu là hàng tặng, không set ma_ck01 (Mã CTKM mua hàng giảm giá)
         // Nếu là đơn "03. Đổi điểm": set ma_ck01 = "TT DIEM DO" và ck01_nt = 0
         // Nếu không phải hàng tặng và không phải "03. Đổi điểm", set ma_ck01 từ promCode như cũ
+        const isDoiDiemForCk01 = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
+        
         let maCk01 = isTangHang ? '' : (sale.promCode ? sale.promCode : '');
-        if (isDoiDiem) {
+        if (isDoiDiem || isDoiDiemForCk01) {
           maCk01 = 'TT DIEM DO';
           ck01_nt = 0;
         }
@@ -4876,9 +4920,14 @@ export class SalesService {
           // ck04_nt: Tiền (Decimal)
           ck04_nt: Number(ck04_nt),
           // ma_ck05: Thanh toán voucher (String, max 32 ký tự)
-          ...(ck05_nt > 0 ? {
-            ma_ck05: limitString(formattedMaCk05 || toString(sale.maCk05 || 'VOUCHER', ''), 32),
-          } : {}),
+          // Nếu là đơn "03. Đổi điểm": luôn set ma_ck05 = '' và ck05_nt = 0
+          // Nếu không phải "03. Đổi điểm": chỉ thêm ma_ck05 khi ck05_nt > 0
+          ...(isDoiDiem || isDoiDiemForCk05
+            ? { ma_ck05: '' }
+            : (ck05_nt > 0 ? {
+                ma_ck05: limitString(formattedMaCk05 || toString(sale.maCk05 || 'VOUCHER', ''), 32),
+              } : {})
+          ),
           // ck05_nt: Tiền (Decimal)
           ck05_nt: Number(ck05_nt),
           // ma_ck06: Dự phòng 1 (String, max 32 ký tự) - không sử dụng
