@@ -1803,6 +1803,7 @@ export class SyncService {
     branchCode?: string;
     itemCode?: string;
     soCode?: string;
+    docCode?: string;
   }): Promise<{
     success: boolean;
     data: StockTransfer[];
@@ -1832,6 +1833,11 @@ export class SyncService {
       }
       if (params.soCode) {
         queryBuilder.andWhere('st.soCode = :soCode', { soCode: params.soCode });
+      }
+      if (params.docCode) {
+        // Use POSITION function instead of LIKE to avoid escaping issues with _ and %
+        // POSITION returns > 0 if substring is found
+        queryBuilder.andWhere('POSITION(:docCode IN st.docCode) > 0', { docCode: params.docCode });
       }
       if (params.dateFrom) {
         // Parse DDMMMYYYY to Date

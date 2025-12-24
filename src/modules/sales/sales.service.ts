@@ -2366,13 +2366,11 @@ export class SalesService {
       const stockTransferInfo = key ? stockTransferMapBySoCodeAndMaterialCode.get(key) : null;
       
       // Lấy stock transfer đầu tiên từ array (hoặc có thể merge nếu cần)
-      // Lấy ma_kho từ stock transfer (stockCode) - ưu tiên từ stock transfer
-      // Nếu không có thì mới tính từ ordertype + maBp
+      // Lấy ma_kho từ stock transfer (stockCode) - CHỈ dùng từ stock transfer, không dùng quy tắc cũ
       const firstSt = stockTransferInfo?.st && stockTransferInfo.st.length > 0 ? stockTransferInfo.st[0] : null;
       const firstRt = stockTransferInfo?.rt && stockTransferInfo.rt.length > 0 ? stockTransferInfo.rt[0] : null;
-      const maKhoFromStockTransfer = firstSt?.stockCode || firstRt?.stockCode || null;
-      const calculatedMaKho = this.calculateMaKho(sale.ordertype, maBp);
-      const finalMaKho = maKhoFromStockTransfer || calculatedMaKho || sale.maKho || sale.branchCode || null;
+      // Chỉ dùng mã kho từ stock transfer (stockCode), không tính từ ordertype + maBp nữa
+      const finalMaKho = firstSt?.stockCode || firstRt?.stockCode || sale.maKho || sale.branchCode || null;
 
       return {
         ...sale,
@@ -2468,7 +2466,7 @@ export class SalesService {
       docCode: firstSale.docCode,
       docDate: firstSale.docDate,
       branchCode: firstSale.branchCode,
-      docSourceType: firstSale.docSourceType,
+      docSourceType: firstSale.docSourceType || (firstSale as any).docSourceType || null,
       customer: firstSale.customer,
       totalRevenue,
       totalQty,
@@ -3389,7 +3387,30 @@ export class SalesService {
         throw new NotFoundException(`Order ${docCode} not found or has no sales`);
       }
 
-      // Kiểm tra loại đơn hàng: "02. Làm dịch vụ" hoặc "02.Làm dịch vụ"
+      // ============================================
+      // BƯỚC 1: Kiểm tra docSourceType trước (ưu tiên cao nhất)
+      // ============================================
+      const firstSale = orderData.sales && orderData.sales.length > 0 ? orderData.sales[0] : null;
+      const docSourceTypeRaw = firstSale?.docSourceType || orderData.docSourceType || '';
+      const docSourceType = docSourceTypeRaw ? String(docSourceTypeRaw).trim().toUpperCase() : '';
+      
+      this.logger.log(`[createInvoiceViaFastApi] docCode: ${docCode}`);
+      this.logger.log(`[createInvoiceViaFastApi] firstSale?.docSourceType: "${firstSale?.docSourceType}"`);
+      this.logger.log(`[createInvoiceViaFastApi] orderData.docSourceType: "${orderData.docSourceType}"`);
+      this.logger.log(`[createInvoiceViaFastApi] docSourceType (normalized): "${docSourceType}"`);
+      
+      if (docSourceType === 'SALE_RETURN') {
+        this.logger.log(`[createInvoiceViaFastApi] ✅ Đơn hàng ${docCode} là SALE_RETURN, chuyển sang handleSaleReturnFlow`);
+        return await this.handleSaleReturnFlow(orderData, docCode);
+      }
+      
+      this.logger.log(`[createInvoiceViaFastApi] ⚠️ Đơn hàng ${docCode} KHÔNG phải SALE_RETURN (docSourceType: "${docSourceType}"), tiếp tục flow bình thường`);
+
+      // ============================================
+      // BƯỚC 2: Kiểm tra các case khác (sau khi đã loại trừ SALE_RETURN)
+      // ============================================
+
+      // SAU ĐÓ: Kiểm tra loại đơn hàng: "02. Làm dịch vụ" hoặc "02.Làm dịch vụ"
       const sales = orderData.sales || [];
       const normalizeOrderType = (ordertypeName: string | null | undefined): string => {
         if (!ordertypeName) return '';
@@ -3404,196 +3425,6 @@ export class SalesService {
       // Nếu là đơn dịch vụ, chạy flow dịch vụ
       if (hasServiceOrder) {
         return await this.executeServiceOrderFlow(orderData, docCode);
-      }
-
-      // Kiểm tra case SALE_RETURN không có stock transfer
-      const firstSale = orderData.sales && orderData.sales.length > 0 ? orderData.sales[0] : null;
-      const docSourceType = firstSale?.docSourceType || orderData.docSourceType;
-      const isSaleReturn = docSourceType === 'SALE_RETURN';
-
-      if (isSaleReturn) {
-        // Kiểm tra xem có stock transfer không
-        const stockTransfers = await this.stockTransferRepository.find({
-          where: { soCode: docCode },
-        });
-
-        // Nếu có stock transfer, gọi API salesReturn
-        if (stockTransfers && stockTransfers.length > 0) {
-          this.logger.log(`[SALE_RETURN] Đơn hàng ${docCode} là SALE_RETURN và có stock transfer, gọi API salesReturn`);
-
-          // Build salesReturn data
-          const salesReturnData = await this.buildSalesReturnData(orderData, stockTransfers);
-
-          // Tạo/cập nhật customer trước
-          if (orderData.customer) {
-            await this.fastApiInvoiceFlowService.createOrUpdateCustomer({
-              ma_kh: this.normalizeMaKh(orderData.customer.code),
-              ten_kh: orderData.customer.name || '',
-              dia_chi: orderData.customer.address || undefined,
-              ngay_sinh: orderData.customer.birthday ? new Date(orderData.customer.birthday).toISOString().split('T')[0] : undefined,
-              so_cccd: orderData.customer.idnumber || undefined,
-              e_mail: undefined,
-              gioi_tinh: orderData.customer.sexual || undefined,
-              dien_thoai: orderData.customer.mobile || undefined,
-            });
-          }
-
-          // Gọi API salesReturn
-          let result: any;
-          try {
-            result = await this.fastApiInvoiceFlowService.createSalesReturn(salesReturnData);
-
-            // Lưu vào bảng kê hóa đơn
-            const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
-            const responseMessage = Array.isArray(result) && result.length > 0 
-              ? (result[0].message || 'Tạo hàng bán trả lại thành công')
-              : 'Tạo hàng bán trả lại thành công';
-            const responseGuid = Array.isArray(result) && result.length > 0 && Array.isArray(result[0].guid) 
-              ? result[0].guid[0] 
-              : (Array.isArray(result) && result.length > 0 ? result[0].guid : null);
-
-            await this.saveFastApiInvoice({
-              docCode,
-              maDvcs: salesReturnData.ma_dvcs,
-              maKh: salesReturnData.ma_kh,
-              tenKh: orderData.customer?.name || salesReturnData.ong_ba || '',
-              ngayCt: salesReturnData.ngay_ct ? new Date(salesReturnData.ngay_ct) : new Date(),
-              status: responseStatus,
-              message: responseMessage,
-              guid: responseGuid || null,
-              fastApiResponse: JSON.stringify(result),
-            });
-
-            return {
-              success: responseStatus === 1,
-              message: responseMessage,
-              result: result,
-            };
-          } catch (error: any) {
-            // Lấy thông báo lỗi chính xác từ Fast API response
-            let errorMessage = 'Tạo hàng bán trả lại thất bại';
-
-            if (error?.response?.data) {
-              const errorData = error.response.data;
-              if (Array.isArray(errorData) && errorData.length > 0) {
-                errorMessage = errorData[0].message || errorData[0].error || errorMessage;
-              } else if (errorData.message) {
-                errorMessage = errorData.message;
-              } else if (errorData.error) {
-                errorMessage = errorData.error;
-              } else if (typeof errorData === 'string') {
-                errorMessage = errorData;
-              }
-            } else if (error?.message) {
-              errorMessage = error.message;
-            }
-
-            // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
-            await this.saveFastApiInvoice({
-              docCode,
-              maDvcs: salesReturnData.ma_dvcs,
-              maKh: salesReturnData.ma_kh,
-              tenKh: orderData.customer?.name || salesReturnData.ong_ba || '',
-              ngayCt: salesReturnData.ngay_ct ? new Date(salesReturnData.ngay_ct) : new Date(),
-              status: 0,
-              message: errorMessage,
-              guid: null,
-              fastApiResponse: JSON.stringify(error?.response?.data || error),
-            });
-
-            this.logger.error(`SALE_RETURN order creation failed for order ${docCode}: ${errorMessage}`);
-
-            return {
-              success: false,
-              message: errorMessage,
-              result: error?.response?.data || error,
-            };
-          }
-        }
-        
-        // Nếu không có stock transfer (không có nhập/xuất kho), chỉ gọi API salesOrder với action = 1
-        if (!stockTransfers || stockTransfers.length === 0) {
-          this.logger.log(`[SALE_RETURN] Đơn hàng ${docCode} là SALE_RETURN và không có stock transfer, chỉ gọi API salesOrder với action=1`);
-
-          // Build invoice data để lấy thông tin cần thiết
-          const invoiceData = await this.buildFastApiInvoiceData(orderData);
-
-          // Gọi API salesOrder với action = 1 (không cần tạo/cập nhật customer)
-          let result: any;
-          try {
-            result = await this.fastApiInvoiceFlowService.createSalesOrder({
-              ...invoiceData,
-              customer: orderData.customer,
-              ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-            }, 1); // action = 1 cho đơn hàng trả lại
-
-            // Lưu vào bảng kê hóa đơn
-            const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
-            const responseMessage = Array.isArray(result) && result.length > 0 
-              ? (result[0].message || 'Tạo đơn hàng trả lại thành công')
-              : 'Tạo đơn hàng trả lại thành công';
-            const responseGuid = Array.isArray(result) && result.length > 0 && Array.isArray(result[0].guid) 
-              ? result[0].guid[0] 
-              : (Array.isArray(result) && result.length > 0 ? result[0].guid : null);
-
-            await this.saveFastApiInvoice({
-              docCode,
-              maDvcs: invoiceData.ma_dvcs,
-              maKh: invoiceData.ma_kh,
-              tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
-              ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
-              status: responseStatus,
-              message: responseMessage,
-              guid: responseGuid || null,
-              fastApiResponse: JSON.stringify(result),
-            });
-
-            return {
-              success: responseStatus === 1,
-              message: responseMessage,
-              result: result,
-            };
-          } catch (error: any) {
-            // Lấy thông báo lỗi chính xác từ Fast API response
-            let errorMessage = 'Tạo đơn hàng trả lại thất bại';
-
-            if (error?.response?.data) {
-              const errorData = error.response.data;
-              if (Array.isArray(errorData) && errorData.length > 0) {
-                errorMessage = errorData[0].message || errorData[0].error || errorMessage;
-              } else if (errorData.message) {
-                errorMessage = errorData.message;
-              } else if (errorData.error) {
-                errorMessage = errorData.error;
-              } else if (typeof errorData === 'string') {
-                errorMessage = errorData;
-              }
-            } else if (error?.message) {
-              errorMessage = error.message;
-            }
-
-            // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
-            await this.saveFastApiInvoice({
-              docCode,
-              maDvcs: invoiceData.ma_dvcs,
-              maKh: invoiceData.ma_kh,
-              tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
-              ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
-              status: 0,
-              message: errorMessage,
-              guid: null,
-              fastApiResponse: JSON.stringify(error?.response?.data || error),
-            });
-
-            this.logger.error(`SALE_RETURN order creation failed for order ${docCode}: ${errorMessage}`);
-
-            return {
-              success: false,
-              message: errorMessage,
-              result: error?.response?.data || error,
-            };
-          }
-        }
       }
 
       // Nếu không phải đơn dịch vụ, chạy flow bình thường (01.Thường)
@@ -5112,6 +4943,182 @@ export class SalesService {
     } catch (error: any) {
       this.logger.error(`Error creating stock transfers: ${error?.message || error}`);
       throw error;
+    }
+  }
+
+  /**
+   * Xử lý flow SALE_RETURN
+   * Case 1: Có stock transfer → Gọi API salesReturn
+   * Case 2: Không có stock transfer → Gọi API salesOrder với action=1
+   */
+  private async handleSaleReturnFlow(orderData: any, docCode: string): Promise<any> {
+    this.logger.log(`[SALE_RETURN Flow] Bắt đầu xử lý đơn hàng trả lại ${docCode}`);
+
+    // Kiểm tra xem có stock transfer không
+    const stockTransfers = await this.stockTransferRepository.find({
+      where: { soCode: docCode },
+    });
+
+    // Case 1: Có stock transfer → Gọi API salesReturn
+    if (stockTransfers && stockTransfers.length > 0) {
+      this.logger.log(`[SALE_RETURN] Đơn hàng ${docCode} có stock transfer, gọi API salesReturn`);
+
+      // Build salesReturn data
+      const salesReturnData = await this.buildSalesReturnData(orderData, stockTransfers);
+
+      // Gọi API salesReturn (không cần tạo/cập nhật customer)
+      let result: any;
+      try {
+        result = await this.fastApiInvoiceFlowService.createSalesReturn(salesReturnData);
+
+        // Lưu vào bảng kê hóa đơn
+        const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
+        const responseMessage = Array.isArray(result) && result.length > 0 
+          ? (result[0].message || 'Tạo hàng bán trả lại thành công')
+          : 'Tạo hàng bán trả lại thành công';
+        const responseGuid = Array.isArray(result) && result.length > 0 && Array.isArray(result[0].guid) 
+          ? result[0].guid[0] 
+          : (Array.isArray(result) && result.length > 0 ? result[0].guid : null);
+
+        await this.saveFastApiInvoice({
+          docCode,
+          maDvcs: salesReturnData.ma_dvcs,
+          maKh: salesReturnData.ma_kh,
+          tenKh: orderData.customer?.name || salesReturnData.ong_ba || '',
+          ngayCt: salesReturnData.ngay_ct ? new Date(salesReturnData.ngay_ct) : new Date(),
+          status: responseStatus,
+          message: responseMessage,
+          guid: responseGuid || null,
+          fastApiResponse: JSON.stringify(result),
+        });
+
+        return {
+          success: responseStatus === 1,
+          message: responseMessage,
+          result: result,
+        };
+      } catch (error: any) {
+        // Lấy thông báo lỗi chính xác từ Fast API response
+        let errorMessage = 'Tạo hàng bán trả lại thất bại';
+
+        if (error?.response?.data) {
+          const errorData = error.response.data;
+          if (Array.isArray(errorData) && errorData.length > 0) {
+            errorMessage = errorData[0].message || errorData[0].error || errorMessage;
+          } else if (errorData.message) {
+            errorMessage = errorData.message;
+          } else if (errorData.error) {
+            errorMessage = errorData.error;
+          } else if (typeof errorData === 'string') {
+            errorMessage = errorData;
+          }
+        } else if (error?.message) {
+          errorMessage = error.message;
+        }
+
+        // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
+        await this.saveFastApiInvoice({
+          docCode,
+          maDvcs: salesReturnData.ma_dvcs,
+          maKh: salesReturnData.ma_kh,
+          tenKh: orderData.customer?.name || salesReturnData.ong_ba || '',
+          ngayCt: salesReturnData.ngay_ct ? new Date(salesReturnData.ngay_ct) : new Date(),
+          status: 0,
+          message: errorMessage,
+          guid: null,
+          fastApiResponse: JSON.stringify(error?.response?.data || error),
+        });
+
+        this.logger.error(`SALE_RETURN order creation failed for order ${docCode}: ${errorMessage}`);
+
+        return {
+          success: false,
+          message: errorMessage,
+          result: error?.response?.data || error,
+        };
+      }
+    }
+
+    // Case 2: Không có stock transfer → Gọi API salesOrder với action=1
+    this.logger.log(`[SALE_RETURN] Đơn hàng ${docCode} không có stock transfer, gọi API salesOrder với action=1`);
+
+    // Build invoice data để lấy thông tin cần thiết
+    const invoiceData = await this.buildFastApiInvoiceData(orderData);
+
+    // Gọi API salesOrder với action = 1 (không cần tạo/cập nhật customer)
+    let result: any;
+    try {
+      result = await this.fastApiInvoiceFlowService.createSalesOrder({
+        ...invoiceData,
+        customer: orderData.customer,
+        ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+      }, 1); // action = 1 cho đơn hàng trả lại
+
+      // Lưu vào bảng kê hóa đơn
+      const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
+      const responseMessage = Array.isArray(result) && result.length > 0 
+        ? (result[0].message || 'Tạo đơn hàng trả lại thành công')
+        : 'Tạo đơn hàng trả lại thành công';
+      const responseGuid = Array.isArray(result) && result.length > 0 && Array.isArray(result[0].guid) 
+        ? result[0].guid[0] 
+        : (Array.isArray(result) && result.length > 0 ? result[0].guid : null);
+
+      await this.saveFastApiInvoice({
+        docCode,
+        maDvcs: invoiceData.ma_dvcs,
+        maKh: invoiceData.ma_kh,
+        tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+        ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
+        status: responseStatus,
+        message: responseMessage,
+        guid: responseGuid || null,
+        fastApiResponse: JSON.stringify(result),
+      });
+
+      return {
+        success: responseStatus === 1,
+        message: responseMessage,
+        result: result,
+      };
+    } catch (error: any) {
+      // Lấy thông báo lỗi chính xác từ Fast API response
+      let errorMessage = 'Tạo đơn hàng trả lại thất bại';
+
+      if (error?.response?.data) {
+        const errorData = error.response.data;
+        if (Array.isArray(errorData) && errorData.length > 0) {
+          errorMessage = errorData[0].message || errorData[0].error || errorMessage;
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.error) {
+          errorMessage = errorData.error;
+        } else if (typeof errorData === 'string') {
+          errorMessage = errorData;
+        }
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+
+      // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
+      await this.saveFastApiInvoice({
+        docCode,
+        maDvcs: invoiceData.ma_dvcs,
+        maKh: invoiceData.ma_kh,
+        tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+        ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
+        status: 0,
+        message: errorMessage,
+        guid: null,
+        fastApiResponse: JSON.stringify(error?.response?.data || error),
+      });
+
+      this.logger.error(`SALE_RETURN order creation failed for order ${docCode}: ${errorMessage}`);
+
+      return {
+        success: false,
+        message: errorMessage,
+        result: error?.response?.data || error,
+      };
     }
   }
 

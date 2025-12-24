@@ -596,6 +596,7 @@ export class SyncController {
     @Query('branchCode') branchCode?: string,
     @Query('itemCode') itemCode?: string,
     @Query('soCode') soCode?: string,
+    @Query('docCode') docCode?: string,
   ) {
     try {
       const result = await this.syncService.getStockTransfers({
@@ -607,6 +608,7 @@ export class SyncController {
         branchCode,
         itemCode,
         soCode,
+        docCode,
       });
       return result;
     } catch (error: any) {
