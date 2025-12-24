@@ -325,6 +325,7 @@ export class SalesService {
   /**
    * Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
    * Logic: Match stock transfer theo itemCode và soCode, lấy stockCode
+   * Xử lý đặc biệt cho đơn trả lại (RT): chuyển RT -> SO hoặc RT -> ST để match
    * @param sale - Sale object có itemCode
    * @param docCode - Mã đơn hàng (docCode)
    * @param stockTransfers - Danh sách stock transfers
@@ -341,24 +342,162 @@ export class SalesService {
   ): string | null {
     let matchedStockTransfer: StockTransfer | null = null;
 
+    // Xử lý đặc biệt cho đơn trả lại (RT): chuyển RT -> SO (mã đơn mua gốc) hoặc RT -> ST (mã xuất kho)
+    const isReturnOrder = docCode.startsWith('RT');
+    let originalOrderCode: string | null = null;
+    let stockOutDocCode: string | null = null;
+    
+    if (isReturnOrder) {
+      // RT33.00121928_1 -> SO33.00121928 (chuyển RT thành SO, bỏ _1)
+      originalOrderCode = docCode.replace(/^RT/, 'SO').replace(/_\d+$/, '');
+      // RT33.00121928_1 -> ST33.00121928_1 (chuyển RT thành ST)
+      stockOutDocCode = docCode.replace(/^RT/, 'ST');
+    }
+
     // Ưu tiên match theo materialCode nếu có stockTransferMap
     if (saleMaterialCode && stockTransferMap) {
-      const stockTransferKey = `${docCode}_${saleMaterialCode}`;
-      const matchedTransfers = stockTransferMap.get(stockTransferKey) || [];
+      // Thử match với docCode gốc
+      let stockTransferKey = `${docCode}_${saleMaterialCode}`;
+      let matchedTransfers = stockTransferMap.get(stockTransferKey) || [];
+      
+      // Nếu là đơn trả lại và không match được, thử với mã đơn gốc
+      if (matchedTransfers.length === 0 && isReturnOrder && originalOrderCode) {
+        stockTransferKey = `${originalOrderCode}_${saleMaterialCode}`;
+        matchedTransfers = stockTransferMap.get(stockTransferKey) || [];
+      }
+      
       if (matchedTransfers.length > 0) {
         matchedStockTransfer = matchedTransfers[0];
       }
     }
 
-    // Nếu không match được theo materialCode, match trực tiếp theo itemCode và soCode
+    // Nếu không match được theo materialCode, match trực tiếp theo itemCode và soCode/docCode
     if (!matchedStockTransfer && sale.itemCode) {
+      // Thử match với docCode gốc
       matchedStockTransfer = stockTransfers.find(
         (st) => st.soCode === docCode && st.itemCode === sale.itemCode
       ) || null;
+      
+      // Nếu là đơn trả lại và không match được, thử với mã đơn gốc (SO)
+      if (!matchedStockTransfer && isReturnOrder && originalOrderCode) {
+        matchedStockTransfer = stockTransfers.find(
+          (st) => st.soCode === originalOrderCode && st.itemCode === sale.itemCode
+        ) || null;
+      }
+      
+      // Nếu vẫn không match được, thử match theo docCode của stock transfer (ST)
+      if (!matchedStockTransfer && isReturnOrder && stockOutDocCode) {
+        matchedStockTransfer = stockTransfers.find(
+          (st) => st.docCode === stockOutDocCode && st.itemCode === sale.itemCode
+        ) || null;
+      }
     }
 
     // Lấy mã kho từ stockCode (Mã kho xuất) của stock transfer
     return matchedStockTransfer?.stockCode || sale.maKho || sale.branchCode || null;
+  }
+
+  /**
+   * Lấy danh sách docCode cần fetch stock transfers
+   * Xử lý đặc biệt cho đơn trả lại (RT): thêm mã đơn gốc (SO) vào danh sách
+   * @param docCodes - Danh sách mã đơn hàng
+   * @returns Danh sách docCode cần fetch (bao gồm cả mã đơn gốc nếu là đơn trả lại)
+   */
+  private getDocCodesForStockTransfer(docCodes: string[]): string[] {
+    const result = new Set<string>();
+    
+    for (const docCode of docCodes) {
+      result.add(docCode);
+      
+      // Nếu là đơn trả lại (RT), thêm mã đơn gốc (SO) vào danh sách
+      if (docCode.startsWith('RT')) {
+        // RT33.00121928_1 -> SO33.00121928 (chuyển RT thành SO, bỏ _1)
+        const originalOrderCode = docCode.replace(/^RT/, 'SO').replace(/_\d+$/, '');
+        result.add(originalOrderCode);
+      }
+    }
+    
+    return Array.from(result);
+  }
+
+  /**
+   * Build stock transfer maps (stockTransferMap và stockTransferByDocCodeMap)
+   * Xử lý đặc biệt cho đơn trả lại: thêm key với mã đơn trả lại (RT) nếu soCode là mã đơn gốc (SO)
+   * @param stockTransfers - Danh sách stock transfers
+   * @param loyaltyProductMap - Map để lấy materialCode từ itemCode
+   * @param docCodes - Danh sách docCodes của orders (để xử lý đơn trả lại)
+   * @returns Object chứa stockTransferMap và stockTransferByDocCodeMap
+   */
+  private buildStockTransferMaps(
+    stockTransfers: StockTransfer[],
+    loyaltyProductMap: Map<string, any>,
+    docCodes: string[]
+  ): {
+    stockTransferMap: Map<string, StockTransfer[]>;
+    stockTransferByDocCodeMap: Map<string, StockTransfer[]>;
+  } {
+    // Tạo map stock transfers theo docCode (của order) và materialCode (Mã hàng từ Loyalty API)
+    // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng)
+    // Xử lý đặc biệt cho đơn trả lại: thêm key với mã đơn trả lại (RT) nếu soCode là mã đơn gốc (SO)
+    const stockTransferMap = new Map<string, StockTransfer[]>();
+    const stockTransferByDocCodeMap = new Map<string, StockTransfer[]>();
+
+    for (const transfer of stockTransfers) {
+      // Lấy materialCode từ database hoặc từ Loyalty API
+      const transferLoyaltyProduct = transfer.itemCode ? loyaltyProductMap.get(transfer.itemCode) : null;
+      const materialCode = transfer.materialCode || transferLoyaltyProduct?.materialCode;
+      
+      if (!materialCode) {
+        // Bỏ qua nếu không có materialCode (không match được)
+        continue;
+      }
+      
+      // Join theo soCode (của stock transfer) = docCode (của order) + materialCode (Mã hàng)
+      const orderDocCode = transfer.soCode || transfer.docCode; // Ưu tiên soCode
+      const key = `${orderDocCode}_${materialCode}`;
+      
+      // Thêm vào stockTransferMap
+      if (!stockTransferMap.has(key)) {
+        stockTransferMap.set(key, []);
+      }
+      stockTransferMap.get(key)!.push(transfer);
+      
+      // Thêm vào stockTransferByDocCodeMap
+      if (!stockTransferByDocCodeMap.has(orderDocCode)) {
+        stockTransferByDocCodeMap.set(orderDocCode, []);
+      }
+      stockTransferByDocCodeMap.get(orderDocCode)!.push(transfer);
+      
+      // Xử lý đặc biệt cho đơn trả lại: nếu soCode là mã đơn gốc (SO), thêm key với mã đơn trả lại (RT)
+      // Ví dụ: soCode = SO33.00121928 -> thêm key RT33.00121928_1_materialCode
+      if (orderDocCode.startsWith('SO') && docCodes.some(docCode => docCode.startsWith('RT'))) {
+        // Tìm mã đơn trả lại tương ứng (SO33.00121928 -> RT33.00121928_1)
+        for (const docCode of docCodes) {
+          if (docCode.startsWith('RT')) {
+            const originalOrderCode = docCode.replace(/^RT/, 'SO').replace(/_\d+$/, '');
+            if (originalOrderCode === orderDocCode) {
+              // Thêm key với mã đơn trả lại vào stockTransferMap
+              const returnKey = `${docCode}_${materialCode}`;
+              if (!stockTransferMap.has(returnKey)) {
+                stockTransferMap.set(returnKey, []);
+              }
+              stockTransferMap.get(returnKey)!.push(transfer);
+              
+              // Thêm key với mã đơn trả lại vào stockTransferByDocCodeMap
+              if (!stockTransferByDocCodeMap.has(docCode)) {
+                stockTransferByDocCodeMap.set(docCode, []);
+              }
+              stockTransferByDocCodeMap.get(docCode)!.push(transfer);
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      stockTransferMap,
+      stockTransferByDocCodeMap,
+    };
   }
 
   /**
@@ -1266,10 +1405,12 @@ export class SalesService {
 
         // Fetch stock transfers theo soCode (mã đơn hàng) từ paginated orders
         // Join theo soCode (của stock transfer) = docCode (của order)
+        // Xử lý đặc biệt cho đơn trả lại: fetch cả theo mã đơn gốc (SO)
         const paginatedDocCodes = Array.from(new Set(paginatedOrders.map(order => order.docCode).filter(Boolean)));
-        const stockTransfers = paginatedDocCodes.length > 0 
+        const docCodesForStockTransfer = this.getDocCodesForStockTransfer(paginatedDocCodes);
+        const stockTransfers = docCodesForStockTransfer.length > 0 
           ? await this.stockTransferRepository.find({
-              where: { soCode: In(paginatedDocCodes) },
+              where: { soCode: In(docCodesForStockTransfer) },
             })
           : [];
 
@@ -1284,38 +1425,12 @@ export class SalesService {
         const allItemCodes = Array.from(new Set([...itemCodes, ...stockTransferItemCodes]));
         const loyaltyProductMap = await this.loyaltyService.fetchProducts(allItemCodes);
 
-        // Tạo map stock transfers theo docCode (của order) và materialCode (Mã hàng từ Loyalty API)
-        // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng)
-        const stockTransferMap = new Map<string, StockTransfer[]>();
-        for (const transfer of stockTransfers) {
-          // Lấy materialCode từ database hoặc từ Loyalty API
-          const transferLoyaltyProduct = transfer.itemCode ? loyaltyProductMap.get(transfer.itemCode) : null;
-          const materialCode = transfer.materialCode || transferLoyaltyProduct?.materialCode;
-          
-          if (!materialCode) {
-            // Bỏ qua nếu không có materialCode (không match được)
-            continue;
-          }
-          
-          // Join theo soCode (của stock transfer) = docCode (của order) + materialCode (Mã hàng)
-          const orderDocCode = transfer.soCode || transfer.docCode; // Ưu tiên soCode
-          const key = `${orderDocCode}_${materialCode}`;
-          if (!stockTransferMap.has(key)) {
-            stockTransferMap.set(key, []);
-          }
-          stockTransferMap.get(key)!.push(transfer);
-        }
-
-        // Tạo map stock transfers theo docCode của order (để có thể lấy tất cả transfers của một đơn)
-        const stockTransferByDocCodeMap = new Map<string, StockTransfer[]>();
-        for (const transfer of stockTransfers) {
-          // Join theo soCode (của stock transfer) = docCode (của order)
-          const orderDocCode = transfer.soCode || transfer.docCode; // Ưu tiên soCode
-          if (!stockTransferByDocCodeMap.has(orderDocCode)) {
-            stockTransferByDocCodeMap.set(orderDocCode, []);
-          }
-          stockTransferByDocCodeMap.get(orderDocCode)!.push(transfer);
-        }
+        // Build stock transfer maps (tổng hợp logic vào một chỗ)
+        const { stockTransferMap, stockTransferByDocCodeMap } = this.buildStockTransferMaps(
+          stockTransfers,
+          loyaltyProductMap,
+          paginatedDocCodes
+        );
 
         // Thêm promotionDisplayCode, maKho, maCtkmTangHang, producttype và stock transfers vào các sales items
         const enrichedOrders = paginatedOrders.map((order) => ({
@@ -1711,10 +1826,12 @@ export class SalesService {
     );
 
     // Fetch stock transfers theo soCode (mã đơn hàng) - stock transfer có soCode = docCode của order
+    // Xử lý đặc biệt cho đơn trả lại: fetch cả theo mã đơn gốc (SO)
     const docCodes = Array.from(new Set(allSalesData.map(sale => sale.docCode).filter(Boolean)));
-    const stockTransfers = docCodes.length > 0 
+    const docCodesForStockTransfer = this.getDocCodesForStockTransfer(docCodes);
+    const stockTransfers = docCodesForStockTransfer.length > 0 
       ? await this.stockTransferRepository.find({
-          where: { soCode: In(docCodes) },
+          where: { soCode: In(docCodesForStockTransfer) },
         })
       : [];
 
@@ -1734,38 +1851,12 @@ export class SalesService {
       this.fetchLoyaltyDepartments(branchCodes),
     ]);
 
-    // Tạo map stock transfers theo docCode (của order) và materialCode (Mã hàng từ Loyalty API)
-    // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng)
-    const stockTransferMap = new Map<string, StockTransfer[]>();
-    for (const transfer of stockTransfers) {
-      // Lấy materialCode từ database hoặc từ Loyalty API
-      const transferLoyaltyProduct = transfer.itemCode ? loyaltyProductMap.get(transfer.itemCode) : null;
-      const materialCode = transfer.materialCode || transferLoyaltyProduct?.materialCode;
-      
-      if (!materialCode) {
-        // Bỏ qua nếu không có materialCode (không match được)
-        continue;
-      }
-      
-      // Join theo soCode (của stock transfer) = docCode (của order) + materialCode (Mã hàng)
-      const orderDocCode = transfer.soCode || transfer.docCode; // Ưu tiên soCode
-      const key = `${orderDocCode}_${materialCode}`;
-      if (!stockTransferMap.has(key)) {
-        stockTransferMap.set(key, []);
-      }
-      stockTransferMap.get(key)!.push(transfer);
-    }
-
-    // Tạo map stock transfers theo docCode của order (để có thể lấy tất cả transfers của một đơn)
-    const stockTransferByDocCodeMap = new Map<string, StockTransfer[]>();
-    for (const transfer of stockTransfers) {
-      // Join theo soCode (của stock transfer) = docCode (của order)
-      const orderDocCode = transfer.soCode || transfer.docCode; // Ưu tiên soCode
-      if (!stockTransferByDocCodeMap.has(orderDocCode)) {
-        stockTransferByDocCodeMap.set(orderDocCode, []);
-      }
-      stockTransferByDocCodeMap.get(orderDocCode)!.push(transfer);
-    }
+    // Build stock transfer maps (tổng hợp logic vào một chỗ)
+    const { stockTransferMap, stockTransferByDocCodeMap } = this.buildStockTransferMaps(
+      stockTransfers,
+      loyaltyProductMap,
+      docCodes
+    );
 
     // Enrich sales với products, departments, stock transfers và tính toán các field phức tạp
     const enrichedSalesMap = new Map<string, any[]>();
@@ -2355,8 +2446,10 @@ export class SalesService {
     }
 
     // Fetch stock transfers để lấy ma_nx (ST* và RT* từ stock transfer)
+    // Xử lý đặc biệt cho đơn trả lại: fetch cả theo mã đơn gốc (SO)
+    const docCodesForStockTransfer = this.getDocCodesForStockTransfer([docCode]);
     const stockTransfers = await this.stockTransferRepository.find({
-      where: { soCode: docCode },
+      where: { soCode: In(docCodesForStockTransfer) },
       order: { itemCode: 'ASC', createdAt: 'ASC' },
     });
 
@@ -3458,17 +3551,9 @@ export class SalesService {
       const docSourceTypeRaw = firstSale?.docSourceType || orderData.docSourceType || '';
       const docSourceType = docSourceTypeRaw ? String(docSourceTypeRaw).trim().toUpperCase() : '';
       
-      this.logger.log(`[createInvoiceViaFastApi] docCode: ${docCode}`);
-      this.logger.log(`[createInvoiceViaFastApi] firstSale?.docSourceType: "${firstSale?.docSourceType}"`);
-      this.logger.log(`[createInvoiceViaFastApi] orderData.docSourceType: "${orderData.docSourceType}"`);
-      this.logger.log(`[createInvoiceViaFastApi] docSourceType (normalized): "${docSourceType}"`);
-      
       if (docSourceType === 'SALE_RETURN') {
-        this.logger.log(`[createInvoiceViaFastApi] ✅ Đơn hàng ${docCode} là SALE_RETURN, chuyển sang handleSaleReturnFlow`);
         return await this.handleSaleReturnFlow(orderData, docCode);
       }
-      
-      this.logger.log(`[createInvoiceViaFastApi] ⚠️ Đơn hàng ${docCode} KHÔNG phải SALE_RETURN (docSourceType: "${docSourceType}"), tiếp tục flow bình thường`);
 
       // ============================================
       // BƯỚC 2: Kiểm tra các case khác (sau khi đã loại trừ SALE_RETURN)
@@ -4070,8 +4155,10 @@ export class SalesService {
       let stockTransferMapBySoCodeAndMaterialCode: Map<string, { st?: StockTransfer[]; rt?: StockTransfer[] }> = new Map();
       if (isNormalOrder) {
         // Fetch stock transfers cho đơn hàng này
+        // Xử lý đặc biệt cho đơn trả lại: fetch cả theo mã đơn gốc (SO)
+        const docCodesForStockTransfer = this.getDocCodesForStockTransfer([orderData.docCode]);
         const stockTransfers = await this.stockTransferRepository.find({
-          where: { soCode: orderData.docCode },
+          where: { soCode: In(docCodesForStockTransfer) },
           order: { itemCode: 'ASC', createdAt: 'ASC' },
         });
 
@@ -4902,36 +4989,112 @@ export class SalesService {
       // Lấy so_seri
       const soSeri = firstSale?.kyHieu || firstSale?.branchCode || orderData.branchCode || 'DEFAULT';
 
-      // Build detail từ invoiceData.detail, thêm các field đặc biệt cho salesReturn
-      const detail = (invoiceData.detail || []).map((item: any) => {
-        return {
-          ...item,
-          // Thêm các field đặc biệt cho salesReturn
-          tk_ck: item.tk_ck || null, // Tài khoản chiết khấu
+      // Build detail từ invoiceData.detail, chỉ giữ các field cần thiết cho salesReturn
+      const detail = (invoiceData.detail || []).map((item: any, index: number) => {
+        // Chỉ thêm tk_ck nếu có giá trị (không phải null/undefined/empty)
+        const detailItem: any = {
+          // Field bắt buộc
+          ma_vt: item.ma_vt,
+          dvt: item.dvt,
+          ma_kho: item.ma_kho,
+          so_luong: item.so_luong,
+          gia_ban: item.gia_ban,
+          tien_hang: item.tien_hang,
+          // Field tài khoản
           tk_dt: item.tk_dt || '511', // Tài khoản trả lại (mặc định 511)
           tk_gv: item.tk_gv || '632', // Tài khoản giá vốn (mặc định 632)
+          // Field khuyến mãi
+          is_reward_line: item.is_reward_line || 0,
+          is_bundle_reward_line: item.is_bundle_reward_line || 0,
+          km_yn: item.km_yn || 0,
+          // Field chiết khấu (ck01_nt đến ck22_nt)
+          ck01_nt: item.ck01_nt || 0,
+          ck02_nt: item.ck02_nt || 0,
+          ck03_nt: item.ck03_nt || 0,
+          ck04_nt: item.ck04_nt || 0,
+          ck05_nt: item.ck05_nt || 0,
+          ck06_nt: item.ck06_nt || 0,
+          ck07_nt: item.ck07_nt || 0,
+          ck08_nt: item.ck08_nt || 0,
+          ck09_nt: item.ck09_nt || 0,
+          ck10_nt: item.ck10_nt || 0,
+          ck11_nt: item.ck11_nt || 0,
+          ck12_nt: item.ck12_nt || 0,
+          ck13_nt: item.ck13_nt || 0,
+          ck14_nt: item.ck14_nt || 0,
+          ck15_nt: item.ck15_nt || 0,
+          ck16_nt: item.ck16_nt || 0,
+          ck17_nt: item.ck17_nt || 0,
+          ck18_nt: item.ck18_nt || 0,
+          ck19_nt: item.ck19_nt || 0,
+          ck20_nt: item.ck20_nt || 0,
+          ck21_nt: item.ck21_nt || 0,
+          ck22_nt: item.ck22_nt || 0,
+          // Field thuế
+          dt_tg_nt: item.dt_tg_nt || 0,
+          ma_thue: item.ma_thue || '00',
+          thue_suat: item.thue_suat || 0,
+          tien_thue: item.tien_thue || 0,
+          // Field bộ phận
+          ma_bp: item.ma_bp,
+          // Field loại giao dịch (cần thiết cho salesReturn)
+          loai_gd: item.loai_gd || '01',
+          // Field dòng (cần thiết cho salesReturn)
+          dong: index + 1,
+          // Field id gốc (cần thiết cho salesReturn)
+          id_goc_so: item.id_goc_so || 0,
+          // Field ngày gốc (cần thiết cho salesReturn)
+          id_goc_ngay: item.id_goc_ngay || formatDateISO(new Date()),
         };
+        
+        // Chỉ thêm tk_ck nếu có giá trị (không phải null/undefined/empty)
+        if (item.tk_ck && item.tk_ck.trim() !== '') {
+          detailItem.tk_ck = item.tk_ck;
+        }
+        
+        return detailItem;
       });
 
-      return {
+      // Build payload, chỉ thêm các field không null
+      const salesReturnPayload: any = {
         ma_dvcs: maDvcs,
         ma_kh: invoiceData.ma_kh,
         ong_ba: invoiceData.ong_ba,
         ma_gd: '1', // Mã giao dịch (mặc định 1 - Hàng bán trả lại)
-        ma_ca: firstSale?.maCa || null,
         tk_co: '131', // Tài khoản có (mặc định 131)
-        so_ct0: soCt0, // Số hóa đơn gốc
-        ngay_ct0: ngayCt0, // Ngày hóa đơn gốc
-        dien_giai: orderData.docCode || null,
         ngay_lct: ngayLct,
         ngay_ct: ngayCt,
         so_ct: orderData.docCode || '',
         so_seri: soSeri,
         ma_nt: 'VND',
         ty_gia: 1.0,
-        ma_nvbh: firstSale?.saleperson_id?.toString() || null,
+        ma_kenh: 'ONLINE', // Mã kênh (mặc định ONLINE)
         detail: detail,
       };
+
+      // Chỉ thêm các field optional nếu có giá trị
+      if (firstSale?.maCa) {
+        salesReturnPayload.ma_ca = firstSale.maCa;
+      }
+      if (soCt0) {
+        salesReturnPayload.so_ct0 = soCt0;
+      }
+      if (ngayCt0) {
+        salesReturnPayload.ngay_ct0 = ngayCt0;
+      }
+      if (orderData.docCode) {
+        salesReturnPayload.dien_giai = orderData.docCode;
+      }
+
+      // Log payload để debug (chỉ log detail đầu tiên để tránh log quá dài)
+      this.logger.debug(`[SalesReturn] Built payload for ${orderData.docCode}`);
+      this.logger.debug(`[SalesReturn] Main payload fields: ${Object.keys(salesReturnPayload).join(', ')}`);
+      if (detail.length > 0) {
+        this.logger.debug(`[SalesReturn] First detail item fields: ${Object.keys(detail[0]).join(', ')}`);
+        this.logger.debug(`[SalesReturn] First detail item: ${JSON.stringify(detail[0], null, 2)}`);
+      }
+
+      return salesReturnPayload;
     } catch (error: any) {
       this.logger.error(`Error building sales return data: ${error?.message || error}`);
       throw new Error(`Failed to build sales return data: ${error?.message || error}`);
@@ -5016,17 +5179,15 @@ export class SalesService {
    * Case 2: Không có stock transfer → Gọi API salesOrder với action=1
    */
   private async handleSaleReturnFlow(orderData: any, docCode: string): Promise<any> {
-    this.logger.log(`[SALE_RETURN Flow] Bắt đầu xử lý đơn hàng trả lại ${docCode}`);
-
     // Kiểm tra xem có stock transfer không
+    // Xử lý đặc biệt cho đơn trả lại: fetch cả theo mã đơn gốc (SO)
+    const docCodesForStockTransfer = this.getDocCodesForStockTransfer([docCode]);
     const stockTransfers = await this.stockTransferRepository.find({
-      where: { soCode: docCode },
+      where: { soCode: In(docCodesForStockTransfer) },
     });
 
     // Case 1: Có stock transfer → Gọi API salesReturn
     if (stockTransfers && stockTransfers.length > 0) {
-      this.logger.log(`[SALE_RETURN] Đơn hàng ${docCode} có stock transfer, gọi API salesReturn`);
-
       // Build salesReturn data
       const salesReturnData = await this.buildSalesReturnData(orderData, stockTransfers);
 
@@ -5104,8 +5265,6 @@ export class SalesService {
     }
 
     // Case 2: Không có stock transfer → Gọi API salesOrder với action=1
-    this.logger.log(`[SALE_RETURN] Đơn hàng ${docCode} không có stock transfer, gọi API salesOrder với action=1`);
-
     // Build invoice data để lấy thông tin cần thiết
     const invoiceData = await this.buildFastApiInvoiceData(orderData);
 

@@ -121,9 +121,6 @@ export class FastApiInvoiceFlowService {
 
       const finalPayload = removeEmptyFields(cleanOrderData);
       
-      // Log payload để debug
-      this.logger.debug(`[Flow] Sales order payload for ${orderData.so_ct}: ${JSON.stringify(finalPayload, null, 2)}`);
-      
       const result = await this.fastApiService.submitSalesOrder(finalPayload);
       this.logger.log(`[Flow] Sales order ${orderData.so_ct} created successfully`);
       return result;
@@ -338,11 +335,8 @@ export class FastApiInvoiceFlowService {
     }
     return obj;
       };
-
-      // Log payload để debug
-      this.logger.debug(`[Flow] Sales return payload: ${JSON.stringify(salesReturnData, null, 2)}`);
-
       const finalPayload = removeEmptyFields(salesReturnData);
+      console.log('finalPayload: ',JSON.stringify(finalPayload, null, 2));
       
       const result = await this.fastApiService.submitSalesReturn(finalPayload);
       this.logger.log(`[Flow] Sales return ${salesReturnData.so_ct || 'N/A'} created successfully`);

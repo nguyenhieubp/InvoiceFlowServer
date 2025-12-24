@@ -774,9 +774,6 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
         throw new Error('Không thể lấy token đăng nhập');
       }
 
-      // Log payload để debug
-      this.logger.debug(`Sales return payload: ${JSON.stringify(salesReturnData, null, 2)}`);
-
       // Gọi API salesReturn với token
       const response = await firstValueFrom(
         this.httpService.post(
@@ -795,6 +792,16 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
       return response.data;
     } catch (error: any) {
       this.logger.error(`Error submitting sales return: ${error?.message || error}`);
+      
+      // Log chi tiết error response để debug
+      if (error?.response) {
+        this.logger.error(`Sales return error response status: ${error.response.status}`);
+        this.logger.error(`Sales return error response data: ${JSON.stringify(error.response.data)}`);
+      }
+      if (error?.config) {
+        this.logger.error(`Sales return request URL: ${error.config.url}`);
+        this.logger.error(`Sales return request payload: ${JSON.stringify(error.config.data)}`);
+      }
 
       // Nếu lỗi 401 (Unauthorized), refresh token và retry
       if (error?.response?.status === 401) {

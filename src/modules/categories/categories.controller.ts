@@ -16,6 +16,7 @@ import { CategoriesService } from './categories.service';
 import { CreateProductItemDto, UpdateProductItemDto } from '../../dto/create-product-item.dto';
 import { CreatePromotionItemDto, UpdatePromotionItemDto } from '../../dto/create-promotion-item.dto';
 import { CreateWarehouseItemDto, UpdateWarehouseItemDto } from '../../dto/create-warehouse-item.dto';
+import { CreateWarehouseCodeMappingDto, UpdateWarehouseCodeMappingDto } from '../../dto/create-warehouse-code-mapping.dto';
 
 @Controller('categories')
 export class CategoriesController {
@@ -224,6 +225,83 @@ export class CategoriesController {
 
     try {
       const result = await this.categoriesService.importWarehousesFromExcel(file);
+      return {
+        message: `Import thành công ${result.success}/${result.total} bản ghi`,
+        ...result,
+      };
+    } catch (error: any) {
+      throw new BadRequestException(
+        error.message || 'Lỗi khi import file Excel',
+      );
+    }
+  }
+
+  // ========== WAREHOUSE CODE MAPPING ENDPOINTS ==========
+
+  @Get('warehouse-code-mappings')
+  async findAllWarehouseCodeMappings(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.categoriesService.findAllWarehouseCodeMappings({
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 50,
+      search,
+    });
+  }
+
+  @Get('warehouse-code-mappings/:id')
+  async findOneWarehouseCodeMapping(@Param('id') id: string) {
+    return this.categoriesService.findOneWarehouseCodeMapping(id);
+  }
+
+  @Get('warehouse-code-mappings/ma-cu/:maCu')
+  async findWarehouseCodeMappingByMaCu(@Param('maCu') maCu: string) {
+    return this.categoriesService.findWarehouseCodeMappingByMaCu(maCu);
+  }
+
+  @Post('warehouse-code-mappings')
+  async createWarehouseCodeMapping(@Body() createDto: CreateWarehouseCodeMappingDto) {
+    return this.categoriesService.createWarehouseCodeMapping(createDto);
+  }
+
+  @Put('warehouse-code-mappings/:id')
+  async updateWarehouseCodeMapping(
+    @Param('id') id: string,
+    @Body() updateDto: UpdateWarehouseCodeMappingDto,
+  ) {
+    return this.categoriesService.updateWarehouseCodeMapping(id, updateDto);
+  }
+
+  @Delete('warehouse-code-mappings/:id')
+  async deleteWarehouseCodeMapping(@Param('id') id: string) {
+    await this.categoriesService.deleteWarehouseCodeMapping(id);
+    return { message: 'Warehouse code mapping deleted successfully' };
+  }
+
+  @Post('warehouse-code-mappings/import')
+  @UseInterceptors(FileInterceptor('file'))
+  async importWarehouseCodeMappingsExcel(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('File không được tìm thấy');
+    }
+
+    // Validate file type
+    const allowedMimes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'text/csv',
+    ];
+    
+    if (!allowedMimes.includes(file.mimetype)) {
+      throw new BadRequestException(
+        'File không hợp lệ. Vui lòng upload file Excel (.xlsx, .xls) hoặc CSV',
+      );
+    }
+
+    try {
+      const result = await this.categoriesService.importWarehouseCodeMappingsFromExcel(file);
       return {
         message: `Import thành công ${result.success}/${result.total} bản ghi`,
         ...result,

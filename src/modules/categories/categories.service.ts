@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, Like, ILike, DataSource, In } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
@@ -6,11 +6,13 @@ import { firstValueFrom } from 'rxjs';
 import { ProductItem } from '../../entities/product-item.entity';
 import { PromotionItem } from '../../entities/promotion-item.entity';
 import { WarehouseItem } from '../../entities/warehouse-item.entity';
+import { WarehouseCodeMapping } from '../../entities/warehouse-code-mapping.entity';
 import { Customer } from '../../entities/customer.entity';
 import { Sale } from '../../entities/sale.entity';
 import { CreateProductItemDto, UpdateProductItemDto } from '../../dto/create-product-item.dto';
 import { CreatePromotionItemDto, UpdatePromotionItemDto } from '../../dto/create-promotion-item.dto';
 import { CreateWarehouseItemDto, UpdateWarehouseItemDto } from '../../dto/create-warehouse-item.dto';
+import { CreateWarehouseCodeMappingDto, UpdateWarehouseCodeMappingDto } from '../../dto/create-warehouse-code-mapping.dto';
 import * as XLSX from 'xlsx';
 
 @Injectable()
@@ -24,6 +26,8 @@ export class CategoriesService {
     private promotionItemRepository: Repository<PromotionItem>,
     @InjectRepository(WarehouseItem)
     private warehouseItemRepository: Repository<WarehouseItem>,
+    @InjectRepository(WarehouseCodeMapping)
+    private warehouseCodeMappingRepository: Repository<WarehouseCodeMapping>,
     @InjectRepository(Customer)
     private customerRepository: Repository<Customer>,
     @InjectRepository(Sale)
@@ -1014,6 +1018,238 @@ export class CategoriesService {
       };
     } catch (error: any) {
       this.logger.error(`Error importing warehouses Excel file: ${error.message}`);
+      throw new Error(`Lỗi khi import file Excel: ${error.message}`);
+    }
+  }
+
+  // ========== WAREHOUSE CODE MAPPING METHODS ==========
+
+  async findAllWarehouseCodeMappings(options: {
+    page?: number;
+    limit?: number;
+    search?: string;
+  }) {
+    const { page = 1, limit = 50, search } = options;
+
+    const query = this.warehouseCodeMappingRepository
+      .createQueryBuilder('mapping')
+      .orderBy('mapping.ngayTao', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (search) {
+      query.andWhere(
+        '(mapping.maCu ILIKE :search OR mapping.maMoi ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    const [data, total] = await query.getManyAndCount();
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async findOneWarehouseCodeMapping(id: string): Promise<WarehouseCodeMapping> {
+    const mapping = await this.warehouseCodeMappingRepository.findOne({
+      where: { id },
+    });
+
+    if (!mapping) {
+      throw new NotFoundException(`Warehouse code mapping with ID ${id} not found`);
+    }
+
+    return mapping;
+  }
+
+  async findWarehouseCodeMappingByMaCu(maCu: string): Promise<WarehouseCodeMapping | null> {
+    return await this.warehouseCodeMappingRepository.findOne({
+      where: { maCu },
+    });
+  }
+
+  async createWarehouseCodeMapping(createDto: CreateWarehouseCodeMappingDto): Promise<WarehouseCodeMapping> {
+    // Kiểm tra xem maCu đã tồn tại chưa
+    const existing = await this.warehouseCodeMappingRepository.findOne({
+      where: { maCu: createDto.maCu },
+    });
+
+    if (existing) {
+      throw new BadRequestException(`Mã cũ "${createDto.maCu}" đã tồn tại`);
+    }
+
+    const mapping = this.warehouseCodeMappingRepository.create({
+      ...createDto,
+      trangThai: createDto.trangThai || 'active',
+    });
+
+    return await this.warehouseCodeMappingRepository.save(mapping);
+  }
+
+  async updateWarehouseCodeMapping(id: string, updateDto: UpdateWarehouseCodeMappingDto): Promise<WarehouseCodeMapping> {
+    const mapping = await this.findOneWarehouseCodeMapping(id);
+
+    // Nếu maCu thay đổi, kiểm tra xem có trùng với record khác không
+    if (updateDto.maCu && updateDto.maCu !== mapping.maCu) {
+      const existing = await this.warehouseCodeMappingRepository.findOne({
+        where: { maCu: updateDto.maCu },
+      });
+
+      if (existing && existing.id !== id) {
+        throw new BadRequestException(`Mã cũ "${updateDto.maCu}" đã tồn tại`);
+      }
+    }
+
+    Object.assign(mapping, updateDto);
+
+    return await this.warehouseCodeMappingRepository.save(mapping);
+  }
+
+  async deleteWarehouseCodeMapping(id: string): Promise<void> {
+    const mapping = await this.findOneWarehouseCodeMapping(id);
+    await this.warehouseCodeMappingRepository.remove(mapping);
+  }
+
+  async importWarehouseCodeMappingsFromExcel(file: Express.Multer.File): Promise<{
+    total: number;
+    success: number;
+    failed: number;
+    errors: Array<{ row: number; error: string }>;
+  }> {
+    try {
+      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(worksheet, { raw: false }) as any[];
+
+      const errors: Array<{ row: number; error: string }> = [];
+      let success = 0;
+      let failed = 0;
+
+      // Normalize header để xử lý khoảng trắng và chữ hoa/thường
+      const normalizeHeader = (header: string): string => {
+        return String(header).trim().toLowerCase().replace(/\s+/g, ' ');
+      };
+
+      // Mapping từ header Excel sang field của entity
+      const fieldMapping: Record<string, string> = {
+        'Cũ': 'maCu',
+        'Mã cũ': 'maCu',
+        'Mã Cũ': 'maCu',
+        'Mới': 'maMoi',
+        'Mã mới': 'maMoi',
+        'Mã Mới': 'maMoi',
+      };
+
+      // Tạo reverse mapping với normalized keys
+      const normalizedMapping: Record<string, string> = {};
+      for (const [excelHeader, fieldName] of Object.entries(fieldMapping)) {
+        normalizedMapping[normalizeHeader(excelHeader)] = fieldName;
+      }
+
+      // Lấy danh sách headers thực tế từ Excel
+      const actualHeaders = data.length > 0 ? Object.keys(data[0]) : [];
+      this.logger.log(`Excel headers found: ${actualHeaders.join(', ')}`);
+
+      // Lọc bỏ các dòng trống trước khi xử lý và lưu lại index gốc
+      const nonEmptyRowsWithIndex = data
+        .map((row, index) => ({ row, originalIndex: index }))
+        .filter(({ row }) => {
+          return !actualHeaders.every(header => {
+            const value = row[header];
+            if (value === null || value === undefined) return true;
+            if (typeof value === 'string' && value.trim() === '') return true;
+            return false;
+          });
+        });
+
+      for (let i = 0; i < nonEmptyRowsWithIndex.length; i++) {
+        const { row, originalIndex } = nonEmptyRowsWithIndex[i];
+        const rowNumber = originalIndex + 2; // +2 vì bắt đầu từ row 2 (row 1 là header)
+
+        try {
+          const mappingData: Partial<WarehouseCodeMapping> = {
+            trangThai: 'active',
+          };
+
+          // Map các fields từ Excel với flexible matching
+          for (const actualHeader of actualHeaders) {
+            const normalizedHeader = normalizeHeader(actualHeader);
+            const fieldName = normalizedMapping[normalizedHeader];
+            
+            if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
+              const rawValue = row[actualHeader];
+              if (typeof rawValue === 'string' && rawValue.trim() === '') {
+                continue;
+              }
+
+              // Tất cả đều là string fields
+              const stringValue = String(rawValue).trim();
+              if (stringValue !== '') {
+                mappingData[fieldName] = stringValue;
+              }
+            }
+          }
+
+          // Validate required fields
+          if (!mappingData.maCu || (typeof mappingData.maCu === 'string' && mappingData.maCu.trim() === '')) {
+            const availableHeaders = actualHeaders.join(', ');
+            errors.push({
+              row: rowNumber,
+              error: `Mã cũ là bắt buộc nhưng không tìm thấy trong dòng ${rowNumber}. Headers trong file: ${availableHeaders}`,
+            });
+            failed++;
+            continue;
+          }
+
+          if (!mappingData.maMoi || (typeof mappingData.maMoi === 'string' && mappingData.maMoi.trim() === '')) {
+            const availableHeaders = actualHeaders.join(', ');
+            errors.push({
+              row: rowNumber,
+              error: `Mã mới là bắt buộc nhưng không tìm thấy trong dòng ${rowNumber}. Headers trong file: ${availableHeaders}`,
+            });
+            failed++;
+            continue;
+          }
+
+          // Kiểm tra xem đã tồn tại chưa (dựa trên maCu)
+          const existing = await this.warehouseCodeMappingRepository.findOne({
+            where: { maCu: mappingData.maCu },
+          });
+
+          if (existing) {
+            // Xóa record cũ và tạo mới thay vì cập nhật
+            await this.warehouseCodeMappingRepository.remove(existing);
+          }
+          
+          // Tạo mới (hoặc tạo lại sau khi xóa)
+          const mapping = this.warehouseCodeMappingRepository.create(mappingData);
+          await this.warehouseCodeMappingRepository.save(mapping);
+
+          success++;
+        } catch (error: any) {
+          this.logger.error(`Error importing warehouse code mapping row ${rowNumber}: ${error.message}`);
+          errors.push({
+            row: rowNumber,
+            error: error.message || 'Unknown error',
+          });
+          failed++;
+        }
+      }
+
+      return {
+        total: nonEmptyRowsWithIndex.length,
+        success,
+        failed,
+        errors,
+      };
+    } catch (error: any) {
+      this.logger.error(`Error importing warehouse code mappings Excel file: ${error.message}`);
       throw new Error(`Lỗi khi import file Excel: ${error.message}`);
     }
   }
