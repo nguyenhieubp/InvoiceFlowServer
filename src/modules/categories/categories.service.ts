@@ -7,12 +7,14 @@ import { ProductItem } from '../../entities/product-item.entity';
 import { PromotionItem } from '../../entities/promotion-item.entity';
 import { WarehouseItem } from '../../entities/warehouse-item.entity';
 import { WarehouseCodeMapping } from '../../entities/warehouse-code-mapping.entity';
+import { PaymentMethod } from '../../entities/payment-method.entity';
 import { Customer } from '../../entities/customer.entity';
 import { Sale } from '../../entities/sale.entity';
 import { CreateProductItemDto, UpdateProductItemDto } from '../../dto/create-product-item.dto';
 import { CreatePromotionItemDto, UpdatePromotionItemDto } from '../../dto/create-promotion-item.dto';
 import { CreateWarehouseItemDto, UpdateWarehouseItemDto } from '../../dto/create-warehouse-item.dto';
 import { CreateWarehouseCodeMappingDto, UpdateWarehouseCodeMappingDto } from '../../dto/create-warehouse-code-mapping.dto';
+import { CreatePaymentMethodDto, UpdatePaymentMethodDto } from '../../dto/create-payment-method.dto';
 import * as XLSX from 'xlsx';
 
 @Injectable()
@@ -28,6 +30,8 @@ export class CategoriesService {
     private warehouseItemRepository: Repository<WarehouseItem>,
     @InjectRepository(WarehouseCodeMapping)
     private warehouseCodeMappingRepository: Repository<WarehouseCodeMapping>,
+    @InjectRepository(PaymentMethod)
+    private paymentMethodRepository: Repository<PaymentMethod>,
     @InjectRepository(Customer)
     private customerRepository: Repository<Customer>,
     @InjectRepository(Sale)
@@ -1270,6 +1274,232 @@ export class CategoriesService {
       };
     } catch (error: any) {
       this.logger.error(`Error importing warehouse code mappings Excel file: ${error.message}`);
+      throw new Error(`Lỗi khi import file Excel: ${error.message}`);
+    }
+  }
+
+  // ========== PAYMENT METHOD METHODS ==========
+
+  async findAllPaymentMethods(options: {
+    page?: number;
+    limit?: number;
+    search?: string;
+  }) {
+    const { page = 1, limit = 50, search } = options;
+
+    const query = this.paymentMethodRepository
+      .createQueryBuilder('paymentMethod')
+      .orderBy('paymentMethod.ngayTao', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (search) {
+      query.andWhere(
+        '(paymentMethod.code ILIKE :search OR paymentMethod.description ILIKE :search OR paymentMethod.documentType ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    const [data, total] = await query.getManyAndCount();
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async findOnePaymentMethod(id: string): Promise<PaymentMethod> {
+    const paymentMethod = await this.paymentMethodRepository.findOne({
+      where: { id },
+    });
+
+    if (!paymentMethod) {
+      throw new NotFoundException(`Payment method with ID ${id} not found`);
+    }
+
+    return paymentMethod;
+  }
+
+  async findPaymentMethodByCode(code: string): Promise<PaymentMethod | null> {
+    return await this.paymentMethodRepository.findOne({
+      where: { code },
+    });
+  }
+
+  async createPaymentMethod(createDto: CreatePaymentMethodDto): Promise<PaymentMethod> {
+    // Kiểm tra xem code đã tồn tại chưa
+    const existing = await this.paymentMethodRepository.findOne({
+      where: { code: createDto.code },
+    });
+
+    if (existing) {
+      throw new BadRequestException(`Mã phương thức thanh toán "${createDto.code}" đã tồn tại`);
+    }
+
+    const paymentMethod = this.paymentMethodRepository.create({
+      ...createDto,
+      trangThai: createDto.trangThai || 'active',
+    });
+
+    return await this.paymentMethodRepository.save(paymentMethod);
+  }
+
+  async updatePaymentMethod(id: string, updateDto: UpdatePaymentMethodDto): Promise<PaymentMethod> {
+    const paymentMethod = await this.findOnePaymentMethod(id);
+
+    // Nếu code thay đổi, kiểm tra xem có trùng với record khác không
+    if (updateDto.code && updateDto.code !== paymentMethod.code) {
+      const existing = await this.paymentMethodRepository.findOne({
+        where: { code: updateDto.code },
+      });
+
+      if (existing && existing.id !== id) {
+        throw new BadRequestException(`Mã phương thức thanh toán "${updateDto.code}" đã tồn tại`);
+      }
+    }
+
+    Object.assign(paymentMethod, updateDto);
+
+    return await this.paymentMethodRepository.save(paymentMethod);
+  }
+
+  async deletePaymentMethod(id: string): Promise<void> {
+    const paymentMethod = await this.findOnePaymentMethod(id);
+    await this.paymentMethodRepository.remove(paymentMethod);
+  }
+
+  async importPaymentMethodsFromExcel(file: Express.Multer.File): Promise<{
+    total: number;
+    success: number;
+    failed: number;
+    errors: Array<{ row: number; error: string }>;
+  }> {
+    try {
+      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(worksheet, { raw: false }) as any[];
+
+      const errors: Array<{ row: number; error: string }> = [];
+      let success = 0;
+      let failed = 0;
+
+      // Normalize header để xử lý khoảng trắng và chữ hoa/thường
+      const normalizeHeader = (header: string): string => {
+        return String(header).trim().toLowerCase().replace(/\s+/g, ' ');
+      };
+
+      // Mapping từ header Excel sang field của entity
+      const fieldMapping: Record<string, string> = {
+        'Mã': 'code',
+        'mã': 'code',
+        'Mã phương thức thanh toán': 'code',
+        'mã phương thức thanh toán': 'code',
+        'Diễn giải': 'description',
+        'diễn giải': 'description',
+        'Loại chứng từ': 'documentType',
+        'loại chứng từ': 'documentType',
+        'Loại Chứng Từ': 'documentType',
+      };
+
+      // Tạo reverse mapping với normalized keys
+      const normalizedMapping: Record<string, string> = {};
+      for (const [excelHeader, fieldName] of Object.entries(fieldMapping)) {
+        normalizedMapping[normalizeHeader(excelHeader)] = fieldName;
+      }
+
+      // Lấy danh sách headers thực tế từ Excel
+      const actualHeaders = data.length > 0 ? Object.keys(data[0]) : [];
+      this.logger.log(`Excel headers found: ${actualHeaders.join(', ')}`);
+
+      // Lọc bỏ các dòng trống trước khi xử lý và lưu lại index gốc
+      const nonEmptyRowsWithIndex = data
+        .map((row, index) => ({ row, originalIndex: index }))
+        .filter(({ row }) => {
+          return !actualHeaders.every(header => {
+            const value = row[header];
+            if (value === null || value === undefined) return true;
+            if (typeof value === 'string' && value.trim() === '') return true;
+            return false;
+          });
+        });
+
+      for (let i = 0; i < nonEmptyRowsWithIndex.length; i++) {
+        const { row, originalIndex } = nonEmptyRowsWithIndex[i];
+        const rowNumber = originalIndex + 2; // +2 vì bắt đầu từ row 2 (row 1 là header)
+
+        try {
+          const paymentMethodData: Partial<PaymentMethod> = {
+            trangThai: 'active',
+          };
+
+          // Map các fields từ Excel với flexible matching
+          for (const actualHeader of actualHeaders) {
+            const normalizedHeader = normalizeHeader(actualHeader);
+            const fieldName = normalizedMapping[normalizedHeader];
+            
+            if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
+              const rawValue = row[actualHeader];
+              if (typeof rawValue === 'string' && rawValue.trim() === '') {
+                continue;
+              }
+
+              // Tất cả đều là string fields
+              const stringValue = String(rawValue).trim();
+              if (stringValue !== '') {
+                paymentMethodData[fieldName] = stringValue;
+              }
+            }
+          }
+
+          // Validate required fields
+          if (!paymentMethodData.code || (typeof paymentMethodData.code === 'string' && paymentMethodData.code.trim() === '')) {
+            const availableHeaders = actualHeaders.join(', ');
+            errors.push({
+              row: rowNumber,
+              error: `Mã là bắt buộc nhưng không tìm thấy trong dòng ${rowNumber}. Headers trong file: ${availableHeaders}`,
+            });
+            failed++;
+            continue;
+          }
+
+          // Kiểm tra xem đã tồn tại chưa (dựa trên code)
+          const existing = await this.paymentMethodRepository.findOne({
+            where: { code: paymentMethodData.code },
+          });
+
+          if (existing) {
+            // Cập nhật record cũ
+            Object.assign(existing, paymentMethodData);
+            await this.paymentMethodRepository.save(existing);
+          } else {
+            // Tạo mới
+            const paymentMethod = this.paymentMethodRepository.create(paymentMethodData);
+            await this.paymentMethodRepository.save(paymentMethod);
+          }
+
+          success++;
+        } catch (error: any) {
+          this.logger.error(`Error importing payment method row ${rowNumber}: ${error.message}`);
+          errors.push({
+            row: rowNumber,
+            error: error.message || 'Unknown error',
+          });
+          failed++;
+        }
+      }
+
+      return {
+        total: nonEmptyRowsWithIndex.length,
+        success,
+        failed,
+        errors,
+      };
+    } catch (error: any) {
+      this.logger.error(`Error importing payment methods Excel file: ${error.message}`);
       throw new Error(`Lỗi khi import file Excel: ${error.message}`);
     }
   }

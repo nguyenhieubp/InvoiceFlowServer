@@ -17,6 +17,7 @@ import { CreateProductItemDto, UpdateProductItemDto } from '../../dto/create-pro
 import { CreatePromotionItemDto, UpdatePromotionItemDto } from '../../dto/create-promotion-item.dto';
 import { CreateWarehouseItemDto, UpdateWarehouseItemDto } from '../../dto/create-warehouse-item.dto';
 import { CreateWarehouseCodeMappingDto, UpdateWarehouseCodeMappingDto } from '../../dto/create-warehouse-code-mapping.dto';
+import { CreatePaymentMethodDto, UpdatePaymentMethodDto } from '../../dto/create-payment-method.dto';
 
 @Controller('categories')
 export class CategoriesController {
@@ -323,6 +324,83 @@ export class CategoriesController {
 
     try {
       const result = await this.categoriesService.importWarehouseCodeMappingsFromExcel(file);
+      return {
+        message: `Import thành công ${result.success}/${result.total} bản ghi`,
+        ...result,
+      };
+    } catch (error: any) {
+      throw new BadRequestException(
+        error.message || 'Lỗi khi import file Excel',
+      );
+    }
+  }
+
+  // ========== PAYMENT METHOD ENDPOINTS ==========
+
+  @Get('payment-methods')
+  async findAllPaymentMethods(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.categoriesService.findAllPaymentMethods({
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 50,
+      search,
+    });
+  }
+
+  @Get('payment-methods/code/:code')
+  async findPaymentMethodByCode(@Param('code') code: string) {
+    return this.categoriesService.findPaymentMethodByCode(code);
+  }
+
+  @Get('payment-methods/:id')
+  async findOnePaymentMethod(@Param('id') id: string) {
+    return this.categoriesService.findOnePaymentMethod(id);
+  }
+
+  @Post('payment-methods')
+  async createPaymentMethod(@Body() createDto: CreatePaymentMethodDto) {
+    return this.categoriesService.createPaymentMethod(createDto);
+  }
+
+  @Put('payment-methods/:id')
+  async updatePaymentMethod(
+    @Param('id') id: string,
+    @Body() updateDto: UpdatePaymentMethodDto,
+  ) {
+    return this.categoriesService.updatePaymentMethod(id, updateDto);
+  }
+
+  @Delete('payment-methods/:id')
+  async deletePaymentMethod(@Param('id') id: string) {
+    await this.categoriesService.deletePaymentMethod(id);
+    return { message: 'Payment method deleted successfully' };
+  }
+
+  @Post('payment-methods/import')
+  @UseInterceptors(FileInterceptor('file'))
+  async importPaymentMethodsExcel(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('File không được tìm thấy');
+    }
+
+    // Validate file type
+    const allowedMimes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'text/csv',
+    ];
+    
+    if (!allowedMimes.includes(file.mimetype)) {
+      throw new BadRequestException(
+        'File không hợp lệ. Vui lòng upload file Excel (.xlsx, .xls) hoặc CSV',
+      );
+    }
+
+    try {
+      const result = await this.categoriesService.importPaymentMethodsFromExcel(file);
       return {
         message: `Import thành công ${result.success}/${result.total} bản ghi`,
         ...result,

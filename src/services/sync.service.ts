@@ -3978,5 +3978,467 @@ export class SyncService {
       throw error;
     }
   }
+
+  /**
+   * Helper method để lưu cashio data vào database
+   * @param cashData - Array of cashio records từ API
+   * @param date - Ngày sync (format: DDMMMYYYY)
+   * @param brand - Brand name
+   * @returns Object chứa savedCount và skippedCount
+   */
+  private async saveCashioData(cashData: any[], date: string, brand?: string): Promise<{ savedCount: number; skippedCount: number; errors: string[] }> {
+    const errors: string[] = [];
+    let savedCount = 0;
+    let skippedCount = 0;
+
+    if (cashData.length === 0) {
+      return { savedCount: 0, skippedCount: 0, errors: [] };
+    }
+
+    try {
+      // Parse docdate từ string sang Date
+      const parseDocdate = (docdateStr: string): Date => {
+        // Format: "03-10-2025 10:30"
+        const parts = docdateStr.split(' ');
+        const datePart = parts[0]; // "03-10-2025"
+        const timePart = parts[1] || '00:00'; // "10:30"
+        const [day, month, year] = datePart.split('-');
+        const [hour, minute] = timePart.split(':');
+        return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+      };
+
+      const parseRefnoIdate = (refnoIdateStr: string): Date | null => {
+        if (!refnoIdateStr || refnoIdateStr === '00:00' || refnoIdateStr.includes('00:00')) {
+          return null;
+        }
+        // Format: "03-10-2025 00:00"
+        const parts = refnoIdateStr.split(' ');
+        const datePart = parts[0]; // "03-10-2025"
+        const [day, month, year] = datePart.split('-');
+        return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      };
+
+      // Lưu từng cashio record vào database (chỉ insert nếu chưa có, skip nếu đã có)
+      for (const cash of cashData) {
+        try {
+          // Tìm xem đã có record với api_id chưa (api_id là unique từ API)
+          const existingCashio = await this.dailyCashioRepository.findOne({
+            where: { api_id: cash.id },
+          });
+
+          // Nếu đã có record với api_id này rồi → skip, không lưu nữa
+          if (existingCashio) {
+            skippedCount++;
+            continue;
+          }
+
+          const parsedRefnoIdate = cash.refno_idate ? parseRefnoIdate(cash.refno_idate) : undefined;
+          
+          const cashioData: Partial<DailyCashio> = {
+            api_id: cash.id,
+            code: cash.code,
+            fop_syscode: cash.fop_syscode || undefined,
+            fop_description: cash.fop_description || undefined,
+            so_code: cash.so_code || '',
+            master_code: cash.master_code || undefined,
+            docdate: parseDocdate(cash.docdate),
+            branch_code: cash.branch_code || undefined,
+            partner_code: cash.partner_code || undefined,
+            partner_name: cash.partner_name || undefined,
+            refno: cash.refno || undefined,
+            refno_idate: parsedRefnoIdate || undefined,
+            total_in: cash.total_in ? Number(cash.total_in) : 0,
+            total_out: cash.total_out ? Number(cash.total_out) : 0,
+            sync_date: date,
+            brand: brand || undefined,
+          };
+
+          // Insert new record
+          const newCashio = this.dailyCashioRepository.create(cashioData);
+          await this.dailyCashioRepository.save(newCashio);
+          savedCount++;
+        } catch (cashioError: any) {
+          const errorMsg = `Failed to save cashio record ${cash.code}: ${cashioError?.message || cashioError}`;
+          this.logger.warn(errorMsg);
+          errors.push(errorMsg);
+        }
+      }
+
+      this.logger.log(`[Cashio] Đã lưu ${savedCount} cashio records mới, bỏ qua ${skippedCount} records đã tồn tại (tổng ${cashData.length} records từ API)`);
+    } catch (error: any) {
+      const errorMsg = `Failed to save cashio data to database: ${error?.message || error}`;
+      this.logger.error(errorMsg);
+      errors.push(errorMsg);
+    }
+
+    return { savedCount, skippedCount, errors };
+  }
+
+  /**
+   * Đồng bộ cashio theo ngày cho một brand hoặc tất cả brands
+   * @param date - Date format: DDMMMYYYY (ví dụ: 02NOV2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   * @returns Kết quả đồng bộ
+   */
+  async syncCashioByDate(date: string, brand?: string): Promise<{
+    success: boolean;
+    totalRecordsCount: number;
+    totalSavedCount: number;
+    totalSkippedCount: number;
+    brandResults: Array<{
+      brand: string;
+      recordsCount: number;
+      savedCount: number;
+      skippedCount: number;
+      errors?: string[];
+    }>;
+    errors?: string[];
+  }> {
+    try {
+      this.logger.log(`[Cashio] Bắt đầu đồng bộ cashio cho ngày ${date}${brand ? ` cho brand ${brand}` : ' cho tất cả brands'}`);
+
+      const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
+      let totalRecordsCount = 0;
+      let totalSavedCount = 0;
+      let totalSkippedCount = 0;
+      const brandResults: Array<{
+        brand: string;
+        recordsCount: number;
+        savedCount: number;
+        skippedCount: number;
+        errors?: string[];
+      }> = [];
+      const allErrors: string[] = [];
+
+      for (const brandName of brands) {
+        try {
+          this.logger.log(`[Cashio] Đang đồng bộ ${brandName} cho ngày ${date}`);
+
+          // Gọi API để lấy cashio data
+          const cashData = await this.zappyApiService.getDailyCash(date, brandName);
+          const recordsCount = cashData.length;
+          totalRecordsCount += recordsCount;
+
+          // Lưu vào database
+          const saveResult = await this.saveCashioData(cashData, date, brandName);
+          totalSavedCount += saveResult.savedCount;
+          totalSkippedCount += saveResult.skippedCount;
+
+          if (saveResult.errors.length > 0) {
+            allErrors.push(...saveResult.errors);
+          }
+
+          brandResults.push({
+            brand: brandName,
+            recordsCount,
+            savedCount: saveResult.savedCount,
+            skippedCount: saveResult.skippedCount,
+            errors: saveResult.errors.length > 0 ? saveResult.errors : undefined,
+          });
+
+          this.logger.log(`[Cashio] Hoàn thành đồng bộ ${brandName}: ${saveResult.savedCount} mới, ${saveResult.skippedCount} đã tồn tại (tổng ${recordsCount} records)`);
+        } catch (brandError: any) {
+          const errorMsg = `[${brandName}] Lỗi khi đồng bộ cashio: ${brandError?.message || brandError}`;
+          this.logger.error(errorMsg);
+          allErrors.push(errorMsg);
+
+          brandResults.push({
+            brand: brandName,
+            recordsCount: 0,
+            savedCount: 0,
+            skippedCount: 0,
+            errors: [errorMsg],
+          });
+        }
+      }
+
+      this.logger.log(`[Cashio] Hoàn thành đồng bộ cashio cho ngày ${date}: ${totalSavedCount} mới, ${totalSkippedCount} đã tồn tại (tổng ${totalRecordsCount} records từ tất cả brands)`);
+
+      return {
+        success: true,
+        totalRecordsCount,
+        totalSavedCount,
+        totalSkippedCount,
+        brandResults,
+        errors: allErrors.length > 0 ? allErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Error syncing cashio by date: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Đồng bộ cashio theo khoảng ngày cho một brand hoặc tất cả brands
+   * @param startDate - Date format: DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param endDate - Date format: DDMMMYYYY (ví dụ: 30NOV2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   * @returns Kết quả đồng bộ
+   */
+  async syncCashioByDateRange(startDate: string, endDate: string, brand?: string): Promise<{
+    success: boolean;
+    totalRecordsCount: number;
+    totalSavedCount: number;
+    totalSkippedCount: number;
+    brandResults: Array<{
+      brand: string;
+      recordsCount: number;
+      savedCount: number;
+      skippedCount: number;
+      errors?: string[];
+    }>;
+    errors?: string[];
+  }> {
+    try {
+      this.logger.log(`[Cashio Range] Bắt đầu đồng bộ cashio từ ${startDate} đến ${endDate}${brand ? ` cho brand ${brand}` : ' cho tất cả brands'}`);
+
+      // Parse dates từ DDMMMYYYY sang Date object
+      const parseDate = (dateStr: string): Date => {
+        const day = parseInt(dateStr.substring(0, 2));
+        const monthStr = dateStr.substring(2, 5).toUpperCase();
+        const year = parseInt(dateStr.substring(5, 9));
+        const monthMap: Record<string, number> = {
+          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+        };
+        const month = monthMap[monthStr] || 0;
+        return new Date(year, month, day);
+      };
+
+      const fromDate = parseDate(startDate);
+      const toDate = parseDate(endDate);
+
+      if (fromDate > toDate) {
+        throw new Error('startDate phải nhỏ hơn hoặc bằng endDate');
+      }
+
+      // Generate danh sách các ngày cần sync
+      const datesToSync: string[] = [];
+      const currentDate = new Date(fromDate);
+      while (currentDate <= toDate) {
+        const day = String(currentDate.getDate()).padStart(2, '0');
+        const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const month = monthNames[currentDate.getMonth()];
+        const year = currentDate.getFullYear();
+        const dateStr = `${day}${month}${year}`;
+        datesToSync.push(dateStr);
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      this.logger.log(`[Cashio Range] Sẽ đồng bộ ${datesToSync.length} ngày từ ${startDate} đến ${endDate}`);
+
+      const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
+      let totalRecordsCount = 0;
+      let totalSavedCount = 0;
+      let totalSkippedCount = 0;
+      const brandResults: Array<{
+        brand: string;
+        recordsCount: number;
+        savedCount: number;
+        skippedCount: number;
+        errors?: string[];
+      }> = [];
+      const allErrors: string[] = [];
+
+      // Đồng bộ từng brand
+      for (const brandName of brands) {
+        let brandRecordsCount = 0;
+        let brandSavedCount = 0;
+        let brandSkippedCount = 0;
+        const brandErrors: string[] = [];
+
+        try {
+          this.logger.log(`[Cashio Range] Bắt đầu đồng bộ brand: ${brandName}`);
+
+          // Đồng bộ từng ngày
+          for (const dateStr of datesToSync) {
+            try {
+              this.logger.log(`[Cashio Range] Đang đồng bộ ${brandName} cho ngày ${dateStr}`);
+
+              // Gọi API để lấy cashio data
+              const cashData = await this.zappyApiService.getDailyCash(dateStr, brandName);
+              brandRecordsCount += cashData.length;
+
+              // Lưu vào database
+              const saveResult = await this.saveCashioData(cashData, dateStr, brandName);
+              brandSavedCount += saveResult.savedCount;
+              brandSkippedCount += saveResult.skippedCount;
+
+              if (saveResult.errors.length > 0) {
+                brandErrors.push(...saveResult.errors);
+              }
+
+              // Thêm delay nhỏ giữa các request để tránh quá tải API
+              await new Promise(resolve => setTimeout(resolve, 100));
+            } catch (dateError: any) {
+              const errorMsg = `[${brandName}] Lỗi khi đồng bộ ngày ${dateStr}: ${dateError?.message || dateError}`;
+              this.logger.error(errorMsg);
+              brandErrors.push(errorMsg);
+            }
+          }
+
+          totalRecordsCount += brandRecordsCount;
+          totalSavedCount += brandSavedCount;
+          totalSkippedCount += brandSkippedCount;
+
+          if (brandErrors.length > 0) {
+            allErrors.push(...brandErrors);
+          }
+
+          brandResults.push({
+            brand: brandName,
+            recordsCount: brandRecordsCount,
+            savedCount: brandSavedCount,
+            skippedCount: brandSkippedCount,
+            errors: brandErrors.length > 0 ? brandErrors : undefined,
+          });
+
+          this.logger.log(`[Cashio Range] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandSkippedCount} đã tồn tại (tổng ${brandRecordsCount} records)`);
+        } catch (brandError: any) {
+          const errorMsg = `[${brandName}] Lỗi khi đồng bộ cashio range: ${brandError?.message || brandError}`;
+          this.logger.error(errorMsg);
+          allErrors.push(errorMsg);
+
+          brandResults.push({
+            brand: brandName,
+            recordsCount: 0,
+            savedCount: 0,
+            skippedCount: 0,
+            errors: [errorMsg],
+          });
+        }
+      }
+
+      this.logger.log(`[Cashio Range] Hoàn thành đồng bộ cashio từ ${startDate} đến ${endDate}: ${totalSavedCount} mới, ${totalSkippedCount} đã tồn tại (tổng ${totalRecordsCount} records từ tất cả brands)`);
+
+      return {
+        success: true,
+        totalRecordsCount,
+        totalSavedCount,
+        totalSkippedCount,
+        brandResults,
+        errors: allErrors.length > 0 ? allErrors : undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Error syncing cashio by date range: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy danh sách cashio với filter và pagination
+   */
+  async getCashio(params: {
+    page?: number;
+    limit?: number;
+    brand?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    branchCode?: string;
+    soCode?: string;
+    partnerCode?: string;
+  }): Promise<{
+    success: boolean;
+    data: DailyCashio[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    try {
+      const page = params.page || 1;
+      const limit = params.limit || 10;
+      const skip = (page - 1) * limit;
+
+      const queryBuilder = this.dailyCashioRepository
+        .createQueryBuilder('cashio')
+        .orderBy('cashio.docdate', 'DESC')
+        .addOrderBy('cashio.code', 'ASC');
+
+      // Filter by brand
+      if (params.brand) {
+        queryBuilder.andWhere('cashio.brand = :brand', { brand: params.brand });
+      }
+
+      // Filter by branchCode
+      if (params.branchCode) {
+        queryBuilder.andWhere('cashio.branch_code = :branchCode', { branchCode: params.branchCode });
+      }
+
+      // Filter by soCode
+      if (params.soCode) {
+        queryBuilder.andWhere('(cashio.so_code = :soCode OR cashio.master_code = :soCode)', { soCode: params.soCode });
+      }
+
+      // Filter by partnerCode
+      if (params.partnerCode) {
+        queryBuilder.andWhere('cashio.partner_code = :partnerCode', { partnerCode: params.partnerCode });
+      }
+
+      // Filter by dateFrom
+      if (params.dateFrom) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day);
+        };
+        const fromDate = parseDate(params.dateFrom);
+        queryBuilder.andWhere('cashio.docdate >= :dateFrom', { dateFrom: fromDate });
+      }
+
+      // Filter by dateTo
+      if (params.dateTo) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day, 23, 59, 59);
+        };
+        const toDate = parseDate(params.dateTo);
+        queryBuilder.andWhere('cashio.docdate <= :dateTo', { dateTo: toDate });
+      }
+
+      // Get total count
+      const total = await queryBuilder.getCount();
+
+      // Apply pagination
+      queryBuilder.skip(skip).take(limit);
+
+      // Get data
+      const data = await queryBuilder.getMany();
+
+      const totalPages = Math.ceil(total / limit);
+
+      return {
+        success: true,
+        data,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`Error getting cashio: ${error?.message || error}`);
+      throw error;
+    }
+  }
 }
 

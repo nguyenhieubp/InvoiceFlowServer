@@ -622,5 +622,118 @@ export class SyncController {
       );
     }
   }
+
+  /**
+   * Đồng bộ cashio theo ngày cho một brand hoặc tất cả brands
+   * @param date - Date format: DDMMMYYYY (ví dụ: 02NOV2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   */
+  @Post('cashio')
+  async syncCashio(@Body('date') date: string, @Body('brand') brand?: string) {
+    if (!date || (typeof date === 'string' && date.trim() === '')) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 02NOV2025)',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const result = await this.syncService.syncCashioByDate(date, brand);
+      return {
+        ...result,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi đồng bộ cashio',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Đồng bộ cashio theo khoảng ngày cho một brand hoặc tất cả brands
+   * @param startDate - Date format: DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param endDate - Date format: DDMMMYYYY (ví dụ: 30NOV2025)
+   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
+   */
+  @Post('cashio/range')
+  async syncCashioByDateRange(
+    @Body('startDate') startDate: string,
+    @Body('endDate') endDate: string,
+    @Body('brand') brand?: string,
+  ) {
+    if (!startDate || !endDate || (typeof startDate === 'string' && startDate.trim() === '') || (typeof endDate === 'string' && endDate.trim() === '')) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01NOV2025)',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const result = await this.syncService.syncCashioByDateRange(startDate, endDate, brand);
+      return {
+        ...result,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi đồng bộ cashio theo khoảng ngày',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Lấy danh sách cashio với filter và pagination
+   */
+  @Get('cashio')
+  async getCashio(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('brand') brand?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('branchCode') branchCode?: string,
+    @Query('soCode') soCode?: string,
+    @Query('partnerCode') partnerCode?: string,
+  ) {
+    try {
+      const result = await this.syncService.getCashio({
+        page: page ? parseInt(page, 10) : 1,
+        limit: limit ? parseInt(limit, 10) : 10,
+        brand,
+        dateFrom,
+        dateTo,
+        branchCode,
+        soCode,
+        partnerCode,
+      });
+      return result;
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi lấy danh sách cashio',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }
 

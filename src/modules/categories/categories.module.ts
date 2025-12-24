@@ -7,12 +7,13 @@ import { ProductItem } from '../../entities/product-item.entity';
 import { PromotionItem } from '../../entities/promotion-item.entity';
 import { WarehouseItem } from '../../entities/warehouse-item.entity';
 import { WarehouseCodeMapping } from '../../entities/warehouse-code-mapping.entity';
+import { PaymentMethod } from '../../entities/payment-method.entity';
 import { Customer } from '../../entities/customer.entity';
 import { Sale } from '../../entities/sale.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ProductItem, PromotionItem, WarehouseItem, WarehouseCodeMapping, Customer, Sale]),
+    TypeOrmModule.forFeature([ProductItem, PromotionItem, WarehouseItem, WarehouseCodeMapping, PaymentMethod, Customer, Sale]),
     HttpModule,
   ],
   controllers: [CategoriesController],
