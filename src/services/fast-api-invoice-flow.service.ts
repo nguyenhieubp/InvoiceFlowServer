@@ -336,7 +336,6 @@ export class FastApiInvoiceFlowService {
     return obj;
       };
       const finalPayload = removeEmptyFields(salesReturnData);
-      console.log('finalPayload: ',JSON.stringify(finalPayload, null, 2));
       
       const result = await this.fastApiService.submitSalesReturn(finalPayload);
       this.logger.log(`[Flow] Sales return ${salesReturnData.so_ct || 'N/A'} created successfully`);

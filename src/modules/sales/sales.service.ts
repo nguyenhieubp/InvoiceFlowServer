@@ -5132,14 +5132,6 @@ export class SalesService {
         salesReturnPayload.dien_giai = orderData.docCode;
       }
 
-      // Log payload để debug (chỉ log detail đầu tiên để tránh log quá dài)
-      this.logger.debug(`[SalesReturn] Built payload for ${orderData.docCode}`);
-      this.logger.debug(`[SalesReturn] Main payload fields: ${Object.keys(salesReturnPayload).join(', ')}`);
-      if (detail.length > 0) {
-        this.logger.debug(`[SalesReturn] First detail item fields: ${Object.keys(detail[0]).join(', ')}`);
-        this.logger.debug(`[SalesReturn] First detail item: ${JSON.stringify(detail[0], null, 2)}`);
-      }
-
       return salesReturnPayload;
     } catch (error: any) {
       this.logger.error(`Error building sales return data: ${error?.message || error}`);
