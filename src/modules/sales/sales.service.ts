@@ -1051,18 +1051,29 @@ export class SalesService {
     calculatedFields: { maLo: string; maCtkmTangHang: string | null; muaHangCkVip: string; maKho: string | null; isTangHang: boolean; isDichVu: boolean; promCodeDisplay: string | null },
     order?: any
   ): any {
-    // Tính toán giaBan nếu chưa có
-    const tienHang = sale.tienHang || sale.linetotal || sale.revenue || 0;
+    // Kiểm tra đơn "03. Đổi điểm" trước khi tính toán giá
+    const isDoiDiemForDisplay = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
+    
+    // Tính toán giaBan và tienHang
+    // Nếu là đơn "03. Đổi điểm": set giaBan = 0 và tienHang = 0 (không tính lại)
+    let tienHang = sale.tienHang || sale.linetotal || sale.revenue || 0;
     const qty = sale.qty || 0;
     let giaBan = sale.giaBan || 0;
-    if (giaBan === 0 && tienHang != null && qty > 0) {
-      giaBan = tienHang / qty;
+    
+    if (isDoiDiemForDisplay) {
+      // Đơn "03. Đổi điểm": fix cứng giaBan = 0 và tienHang = 0
+      giaBan = 0;
+      tienHang = 0;
+    } else {
+      // Các đơn khác: tính giaBan nếu chưa có
+      if (giaBan === 0 && tienHang != null && qty > 0) {
+        giaBan = tienHang / qty;
+      }
     }
 
     // Tính toán muaHangGiamGiaDisplay
     // Nếu là đơn "03. Đổi điểm": set muaHangGiamGiaDisplay = "TT DIEM DO"
     // Nếu không phải hàng tặng và không phải "03. Đổi điểm": dùng promCode
-    const isDoiDiemForDisplay = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
     
     let muaHangGiamGiaDisplay: string | null = null;
     if (isDoiDiemForDisplay) {
@@ -1090,7 +1101,9 @@ export class SalesService {
       muaHangGiamGiaDisplay: muaHangGiamGiaDisplay,
       other_discamt: other_discamt, // Set = 0 cho đơn "03. Đổi điểm"
       chietKhauMuaHangGiamGia: other_discamt, // Set = 0 cho đơn "03. Đổi điểm"
-      giaBan: giaBan, // Đảm bảo giaBan đã được tính toán
+      giaBan: giaBan, // Đơn "03. Đổi điểm": = 0, các đơn khác: đã được tính toán
+      tienHang: tienHang, // Đơn "03. Đổi điểm": = 0, các đơn khác: giữ nguyên từ sale
+      linetotal: isDoiDiemForDisplay ? 0 : (sale.linetotal ?? tienHang), // Đơn "03. Đổi điểm": = 0
       promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
       // Đảm bảo ordertypeName được trả về (từ database hoặc từ ordertype nếu ordertypeName không có)
       ordertypeName: sale.ordertypeName || sale.ordertype || null,
@@ -3604,14 +3617,26 @@ export class SalesService {
         return await this.handleSaleReturnFlow(orderData, docCode);
       }
 
-      // Xử lý SALE_ORDER không có stock transfer
-      if (docSourceType === 'SALE_ORDER') {
-        const saleOrderResult = await this.handleSaleOrderWithoutStockTransfer(orderData, docCode);
-        // Nếu có kết quả (không có stock transfer), trả về kết quả
+      // Xử lý đơn hàng có đuôi _X (ví dụ: SO45.01574458_X)
+      // Cả đơn có _X và đơn gốc (bỏ _X) đều sẽ có action = 1
+      if (this.hasUnderscoreX(docCode)) {
+        const saleOrderResult = await this.handleSaleOrderWithUnderscoreX(orderData, docCode);
+        // Nếu có kết quả, trả về kết quả
         if (saleOrderResult !== null) {
           return saleOrderResult;
         }
-        // Nếu null (có stock transfer), tiếp tục flow bình thường
+      }
+
+      // Xử lý đơn gốc (không có _X) nếu có đơn tương ứng với _X
+      // Ví dụ: SO45.01574458 nếu có SO45.01574458_X thì cũng sẽ có action = 1
+      const docCodeWithX = `${docCode}_X`;
+      const hasCorrespondingXOrder = await this.checkOrderExists(docCodeWithX);
+      if (hasCorrespondingXOrder) {
+        const saleOrderResult = await this.handleSaleOrderWithUnderscoreX(orderData, docCode);
+        // Nếu có kết quả, trả về kết quả
+        if (saleOrderResult !== null) {
+          return saleOrderResult;
+        }
       }
 
       // ============================================
@@ -3644,12 +3669,12 @@ export class SalesService {
       if (hasDoiDiemOrder) {
         const invoiceData = await this.buildFastApiInvoiceData(orderData);
         try {
-          // Bước 1: Gọi Fast/salesOrder với action = 1
+          // Bước 1: Gọi Fast/salesOrder với action = 0
           const salesOrderResult = await this.fastApiInvoiceFlowService.createSalesOrder({
             ...invoiceData,
             customer: orderData.customer,
             ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-          }, 1); // action = 1 cho đơn "03. Đổi điểm"
+          }, 0); // action = 0 cho đơn "03. Đổi điểm"
 
           // Bước 2: Gọi Fast/salesInvoice sau khi salesOrder thành công
           let salesInvoiceResult: any = null;
@@ -4602,31 +4627,34 @@ export class SalesService {
           ck09_nt + ck10_nt + ck11_nt + ck12_nt + ck13_nt + ck14_nt + ck15_nt + ck16_nt +
           ck17_nt + ck18_nt + ck19_nt + ck20_nt + ck21_nt + ck22_nt;
 
+        // Với đơn hàng "03. Đổi điểm": gia_ban và tien_hang luôn = 0, không tính lại
         // Với đơn hàng "01.Thường": tien_hang đã được tính từ qty (stock transfer) * giaBan ở trên
         // Với các đơn hàng khác: Tính tien_hang từ sale như bình thường
-        if (!isNormalOrder) {
-        // tien_hang phải là giá gốc (trước chiết khấu)
-        // Ưu tiên: mn_linetotal > linetotal > tienHang > (revenue + tongChietKhau)
-          tienHangGoc = toNumber((sale as any).mn_linetotal || sale.linetotal || sale.tienHang, 0);
-        if (tienHangGoc === 0) {
-          // Nếu không có giá gốc, tính từ revenue + chiết khấu
-          tienHangGoc = tienHang + tongChietKhau;
-        }
+        if (!isDoiDiem && !isDoiDiemForCk05) {
+          if (!isNormalOrder) {
+            // tien_hang phải là giá gốc (trước chiết khấu)
+            // Ưu tiên: mn_linetotal > linetotal > tienHang > (revenue + tongChietKhau)
+            tienHangGoc = toNumber((sale as any).mn_linetotal || sale.linetotal || sale.tienHang, 0);
+            if (tienHangGoc === 0) {
+              // Nếu không có giá gốc, tính từ revenue + chiết khấu
+              tienHangGoc = tienHang + tongChietKhau;
+            }
 
-        // Tính gia_ban: giá gốc (trước chiết khấu)
-        // Nếu sale.giaBan đã có giá trị, dùng nó (đó là giá gốc)
-        // Nếu không, tính từ tienHangGoc
-        if (giaBan === 0 && qty > 0) {
-          giaBan = tienHangGoc / qty;
-        } else if (giaBan === 0 && tienHangGoc > 0 && qty > 0) {
-          // Fallback: nếu không có chiết khấu, dùng tienHangGoc / qty
-          giaBan = tienHangGoc / qty;
-          }
-        } else {
-          // Với đơn hàng "01.Thường": tienHangGoc đã được tính từ qty * giaBan ở trên
-          // Chỉ cần đảm bảo giaBan đã có giá trị
-          if (giaBan === 0 && qty > 0 && tienHangGoc > 0) {
-            giaBan = tienHangGoc / qty;
+            // Tính gia_ban: giá gốc (trước chiết khấu)
+            // Nếu sale.giaBan đã có giá trị, dùng nó (đó là giá gốc)
+            // Nếu không, tính từ tienHangGoc
+            if (giaBan === 0 && qty > 0) {
+              giaBan = tienHangGoc / qty;
+            } else if (giaBan === 0 && tienHangGoc > 0 && qty > 0) {
+              // Fallback: nếu không có chiết khấu, dùng tienHangGoc / qty
+              giaBan = tienHangGoc / qty;
+            }
+          } else {
+            // Với đơn hàng "01.Thường": tienHangGoc đã được tính từ qty * giaBan ở trên
+            // Chỉ cần đảm bảo giaBan đã có giá trị
+            if (giaBan === 0 && qty > 0 && tienHangGoc > 0) {
+              giaBan = tienHangGoc / qty;
+            }
           }
         }
 
@@ -5402,23 +5430,48 @@ export class SalesService {
    * Case 2: Không có stock transfer → Gọi API salesOrder với action=1
    */
   /**
-   * Xử lý SALE_ORDER không có stock transfer
-   * Gọi API salesOrder với action: 1
+   * Helper: Kiểm tra xem docCode có đuôi _X không (ví dụ: SO45.01574458_X)
    */
-  private async handleSaleOrderWithoutStockTransfer(orderData: any, docCode: string): Promise<any> {
-    // Kiểm tra xem có stock transfer không
-    const docCodesForStockTransfer = this.getDocCodesForStockTransfer([docCode]);
-    const stockTransfers = await this.stockTransferRepository.find({
-      where: { soCode: In(docCodesForStockTransfer) },
-    });
+  private hasUnderscoreX(docCode: string): boolean {
+    if (!docCode) return false;
+    return docCode.trim().endsWith('_X');
+  }
 
-    // Nếu có stock transfer, không xử lý ở đây (sẽ xử lý ở flow bình thường)
-    if (stockTransfers && stockTransfers.length > 0) {
-      // Có stock transfer, không xử lý ở đây, để flow bình thường xử lý
-      return null;
+  /**
+   * Helper: Lấy đơn gốc từ đơn có đuôi _X (ví dụ: SO45.01574458_X => SO45.01574458)
+   */
+  private getBaseDocCode(docCode: string): string {
+    if (!docCode) return docCode;
+    const trimmed = docCode.trim();
+    if (trimmed.endsWith('_X')) {
+      return trimmed.slice(0, -2); // Bỏ '_X' ở cuối
     }
+    return trimmed;
+  }
 
-    // Không có stock transfer → Gọi API salesOrder với action: 1
+  /**
+   * Helper: Kiểm tra xem có đơn tương ứng với _X không (ví dụ: SO45.01574458 => SO45.01574458_X)
+   */
+  private async checkOrderExists(docCode: string): Promise<boolean> {
+    if (!docCode) return false;
+    try {
+      const count = await this.saleRepository.count({
+        where: { docCode: docCode },
+      });
+      return count > 0;
+    } catch (error) {
+      this.logger.error(`Error checking order existence for ${docCode}: ${error?.message || error}`);
+      return false;
+    }
+  }
+
+  /**
+   * Xử lý đơn hàng có đuôi _X (ví dụ: SO45.01574458_X)
+   * Gọi API salesOrder với action: 1
+   * Cả đơn có _X và đơn gốc (bỏ _X) đều sẽ có action = 1
+   */
+  private async handleSaleOrderWithUnderscoreX(orderData: any, docCode: string): Promise<any> {
+    // Đơn có đuôi _X → Gọi API salesOrder với action: 1
     const invoiceData = await this.buildFastApiInvoiceData(orderData);
 
     // Gọi API salesOrder với action = 1 (không cần tạo/cập nhật customer)
@@ -5428,7 +5481,7 @@ export class SalesService {
         ...invoiceData,
         customer: orderData.customer,
         ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-      }, 1); // action = 1 cho đơn hàng không có stock transfer
+      }, 1); // action = 1 cho đơn hàng có đuôi _X
 
       // Lưu vào bảng kê hóa đơn
       const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
@@ -5488,7 +5541,7 @@ export class SalesService {
         fastApiResponse: JSON.stringify(error?.response?.data || error),
       });
 
-      this.logger.error(`SALE_ORDER without stock transfer creation failed for order ${docCode}: ${errorMessage}`);
+      this.logger.error(`SALE_ORDER with _X suffix creation failed for order ${docCode}: ${errorMessage}`);
 
       return {
         success: false,
