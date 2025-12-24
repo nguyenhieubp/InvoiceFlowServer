@@ -310,6 +310,54 @@ export class FastApiInvoiceFlowService {
   }
 
   /**
+   * Tạo hàng bán trả lại (salesReturn) trong Fast API
+   * 2.15/ Hàng bán trả lại
+   * Sử dụng cho SALE_RETURN có stock transfer
+   */
+  async createSalesReturn(salesReturnData: any): Promise<any> {
+    this.logger.log(`[Flow] Creating sales return ${salesReturnData.so_ct || 'N/A'}...`);
+    try {
+      // Helper function để loại bỏ các field null, undefined, hoặc empty string
+      const removeEmptyFields = (obj: any): any => {
+        if (obj === null || obj === undefined) {
+          return obj;
+        }
+        if (Array.isArray(obj)) {
+          return obj.map(item => removeEmptyFields(item));
+        }
+        if (typeof obj === 'object') {
+          const cleaned: any = {};
+          for (const [key, value] of Object.entries(obj)) {
+            // Giữ lại các giá trị: 0, false, empty array, date objects
+            const shouldKeep = value !== null && value !== undefined && value !== '';
+            if (shouldKeep) {
+              cleaned[key] = removeEmptyFields(value);
+            }
+          }
+          return cleaned;
+        }
+        return obj;
+      };
+
+      // Log payload để debug
+      this.logger.debug(`[Flow] Sales return payload: ${JSON.stringify(salesReturnData, null, 2)}`);
+
+      const finalPayload = removeEmptyFields(salesReturnData);
+      
+      const result = await this.fastApiService.submitSalesReturn(finalPayload);
+      this.logger.log(`[Flow] Sales return ${salesReturnData.so_ct || 'N/A'} created successfully`);
+      return result;
+    } catch (error: any) {
+      this.logger.error(`[Flow] Failed to create sales return ${salesReturnData.so_ct || 'N/A'}: ${error?.message || error}`);
+      if (error?.response) {
+        this.logger.error(`[Flow] Sales return error response status: ${error.response.status}`);
+        this.logger.error(`[Flow] Sales return error response data: ${JSON.stringify(error.response.data)}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Tạo phiếu tạo gộp – xuất tách (gxtInvoice) trong Fast API
    * Sử dụng cho đơn dịch vụ: detail (nhập - productType = 'S'), ndetail (xuất - productType = 'I')
    */

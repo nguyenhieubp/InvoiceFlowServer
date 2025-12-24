@@ -3441,7 +3441,7 @@ export class SalesService {
           // Gọi API salesReturn
           let result: any;
           try {
-            result = await this.fastApiService.submitSalesReturn(salesReturnData);
+            result = await this.fastApiInvoiceFlowService.createSalesReturn(salesReturnData);
 
             // Lưu vào bảng kê hóa đơn
             const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
@@ -3518,21 +3518,7 @@ export class SalesService {
           // Build invoice data để lấy thông tin cần thiết
           const invoiceData = await this.buildFastApiInvoiceData(orderData);
 
-          // Tạo/cập nhật customer trước
-          if (orderData.customer) {
-            await this.fastApiInvoiceFlowService.createOrUpdateCustomer({
-              ma_kh: this.normalizeMaKh(orderData.customer.code),
-              ten_kh: orderData.customer.name || '',
-              dia_chi: orderData.customer.address || undefined,
-              ngay_sinh: orderData.customer.birthday ? new Date(orderData.customer.birthday).toISOString().split('T')[0] : undefined,
-              so_cccd: orderData.customer.idnumber || undefined,
-              e_mail: undefined,
-              gioi_tinh: orderData.customer.sexual || undefined,
-              dien_thoai: orderData.customer.mobile || undefined,
-            });
-          }
-
-          // Gọi API salesOrder với action = 1
+          // Gọi API salesOrder với action = 1 (không cần tạo/cập nhật customer)
           let result: any;
           try {
             result = await this.fastApiInvoiceFlowService.createSalesOrder({
@@ -3904,7 +3890,7 @@ export class SalesService {
       let gxtInvoiceResult: any = null;
       if (importLines.length > 0 || exportLines.length > 0) {
         this.logger.log(
-          `[ServiceOrderFlow] Tạo GxtInvoice: ${importLines.length} dòng nhập (S) → detail, ${exportLines.length} dòng xuất (I) → ndetail`
+          `[ServiceOrderFlow] Tạo GxtInvoice: ${exportLines.length} dòng xuất (I) → detail, ${importLines.length} dòng nhập (S) → ndetail`
         );
 
         const gxtInvoiceData = await this.buildGxtInvoiceData(orderData, importLines, exportLines);
@@ -3997,8 +3983,8 @@ export class SalesService {
 
   /**
    * Build GxtInvoice data (Phiếu tạo gộp – xuất tách)
-   * - detail: các dòng productType = 'S' (nhập)
-   * - ndetail: các dòng productType = 'I' (xuất)
+   * - detail: các dòng productType = 'I' (xuất)
+   * - ndetail: các dòng productType = 'S' (nhập)
    */
   private async buildGxtInvoiceData(orderData: any, importLines: any[], exportLines: any[]): Promise<any> {
     const formatDateISO = (date: Date | string): string => {
@@ -4079,14 +4065,16 @@ export class SalesService {
         tien_nt2: Number(tienNt2),
         ma_nx: 'NX01', // Fix cứng theo yêu cầu
         ma_bp: limitString(maBp, 8),
+        dong: index + 1, // Số thứ tự dòng tăng dần (1, 2, 3...)
+        dong_vt_goc: 1, // Dòng vật tư gốc luôn là 1
       };
     };
 
-    // Build detail (nhập - productType = 'S')
-    const detail = await Promise.all(importLines.map((sale, index) => buildLineItem(sale, index)));
+    // Build detail (xuất - productType = 'I')
+    const detail = await Promise.all(exportLines.map((sale, index) => buildLineItem(sale, index)));
 
-    // Build ndetail (xuất - productType = 'I')
-    const ndetail = await Promise.all(exportLines.map((sale, index) => buildLineItem(sale, index)));
+    // Build ndetail (nhập - productType = 'S')
+    const ndetail = await Promise.all(importLines.map((sale, index) => buildLineItem(sale, index)));
 
     // Lấy kho nhập và kho xuất (có thể cần map từ branch/department)
     // Tạm thời dùng branchCode làm kho mặc định
@@ -4103,6 +4091,7 @@ export class SalesService {
       ngay_lct: ngayLct,
       so_ct: orderData.docCode || '',
       dien_giai: orderData.docCode || '',
+      action: 0, // 0: Mới, Sửa; 1: Xóa
       detail: detail,
       ndetail: ndetail,
     };
