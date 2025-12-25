@@ -1096,8 +1096,8 @@ export class SalesService {
       tienHang = 0;
     } else {
       // Các đơn khác: tính giaBan nếu chưa có
-      if (giaBan === 0 && tienHang != null && qty > 0) {
-        giaBan = tienHang / qty;
+    if (giaBan === 0 && tienHang != null && qty > 0) {
+      giaBan = tienHang / qty;
       }
     }
 
@@ -1977,7 +1977,7 @@ export class SalesService {
       
       // Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
       const maKhoFromStockTransfer = await this.getMaKhoFromStockTransfer(sale, docCode, stockTransfers, saleMaterialCode, stockTransferMap);
-      
+
       const calculatedFields = this.calculateSaleFields(sale, loyaltyProduct, department, sale.branchCode);
       // Override maKho từ calculatedFields bằng maKho từ stock transfer
       calculatedFields.maKho = maKhoFromStockTransfer;
@@ -4370,6 +4370,35 @@ export class SalesService {
         fastApiResponse: JSON.stringify(result),
       });
 
+      // Xử lý cashio payment (chỉ cho đơn hàng "01. Thường" và khi tạo invoice thành công)
+      if (isSuccess) {
+        const firstSale = orderData.sales && orderData.sales.length > 0 ? orderData.sales[0] : null;
+        const ordertypeName = firstSale?.ordertypeName || firstSale?.ordertype || '';
+        const normalizedOrderType = String(ordertypeName).trim();
+        const isNormalOrder = normalizedOrderType === '01.Thường' || normalizedOrderType === '01. Thường';
+
+        if (isNormalOrder) {
+          try {
+            this.logger.log(`[Cashio] Bắt đầu xử lý cashio payment cho đơn hàng ${docCode} (01. Thường)`);
+            const cashioResult = await this.fastApiInvoiceFlowService.processCashioPayment(
+              docCode,
+              orderData,
+              invoiceData,
+            );
+
+            if (cashioResult.cashReceiptResults && cashioResult.cashReceiptResults.length > 0) {
+              this.logger.log(`[Cashio] Đã tạo ${cashioResult.cashReceiptResults.length} cashReceipt thành công cho đơn hàng ${docCode}`);
+            }
+            if (cashioResult.creditAdviceResults && cashioResult.creditAdviceResults.length > 0) {
+              this.logger.log(`[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode}`);
+            }
+          } catch (error: any) {
+            // Log lỗi nhưng không throw để không chặn flow chính
+            this.logger.warn(`[Cashio] Lỗi khi xử lý cashio payment cho đơn hàng ${docCode}: ${error?.message || error}`);
+          }
+        }
+      }
+
       if (!isSuccess) {
         // Có lỗi từ Fast API
         this.logger.error(`Invoice creation failed for order ${docCode}: ${responseMessage}`);
@@ -4735,7 +4764,7 @@ export class SalesService {
     const d = typeof date === 'string' ? new Date(date) : date;
     if (isNaN(d.getTime())) {
       return '';
-    }
+  }
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
@@ -4997,12 +5026,12 @@ export class SalesService {
           maCk05Value = null;
           formattedMaCk05 = null;
         } else {
-          // Tính ma_ck05 giống frontend - truyền customer từ orderData nếu sale chưa có
-          const saleWithCustomer = {
-            ...sale,
-            customer: sale.customer || orderData.customer,
-            brand: sale.customer?.brand || orderData.customer?.brand || sale?.brand || orderData?.brand,
-          };
+        // Tính ma_ck05 giống frontend - truyền customer từ orderData nếu sale chưa có
+        const saleWithCustomer = {
+          ...sale,
+          customer: sale.customer || orderData.customer,
+          brand: sale.customer?.brand || orderData.customer?.brand || sale?.brand || orderData?.brand,
+        };
           maCk05Value = this.calculateMaCk05(saleWithCustomer);
           formattedMaCk05 = this.formatVoucherCode(maCk05Value);
         }
@@ -5083,22 +5112,22 @@ export class SalesService {
         // Với các đơn hàng khác: Tính tien_hang từ sale như bình thường
         if (!isDoiDiem && !isDoiDiemForCk05) {
           if (!isNormalOrder) {
-            // tien_hang phải là giá gốc (trước chiết khấu)
-            // Ưu tiên: mn_linetotal > linetotal > tienHang > (revenue + tongChietKhau)
+        // tien_hang phải là giá gốc (trước chiết khấu)
+        // Ưu tiên: mn_linetotal > linetotal > tienHang > (revenue + tongChietKhau)
             tienHangGoc = toNumber((sale as any).mn_linetotal || sale.linetotal || sale.tienHang, 0);
-            if (tienHangGoc === 0) {
-              // Nếu không có giá gốc, tính từ revenue + chiết khấu
-              tienHangGoc = tienHang + tongChietKhau;
-            }
+        if (tienHangGoc === 0) {
+          // Nếu không có giá gốc, tính từ revenue + chiết khấu
+          tienHangGoc = tienHang + tongChietKhau;
+        }
 
-            // Tính gia_ban: giá gốc (trước chiết khấu)
-            // Nếu sale.giaBan đã có giá trị, dùng nó (đó là giá gốc)
-            // Nếu không, tính từ tienHangGoc
-            if (giaBan === 0 && qty > 0) {
-              giaBan = tienHangGoc / qty;
-            } else if (giaBan === 0 && tienHangGoc > 0 && qty > 0) {
-              // Fallback: nếu không có chiết khấu, dùng tienHangGoc / qty
-              giaBan = tienHangGoc / qty;
+        // Tính gia_ban: giá gốc (trước chiết khấu)
+        // Nếu sale.giaBan đã có giá trị, dùng nó (đó là giá gốc)
+        // Nếu không, tính từ tienHangGoc
+        if (giaBan === 0 && qty > 0) {
+          giaBan = tienHangGoc / qty;
+        } else if (giaBan === 0 && tienHangGoc > 0 && qty > 0) {
+          // Fallback: nếu không có chiết khấu, dùng tienHangGoc / qty
+          giaBan = tienHangGoc / qty;
             }
           } else {
             // Với đơn hàng "01.Thường": tienHangGoc đã được tính từ qty * giaBan ở trên
@@ -5404,7 +5433,7 @@ export class SalesService {
           ...(isDoiDiem || isDoiDiemForCk05
             ? { ma_ck05: '' }
             : (ck05_nt > 0 ? {
-                ma_ck05: limitString(formattedMaCk05 || toString(sale.maCk05 || 'VOUCHER', ''), 32),
+            ma_ck05: limitString(formattedMaCk05 || toString(sale.maCk05 || 'VOUCHER', ''), 32),
               } : {})
           ),
           // ck05_nt: Tiền (Decimal)

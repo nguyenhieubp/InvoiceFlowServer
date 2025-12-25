@@ -763,6 +763,82 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
 
 
   /**
+   * Gọi API cashReceipt (Phiếu thu tiền mặt)
+   * @param cashReceiptData - Dữ liệu phiếu thu tiền mặt
+   */
+  async submitCashReceipt(cashReceiptData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Gọi API cashReceipt với token
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/cashReceipt`,
+          cashReceiptData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('Cash receipt submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`Error submitting cash receipt: ${error?.message || error}`);
+      if (error?.response) {
+        this.logger.error(`Cash receipt error response status: ${error.response.status}`);
+        this.logger.error(`Cash receipt error response data: ${JSON.stringify(error.response.data)}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Gọi API creditAdvice (Giấy báo có)
+   * @param creditAdviceData - Dữ liệu giấy báo có
+   */
+  async submitCreditAdvice(creditAdviceData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Gọi API creditAdvice với token
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/creditAdvice`,
+          creditAdviceData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('Credit advice submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`Error submitting credit advice: ${error?.message || error}`);
+      if (error?.response) {
+        this.logger.error(`Credit advice error response status: ${error.response.status}`);
+        this.logger.error(`Credit advice error response data: ${JSON.stringify(error.response.data)}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Gọi API gxtInvoice (Phiếu tạo gộp – xuất tách)
    * @param gxtInvoiceData - Dữ liệu phiếu tạo gộp/xuất tách
    */

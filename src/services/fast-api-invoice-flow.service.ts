@@ -1,6 +1,7 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { FastApiService } from './fast-api.service';
 import { CategoriesService } from '../modules/categories/categories.service';
+import { SyncService } from './sync.service';
 
 /**
  * Service quản lý tạo invoice trong Fast API
@@ -13,6 +14,8 @@ export class FastApiInvoiceFlowService {
   constructor(
     private readonly fastApiService: FastApiService,
     private readonly categoriesService: CategoriesService,
+    @Inject(forwardRef(() => SyncService))
+    private readonly syncService: SyncService,
   ) {}
 
   /**
@@ -342,6 +345,186 @@ export class FastApiInvoiceFlowService {
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}${month}${day}`;
+  }
+
+  /**
+   * Format date thành ISO string cho Fast API (YYYY-MM-DDTHH:mm:ss)
+   */
+  private formatDateISO(date: Date | string): string {
+    const d = typeof date === 'string' ? new Date(date) : date;
+    if (isNaN(d.getTime())) {
+      return new Date().toISOString();
+    }
+    return d.toISOString();
+  }
+
+  /**
+   * Xử lý cashio và gọi API cashReceipt hoặc creditAdvice nếu cần
+   * Chỉ áp dụng cho đơn hàng "01. Thường"
+   * Một đơn hàng có thể có nhiều phương thức thanh toán
+   * @param docCode - Mã đơn hàng
+   * @param orderData - Dữ liệu đơn hàng
+   * @param invoiceData - Dữ liệu invoice đã build
+   */
+  async processCashioPayment(docCode: string, orderData: any, invoiceData: any): Promise<{
+    cashReceiptResults?: any[];
+    creditAdviceResults?: any[];
+  }> {
+    try {
+      // Lấy cashio data theo soCode
+      const cashioResult = await this.syncService.getCashio({
+        page: 1,
+        limit: 100,
+        soCode: docCode,
+      });
+
+      if (!cashioResult.success || !cashioResult.data || cashioResult.data.length === 0) {
+        this.logger.debug(`[Cashio] Không tìm thấy cashio data cho đơn hàng ${docCode}`);
+        return {};
+      }
+
+      const cashReceiptResults: any[] = [];
+      const creditAdviceResults: any[] = [];
+
+      // Xử lý tất cả các cashio records (một đơn hàng có thể có nhiều phương thức thanh toán)
+      for (const cashioData of cashioResult.data) {
+        const totalIn = parseFloat(String(cashioData.total_in || '0'));
+
+        // Trường hợp 1: fop_syscode = "CASH" và total_in > 0 → Gọi cashReceipt
+        if (cashioData.fop_syscode === 'CASH' && totalIn > 0) {
+          try {
+            this.logger.log(`[Cashio] Phát hiện CASH payment cho đơn hàng ${docCode} (${cashioData.code}), gọi cashReceipt API`);
+            
+            const cashReceiptPayload = this.buildCashReceiptPayload(cashioData, orderData, invoiceData);
+            const cashReceiptResult = await this.fastApiService.submitCashReceipt(cashReceiptPayload);
+            
+            cashReceiptResults.push({
+              cashioCode: cashioData.code,
+              result: cashReceiptResult,
+            });
+          } catch (error: any) {
+            this.logger.warn(`[Cashio] Lỗi khi tạo cashReceipt cho ${cashioData.code}: ${error?.message || error}`);
+          }
+          continue;
+        }
+
+        // Trường hợp 2: fop_syscode != "CASH" → Kiểm tra payment method
+        if (cashioData.fop_syscode && cashioData.fop_syscode !== 'CASH') {
+          try {
+            // Lấy payment method theo code
+            const paymentMethod = await this.categoriesService.findPaymentMethodByCode(cashioData.fop_syscode);
+            
+            if (paymentMethod && paymentMethod.documentType === 'Giấy báo có') {
+           
+              const creditAdvicePayload = this.buildCreditAdvicePayload(cashioData, orderData, invoiceData, paymentMethod);
+              const creditAdviceResult = await this.fastApiService.submitCreditAdvice(creditAdvicePayload);
+              
+              creditAdviceResults.push({
+                cashioCode: cashioData.code,
+                result: creditAdviceResult,
+              });
+            } else if (!paymentMethod || !paymentMethod.documentType) {
+              this.logger.debug(`[Cashio] Payment method "${cashioData.fop_syscode}" (${cashioData.code}) không có documentType hoặc không phải "Giấy báo có", không gọi API nào`);
+            }
+          } catch (error: any) {
+            this.logger.warn(`[Cashio] Lỗi khi xử lý payment method "${cashioData.fop_syscode}" cho ${cashioData.code}: ${error?.message || error}`);
+          }
+        }
+      }
+
+      // Trả về kết quả (có thể có nhiều kết quả)
+      const result: any = {};
+      if (cashReceiptResults.length > 0) {
+        result.cashReceiptResults = cashReceiptResults;
+      }
+      if (creditAdviceResults.length > 0) {
+        result.creditAdviceResults = creditAdviceResults;
+      }
+
+      return result;
+    } catch (error: any) {
+      // Log lỗi nhưng không throw để không chặn flow chính
+      this.logger.warn(`[Cashio] Lỗi khi xử lý cashio payment cho đơn hàng ${docCode}: ${error?.message || error}`);
+      return {};
+    }
+  }
+
+  /**
+   * Build payload cho cashReceipt API
+   */
+  private buildCashReceiptPayload(cashioData: any, orderData: any, invoiceData: any): any {
+    const totalIn = parseFloat(String(cashioData.total_in || '0'));
+    const docDate = cashioData.docdate || orderData.docDate || new Date();
+    
+    return {
+      action: 0,
+      ma_dvcs: invoiceData.ma_dvcs || cashioData.branch_code || '',
+      ma_kh: invoiceData.ma_kh || cashioData.partner_code || '',
+      ong_ba: orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba || '',
+      loai_ct: '2', // Mặc định 2 - Thu của khách hàng
+      dept_id: invoiceData.ma_bp || cashioData.branch_code || '',
+      dien_giai: `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
+      ngay_lct: this.formatDateISO(docDate),
+      so_ct: orderData.docCode || invoiceData.so_ct || '',
+      so_ct_tc: orderData.docCode || invoiceData.so_ct || '',
+      ma_nt: 'VND',
+      ty_gia: 1,
+      ma_cp1: '',
+      ma_cp2: '',
+      httt: 'CASH',
+      status: '0' as string,
+      detail: [
+        {
+          ma_kh_i: invoiceData.ma_kh || cashioData.partner_code || '',
+          tien: totalIn,
+          dien_giai: cashioData.refno || `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
+          ma_bp: invoiceData.ma_bp || cashioData.branch_code || '',
+          ma_vv: '',
+          ma_hd: '',
+          ma_phi: '',
+          ma_ku: '',
+        },
+      ],
+    };
+  }
+
+  /**
+   * Build payload cho creditAdvice API
+   */
+  private buildCreditAdvicePayload(cashioData: any, orderData: any, invoiceData: any, paymentMethod: any): any {
+    const totalIn = parseFloat(String(cashioData.total_in || '0'));
+    const docDate = cashioData.docdate || orderData.docDate || new Date();
+    
+    return {
+      action: 0,
+      ma_dvcs: invoiceData.ma_dvcs || cashioData.branch_code || '',
+      ma_kh: invoiceData.ma_kh || cashioData.partner_code || '',
+      ong_ba: orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba || '',
+      loai_ct: '2', // Mặc định 2 - Thu của khách hàng
+      dept_id: invoiceData.ma_bp || cashioData.branch_code || '',
+      dien_giai: `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
+      ngay_lct: this.formatDateISO(docDate),
+      so_ct: orderData.docCode || invoiceData.so_ct || '',
+      so_ct_tc: orderData.docCode || invoiceData.so_ct || '',
+      ma_nt: 'VND',
+      ty_gia: 1,
+      ma_cp1: '',
+      ma_cp2: '',
+      httt: paymentMethod.code || cashioData.fop_syscode || '',
+      status: '0',
+      detail: [
+        {
+          ma_kh_i: invoiceData.ma_kh || cashioData.partner_code || '',
+          tien: totalIn,
+          dien_giai: cashioData.refno || paymentMethod.description || `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
+          ma_bp: invoiceData.ma_bp || cashioData.branch_code || '',
+          ma_vv: '',
+          ma_hd: '',
+          ma_phi: '',
+          ma_ku: '',
+        },
+      ],
+    };
   }
 }
 

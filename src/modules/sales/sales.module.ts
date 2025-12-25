@@ -21,6 +21,7 @@ import { CheckFaceId } from '../../entities/check-face-id.entity';
 import { StockTransfer } from '../../entities/stock-transfer.entity';
 import { InvoicesModule } from '../invoices/invoices.module';
 import { CategoriesModule } from '../categories/categories.module';
+import { SyncModule } from '../sync/sync.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { CategoriesModule } from '../categories/categories.module';
     HttpModule,
     forwardRef(() => InvoicesModule),
     CategoriesModule,
+    forwardRef(() => SyncModule),
   ],
   controllers: [SalesController],
   providers: [SalesService, InvoicePrintService, ZappyApiService, FastApiService, FastApiInvoiceFlowService, LoyaltyService, InvoiceValidationService],
