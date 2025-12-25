@@ -4656,6 +4656,13 @@ export class SyncService {
       // Xử lý từng docCode
       for (const [docCode, stockTransfer] of docCodeMap) {
         try {
+          // Kiểm tra doctype phải là "STOCK_IO" mới gọi API warehouse (kiểm tra đầu tiên để tránh check các điều kiện khác)
+          if (stockTransfer.doctype !== 'STOCK_IO') {
+            this.logger.debug(`[Warehouse Auto] DocCode ${docCode} có doctype = "${stockTransfer.doctype}", bỏ qua (chỉ xử lý doctype = "STOCK_IO")`);
+            skippedCount++;
+            continue;
+          }
+
           // Kiểm tra docCode đã được xử lý warehouse chưa
           const existing = await this.warehouseProcessedRepository.findOne({
             where: { docCode },
@@ -4682,7 +4689,7 @@ export class SyncService {
           }
 
           // Gọi API warehouse
-          this.logger.log(`[Warehouse Auto] Đang xử lý warehouse cho docCode ${docCode} (ioType: ${stockTransfer.ioType})`);
+          this.logger.log(`[Warehouse Auto] Đang xử lý warehouse cho docCode ${docCode} (doctype: ${stockTransfer.doctype}, ioType: ${stockTransfer.ioType})`);
           const result = await this.fastApiInvoiceFlowService.processWarehouseFromStockTransfer(stockTransfer);
 
           // Lưu vào bảng tracking

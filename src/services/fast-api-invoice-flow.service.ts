@@ -549,6 +549,13 @@ export class FastApiInvoiceFlowService {
       );
     }
 
+    // Kiểm tra ioType phải là "I" hoặc "O"
+    if (stockTransfer.ioType !== 'I' && stockTransfer.ioType !== 'O') {
+      throw new BadRequestException(
+        `Không thể xử lý stock transfer có ioType = "${stockTransfer.ioType}". Chỉ chấp nhận "I" (nhập) hoặc "O" (xuất).`
+      );
+    }
+
     // Lấy ma_dvcs từ department API (ưu tiên), nếu không có thì fallback
     let department: any = null;
     if (stockTransfer.branchCode) {
@@ -635,19 +642,17 @@ export class FastApiInvoiceFlowService {
       ],
     };
 
-    // Gọi API tương ứng
+    // Gọi API tương ứng (ioType đã được validate ở trên)
     if (stockTransfer.ioType === 'I') {
       // Nhập kho
       this.logger.log(`[Warehouse] Tạo phiếu nhập kho cho ${stockTransfer.docCode}`);
       const result = await this.fastApiService.submitWarehouseReceipt(payload);
       return result;
-    } else if (stockTransfer.ioType === 'O') {
-      // Xuất kho
+    } else {
+      // Xuất kho (ioType = "O" - đã được validate ở trên)
       this.logger.log(`[Warehouse] Tạo phiếu xuất kho cho ${stockTransfer.docCode}`);
       const result = await this.fastApiService.submitWarehouseRelease(payload);
       return result;
-    } else {
-      throw new BadRequestException(`ioType không hợp lệ: "${stockTransfer.ioType}". Chỉ chấp nhận "I" (nhập) hoặc "O" (xuất).`);
     }
   }
 }
