@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException, Inject, forwardRef } from '@ne
 import { FastApiService } from './fast-api.service';
 import { CategoriesService } from '../modules/categories/categories.service';
 import { SyncService } from './sync.service';
+import { LoyaltyService } from './loyalty.service';
 
 /**
  * Service quản lý tạo invoice trong Fast API
@@ -16,7 +17,8 @@ export class FastApiInvoiceFlowService {
     private readonly categoriesService: CategoriesService,
     @Inject(forwardRef(() => SyncService))
     private readonly syncService: SyncService,
-  ) {}
+    private readonly loyaltyService: LoyaltyService,
+  ) { }
 
   /**
    * Helper: Loại bỏ các field null, undefined, hoặc empty string
@@ -32,7 +34,7 @@ export class FastApiInvoiceFlowService {
     if (typeof obj === 'object') {
       const cleaned: any = {};
       for (const [key, value] of Object.entries(obj)) {
-        const shouldKeep = value !== null && value !== undefined && value !== '' 
+        const shouldKeep = value !== null && value !== undefined && value !== ''
           || (keepMaLoAndSerial && (key === 'ma_lo' || key === 'so_serial'));
         if (shouldKeep) {
           cleaned[key] = this.removeEmptyFields(value, keepMaLoAndSerial);
@@ -117,7 +119,7 @@ export class FastApiInvoiceFlowService {
     try {
       const cleanOrderData = this.buildCleanPayload(orderData, action);
       const finalPayload = this.removeEmptyFields(cleanOrderData);
-      
+
       const result = await this.fastApiService.submitSalesOrder(finalPayload);
       this.logger.log(`[Flow] Sales order ${orderData.so_ct} created successfully`);
       return result;
@@ -149,16 +151,16 @@ export class FastApiInvoiceFlowService {
         // Cắt phần sau dấu "-" để lấy mã CTKM
         const parts = trimmed.split('-');
         let codeToCheck = parts[0] || trimmed;
-        
+
         // Loại bỏ prefix "FBV TT " nếu có (ví dụ: "FBV TT VCHB" → "VCHB")
         codeToCheck = codeToCheck.replace(/^FBV\s+TT\s+/i, '');
-        
+
         // Chuyển đổi các mã VC label sang format có khoảng trắng để match với Loyalty API
         // VCHB → VC HB, VCKM → VC KM, VCDV → VC DV
         codeToCheck = codeToCheck.replace(/VCHB/g, 'VC HB');
         codeToCheck = codeToCheck.replace(/VCKM/g, 'VC KM');
         codeToCheck = codeToCheck.replace(/VCDV/g, 'VC DV');
-        
+
         return codeToCheck;
       };
 
@@ -175,13 +177,13 @@ export class FastApiInvoiceFlowService {
               promotionCodes.add(codeToCheck);
             }
           }
-          
+
           // Collect các mã CTKM mua hàng giảm giá (ma_ck01 đến ma_ck22)
           // Lưu ý: ma_ck05 (Thanh toán voucher) không phải promotion code nên không cần validate
           for (let i = 1; i <= 22; i++) {
             // Bỏ qua ma_ck05 (Thanh toán voucher) - không cần validate với Loyalty API
             if (i === 5) continue;
-            
+
             const maCk = item[`ma_ck${i.toString().padStart(2, '0')}`];
             if (maCk && maCk.trim() !== '') {
               // Chỉ áp dụng getPromotionCodeToCheck cho ma_ck01
@@ -222,7 +224,7 @@ export class FastApiInvoiceFlowService {
       // Build clean payload (giống salesOrder nhưng action luôn = 0)
       const cleanInvoiceData = this.buildCleanPayload(invoiceData, 0);
       const finalPayload = this.removeEmptyFields(cleanInvoiceData);
-      
+
       const result = await this.fastApiService.submitSalesInvoice(finalPayload);
       this.logger.log(`[Flow] Sales invoice ${invoiceData.so_ct} created successfully`);
       return result;
@@ -242,7 +244,7 @@ export class FastApiInvoiceFlowService {
     this.logger.log(`[Flow] Creating sales return ${salesReturnData.so_ct || 'N/A'}...`);
     try {
       const finalPayload = this.removeEmptyFields(salesReturnData, false);
-      
+
       const result = await this.fastApiService.submitSalesReturn(finalPayload);
       this.logger.log(`[Flow] Sales return ${salesReturnData.so_ct || 'N/A'} created successfully`);
       return result;
@@ -266,7 +268,7 @@ export class FastApiInvoiceFlowService {
     try {
       this.logger.debug(`[Flow] GxtInvoice payload: ${JSON.stringify(gxtInvoiceData, null, 2)}`);
       const finalPayload = this.removeEmptyFields(gxtInvoiceData, false);
-      
+
       const result = await this.fastApiService.submitGxtInvoice(finalPayload);
       this.logger.log(`[Flow] GxtInvoice ${gxtInvoiceData.so_ct || 'N/A'} created successfully`);
       return result;
@@ -394,10 +396,10 @@ export class FastApiInvoiceFlowService {
         if (cashioData.fop_syscode === 'CASH' && totalIn > 0) {
           try {
             this.logger.log(`[Cashio] Phát hiện CASH payment cho đơn hàng ${docCode} (${cashioData.code}), gọi cashReceipt API`);
-            
+
             const cashReceiptPayload = this.buildCashReceiptPayload(cashioData, orderData, invoiceData);
             const cashReceiptResult = await this.fastApiService.submitCashReceipt(cashReceiptPayload);
-            
+
             cashReceiptResults.push({
               cashioCode: cashioData.code,
               result: cashReceiptResult,
@@ -413,12 +415,12 @@ export class FastApiInvoiceFlowService {
           try {
             // Lấy payment method theo code
             const paymentMethod = await this.categoriesService.findPaymentMethodByCode(cashioData.fop_syscode);
-            
+
             if (paymentMethod && paymentMethod.documentType === 'Giấy báo có') {
-           
+
               const creditAdvicePayload = this.buildCreditAdvicePayload(cashioData, orderData, invoiceData, paymentMethod);
               const creditAdviceResult = await this.fastApiService.submitCreditAdvice(creditAdvicePayload);
-              
+
               creditAdviceResults.push({
                 cashioCode: cashioData.code,
                 result: creditAdviceResult,
@@ -455,7 +457,7 @@ export class FastApiInvoiceFlowService {
   private buildCashReceiptPayload(cashioData: any, orderData: any, invoiceData: any): any {
     const totalIn = parseFloat(String(cashioData.total_in || '0'));
     const docDate = cashioData.docdate || orderData.docDate || new Date();
-    
+
     return {
       action: 0,
       ma_dvcs: invoiceData.ma_dvcs || cashioData.branch_code || '',
@@ -494,7 +496,7 @@ export class FastApiInvoiceFlowService {
   private buildCreditAdvicePayload(cashioData: any, orderData: any, invoiceData: any, paymentMethod: any): any {
     const totalIn = parseFloat(String(cashioData.total_in || '0'));
     const docDate = cashioData.docdate || orderData.docDate || new Date();
-    
+
     return {
       action: 0,
       ma_dvcs: invoiceData.ma_dvcs || cashioData.branch_code || '',
@@ -533,6 +535,13 @@ export class FastApiInvoiceFlowService {
    * @returns Kết quả từ API
    */
   async processWarehouseFromStockTransfer(stockTransfer: any): Promise<any> {
+    // Kiểm tra doctype phải là "STOCK_IO"
+    if (stockTransfer.doctype !== 'STOCK_IO') {
+      throw new BadRequestException(
+        `Không thể xử lý stock transfer có doctype = "${stockTransfer.doctype}". Chỉ chấp nhận doctype = "STOCK_IO".`
+      );
+    }
+
     // Kiểm tra soCode phải là "null" (string) hoặc null
     if (stockTransfer.soCode !== 'null' && stockTransfer.soCode !== null) {
       throw new BadRequestException(
@@ -540,11 +549,55 @@ export class FastApiInvoiceFlowService {
       );
     }
 
+    // Lấy ma_dvcs từ department API (ưu tiên), nếu không có thì fallback
+    let department: any = null;
+    if (stockTransfer.branchCode) {
+      try {
+        department = await this.categoriesService.getDepartmentFromLoyaltyAPI(stockTransfer.branchCode);
+      } catch (error: any) {
+        this.logger.warn(`Không thể lấy department cho branchCode ${stockTransfer.branchCode}: ${error?.message || error}`);
+      }
+    }
+
+    const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht || '';
+
+    // Fetch material catalog từ Loyalty API (giống bên sale)
+    let materialCatalog: any = null;
+    const itemCodeToFetch = stockTransfer.itemCode;
+    if (itemCodeToFetch) {
+      try {
+        materialCatalog = await this.loyaltyService.fetchProduct(itemCodeToFetch);
+        if (materialCatalog) {
+          this.logger.debug(`[Warehouse] Đã lấy material catalog cho itemCode ${itemCodeToFetch}`);
+        }
+      } catch (error: any) {
+        this.logger.warn(`Không thể lấy material catalog cho itemCode ${itemCodeToFetch}: ${error?.message || error}`);
+      }
+    }
+
+    // Lấy materialCode và unit từ material catalog (ưu tiên từ catalog, fallback từ stockTransfer)
+    const materialCode = materialCatalog?.materialCode || stockTransfer.materialCode || stockTransfer.itemCode || '';
+    const unit = materialCatalog?.unit || '';
+
+    // Map mã kho qua API warehouse-code-mappings (giống bên sale)
+    let mappedStockCode = stockTransfer.stockCode || '';
+    if (stockTransfer.stockCode) {
+      try {
+        const maMoi = await this.categoriesService.mapWarehouseCode(stockTransfer.stockCode);
+        // Nếu có maMoi (mapped = true) → dùng maMoi
+        // Nếu không có maMoi (mapped = false) → dùng giá trị gốc từ stockTransfer
+        mappedStockCode = maMoi || stockTransfer.stockCode;
+      } catch (error: any) {
+        // Nếu có lỗi khi gọi API mapping, fallback về giá trị gốc
+        this.logger.warn(`Không thể map warehouse code ${stockTransfer.stockCode}: ${error?.message || error}`);
+        mappedStockCode = stockTransfer.stockCode;
+      }
+    }
+
     // Build payload từ stock transfer
     const payload = {
-      ma_dvcs: stockTransfer.branchCode || '',
-      ma_kh: stockTransfer.branchCode || '', // Dùng branchCode làm ma_kh nếu không có
-      ong_ba: stockTransfer.branchCode || '',
+      ma_dvcs: maDvcs,
+      ma_kh: stockTransfer.branchCode || '',
       ma_gd: '2', // Fix cứng ma_gd = 2
       ngay_ct: stockTransfer.transDate || new Date().toISOString(),
       so_ct: stockTransfer.docCode || '',
@@ -553,17 +606,16 @@ export class FastApiInvoiceFlowService {
       dien_giai: stockTransfer.docDesc || `Phiếu ${stockTransfer.ioType === 'I' ? 'nhập' : 'xuất'} kho ${stockTransfer.docCode}`,
       detail: [
         {
-          ma_vt: stockTransfer.materialCode || stockTransfer.itemCode || '',
-          dvt: '', // Có thể lấy từ item nếu có
+          ma_vt: materialCode,
+          dvt: unit,
           so_serial: stockTransfer.batchSerial || '',
-          ma_kho: stockTransfer.stockCode || '',
+          ma_kho: mappedStockCode,
           so_luong: Math.abs(parseFloat(String(stockTransfer.qty || '0'))), // Lấy giá trị tuyệt đối
           gia_nt: 0,
           tien_nt: 0,
           ma_lo: stockTransfer.batchSerial || '',
           ma_nx: stockTransfer.lineInfo1 || '',
           ma_vv: '',
-          ma_bp: stockTransfer.branchCode || '',
           so_lsx: '',
           ma_sp: stockTransfer.itemCode || '',
           ma_hd: '',
@@ -587,11 +639,13 @@ export class FastApiInvoiceFlowService {
     if (stockTransfer.ioType === 'I') {
       // Nhập kho
       this.logger.log(`[Warehouse] Tạo phiếu nhập kho cho ${stockTransfer.docCode}`);
-      return await this.fastApiService.submitWarehouseReceipt(payload);
+      const result = await this.fastApiService.submitWarehouseReceipt(payload);
+      return result;
     } else if (stockTransfer.ioType === 'O') {
       // Xuất kho
       this.logger.log(`[Warehouse] Tạo phiếu xuất kho cho ${stockTransfer.docCode}`);
-      return await this.fastApiService.submitWarehouseRelease(payload);
+      const result = await this.fastApiService.submitWarehouseRelease(payload);
+      return result;
     } else {
       throw new BadRequestException(`ioType không hợp lệ: "${stockTransfer.ioType}". Chỉ chấp nhận "I" (nhập) hoặc "O" (xuất).`);
     }
