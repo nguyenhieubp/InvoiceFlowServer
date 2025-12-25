@@ -353,6 +353,16 @@ export class SalesService {
   }
 
   /**
+   * Helper: Kiểm tra xem đơn hàng có phải "06. Đầu tư" không
+   */
+  private isDauTuOrder(ordertype: string | null | undefined, ordertypeName: string | null | undefined): boolean {
+    const ordertypeValue = ordertype || ordertypeName || '';
+    return ordertypeValue.includes('06. Đầu tư') ||
+      ordertypeValue.includes('06.Đầu tư') ||
+      ordertypeValue.includes('06.  Đầu tư');
+  }
+
+  /**
    * Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
    * Logic: Match stock transfer theo itemCode và soCode, lấy stockCode
    * Xử lý đặc biệt cho đơn trả lại (RT): chuyển RT -> SO hoặc RT -> ST để match
@@ -1279,26 +1289,6 @@ export class SalesService {
 
       return {
         ...order,
-        // Thêm daily_cashio data với format nhất quán
-        dailyCashio: selectedCashio ? {
-          code: selectedCashio.code,
-          fop_syscode: selectedCashio.fop_syscode,
-          fop_description: selectedCashio.fop_description,
-          so_code: selectedCashio.so_code,
-          master_code: selectedCashio.master_code,
-          total_in: selectedCashio.total_in,
-          total_out: selectedCashio.total_out,
-          refno: selectedCashio.refno,
-          refno_idate: selectedCashio.refno_idate,
-          allCashioRecords: cashioRecords.map(c => ({
-            code: c.code,
-            fop_syscode: c.fop_syscode,
-            fop_description: c.fop_description,
-            total_in: c.total_in,
-            total_out: c.total_out,
-          })),
-        } : null,
-        // Giữ lại các field cũ để backward compatibility
         cashioData: cashioRecords.length > 0 ? cashioRecords : null,
         cashioFopSyscode: selectedCashio?.fop_syscode || null,
         cashioFopDescription: selectedCashio?.fop_description || null,
@@ -1515,27 +1505,6 @@ export class SalesService {
             })
           : [];
 
-        // Join với daily_cashio để lấy thông tin thanh toán
-        // Join theo: daily_cashio.so_code = sale.docCode HOẶC daily_cashio.master_code = sale.docCode
-        const cashioRecords = paginatedDocCodes.length > 0
-          ? await this.dailyCashioRepository
-              .createQueryBuilder('cashio')
-              .where('cashio.so_code IN (:...docCodes)', { docCodes: paginatedDocCodes })
-              .orWhere('cashio.master_code IN (:...docCodes)', { docCodes: paginatedDocCodes })
-              .getMany()
-          : [];
-
-        // Tạo map để join cashio với orders
-        const cashioMap = new Map<string, DailyCashio[]>();
-        paginatedDocCodes.forEach(docCode => {
-          const matchingCashios = cashioRecords.filter(c =>
-            c.so_code === docCode || c.master_code === docCode
-          );
-          if (matchingCashios.length > 0) {
-            cashioMap.set(docCode, matchingCashios);
-          }
-        });
-
         // Fetch products từ Loyalty API sử dụng LoyaltyService (cho cả sales và stock transfers)
         const stockTransferItemCodes = Array.from(
           new Set(
@@ -1554,37 +1523,11 @@ export class SalesService {
           paginatedDocCodes
         );
 
-        // Thêm promotionDisplayCode, maKho, maCtkmTangHang, producttype, stock transfers và daily_cashio vào các sales items
-        const enrichedOrders = await Promise.all(paginatedOrders.map(async (order) => {
-          // Lấy cashio records cho order này
-          const cashioRecords = cashioMap.get(order.docCode) || [];
-          const ecoinCashio = cashioRecords.find(c => c.fop_syscode === 'ECOIN');
-          const voucherCashio = cashioRecords.find(c => c.fop_syscode === 'VOUCHER');
-          const selectedCashio = ecoinCashio || voucherCashio || cashioRecords[0] || null;
-
-          return {
-            ...order,
-            // Thêm daily_cashio data vào order
-            dailyCashio: selectedCashio ? {
-              code: selectedCashio.code,
-              fop_syscode: selectedCashio.fop_syscode,
-              fop_description: selectedCashio.fop_description,
-              so_code: selectedCashio.so_code,
-              master_code: selectedCashio.master_code,
-              total_in: selectedCashio.total_in,
-              total_out: selectedCashio.total_out,
-              refno: selectedCashio.refno,
-              refno_idate: selectedCashio.refno_idate,
-              allCashioRecords: cashioRecords.map(c => ({
-                code: c.code,
-                fop_syscode: c.fop_syscode,
-                fop_description: c.fop_description,
-                total_in: c.total_in,
-                total_out: c.total_out,
-              })),
-            } : null,
-            stockTransfers: (stockTransferByDocCodeMap.get(order.docCode) || []).map(st => this.formatStockTransferForFrontend(st)),
-            sales: await Promise.all((order.sales || []).map(async (sale) => {
+        // Thêm promotionDisplayCode, maKho, maCtkmTangHang, producttype và stock transfers vào các sales items
+        const enrichedOrders = await Promise.all(paginatedOrders.map(async (order) => ({
+          ...order,
+          stockTransfers: (stockTransferByDocCodeMap.get(order.docCode) || []).map(st => this.formatStockTransferForFrontend(st)),
+          sales: await Promise.all((order.sales || []).map(async (sale) => {
             const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
             const maBp = department?.ma_bp || sale.branchCode || null;
             const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
@@ -1655,8 +1598,7 @@ export class SalesService {
               stockTransfers: saleStockTransfers.map(st => this.formatStockTransferForFrontend(st)),
             };
           })) || [],
-          };
-        }));
+        })));
 
         return {
           data: enrichedOrders,
@@ -3701,13 +3643,61 @@ export class SalesService {
       const docSourceType = docSourceTypeRaw ? String(docSourceTypeRaw).trim().toUpperCase() : '';
       
       // Xử lý SALE_RETURN
+      // Nhưng vẫn phải validate chỉ cho phép "01.Thường" và "01. Thường"
       if (docSourceType === 'SALE_RETURN') {
+        // Validate chỉ cho phép "01.Thường" và "01. Thường"
+        const validationResult = this.invoiceValidationService.validateOrderForInvoice({
+          docCode,
+          sales: orderData.sales,
+        });
+        if (!validationResult.success) {
+          await this.saveFastApiInvoice({
+            docCode,
+            maDvcs: orderData.branchCode || '',
+            maKh: orderData.customer?.code || '',
+            tenKh: orderData.customer?.name || '',
+            ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+            status: 0,
+            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
+            guid: null,
+            fastApiResponse: undefined,
+          });
+          return {
+            success: false,
+            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
+            result: null,
+          };
+        }
         return await this.handleSaleReturnFlow(orderData, docCode);
       }
 
       // Xử lý đơn hàng có đuôi _X (ví dụ: SO45.01574458_X)
       // Cả đơn có _X và đơn gốc (bỏ _X) đều sẽ có action = 1
+      // Nhưng vẫn phải validate chỉ cho phép "01.Thường" và "01. Thường"
       if (this.hasUnderscoreX(docCode)) {
+        // Validate chỉ cho phép "01.Thường" và "01. Thường"
+        const validationResult = this.invoiceValidationService.validateOrderForInvoice({
+          docCode,
+          sales: orderData.sales,
+        });
+        if (!validationResult.success) {
+          await this.saveFastApiInvoice({
+            docCode,
+            maDvcs: orderData.branchCode || '',
+            maKh: orderData.customer?.code || '',
+            tenKh: orderData.customer?.name || '',
+            ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+            status: 0,
+            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
+            guid: null,
+            fastApiResponse: undefined,
+          });
+          return {
+            success: false,
+            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
+            result: null,
+          };
+        }
         const saleOrderResult = await this.handleSaleOrderWithUnderscoreX(orderData, docCode);
         // Nếu có kết quả, trả về kết quả
         if (saleOrderResult !== null) {
@@ -3717,9 +3707,33 @@ export class SalesService {
 
       // Xử lý đơn gốc (không có _X) nếu có đơn tương ứng với _X
       // Ví dụ: SO45.01574458 nếu có SO45.01574458_X thì cũng sẽ có action = 1
+      // Nhưng vẫn phải validate chỉ cho phép "01.Thường" và "01. Thường"
       const docCodeWithX = `${docCode}_X`;
       const hasCorrespondingXOrder = await this.checkOrderExists(docCodeWithX);
       if (hasCorrespondingXOrder) {
+        // Validate chỉ cho phép "01.Thường" và "01. Thường"
+        const validationResult = this.invoiceValidationService.validateOrderForInvoice({
+          docCode,
+          sales: orderData.sales,
+        });
+        if (!validationResult.success) {
+          await this.saveFastApiInvoice({
+            docCode,
+            maDvcs: orderData.branchCode || '',
+            maKh: orderData.customer?.code || '',
+            tenKh: orderData.customer?.name || '',
+            ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+            status: 0,
+            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
+            guid: null,
+            fastApiResponse: undefined,
+          });
+          return {
+            success: false,
+            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
+            result: null,
+          };
+        }
         const saleOrderResult = await this.handleSaleOrderWithUnderscoreX(orderData, docCode);
         // Nếu có kết quả, trả về kết quả
         if (saleOrderResult !== null) {
@@ -3748,13 +3762,16 @@ export class SalesService {
       const hasTangSinhNhatOrder = sales.some((s: any) => 
         this.isTangSinhNhatOrder(s.ordertype, s.ordertypeName)
       );
+      const hasDauTuOrder = sales.some((s: any) => 
+        this.isDauTuOrder(s.ordertype, s.ordertypeName)
+      );
       const hasServiceOrder = sales.some((s: any) => {
         const normalized = normalizeOrderType(s.ordertypeName || s.ordertype);
         return normalized === '02. làm dịch vụ' || normalized === '02.làm dịch vụ';
       });
 
       // Nếu không phải các loại đơn đặc biệt được phép, validate chỉ cho phép "01.Thường"
-      if (!hasDoiDiemOrder && !hasDoiDvOrder && !hasTangSinhNhatOrder && !hasServiceOrder) {
+      if (!hasDoiDiemOrder && !hasDoiDvOrder && !hasTangSinhNhatOrder && !hasDauTuOrder && !hasServiceOrder) {
         const validationResult = this.invoiceValidationService.validateOrderForInvoice({
           docCode,
           sales: orderData.sales,
@@ -4103,6 +4120,117 @@ export class SalesService {
           }
 
           this.logger.error(`05. Tặng sinh nhật order creation failed for order ${docCode}: ${errorMessage}`);
+
+          await this.saveFastApiInvoice({
+            docCode,
+            maDvcs: orderData.branchCode || '',
+            maKh: orderData.customer?.code || '',
+            tenKh: orderData.customer?.name || '',
+            ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+            status: 0,
+            message: errorMessage,
+            guid: null,
+            fastApiResponse: error?.response?.data ? JSON.stringify(error.response.data) : undefined,
+          });
+
+          return {
+            success: false,
+            message: errorMessage,
+            result: error?.response?.data || error,
+          };
+        }
+      }
+
+      // Nếu là đơn "06. Đầu tư", gọi Fast/salesOrder và Fast/salesInvoice
+      if (hasDauTuOrder) {
+        const invoiceData = await this.buildFastApiInvoiceData(orderData);
+        try {
+          // Bước 1: Gọi Fast/salesOrder với action = 0
+          const salesOrderResult = await this.fastApiInvoiceFlowService.createSalesOrder({
+            ...invoiceData,
+            customer: orderData.customer,
+            ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+          }, 0); // action = 0 cho đơn "06. Đầu tư"
+
+          // Bước 2: Gọi Fast/salesInvoice sau khi salesOrder thành công
+          let salesInvoiceResult: any = null;
+          try {
+            salesInvoiceResult = await this.fastApiInvoiceFlowService.createSalesInvoice({
+              ...invoiceData,
+              customer: orderData.customer,
+              ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+            });
+          } catch (salesInvoiceError: any) {
+            // Nếu salesInvoice thất bại, log lỗi nhưng vẫn lưu kết quả salesOrder
+            let salesInvoiceErrorMessage = 'Tạo sales invoice thất bại (06. Đầu tư)';
+            if (salesInvoiceError?.response?.data) {
+              const errorData = salesInvoiceError.response.data;
+              if (Array.isArray(errorData) && errorData.length > 0) {
+                salesInvoiceErrorMessage = errorData[0].message || errorData[0].error || salesInvoiceErrorMessage;
+              } else if (errorData.message) {
+                salesInvoiceErrorMessage = errorData.message;
+              } else if (errorData.error) {
+                salesInvoiceErrorMessage = errorData.error;
+              } else if (typeof errorData === 'string') {
+                salesInvoiceErrorMessage = errorData;
+              }
+            } else if (salesInvoiceError?.message) {
+              salesInvoiceErrorMessage = salesInvoiceError.message;
+            }
+            this.logger.error(`06. Đầu tư sales invoice creation failed for order ${docCode}: ${salesInvoiceErrorMessage}`);
+          }
+
+          // Lưu vào bảng kê hóa đơn
+          const responseStatus = salesInvoiceResult ? 1 : (salesOrderResult ? 0 : 0);
+          const responseMessage = salesInvoiceResult
+            ? 'Tạo sales order và sales invoice thành công (06. Đầu tư)'
+            : salesOrderResult
+            ? 'Tạo sales order thành công, nhưng sales invoice thất bại (06. Đầu tư)'
+            : 'Tạo sales order và sales invoice thất bại (06. Đầu tư)';
+
+          await this.saveFastApiInvoice({
+            docCode,
+            maDvcs: orderData.branchCode || invoiceData.ma_dvcs || '',
+            maKh: orderData.customer?.code || invoiceData.ma_kh || '',
+            tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
+            ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+            status: responseStatus,
+            message: responseMessage,
+            guid: salesInvoiceResult?.guid || salesOrderResult?.guid || null,
+            fastApiResponse: JSON.stringify({
+              salesOrder: salesOrderResult,
+              salesInvoice: salesInvoiceResult,
+            }),
+          });
+
+          return {
+            success: !!salesInvoiceResult,
+            message: salesInvoiceResult
+              ? `Tạo sales order và sales invoice thành công cho đơn hàng ${docCode} (06. Đầu tư)`
+              : `Tạo sales order thành công nhưng sales invoice thất bại cho đơn hàng ${docCode} (06. Đầu tư)`,
+            result: {
+              salesOrder: salesOrderResult,
+              salesInvoice: salesInvoiceResult,
+            },
+          };
+        } catch (error: any) {
+          let errorMessage = 'Tạo sales order thất bại (06. Đầu tư)';
+          if (error?.response?.data) {
+            const errorData = error.response.data;
+            if (Array.isArray(errorData) && errorData.length > 0) {
+              errorMessage = errorData[0].message || errorData[0].error || errorMessage;
+            } else if (errorData.message) {
+              errorMessage = errorData.message;
+            } else if (errorData.error) {
+              errorMessage = errorData.error;
+            } else if (typeof errorData === 'string') {
+              errorMessage = errorData;
+            }
+          } else if (error?.message) {
+            errorMessage = error.message;
+          }
+
+          this.logger.error(`06. Đầu tư order creation failed for order ${docCode}: ${errorMessage}`);
 
           await this.saveFastApiInvoice({
             docCode,
