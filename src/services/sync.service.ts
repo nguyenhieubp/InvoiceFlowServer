@@ -808,31 +808,31 @@ export class SyncService {
       }
 
 
-      // Tạm thời comment: Tự động tạo hóa đơn cho tất cả các đơn hàng vừa đồng bộ (chạy ngầm ở background)
+      // Tự động tạo hóa đơn cho tất cả các đơn hàng vừa đồng bộ (chạy ngầm ở background)
       // Chỉ tạo invoice cho các đơn hàng trong ngày sync (từ orders vừa sync)
       // Lấy docCodes từ các orders vừa sync, sau đó kiểm tra xem có sales được lưu không
-      // const orderDocCodes = [...new Set(orders.map(order => order.docCode).filter((code: string) => code))];
+      const orderDocCodes = [...new Set(orders.map(order => order.docCode).filter((code: string) => code))];
       
       // Kiểm tra xem các đơn hàng này có sales được lưu trong database không
       // (để tránh lỗi khi order không có sales nào được lưu do filter dvt)
-      // const savedDocCodes = await this.saleRepository
-      //   .createQueryBuilder('sale')
-      //   .select('DISTINCT sale.docCode', 'docCode')
-      //   .where('sale.docCode IN (:...docCodes)', { docCodes: orderDocCodes })
-      //   .andWhere('sale.isProcessed = :isProcessed', { isProcessed: false })
-      //   .getRawMany();
+      const savedDocCodes = await this.saleRepository
+        .createQueryBuilder('sale')
+        .select('DISTINCT sale.docCode', 'docCode')
+        .where('sale.docCode IN (:...docCodes)', { docCodes: orderDocCodes })
+        .andWhere('sale.isProcessed = :isProcessed', { isProcessed: false })
+        .getRawMany();
       
-      // const docCodes = savedDocCodes.map((item: any) => item.docCode).filter((code: string) => code);
+      const docCodes = savedDocCodes.map((item: any) => item.docCode).filter((code: string) => code);
       
       // Tạo invoice ở background (không await) để trả về response ngay
-      // if (docCodes.length > 0) {
-      //   this.logger.log(`Bắt đầu tạo hóa đơn ngầm cho ${docCodes.length} đơn hàng...`);
-      //   
-      //   // Chạy ở background, không await
-      //   this.createInvoicesInBackground(docCodes, date).catch((error) => {
-      //     this.logger.error(`Lỗi khi tạo hóa đơn ngầm: ${error?.message || error}`);
-      //   });
-      // }
+      if (docCodes.length > 0) {
+        this.logger.log(`Bắt đầu tạo hóa đơn ngầm cho ${docCodes.length} đơn hàng...`);
+        
+        // Chạy ở background, không await
+        this.createInvoicesInBackground(docCodes, date).catch((error) => {
+          this.logger.error(`Lỗi khi tạo hóa đơn ngầm: ${error?.message || error}`);
+        });
+      }
 
       // Sync checkFaceID data từ API
       try {
