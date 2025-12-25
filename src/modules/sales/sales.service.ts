@@ -1279,6 +1279,26 @@ export class SalesService {
 
       return {
         ...order,
+        // Thêm daily_cashio data với format nhất quán
+        dailyCashio: selectedCashio ? {
+          code: selectedCashio.code,
+          fop_syscode: selectedCashio.fop_syscode,
+          fop_description: selectedCashio.fop_description,
+          so_code: selectedCashio.so_code,
+          master_code: selectedCashio.master_code,
+          total_in: selectedCashio.total_in,
+          total_out: selectedCashio.total_out,
+          refno: selectedCashio.refno,
+          refno_idate: selectedCashio.refno_idate,
+          allCashioRecords: cashioRecords.map(c => ({
+            code: c.code,
+            fop_syscode: c.fop_syscode,
+            fop_description: c.fop_description,
+            total_in: c.total_in,
+            total_out: c.total_out,
+          })),
+        } : null,
+        // Giữ lại các field cũ để backward compatibility
         cashioData: cashioRecords.length > 0 ? cashioRecords : null,
         cashioFopSyscode: selectedCashio?.fop_syscode || null,
         cashioFopDescription: selectedCashio?.fop_description || null,
@@ -1495,6 +1515,27 @@ export class SalesService {
             })
           : [];
 
+        // Join với daily_cashio để lấy thông tin thanh toán
+        // Join theo: daily_cashio.so_code = sale.docCode HOẶC daily_cashio.master_code = sale.docCode
+        const cashioRecords = paginatedDocCodes.length > 0
+          ? await this.dailyCashioRepository
+              .createQueryBuilder('cashio')
+              .where('cashio.so_code IN (:...docCodes)', { docCodes: paginatedDocCodes })
+              .orWhere('cashio.master_code IN (:...docCodes)', { docCodes: paginatedDocCodes })
+              .getMany()
+          : [];
+
+        // Tạo map để join cashio với orders
+        const cashioMap = new Map<string, DailyCashio[]>();
+        paginatedDocCodes.forEach(docCode => {
+          const matchingCashios = cashioRecords.filter(c =>
+            c.so_code === docCode || c.master_code === docCode
+          );
+          if (matchingCashios.length > 0) {
+            cashioMap.set(docCode, matchingCashios);
+          }
+        });
+
         // Fetch products từ Loyalty API sử dụng LoyaltyService (cho cả sales và stock transfers)
         const stockTransferItemCodes = Array.from(
           new Set(
@@ -1513,11 +1554,37 @@ export class SalesService {
           paginatedDocCodes
         );
 
-        // Thêm promotionDisplayCode, maKho, maCtkmTangHang, producttype và stock transfers vào các sales items
-        const enrichedOrders = await Promise.all(paginatedOrders.map(async (order) => ({
-          ...order,
-          stockTransfers: (stockTransferByDocCodeMap.get(order.docCode) || []).map(st => this.formatStockTransferForFrontend(st)),
-          sales: await Promise.all((order.sales || []).map(async (sale) => {
+        // Thêm promotionDisplayCode, maKho, maCtkmTangHang, producttype, stock transfers và daily_cashio vào các sales items
+        const enrichedOrders = await Promise.all(paginatedOrders.map(async (order) => {
+          // Lấy cashio records cho order này
+          const cashioRecords = cashioMap.get(order.docCode) || [];
+          const ecoinCashio = cashioRecords.find(c => c.fop_syscode === 'ECOIN');
+          const voucherCashio = cashioRecords.find(c => c.fop_syscode === 'VOUCHER');
+          const selectedCashio = ecoinCashio || voucherCashio || cashioRecords[0] || null;
+
+          return {
+            ...order,
+            // Thêm daily_cashio data vào order
+            dailyCashio: selectedCashio ? {
+              code: selectedCashio.code,
+              fop_syscode: selectedCashio.fop_syscode,
+              fop_description: selectedCashio.fop_description,
+              so_code: selectedCashio.so_code,
+              master_code: selectedCashio.master_code,
+              total_in: selectedCashio.total_in,
+              total_out: selectedCashio.total_out,
+              refno: selectedCashio.refno,
+              refno_idate: selectedCashio.refno_idate,
+              allCashioRecords: cashioRecords.map(c => ({
+                code: c.code,
+                fop_syscode: c.fop_syscode,
+                fop_description: c.fop_description,
+                total_in: c.total_in,
+                total_out: c.total_out,
+              })),
+            } : null,
+            stockTransfers: (stockTransferByDocCodeMap.get(order.docCode) || []).map(st => this.formatStockTransferForFrontend(st)),
+            sales: await Promise.all((order.sales || []).map(async (sale) => {
             const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
             const maBp = department?.ma_bp || sale.branchCode || null;
             const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
@@ -1588,7 +1655,8 @@ export class SalesService {
               stockTransfers: saleStockTransfers.map(st => this.formatStockTransferForFrontend(st)),
             };
           })) || [],
-        })));
+          };
+        }));
 
         return {
           data: enrichedOrders,
