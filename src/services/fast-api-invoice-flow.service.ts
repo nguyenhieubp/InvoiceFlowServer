@@ -526,5 +526,75 @@ export class FastApiInvoiceFlowService {
       ],
     };
   }
+
+  /**
+   * Xử lý warehouse receipt/release từ stock transfer
+   * @param stockTransfer - Dữ liệu stock transfer
+   * @returns Kết quả từ API
+   */
+  async processWarehouseFromStockTransfer(stockTransfer: any): Promise<any> {
+    // Kiểm tra soCode phải là "null" (string) hoặc null
+    if (stockTransfer.soCode !== 'null' && stockTransfer.soCode !== null) {
+      throw new BadRequestException(
+        `Không thể xử lý stock transfer có soCode = "${stockTransfer.soCode}". Chỉ chấp nhận soCode = "null" hoặc null.`
+      );
+    }
+
+    // Build payload từ stock transfer
+    const payload = {
+      ma_dvcs: stockTransfer.branchCode || '',
+      ma_kh: stockTransfer.branchCode || '', // Dùng branchCode làm ma_kh nếu không có
+      ong_ba: stockTransfer.branchCode || '',
+      ma_gd: '2', // Fix cứng ma_gd = 2
+      ngay_ct: stockTransfer.transDate || new Date().toISOString(),
+      so_ct: stockTransfer.docCode || '',
+      ma_nt: 'VND',
+      ty_gia: 1,
+      dien_giai: stockTransfer.docDesc || `Phiếu ${stockTransfer.ioType === 'I' ? 'nhập' : 'xuất'} kho ${stockTransfer.docCode}`,
+      detail: [
+        {
+          ma_vt: stockTransfer.materialCode || stockTransfer.itemCode || '',
+          dvt: '', // Có thể lấy từ item nếu có
+          so_serial: stockTransfer.batchSerial || '',
+          ma_kho: stockTransfer.stockCode || '',
+          so_luong: Math.abs(parseFloat(String(stockTransfer.qty || '0'))), // Lấy giá trị tuyệt đối
+          gia_nt: 0,
+          tien_nt: 0,
+          ma_lo: stockTransfer.batchSerial || '',
+          ma_nx: stockTransfer.lineInfo1 || '',
+          ma_vv: '',
+          ma_bp: stockTransfer.branchCode || '',
+          so_lsx: '',
+          ma_sp: stockTransfer.itemCode || '',
+          ma_hd: '',
+          // Các field chỉ có trong warehouseRelease
+          ...(stockTransfer.ioType === 'O' ? {
+            px_gia_dd: 0,
+            ma_phi: '',
+            ma_ku: '',
+            ma_phi_hh: '',
+            ma_phi_ttlk: '',
+            tien_hh_nt: 0,
+            tien_ttlk_nt: 0,
+          } : {
+            pn_gia_tb: 0,
+          }),
+        },
+      ],
+    };
+
+    // Gọi API tương ứng
+    if (stockTransfer.ioType === 'I') {
+      // Nhập kho
+      this.logger.log(`[Warehouse] Tạo phiếu nhập kho cho ${stockTransfer.docCode}`);
+      return await this.fastApiService.submitWarehouseReceipt(payload);
+    } else if (stockTransfer.ioType === 'O') {
+      // Xuất kho
+      this.logger.log(`[Warehouse] Tạo phiếu xuất kho cho ${stockTransfer.docCode}`);
+      return await this.fastApiService.submitWarehouseRelease(payload);
+    } else {
+      throw new BadRequestException(`ioType không hợp lệ: "${stockTransfer.ioType}". Chỉ chấp nhận "I" (nhập) hoặc "O" (xuất).`);
+    }
+  }
 }
 

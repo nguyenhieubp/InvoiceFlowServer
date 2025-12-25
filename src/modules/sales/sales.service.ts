@@ -1333,6 +1333,22 @@ export class SalesService {
     private invoiceValidationService: InvoiceValidationService,
   ) { }
 
+  /**
+   * Lấy stock transfer theo id
+   */
+  async getStockTransferById(id: string): Promise<StockTransfer | null> {
+    return await this.stockTransferRepository.findOne({
+      where: { id },
+    });
+  }
+
+  /**
+   * Xử lý warehouse receipt/release từ stock transfer
+   */
+  async processWarehouseFromStockTransfer(stockTransfer: StockTransfer): Promise<any> {
+    return await this.fastApiInvoiceFlowService.processWarehouseFromStockTransfer(stockTransfer);
+  }
+
   async findAll(options: {
     brand?: string;
     isProcessed?: boolean;

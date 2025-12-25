@@ -7,6 +7,7 @@ import { Sale } from '../entities/sale.entity';
 import { DailyCashio } from '../entities/daily-cashio.entity';
 import { CheckFaceId } from '../entities/check-face-id.entity';
 import { StockTransfer } from '../entities/stock-transfer.entity';
+import { WarehouseProcessed } from '../entities/warehouse-processed.entity';
 import { ShiftEndCash } from '../entities/shift-end-cash.entity';
 import { ShiftEndCashLine } from '../entities/shift-end-cash-line.entity';
 import { RepackFormula } from '../entities/repack-formula.entity';
@@ -18,6 +19,7 @@ import { VoucherIssueDetail } from '../entities/voucher-issue-detail.entity';
 import { ZappyApiService } from './zappy-api.service';
 import { LoyaltyService } from './loyalty.service';
 import { SalesService } from '../modules/sales/sales.service';
+import { FastApiInvoiceFlowService } from './fast-api-invoice-flow.service';
 
 @Injectable()
 export class SyncService {
@@ -49,6 +51,8 @@ export class SyncService {
     private checkFaceIdRepository: Repository<CheckFaceId>,
     @InjectRepository(StockTransfer)
     private stockTransferRepository: Repository<StockTransfer>,
+    @InjectRepository(WarehouseProcessed)
+    private warehouseProcessedRepository: Repository<WarehouseProcessed>,
     @InjectRepository(ShiftEndCash)
     private shiftEndCashRepository: Repository<ShiftEndCash>,
     @InjectRepository(ShiftEndCashLine)
@@ -70,6 +74,8 @@ export class SyncService {
     private loyaltyService: LoyaltyService,
     @Inject(forwardRef(() => SalesService))
     private salesService: SalesService,
+    @Inject(forwardRef(() => FastApiInvoiceFlowService))
+    private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
   ) {}
 
   async syncBrand(brandName: string, date: string): Promise<{
@@ -1638,6 +1644,14 @@ export class SyncService {
       }
 
       this.logger.log(`[Stock Transfer] Đã lưu ${savedCount} records mới cho brand ${brand} ngày ${date}`);
+
+      // Tự động xử lý warehouse cho các stock transfers mới (chỉ cho các docCode chưa được xử lý)
+      try {
+        await this.processWarehouseForStockTransfers(date, brand);
+      } catch (warehouseError: any) {
+        this.logger.warn(`[Stock Transfer] Lỗi khi xử lý warehouse tự động cho brand ${brand} ngày ${date}: ${warehouseError?.message || warehouseError}`);
+        // Không throw error để không chặn flow sync chính
+      }
 
       return {
         success: errors.length === 0,
@@ -4437,6 +4451,280 @@ export class SyncService {
       };
     } catch (error: any) {
       this.logger.error(`Error getting cashio: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  async getWarehouseProcessed(params: {
+    page?: number;
+    limit?: number;
+    dateFrom?: string;
+    dateTo?: string;
+    ioType?: string;
+    success?: boolean;
+  }): Promise<{
+    success: boolean;
+    data: WarehouseProcessed[];
+    statistics: {
+      total: number;
+      success: number;
+      failed: number;
+      byIoType: {
+        I: number;
+        O: number;
+      };
+    };
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    try {
+      const page = params.page || 1;
+      const limit = params.limit || 10;
+      const skip = (page - 1) * limit;
+
+      const queryBuilder = this.warehouseProcessedRepository
+        .createQueryBuilder('wp')
+        .orderBy('wp.processedDate', 'DESC')
+        .addOrderBy('wp.docCode', 'ASC');
+
+      // Filter by ioType
+      if (params.ioType) {
+        queryBuilder.andWhere('wp.ioType = :ioType', { ioType: params.ioType });
+      }
+
+      // Filter by success
+      if (params.success !== undefined) {
+        queryBuilder.andWhere('wp.success = :success', { success: params.success });
+      }
+
+      // Filter by dateFrom
+      if (params.dateFrom) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day);
+        };
+        const fromDate = parseDate(params.dateFrom);
+        queryBuilder.andWhere('wp.processedDate >= :dateFrom', { dateFrom: fromDate });
+      }
+
+      // Filter by dateTo
+      if (params.dateTo) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day, 23, 59, 59);
+        };
+        const toDate = parseDate(params.dateTo);
+        queryBuilder.andWhere('wp.processedDate <= :dateTo', { dateTo: toDate });
+      }
+
+      // Get total count
+      const total = await queryBuilder.getCount();
+
+      // Apply pagination
+      queryBuilder.skip(skip).take(limit);
+
+      // Get data
+      const data = await queryBuilder.getMany();
+
+      // Calculate statistics
+      const statsQueryBuilder = this.warehouseProcessedRepository.createQueryBuilder('wp');
+
+      // Apply same filters for statistics
+      if (params.dateFrom) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day);
+        };
+        const fromDate = parseDate(params.dateFrom);
+        statsQueryBuilder.andWhere('wp.processedDate >= :dateFrom', { dateFrom: fromDate });
+      }
+
+      if (params.dateTo) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day, 23, 59, 59);
+        };
+        const toDate = parseDate(params.dateTo);
+        statsQueryBuilder.andWhere('wp.processedDate <= :dateTo', { dateTo: toDate });
+      }
+
+      const allRecords = await statsQueryBuilder.getMany();
+      const statistics = {
+        total: allRecords.length,
+        success: allRecords.filter(r => r.success).length,
+        failed: allRecords.filter(r => !r.success).length,
+        byIoType: {
+          I: allRecords.filter(r => r.ioType === 'I').length,
+          O: allRecords.filter(r => r.ioType === 'O').length,
+        },
+      };
+
+      const totalPages = Math.ceil(total / limit);
+
+      return {
+        success: true,
+        data,
+        statistics,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi lấy danh sách warehouse processed: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Tự động xử lý warehouse cho các stock transfers của một ngày
+   * Chỉ xử lý các docCode chưa được gọi API warehouse
+   * @param date - Ngày sync (format: DDMMMYYYY)
+   * @param brand - Brand name
+   */
+  async processWarehouseForStockTransfers(date: string, brand: string): Promise<void> {
+    try {
+      this.logger.log(`[Warehouse Auto] Bắt đầu xử lý warehouse tự động cho brand ${brand} ngày ${date}`);
+
+      // Lấy tất cả stock transfers của ngày đó
+      const stockTransfers = await this.stockTransferRepository.find({
+        where: {
+          syncDate: date,
+          brand: brand,
+        },
+        order: {
+          docCode: 'ASC',
+          createdAt: 'ASC',
+        },
+      });
+
+      if (!stockTransfers || stockTransfers.length === 0) {
+        this.logger.log(`[Warehouse Auto] Không có stock transfers để xử lý cho brand ${brand} ngày ${date}`);
+        return;
+      }
+
+      // Nhóm theo docCode để tránh xử lý trùng
+      const docCodeMap = new Map<string, StockTransfer>();
+      for (const st of stockTransfers) {
+        if (!docCodeMap.has(st.docCode)) {
+          docCodeMap.set(st.docCode, st);
+        }
+      }
+
+      let processedCount = 0;
+      let skippedCount = 0;
+      let errorCount = 0;
+
+      // Xử lý từng docCode
+      for (const [docCode, stockTransfer] of docCodeMap) {
+        try {
+          // Kiểm tra docCode đã được xử lý warehouse chưa
+          const existing = await this.warehouseProcessedRepository.findOne({
+            where: { docCode },
+          });
+
+          if (existing) {
+            this.logger.debug(`[Warehouse Auto] DocCode ${docCode} đã được xử lý warehouse, bỏ qua`);
+            skippedCount++;
+            continue;
+          }
+
+          // Kiểm tra điều kiện: soCode phải là "null" hoặc null
+          if (stockTransfer.soCode !== 'null' && stockTransfer.soCode !== null) {
+            this.logger.debug(`[Warehouse Auto] DocCode ${docCode} có soCode = "${stockTransfer.soCode}", bỏ qua (chỉ xử lý soCode = "null" hoặc null)`);
+            skippedCount++;
+            continue;
+          }
+
+          // Kiểm tra ioType phải là "I" hoặc "O"
+          if (stockTransfer.ioType !== 'I' && stockTransfer.ioType !== 'O') {
+            this.logger.debug(`[Warehouse Auto] DocCode ${docCode} có ioType = "${stockTransfer.ioType}", bỏ qua (chỉ xử lý "I" hoặc "O")`);
+            skippedCount++;
+            continue;
+          }
+
+          // Gọi API warehouse
+          this.logger.log(`[Warehouse Auto] Đang xử lý warehouse cho docCode ${docCode} (ioType: ${stockTransfer.ioType})`);
+          const result = await this.fastApiInvoiceFlowService.processWarehouseFromStockTransfer(stockTransfer);
+
+          // Lưu vào bảng tracking
+          const warehouseProcessed = this.warehouseProcessedRepository.create({
+            docCode,
+            ioType: stockTransfer.ioType,
+            processedDate: new Date(),
+            result: JSON.stringify(result),
+            success: true,
+          });
+          await this.warehouseProcessedRepository.save(warehouseProcessed);
+
+          processedCount++;
+          this.logger.log(`[Warehouse Auto] Đã xử lý warehouse thành công cho docCode ${docCode}`);
+        } catch (error: any) {
+          errorCount++;
+          const errorMessage = error?.message || String(error);
+
+          // Lưu vào bảng tracking với success = false
+          try {
+            const warehouseProcessed = this.warehouseProcessedRepository.create({
+              docCode,
+              ioType: stockTransfer.ioType,
+              processedDate: new Date(),
+              errorMessage,
+              success: false,
+            });
+            await this.warehouseProcessedRepository.save(warehouseProcessed);
+          } catch (saveError: any) {
+            this.logger.error(`[Warehouse Auto] Lỗi khi lưu tracking cho docCode ${docCode}: ${saveError?.message || saveError}`);
+          }
+
+          this.logger.warn(`[Warehouse Auto] Lỗi khi xử lý warehouse cho docCode ${docCode}: ${errorMessage}`);
+        }
+      }
+
+      this.logger.log(
+        `[Warehouse Auto] Hoàn thành xử lý warehouse cho brand ${brand} ngày ${date}: ` +
+        `${processedCount} thành công, ${skippedCount} bỏ qua, ${errorCount} lỗi`
+      );
+    } catch (error: any) {
+      this.logger.error(`[Warehouse Auto] Lỗi khi xử lý warehouse tự động cho brand ${brand} ngày ${date}: ${error?.message || error}`);
       throw error;
     }
   }

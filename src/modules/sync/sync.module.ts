@@ -12,6 +12,7 @@ import { Sale } from '../../entities/sale.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
 import { CheckFaceId } from '../../entities/check-face-id.entity';
 import { StockTransfer } from '../../entities/stock-transfer.entity';
+import { WarehouseProcessed } from '../../entities/warehouse-processed.entity';
 import { ShiftEndCash } from '../../entities/shift-end-cash.entity';
 import { ShiftEndCashLine } from '../../entities/shift-end-cash-line.entity';
 import { RepackFormula } from '../../entities/repack-formula.entity';
@@ -23,13 +24,14 @@ import { VoucherIssueDetail } from '../../entities/voucher-issue-detail.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Customer, Sale, DailyCashio, CheckFaceId, StockTransfer, ShiftEndCash, ShiftEndCashLine, RepackFormula, RepackFormulaItem, Promotion, PromotionLine, VoucherIssue, VoucherIssueDetail]),
+    TypeOrmModule.forFeature([Customer, Sale, DailyCashio, CheckFaceId, StockTransfer, WarehouseProcessed, ShiftEndCash, ShiftEndCashLine, RepackFormula, RepackFormulaItem, Promotion, PromotionLine, VoucherIssue, VoucherIssueDetail]),
     HttpModule,
     forwardRef(() => SalesModule),
   ],
   controllers: [SyncController],
   providers: [SyncService, SyncTask, ZappyApiService, LoyaltyService],
   exports: [SyncService],
+  // Import SalesModule để có thể inject FastApiInvoiceFlowService (đã export từ SalesModule)
 })
 export class SyncModule {}
 

@@ -259,6 +259,22 @@ export class SalesController {
     return this.salesService.syncErrorOrderByDocCode(docCode);
   }
 
+  @Post('stock-transfer/:id/warehouse')
+  async processWarehouseFromStockTransfer(@Param('id') id: string) {
+    try {
+      // Lấy stock transfer từ database
+      const stockTransfer = await this.salesService.getStockTransferById(id);
+      if (!stockTransfer) {
+        throw new NotFoundException(`Stock transfer với id ${id} không tồn tại`);
+      }
+
+      // Xử lý warehouse receipt/release
+      return await this.salesService.processWarehouseFromStockTransfer(stockTransfer);
+    } catch (error: any) {
+      throw new BadRequestException(error.message || 'Lỗi khi xử lý warehouse');
+    }
+  }
+
   @Post('explain-faceid')
   async explainFaceId(@Body() explainDto: ExplainFaceIdDto) {
     try {

@@ -119,9 +119,6 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
         throw new Error('Không thể lấy token đăng nhập');
       }
 
-      // Log payload để debug
-      this.logger.debug(`Sales order payload: ${JSON.stringify(orderData, null, 2)}`);
-
       // Gọi API salesOrder với token
       const response = await firstValueFrom(
         this.httpService.post(
@@ -833,6 +830,82 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
       if (error?.response) {
         this.logger.error(`Credit advice error response status: ${error.response.status}`);
         this.logger.error(`Credit advice error response data: ${JSON.stringify(error.response.data)}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Gọi API warehouseReceipt (Phiếu nhập kho)
+   * @param warehouseReceiptData - Dữ liệu phiếu nhập kho
+   */
+  async submitWarehouseReceipt(warehouseReceiptData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Gọi API warehouseReceipt với token
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/warehouseReceipt`,
+          warehouseReceiptData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('Warehouse receipt submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`Error submitting warehouse receipt: ${error?.message || error}`);
+      if (error?.response) {
+        this.logger.error(`Warehouse receipt error response status: ${error.response.status}`);
+        this.logger.error(`Warehouse receipt error response data: ${JSON.stringify(error.response.data)}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Gọi API warehouseRelease (Phiếu xuất kho)
+   * @param warehouseReleaseData - Dữ liệu phiếu xuất kho
+   */
+  async submitWarehouseRelease(warehouseReleaseData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Gọi API warehouseRelease với token
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/warehouseRelease`,
+          warehouseReleaseData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('Warehouse release submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`Error submitting warehouse release: ${error?.message || error}`);
+      if (error?.response) {
+        this.logger.error(`Warehouse release error response status: ${error.response.status}`);
+        this.logger.error(`Warehouse release error response data: ${JSON.stringify(error.response.data)}`);
       }
       throw error;
     }

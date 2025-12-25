@@ -735,5 +735,36 @@ export class SyncController {
       );
     }
   }
+
+  @Get('warehouse-processed')
+  async getWarehouseProcessed(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('ioType') ioType?: string,
+    @Query('success') success?: string,
+  ) {
+    try {
+      const result = await this.syncService.getWarehouseProcessed({
+        page: page ? parseInt(page, 10) : 1,
+        limit: limit ? parseInt(limit, 10) : 10,
+        dateFrom,
+        dateTo,
+        ioType,
+        success: success !== undefined ? success === 'true' : undefined,
+      });
+      return result;
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi lấy thống kê warehouse processed',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }
 
