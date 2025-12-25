@@ -912,6 +912,44 @@ export class FastApiService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Gọi API warehouseTransfer (Phiếu điều chuyển kho)
+   * @param warehouseTransferData - Dữ liệu phiếu điều chuyển kho
+   */
+  async submitWarehouseTransfer(warehouseTransferData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Gọi API warehouseTransfer với token
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/warehouseTransfer`,
+          warehouseTransferData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('Warehouse transfer submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`Error submitting warehouse transfer: ${error?.message || error}`);
+      if (error?.response) {
+        this.logger.error(`Warehouse transfer error response status: ${error.response.status}`);
+        this.logger.error(`Warehouse transfer error response data: ${JSON.stringify(error.response.data)}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Gọi API gxtInvoice (Phiếu tạo gộp – xuất tách)
    * @param gxtInvoiceData - Dữ liệu phiếu tạo gộp/xuất tách
    */

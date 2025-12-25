@@ -4550,6 +4550,17 @@ export class SyncService {
       const statsQueryBuilder = this.warehouseProcessedRepository.createQueryBuilder('wp');
 
       // Apply same filters for statistics
+      // Filter by ioType
+      if (params.ioType) {
+        statsQueryBuilder.andWhere('wp.ioType = :ioType', { ioType: params.ioType });
+      }
+
+      // Filter by success
+      if (params.success !== undefined) {
+        statsQueryBuilder.andWhere('wp.success = :success', { success: params.success });
+      }
+
+      // Filter by dateFrom
       if (params.dateFrom) {
         const parseDate = (dateStr: string): Date => {
           const day = parseInt(dateStr.substring(0, 2));
@@ -4641,12 +4652,13 @@ export class SyncService {
         return;
       }
 
-      // Nhóm theo docCode để tránh xử lý trùng
-      const docCodeMap = new Map<string, StockTransfer>();
+      // Nhóm theo docCode và doctype
+      const docCodeMap = new Map<string, StockTransfer[]>();
       for (const st of stockTransfers) {
         if (!docCodeMap.has(st.docCode)) {
-          docCodeMap.set(st.docCode, st);
+          docCodeMap.set(st.docCode, []);
         }
+        docCodeMap.get(st.docCode)!.push(st);
       }
 
       let processedCount = 0;
@@ -4654,14 +4666,10 @@ export class SyncService {
       let errorCount = 0;
 
       // Xử lý từng docCode
-      for (const [docCode, stockTransfer] of docCodeMap) {
+      for (const [docCode, stockTransferList] of docCodeMap) {
         try {
-          // Kiểm tra doctype phải là "STOCK_IO" mới gọi API warehouse (kiểm tra đầu tiên để tránh check các điều kiện khác)
-          if (stockTransfer.doctype !== 'STOCK_IO') {
-            this.logger.debug(`[Warehouse Auto] DocCode ${docCode} có doctype = "${stockTransfer.doctype}", bỏ qua (chỉ xử lý doctype = "STOCK_IO")`);
-            skippedCount++;
-            continue;
-          }
+          // Lấy record đầu tiên để kiểm tra điều kiện
+          const firstStockTransfer = stockTransferList[0];
 
           // Kiểm tra docCode đã được xử lý warehouse chưa
           const existing = await this.warehouseProcessedRepository.findOne({
@@ -4670,6 +4678,45 @@ export class SyncService {
 
           if (existing) {
             this.logger.debug(`[Warehouse Auto] DocCode ${docCode} đã được xử lý warehouse, bỏ qua`);
+            skippedCount++;
+            continue;
+          }
+
+          // Xử lý STOCK_TRANSFER với relatedStockCode
+          if (firstStockTransfer.doctype === 'STOCK_TRANSFER' && firstStockTransfer.relatedStockCode) {
+            // Kiểm tra relatedStockCode phải có
+            if (!firstStockTransfer.relatedStockCode || firstStockTransfer.relatedStockCode.trim() === '') {
+              this.logger.debug(`[Warehouse Auto] DocCode ${docCode} có doctype = "STOCK_TRANSFER" nhưng không có relatedStockCode, bỏ qua`);
+              skippedCount++;
+              continue;
+            }
+
+            // Gọi API warehouse transfer (group tất cả items cùng docCode)
+            this.logger.log(`[Warehouse Auto] Đang xử lý warehouse transfer cho docCode ${docCode}`);
+            const result = await this.fastApiInvoiceFlowService.processWarehouseTransferFromStockTransfers(stockTransferList);
+
+            // Lưu vào bảng tracking
+            const warehouseProcessed = this.warehouseProcessedRepository.create({
+              docCode,
+              ioType: 'T', // T = Transfer
+              processedDate: new Date(),
+              result: JSON.stringify(result),
+              success: true,
+            });
+            await this.warehouseProcessedRepository.save(warehouseProcessed);
+
+            processedCount++;
+            this.logger.log(`[Warehouse Auto] Đã xử lý warehouse transfer thành công cho docCode ${docCode}`);
+            continue;
+          }
+
+          // Xử lý STOCK_IO
+          // Chỉ xử lý record đầu tiên (vì các record cùng docCode có thể khác nhau)
+          const stockTransfer = firstStockTransfer;
+          
+          // Kiểm tra doctype phải là "STOCK_IO" mới gọi API warehouse (kiểm tra đầu tiên để tránh check các điều kiện khác)
+          if (stockTransfer.doctype !== 'STOCK_IO') {
+            this.logger.debug(`[Warehouse Auto] DocCode ${docCode} có doctype = "${stockTransfer.doctype}", bỏ qua (chỉ xử lý doctype = "STOCK_IO" hoặc "STOCK_TRANSFER")`);
             skippedCount++;
             continue;
           }
@@ -4710,9 +4757,10 @@ export class SyncService {
 
           // Lưu vào bảng tracking với success = false
           try {
+            const firstStockTransfer = stockTransferList[0];
             const warehouseProcessed = this.warehouseProcessedRepository.create({
               docCode,
-              ioType: stockTransfer.ioType,
+              ioType: firstStockTransfer.ioType || 'T', // T = Transfer nếu không có ioType
               processedDate: new Date(),
               errorMessage,
               success: false,

@@ -11,6 +11,7 @@ import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
 import { CheckFaceId } from '../../entities/check-face-id.entity';
 import { StockTransfer } from '../../entities/stock-transfer.entity';
+import { WarehouseProcessed } from '../../entities/warehouse-processed.entity';
 import { InvoicePrintService } from '../../services/invoice-print.service';
 import { InvoiceService } from '../../services/invoice.service';
 import { ZappyApiService } from '../../services/zappy-api.service';
@@ -1322,6 +1323,8 @@ export class SalesService {
     private checkFaceIdRepository: Repository<CheckFaceId>,
     @InjectRepository(StockTransfer)
     private stockTransferRepository: Repository<StockTransfer>,
+    @InjectRepository(WarehouseProcessed)
+    private warehouseProcessedRepository: Repository<WarehouseProcessed>,
     private invoicePrintService: InvoicePrintService,
     private invoiceService: InvoiceService,
     private httpService: HttpService,
@@ -1343,10 +1346,69 @@ export class SalesService {
   }
 
   /**
-   * Xử lý warehouse receipt/release từ stock transfer
+   * Xử lý warehouse receipt/release/transfer từ stock transfer
    */
   async processWarehouseFromStockTransfer(stockTransfer: StockTransfer): Promise<any> {
-    return await this.fastApiInvoiceFlowService.processWarehouseFromStockTransfer(stockTransfer);
+    try {
+      let result: any;
+      let ioTypeForTracking: string;
+
+      // Xử lý STOCK_TRANSFER với relatedStockCode
+      if (stockTransfer.doctype === 'STOCK_TRANSFER' && stockTransfer.relatedStockCode) {
+        // Lấy tất cả stock transfers cùng docCode
+        const stockTransferList = await this.stockTransferRepository.find({
+          where: { docCode: stockTransfer.docCode },
+          order: { createdAt: 'ASC' },
+        });
+
+        // Gọi API warehouse transfer
+        result = await this.fastApiInvoiceFlowService.processWarehouseTransferFromStockTransfers(stockTransferList);
+        ioTypeForTracking = 'T'; // T = Transfer
+      } else {
+        // Xử lý STOCK_IO
+        result = await this.fastApiInvoiceFlowService.processWarehouseFromStockTransfer(stockTransfer);
+        ioTypeForTracking = stockTransfer.ioType;
+      }
+
+      // Lưu vào bảng tracking với success = true
+      try {
+        const warehouseProcessed = this.warehouseProcessedRepository.create({
+          docCode: stockTransfer.docCode,
+          ioType: ioTypeForTracking,
+          processedDate: new Date(),
+          result: JSON.stringify(result),
+          success: true,
+        });
+        await this.warehouseProcessedRepository.save(warehouseProcessed);
+        this.logger.log(`[Warehouse Manual] Đã lưu tracking thành công cho docCode ${stockTransfer.docCode}`);
+      } catch (saveError: any) {
+        this.logger.error(`[Warehouse Manual] Lỗi khi lưu tracking cho docCode ${stockTransfer.docCode}: ${saveError?.message || saveError}`);
+        // Không throw error để không ảnh hưởng đến response chính
+      }
+
+      return result;
+    } catch (error: any) {
+      const errorMessage = error?.message || String(error);
+
+      // Lưu vào bảng tracking với success = false
+      try {
+        const ioTypeForTracking = stockTransfer.doctype === 'STOCK_TRANSFER' ? 'T' : stockTransfer.ioType;
+        const warehouseProcessed = this.warehouseProcessedRepository.create({
+          docCode: stockTransfer.docCode,
+          ioType: ioTypeForTracking,
+          processedDate: new Date(),
+          errorMessage,
+          success: false,
+        });
+        await this.warehouseProcessedRepository.save(warehouseProcessed);
+        this.logger.log(`[Warehouse Manual] Đã lưu tracking thất bại cho docCode ${stockTransfer.docCode}`);
+      } catch (saveError: any) {
+        this.logger.error(`[Warehouse Manual] Lỗi khi lưu tracking cho docCode ${stockTransfer.docCode}: ${saveError?.message || saveError}`);
+      }
+
+      // Throw error để controller xử lý
+      throw error;
+    }
   }
 
   async findAll(options: {
@@ -3652,6 +3714,105 @@ export class SalesService {
       }
 
       // ============================================
+      // XỬ LÝ ĐƠN GỐC VÀ ĐƠN _X CÙNG LÚC (cho double-click)
+      // ============================================
+      // Nếu đơn có đuôi _X → xử lý cả đơn _X và đơn gốc
+      // Nếu đơn gốc → kiểm tra có đơn _X không, nếu có thì xử lý cả 2
+      const isUnderscoreX = this.hasUnderscoreX(docCode);
+      const baseDocCode = this.getBaseDocCode(docCode);
+      const docCodeWithX = `${baseDocCode}_X`;
+      
+      let relatedDocCode: string | null = null;
+      if (isUnderscoreX) {
+        // Đơn có đuôi _X → cần xử lý cả đơn gốc
+        relatedDocCode = baseDocCode;
+      } else {
+        // Đơn gốc → kiểm tra có đơn _X không
+        const hasXOrder = await this.checkOrderExists(docCodeWithX);
+        if (hasXOrder) {
+          relatedDocCode = docCodeWithX;
+        }
+      }
+
+      // Nếu có đơn liên quan, xử lý cả 2 đơn
+      if (relatedDocCode) {
+        const results: any[] = [];
+        
+        // Xử lý đơn hiện tại
+        try {
+          const currentResult = await this.processSingleOrder(docCode, forceRetry);
+          results.push({ docCode, ...currentResult });
+        } catch (error: any) {
+          results.push({
+            docCode,
+            success: false,
+            message: error?.message || 'Lỗi khi xử lý đơn hàng',
+            error: error?.message || error,
+          });
+        }
+
+        // Xử lý đơn liên quan
+        try {
+          const relatedResult = await this.processSingleOrder(relatedDocCode, forceRetry);
+          results.push({ docCode: relatedDocCode, ...relatedResult });
+        } catch (error: any) {
+          results.push({
+            docCode: relatedDocCode,
+            success: false,
+            message: error?.message || 'Lỗi khi xử lý đơn hàng liên quan',
+            error: error?.message || error,
+          });
+        }
+
+        // Trả về kết quả tổng hợp
+        const allSuccess = results.every(r => r.success);
+        return {
+          success: allSuccess,
+          message: allSuccess 
+            ? `Đã xử lý thành công cả ${docCode} và ${relatedDocCode}`
+            : `Đã xử lý ${results.filter(r => r.success).length}/${results.length} đơn hàng`,
+          results: results,
+        };
+      }
+
+      // Nếu không có đơn liên quan, xử lý đơn hiện tại như bình thường
+      return await this.processSingleOrder(docCode, forceRetry);
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi tạo hóa đơn cho ${docCode}: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Xử lý một đơn hàng đơn lẻ (được gọi từ createInvoiceViaFastApi)
+   */
+  private async processSingleOrder(docCode: string, forceRetry: boolean = false): Promise<any> {
+    try {
+      // Kiểm tra xem đơn hàng đã có trong bảng kê hóa đơn chưa (đã tạo thành công)
+      // Nếu forceRetry = true, bỏ qua check này để cho phép retry
+      if (!forceRetry) {
+        const existingInvoice = await this.fastApiInvoiceRepository.findOne({
+          where: { docCode },
+        });
+
+        if (existingInvoice && existingInvoice.status === 1) {
+          return {
+            success: true,
+            message: `Đơn hàng ${docCode} đã được tạo hóa đơn thành công trước đó`,
+            result: existingInvoice.fastApiResponse ? JSON.parse(existingInvoice.fastApiResponse) : null,
+            alreadyExists: true,
+          };
+        }
+      }
+
+      // Lấy thông tin đơn hàng
+      const orderData = await this.findByOrderCode(docCode);
+
+      if (!orderData || !orderData.sales || orderData.sales.length === 0) {
+        throw new NotFoundException(`Order ${docCode} not found or has no sales`);
+      }
+
+      // ============================================
       // BƯỚC 1: Kiểm tra docSourceType trước (ưu tiên cao nhất)
       // ============================================
       const firstSale = orderData.sales && orderData.sales.length > 0 ? orderData.sales[0] : null;
@@ -4456,16 +4617,8 @@ export class SalesService {
       }
 
       // Đánh dấu đơn hàng là đã xử lý
-      await this.markOrderAsProcessed(docCode);
-
-      // Log màu vàng khi tạo thành công: "TẠI ĐƠN (MÃ ĐƠN)-Ngày(Ngày đocate)"
-      const ngayCtDate = invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date();
-      const ngayCtFormatted = ngayCtDate.toLocaleDateString('vi-VN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      });
-
+      const markOrderAsProcessedResult = await this.markOrderAsProcessed(docCode);
+      console.log('markOrderAsProcessedResult', markOrderAsProcessedResult);
       return {
         success: true,
         message: `Tạo hóa đơn ${docCode} thành công`,

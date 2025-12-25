@@ -70,7 +70,7 @@ export class FastApiInvoiceFlowService {
       ma_kenh: orderData.ma_kenh ?? 'ONLINE',
       loai_gd: '01',
       detail: (orderData.detail || []).map((item: any) => {
-        const { product, ...cleanItem } = item;
+        const { product, ma_bp, ...cleanItem } = item;
         const result: any = { ...cleanItem };
         // Giữ lại ma_lo và so_serial (kể cả null)
         if ('ma_lo' in item) result.ma_lo = item.ma_lo;
@@ -654,6 +654,125 @@ export class FastApiInvoiceFlowService {
       const result = await this.fastApiService.submitWarehouseRelease(payload);
       return result;
     }
+  }
+
+  /**
+   * Xử lý warehouse transfer từ stock transfer (điều chuyển kho)
+   * @param stockTransfers - Mảng các stock transfer cùng docCode
+   * @returns Kết quả từ API
+   */
+  async processWarehouseTransferFromStockTransfers(stockTransfers: any[]): Promise<any> {
+    if (!stockTransfers || stockTransfers.length === 0) {
+      throw new BadRequestException('Không có stock transfer để xử lý');
+    }
+
+    // Lấy stock transfer đầu tiên để lấy thông tin chung (tất cả đều cùng docCode)
+    const firstStockTransfer = stockTransfers[0];
+
+    // Kiểm tra doctype phải là "STOCK_TRANSFER"
+    if (firstStockTransfer.doctype !== 'STOCK_TRANSFER') {
+      throw new BadRequestException(
+        `Không thể xử lý stock transfer có doctype = "${firstStockTransfer.doctype}". Chỉ chấp nhận doctype = "STOCK_TRANSFER".`
+      );
+    }
+
+    // Kiểm tra relatedStockCode phải có
+    if (!firstStockTransfer.relatedStockCode || firstStockTransfer.relatedStockCode.trim() === '') {
+      throw new BadRequestException(
+        `Không thể xử lý stock transfer điều chuyển kho. relatedStockCode không được để trống.`
+      );
+    }
+
+    // Lấy ma_dvcs từ department API (ưu tiên), nếu không có thì fallback
+    let department: any = null;
+    if (firstStockTransfer.branchCode) {
+      try {
+        department = await this.categoriesService.getDepartmentFromLoyaltyAPI(firstStockTransfer.branchCode);
+      } catch (error: any) {
+        this.logger.warn(`Không thể lấy department cho branchCode ${firstStockTransfer.branchCode}: ${error?.message || error}`);
+      }
+    }
+
+    const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht || '';
+
+    // Map mã kho xuất (ma_kho_x) - từ stockCode
+    let mappedStockCodeX = firstStockTransfer.stockCode || '';
+    if (firstStockTransfer.stockCode) {
+      try {
+        const maMoi = await this.categoriesService.mapWarehouseCode(firstStockTransfer.stockCode);
+        mappedStockCodeX = maMoi || firstStockTransfer.stockCode;
+      } catch (error: any) {
+        this.logger.warn(`Không thể map warehouse code ${firstStockTransfer.stockCode}: ${error?.message || error}`);
+        mappedStockCodeX = firstStockTransfer.stockCode;
+      }
+    }
+
+    // Map mã kho nhập (ma_kho_n) - từ relatedStockCode
+    let mappedStockCodeN = firstStockTransfer.relatedStockCode || '';
+    if (firstStockTransfer.relatedStockCode) {
+      try {
+        const maMoi = await this.categoriesService.mapWarehouseCode(firstStockTransfer.relatedStockCode);
+        mappedStockCodeN = maMoi || firstStockTransfer.relatedStockCode;
+      } catch (error: any) {
+        this.logger.warn(`Không thể map warehouse code ${firstStockTransfer.relatedStockCode}: ${error?.message || error}`);
+        mappedStockCodeN = firstStockTransfer.relatedStockCode;
+      }
+    }
+
+    // Build detail array từ các stock transfers
+    const detail: any[] = [];
+    for (const stockTransfer of stockTransfers) {
+      // Fetch material catalog từ Loyalty API
+      let materialCatalog: any = null;
+      const itemCodeToFetch = stockTransfer.itemCode;
+      if (itemCodeToFetch) {
+        try {
+          materialCatalog = await this.loyaltyService.fetchProduct(itemCodeToFetch);
+          if (materialCatalog) {
+            this.logger.debug(`[Warehouse Transfer] Đã lấy material catalog cho itemCode ${itemCodeToFetch}`);
+          }
+        } catch (error: any) {
+          this.logger.warn(`Không thể lấy material catalog cho itemCode ${itemCodeToFetch}: ${error?.message || error}`);
+        }
+      }
+
+      // Lấy materialCode và unit từ material catalog (ưu tiên từ catalog, fallback từ stockTransfer)
+      const materialCode = materialCatalog?.materialCode || stockTransfer.materialCode || stockTransfer.itemCode || '';
+      const unit = materialCatalog?.unit || '';
+
+      detail.push({
+        ma_vt: materialCode,
+        dvt: unit,
+        so_serial: stockTransfer.batchSerial || '',
+        so_luong: Math.abs(parseFloat(String(stockTransfer.qty || '0'))), // Lấy giá trị tuyệt đối
+        gia_nt: 0,
+        tien_nt: 0,
+        ma_lo: stockTransfer.batchSerial || '',
+        ma_nx: stockTransfer.lineInfo1 || '',
+        ma_bp: stockTransfer.branchCode || '',
+        px_gia_dd: 0,
+      });
+    }
+
+    // Build payload
+    const payload = {
+      ma_dvcs: maDvcs,
+      ma_kho_n: mappedStockCodeN, // Kho nhập (từ relatedStockCode)
+      ma_kho_x: mappedStockCodeX, // Kho xuất (từ stockCode)
+      ma_gd: '3', // Fix cứng ma_gd = 3 (xuất điều chuyển)
+      ngay_ct: firstStockTransfer.transDate || new Date().toISOString(),
+      so_ct: firstStockTransfer.docCode || '',
+      ma_nt: 'VND',
+      ty_gia: 1,
+      dien_giai: firstStockTransfer.docDesc || `Phiếu điều chuyển kho ${firstStockTransfer.docCode}`,
+      so_buoc: 2, // Mặc định 2
+      detail,
+    };
+
+    // Gọi API warehouseTransfer
+    this.logger.log(`[Warehouse Transfer] Tạo phiếu điều chuyển kho cho ${firstStockTransfer.docCode}`);
+    const result = await this.fastApiService.submitWarehouseTransfer(payload);
+    return result;
   }
 }
 

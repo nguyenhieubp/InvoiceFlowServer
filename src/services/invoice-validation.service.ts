@@ -17,6 +17,10 @@ export class InvoiceValidationService {
     // 01. Thường
     '01.Thường',
     '01. Thường',
+    // 02. Làm dịch vụ
+    '02. Làm dịch vụ',
+    '02.Làm dịch vụ',
+    '02.  Làm dịch vụ',
     // 03. Đổi điểm
     '03. Đổi điểm',
     '03.Đổi điểm',

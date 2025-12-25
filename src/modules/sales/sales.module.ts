@@ -19,13 +19,14 @@ import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
 import { CheckFaceId } from '../../entities/check-face-id.entity';
 import { StockTransfer } from '../../entities/stock-transfer.entity';
+import { WarehouseProcessed } from '../../entities/warehouse-processed.entity';
 import { InvoicesModule } from '../invoices/invoices.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { SyncModule } from '../sync/sync.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Sale, Customer, ProductItem, Invoice, InvoiceItem, FastApiInvoice, DailyCashio, CheckFaceId, StockTransfer]),
+    TypeOrmModule.forFeature([Sale, Customer, ProductItem, Invoice, InvoiceItem, FastApiInvoice, DailyCashio, CheckFaceId, StockTransfer, WarehouseProcessed]),
     HttpModule,
     forwardRef(() => InvoicesModule),
     CategoriesModule,
