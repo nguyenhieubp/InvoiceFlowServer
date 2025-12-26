@@ -1389,37 +1389,96 @@ export class SalesService {
         ioTypeForTracking = stockTransfer.ioType;
       }
 
-      // Lưu vào bảng tracking với success = true
+      // Kiểm tra result có status = 1 không để xác định success
+      let isSuccess = false;
+      let errorMessage: string | undefined = undefined;
+      
+      if (Array.isArray(result) && result.length > 0) {
+        const firstItem = result[0];
+        isSuccess = firstItem.status === 1;
+        if (!isSuccess) {
+          errorMessage = firstItem.message || 'Tạo phiếu warehouse thất bại';
+        }
+      } else if (result && typeof result === 'object' && result.status !== undefined) {
+        isSuccess = result.status === 1;
+        if (!isSuccess) {
+          errorMessage = result.message || 'Tạo phiếu warehouse thất bại';
+        }
+      } else {
+        // Nếu result không có format mong đợi, coi như thất bại
+        isSuccess = false;
+        errorMessage = 'Response không hợp lệ từ Fast API';
+      }
+
+      // Lưu vào bảng tracking với success đúng (upsert - update nếu đã tồn tại)
       try {
-        const warehouseProcessed = this.warehouseProcessedRepository.create({
-          docCode: stockTransfer.docCode,
-          ioType: ioTypeForTracking,
-          processedDate: new Date(),
-          result: JSON.stringify(result),
-          success: true,
+        // Tìm record đã tồn tại
+        const existing = await this.warehouseProcessedRepository.findOne({
+          where: { docCode: stockTransfer.docCode },
         });
-        await this.warehouseProcessedRepository.save(warehouseProcessed);
-        this.logger.log(`[Warehouse Manual] Đã lưu tracking thành công cho docCode ${stockTransfer.docCode}`);
+
+        if (existing) {
+          // Update record đã tồn tại
+          existing.ioType = ioTypeForTracking;
+          existing.processedDate = new Date();
+          existing.result = JSON.stringify(result);
+          existing.success = isSuccess;
+          existing.errorMessage = isSuccess ? undefined : errorMessage; // Xóa errorMessage nếu thành công
+          await this.warehouseProcessedRepository.save(existing);
+        } else {
+          // Tạo mới nếu chưa tồn tại
+          const warehouseProcessed = this.warehouseProcessedRepository.create({
+            docCode: stockTransfer.docCode,
+            ioType: ioTypeForTracking,
+            processedDate: new Date(),
+            result: JSON.stringify(result),
+            success: isSuccess,
+            ...(errorMessage && { errorMessage }),
+          });
+          await this.warehouseProcessedRepository.save(warehouseProcessed);
+        }
+        this.logger.log(`[Warehouse Manual] Đã lưu tracking cho docCode ${stockTransfer.docCode} với success = ${isSuccess}`);
       } catch (saveError: any) {
         this.logger.error(`[Warehouse Manual] Lỗi khi lưu tracking cho docCode ${stockTransfer.docCode}: ${saveError?.message || saveError}`);
         // Không throw error để không ảnh hưởng đến response chính
+      }
+
+      // Nếu không thành công, throw error để controller xử lý
+      if (!isSuccess) {
+        throw new BadRequestException(errorMessage || 'Tạo phiếu warehouse thất bại');
       }
 
       return result;
     } catch (error: any) {
       const errorMessage = error?.message || String(error);
 
-      // Lưu vào bảng tracking với success = false
+      // Lưu vào bảng tracking với success = false (upsert - update nếu đã tồn tại)
       try {
         const ioTypeForTracking = stockTransfer.doctype === 'STOCK_TRANSFER' ? 'T' : stockTransfer.ioType;
-        const warehouseProcessed = this.warehouseProcessedRepository.create({
-          docCode: stockTransfer.docCode,
-          ioType: ioTypeForTracking,
-          processedDate: new Date(),
-          errorMessage,
-          success: false,
+        
+        // Tìm record đã tồn tại
+        const existing = await this.warehouseProcessedRepository.findOne({
+          where: { docCode: stockTransfer.docCode },
         });
-        await this.warehouseProcessedRepository.save(warehouseProcessed);
+
+        if (existing) {
+          // Update record đã tồn tại
+          existing.ioType = ioTypeForTracking;
+          existing.processedDate = new Date();
+          existing.errorMessage = errorMessage;
+          existing.success = false;
+          await this.warehouseProcessedRepository.save(existing);
+        } else {
+          // Tạo mới nếu chưa tồn tại
+          const warehouseProcessed = this.warehouseProcessedRepository.create({
+            docCode: stockTransfer.docCode,
+            ioType: ioTypeForTracking,
+            processedDate: new Date(),
+            errorMessage,
+            success: false,
+          });
+          await this.warehouseProcessedRepository.save(warehouseProcessed);
+        }
         this.logger.log(`[Warehouse Manual] Đã lưu tracking thất bại cho docCode ${stockTransfer.docCode}`);
       } catch (saveError: any) {
         this.logger.error(`[Warehouse Manual] Lỗi khi lưu tracking cho docCode ${stockTransfer.docCode}: ${saveError?.message || saveError}`);

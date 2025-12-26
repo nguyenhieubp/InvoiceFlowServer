@@ -4223,17 +4223,6 @@ export class SyncService {
           // Lấy record đầu tiên để kiểm tra điều kiện
           const firstStockTransfer = stockTransferList[0];
 
-          // Kiểm tra docCode đã được xử lý warehouse chưa
-          const existing = await this.warehouseProcessedRepository.findOne({
-            where: { docCode },
-          });
-
-          if (existing) {
-            this.logger.debug(`[Warehouse Auto] DocCode ${docCode} đã được xử lý warehouse, bỏ qua`);
-            skippedCount++;
-            continue;
-          }
-
           // Xử lý STOCK_TRANSFER với relatedStockCode
           if (firstStockTransfer.doctype === 'STOCK_TRANSFER' && firstStockTransfer.relatedStockCode) {
             // Kiểm tra relatedStockCode phải có
@@ -4247,15 +4236,27 @@ export class SyncService {
             this.logger.log(`[Warehouse Auto] Đang xử lý warehouse transfer cho docCode ${docCode}`);
             const result = await this.fastApiInvoiceFlowService.processWarehouseTransferFromStockTransfers(stockTransferList);
 
-            // Lưu vào bảng tracking
-            const warehouseProcessed = this.warehouseProcessedRepository.create({
-              docCode,
-              ioType: 'T', // T = Transfer
-              processedDate: new Date(),
-              result: JSON.stringify(result),
-              success: true,
+            // Lưu vào bảng tracking (upsert - update nếu đã tồn tại)
+            const existingRecord = await this.warehouseProcessedRepository.findOne({
+              where: { docCode },
             });
-            await this.warehouseProcessedRepository.save(warehouseProcessed);
+            if (existingRecord) {
+              existingRecord.ioType = 'T'; // T = Transfer
+              existingRecord.processedDate = new Date();
+              existingRecord.result = JSON.stringify(result);
+              existingRecord.success = true;
+              existingRecord.errorMessage = undefined;
+              await this.warehouseProcessedRepository.save(existingRecord);
+            } else {
+              const warehouseProcessed = this.warehouseProcessedRepository.create({
+                docCode,
+                ioType: 'T', // T = Transfer
+                processedDate: new Date(),
+                result: JSON.stringify(result),
+                success: true,
+              });
+              await this.warehouseProcessedRepository.save(warehouseProcessed);
+            }
 
             processedCount++;
             this.logger.log(`[Warehouse Auto] Đã xử lý warehouse transfer thành công cho docCode ${docCode}`);
@@ -4291,15 +4292,27 @@ export class SyncService {
           this.logger.log(`[Warehouse Auto] Đang xử lý warehouse cho docCode ${docCode} (doctype: ${stockTransfer.doctype}, ioType: ${stockTransfer.ioType})`);
           const result = await this.fastApiInvoiceFlowService.processWarehouseFromStockTransfer(stockTransfer);
 
-          // Lưu vào bảng tracking
-          const warehouseProcessed = this.warehouseProcessedRepository.create({
-            docCode,
-            ioType: stockTransfer.ioType,
-            processedDate: new Date(),
-            result: JSON.stringify(result),
-            success: true,
+          // Lưu vào bảng tracking (upsert - update nếu đã tồn tại)
+          const existingRecord = await this.warehouseProcessedRepository.findOne({
+            where: { docCode },
           });
-          await this.warehouseProcessedRepository.save(warehouseProcessed);
+          if (existingRecord) {
+            existingRecord.ioType = stockTransfer.ioType;
+            existingRecord.processedDate = new Date();
+            existingRecord.result = JSON.stringify(result);
+            existingRecord.success = true;
+            existingRecord.errorMessage = undefined;
+            await this.warehouseProcessedRepository.save(existingRecord);
+          } else {
+            const warehouseProcessed = this.warehouseProcessedRepository.create({
+              docCode,
+              ioType: stockTransfer.ioType,
+              processedDate: new Date(),
+              result: JSON.stringify(result),
+              success: true,
+            });
+            await this.warehouseProcessedRepository.save(warehouseProcessed);
+          }
 
           processedCount++;
           this.logger.log(`[Warehouse Auto] Đã xử lý warehouse thành công cho docCode ${docCode}`);
@@ -4307,17 +4320,28 @@ export class SyncService {
           errorCount++;
           const errorMessage = error?.message || String(error);
 
-          // Lưu vào bảng tracking với success = false
+          // Lưu vào bảng tracking với success = false (upsert - update nếu đã tồn tại)
           try {
             const firstStockTransfer = stockTransferList[0];
-            const warehouseProcessed = this.warehouseProcessedRepository.create({
-              docCode,
-              ioType: firstStockTransfer.ioType || 'T', // T = Transfer nếu không có ioType
-              processedDate: new Date(),
-              errorMessage,
-              success: false,
+            const existingRecord = await this.warehouseProcessedRepository.findOne({
+              where: { docCode },
             });
-            await this.warehouseProcessedRepository.save(warehouseProcessed);
+            if (existingRecord) {
+              existingRecord.ioType = firstStockTransfer.ioType || 'T'; // T = Transfer nếu không có ioType
+              existingRecord.processedDate = new Date();
+              existingRecord.errorMessage = errorMessage;
+              existingRecord.success = false;
+              await this.warehouseProcessedRepository.save(existingRecord);
+            } else {
+              const warehouseProcessed = this.warehouseProcessedRepository.create({
+                docCode,
+                ioType: firstStockTransfer.ioType || 'T', // T = Transfer nếu không có ioType
+                processedDate: new Date(),
+                errorMessage,
+                success: false,
+              });
+              await this.warehouseProcessedRepository.save(warehouseProcessed);
+            }
           } catch (saveError: any) {
             this.logger.error(`[Warehouse Auto] Lỗi khi lưu tracking cho docCode ${docCode}: ${saveError?.message || saveError}`);
           }

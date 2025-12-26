@@ -686,7 +686,8 @@ export class FastApiInvoiceFlowService {
     }
 
     const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht || '';
-
+    const maBp = department?.ma_bp || '';
+    
     // Gọi Customer API trước (Fast/Customer)
     if (firstStockTransfer.branchCode) {
       try {
@@ -754,7 +755,7 @@ export class FastApiInvoiceFlowService {
         gia_nt: 0,
         tien_nt: 0,
         ma_lo: stockTransfer.batchSerial || '',
-        ma_bp: stockTransfer.branchCode || '',
+        ma_bp: maBp,
         px_gia_dd: 0,
       });
     }
