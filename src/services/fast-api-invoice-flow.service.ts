@@ -430,12 +430,26 @@ export class FastApiInvoiceFlowService {
 
         // Trường hợp 2: fop_syscode != "CASH" → Kiểm tra payment method
         if (cashioData.fop_syscode && cashioData.fop_syscode !== 'CASH') {
-          try {
-            // Lấy payment method theo code
-            const paymentMethod = await this.categoriesService.findPaymentMethodByCode(cashioData.fop_syscode);
+          // Lấy payment method theo code
+          const paymentMethod = await this.categoriesService.findPaymentMethodByCode(cashioData.fop_syscode);
 
-            if (paymentMethod && paymentMethod.documentType === 'Giấy báo có') {
+          // Kiểm tra payment method có tồn tại không
+          if (!paymentMethod) {
+            const errorMessage = `Không tìm thấy payment method với code "${cashioData.fop_syscode}" cho cashio ${cashioData.code}`;
+            this.logger.error(`[Cashio] ${errorMessage}`);
+            throw new BadRequestException(errorMessage);
+          }
 
+          // Kiểm tra documentType
+          if (!paymentMethod.documentType) {
+            const errorMessage = `Payment method "${cashioData.fop_syscode}" (${cashioData.code}) không có documentType`;
+            this.logger.error(`[Cashio] ${errorMessage}`);
+            throw new BadRequestException(errorMessage);
+          }
+
+          // Chỉ xử lý nếu documentType = "Giấy báo có"
+          if (paymentMethod.documentType === 'Giấy báo có') {
+            try {
               const creditAdvicePayload = FastApiPayloadHelper.buildCreditAdvicePayload(cashioData, orderData, invoiceData, paymentMethod);
               const creditAdviceResult = await this.fastApiService.submitCreditAdvice(creditAdvicePayload);
               
@@ -459,11 +473,21 @@ export class FastApiInvoiceFlowService {
                 cashioCode: cashioData.code,
                 result: creditAdviceResult,
               });
-            } else if (!paymentMethod || !paymentMethod.documentType) {
-              this.logger.debug(`[Cashio] Payment method "${cashioData.fop_syscode}" (${cashioData.code}) không có documentType hoặc không phải "Giấy báo có", không gọi API nào`);
+            } catch (error: any) {
+              // Nếu là BadRequestException từ validation, throw lại
+              if (error instanceof BadRequestException) {
+                throw error;
+              }
+              // Nếu là lỗi khác, log và throw
+              const errorMessage = `Lỗi khi tạo credit advice cho payment method "${cashioData.fop_syscode}" (${cashioData.code}): ${error?.message || error}`;
+              this.logger.error(`[Cashio] ${errorMessage}`);
+              throw new BadRequestException(errorMessage);
             }
-          } catch (error: any) {
-            this.logger.warn(`[Cashio] Lỗi khi xử lý payment method "${cashioData.fop_syscode}" cho ${cashioData.code}: ${error?.message || error}`);
+          } else {
+            // Payment method có documentType nhưng không phải "Giấy báo có" → báo lỗi
+            const errorMessage = `Payment method "${cashioData.fop_syscode}" (${cashioData.code}) có documentType = "${paymentMethod.documentType}", không phải "Giấy báo có"`;
+            this.logger.error(`[Cashio] ${errorMessage}`);
+            throw new BadRequestException(errorMessage);
           }
         }
       }
@@ -479,9 +503,15 @@ export class FastApiInvoiceFlowService {
 
       return result;
     } catch (error: any) {
-      // Log lỗi nhưng không throw để không chặn flow chính
-      this.logger.warn(`[Cashio] Lỗi khi xử lý cashio payment cho đơn hàng ${docCode}: ${error?.message || error}`);
-      return {};
+      // Nếu là BadRequestException (lỗi mapping hoặc validation), throw lại để báo lỗi
+      if (error instanceof BadRequestException) {
+        this.logger.error(`[Cashio] Lỗi khi xử lý cashio payment cho đơn hàng ${docCode}: ${error?.message || error}`);
+        throw error;
+      }
+      // Các lỗi khác (network, API, ...) vẫn log và throw để báo lỗi
+      const errorMessage = `Lỗi khi xử lý cashio payment cho đơn hàng ${docCode}: ${error?.message || error}`;
+      this.logger.error(`[Cashio] ${errorMessage}`);
+      throw new BadRequestException(errorMessage);
     }
   }
 

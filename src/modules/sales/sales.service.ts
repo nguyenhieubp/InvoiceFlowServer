@@ -3649,18 +3649,14 @@ export class SalesService {
       }
 
       // ============================================
-      // CHỈ XỬ LÝ ĐƠN GỐC, BỎ QUA ĐƠN _X
+      // XỬ LÝ ĐƠN CÓ ĐUÔI _X
       // ============================================
-      // Nếu đơn có đuôi _X → bỏ qua, không xử lý
+      // Nếu đơn có đuôi _X → xử lý với action = 1
       if (this.hasUnderscoreX(docCode)) {
-        return {
-          success: false,
-          message: `Đơn hàng có đuôi _X không được xử lý. Vui lòng xử lý đơn gốc.`,
-          result: null,
-        };
+        return await this.handleSaleOrderWithUnderscoreX(orderData, docCode);
       }
 
-      // Chỉ xử lý đơn gốc (không có _X)
+      // Xử lý đơn gốc (không có _X)
       return await this.processSingleOrder(docCode, forceRetry);
     } catch (error: any) {
       this.logger.error(`Lỗi khi tạo hóa đơn cho ${docCode}: ${error?.message || error}`);
@@ -3713,6 +3709,7 @@ export class SalesService {
           sales: orderData.sales,
         });
         if (!validationResult.success) {
+          const errorMessage = validationResult.message || `Đơn hàng ${docCode} không đủ điều kiện tạo hóa đơn`;
           await this.saveFastApiInvoice({
             docCode,
             maDvcs: orderData.branchCode || '',
@@ -3720,13 +3717,13 @@ export class SalesService {
             tenKh: orderData.customer?.name || '',
             ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
             status: 0,
-            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
+            message: errorMessage,
             guid: null,
             fastApiResponse: undefined,
           });
           return {
             success: false,
-            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
+            message: errorMessage,
             result: null,
           };
         }
@@ -3773,6 +3770,7 @@ export class SalesService {
         });
 
         if (!validationResult.success) {
+          const errorMessage = validationResult.message || `Đơn hàng ${docCode} không đủ điều kiện tạo hóa đơn`;
           // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
           await this.saveFastApiInvoice({
             docCode,
@@ -3781,14 +3779,14 @@ export class SalesService {
             tenKh: orderData.customer?.name || '',
             ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
             status: 0,
-            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
+            message: errorMessage,
             guid: null,
             fastApiResponse: undefined,
           });
 
           return {
             success: false,
-            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
+            message: errorMessage,
             result: null,
           };
         }
@@ -3953,6 +3951,24 @@ export class SalesService {
             this.logger.error(`04. Đổi DV sales invoice creation failed for order ${docCode}: ${salesInvoiceErrorMessage}`);
           }
 
+          // Bước 3: Xử lý cashio payment (Phiếu thu tiền mặt/Giấy báo có) nếu salesInvoice thành công
+          let cashioResult: any = null;
+          if (salesInvoiceResult) {
+            this.logger.log(`[Cashio] Bắt đầu xử lý cashio payment cho đơn hàng ${docCode} (04. Đổi DV)`);
+            cashioResult = await this.fastApiInvoiceFlowService.processCashioPayment(
+              docCode,
+              orderData,
+              invoiceData,
+            );
+
+            if (cashioResult.cashReceiptResults && cashioResult.cashReceiptResults.length > 0) {
+              this.logger.log(`[Cashio] Đã tạo ${cashioResult.cashReceiptResults.length} cashReceipt thành công cho đơn hàng ${docCode} (04. Đổi DV)`);
+            }
+            if (cashioResult.creditAdviceResults && cashioResult.creditAdviceResults.length > 0) {
+              this.logger.log(`[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode} (04. Đổi DV)`);
+            }
+          }
+
           // Lưu vào bảng kê hóa đơn
           const responseStatus = salesInvoiceResult ? 1 : (salesOrderResult ? 0 : 0);
           const responseMessage = salesInvoiceResult
@@ -3973,6 +3989,7 @@ export class SalesService {
             fastApiResponse: JSON.stringify({
               salesOrder: salesOrderResult,
               salesInvoice: salesInvoiceResult,
+              cashio: cashioResult,
             }),
           });
 
@@ -3984,6 +4001,7 @@ export class SalesService {
             result: {
               salesOrder: salesOrderResult,
               salesInvoice: salesInvoiceResult,
+              cashio: cashioResult,
             },
           };
         } catch (error: any) {
@@ -4435,13 +4453,21 @@ export class SalesService {
             // status === 1 = thành công
             isSuccess = true;
             responseStatus = 1;
-            responseMessage = firstItem.message || 'Tạo hóa đơn thành công';
+            const apiMessage = firstItem.message || '';
+            const shouldUseApiMessage = apiMessage && apiMessage.trim().toUpperCase() !== 'OK';
+            responseMessage = shouldUseApiMessage
+              ? `Tạo hóa đơn thành công cho đơn hàng ${docCode}. ${apiMessage}`
+              : `Tạo hóa đơn thành công cho đơn hàng ${docCode}`;
             responseGuid = Array.isArray(firstItem.guid) ? firstItem.guid[0] : firstItem.guid || null;
           } else {
             // status === 0 hoặc khác = lỗi
             isSuccess = false;
             responseStatus = firstItem.status ?? 0;
-            responseMessage = firstItem.message || firstItem.error || 'Tạo hóa đơn thất bại';
+            const apiMessage = firstItem.message || firstItem.error || '';
+            const shouldUseApiMessage = apiMessage && apiMessage.trim().toUpperCase() !== 'OK';
+            responseMessage = shouldUseApiMessage
+              ? `Tạo hóa đơn thất bại cho đơn hàng ${docCode}. ${apiMessage}`
+              : `Tạo hóa đơn thất bại cho đơn hàng ${docCode}`;
           }
         }
       } else if (result && typeof result === 'object') {
@@ -4449,12 +4475,20 @@ export class SalesService {
         if (result.status === 1) {
           isSuccess = true;
           responseStatus = 1;
-          responseMessage = result.message || 'Tạo hóa đơn thành công';
+          const apiMessage = result.message || '';
+          const shouldUseApiMessage = apiMessage && apiMessage.trim().toUpperCase() !== 'OK';
+          responseMessage = shouldUseApiMessage
+            ? `Tạo hóa đơn thành công cho đơn hàng ${docCode}. ${apiMessage}`
+            : `Tạo hóa đơn thành công cho đơn hàng ${docCode}`;
           responseGuid = result.guid || null;
         } else {
           isSuccess = false;
           responseStatus = result.status ?? 0;
-          responseMessage = result.message || result.error || 'Tạo hóa đơn thất bại';
+          const apiMessage = result.message || result.error || '';
+          const shouldUseApiMessage = apiMessage && apiMessage.trim().toUpperCase() !== 'OK';
+          responseMessage = shouldUseApiMessage
+            ? `Tạo hóa đơn thất bại cho đơn hàng ${docCode}. ${apiMessage}`
+            : `Tạo hóa đơn thất bại cho đơn hàng ${docCode}`;
         }
       } else {
         // Fallback: không có result hoặc result không hợp lệ
@@ -4476,31 +4510,28 @@ export class SalesService {
         fastApiResponse: JSON.stringify(result),
       });
 
-      // Xử lý cashio payment (chỉ cho đơn hàng "01. Thường" và khi tạo invoice thành công)
+      // Xử lý cashio payment (cho đơn hàng "01. Thường", "07. Bán tài khoản" và khi tạo invoice thành công)
       if (isSuccess) {
         const firstSale = orderData.sales && orderData.sales.length > 0 ? orderData.sales[0] : null;
         const ordertypeName = firstSale?.ordertypeName || firstSale?.ordertype || '';
         const normalizedOrderType = String(ordertypeName).trim();
         const isNormalOrder = normalizedOrderType === '01.Thường' || normalizedOrderType === '01. Thường';
+        const isBanTaiKhoanOrder = normalizedOrderType.includes('07. Bán tài khoản') || normalizedOrderType.includes('07.Bán tài khoản');
 
-        if (isNormalOrder) {
-          try {
-            this.logger.log(`[Cashio] Bắt đầu xử lý cashio payment cho đơn hàng ${docCode} (01. Thường)`);
-            const cashioResult = await this.fastApiInvoiceFlowService.processCashioPayment(
-              docCode,
-              orderData,
-              invoiceData,
-            );
+        if (isNormalOrder || isBanTaiKhoanOrder) {
+          const orderTypeLabel = isNormalOrder ? '01. Thường' : '07. Bán tài khoản';
+          this.logger.log(`[Cashio] Bắt đầu xử lý cashio payment cho đơn hàng ${docCode} (${orderTypeLabel})`);
+          const cashioResult = await this.fastApiInvoiceFlowService.processCashioPayment(
+            docCode,
+            orderData,
+            invoiceData,
+          );
 
-            if (cashioResult.cashReceiptResults && cashioResult.cashReceiptResults.length > 0) {
-              this.logger.log(`[Cashio] Đã tạo ${cashioResult.cashReceiptResults.length} cashReceipt thành công cho đơn hàng ${docCode}`);
-            }
-            if (cashioResult.creditAdviceResults && cashioResult.creditAdviceResults.length > 0) {
-              this.logger.log(`[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode}`);
-            }
-          } catch (error: any) {
-            // Log lỗi nhưng không throw để không chặn flow chính
-            this.logger.warn(`[Cashio] Lỗi khi xử lý cashio payment cho đơn hàng ${docCode}: ${error?.message || error}`);
+          if (cashioResult.cashReceiptResults && cashioResult.cashReceiptResults.length > 0) {
+            this.logger.log(`[Cashio] Đã tạo ${cashioResult.cashReceiptResults.length} cashReceipt thành công cho đơn hàng ${docCode} (${orderTypeLabel})`);
+          }
+          if (cashioResult.creditAdviceResults && cashioResult.creditAdviceResults.length > 0) {
+            this.logger.log(`[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode} (${orderTypeLabel})`);
           }
         }
       }
@@ -4626,6 +4657,24 @@ export class SalesService {
         this.logger.log(`[ServiceOrderFlow] Không có dòng dịch vụ (productType = 'S'), bỏ qua SalesInvoice`);
       }
 
+      // Step 3.5: Xử lý cashio payment (Phiếu thu tiền mặt/Giấy báo có) nếu salesInvoice thành công
+      let cashioResult: any = null;
+      if (salesInvoiceResult) {
+        this.logger.log(`[Cashio] Bắt đầu xử lý cashio payment cho đơn hàng ${docCode} (02. Làm dịch vụ)`);
+        cashioResult = await this.fastApiInvoiceFlowService.processCashioPayment(
+          docCode,
+          orderData,
+          invoiceData,
+        );
+
+        if (cashioResult.cashReceiptResults && cashioResult.cashReceiptResults.length > 0) {
+          this.logger.log(`[Cashio] Đã tạo ${cashioResult.cashReceiptResults.length} cashReceipt thành công cho đơn hàng ${docCode} (02. Làm dịch vụ)`);
+        }
+        if (cashioResult.creditAdviceResults && cashioResult.creditAdviceResults.length > 0) {
+          this.logger.log(`[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode} (02. Làm dịch vụ)`);
+        }
+      }
+
       // Step 4: Tạo GxtInvoice (S → detail, I → ndetail)
       const importLines = sales.filter((s: any) => {
         const productType = (s.producttype || s.productType || '').toUpperCase().trim();
@@ -4683,6 +4732,7 @@ export class SalesService {
           salesOrder: 'success',
           salesInvoice: salesInvoiceResult,
           gxtInvoice: gxtInvoiceResult,
+          cashio: cashioResult,
         }),
       });
 
@@ -4696,6 +4746,7 @@ export class SalesService {
           salesOrder: 'success',
           salesInvoice: salesInvoiceResult,
           gxtInvoice: gxtInvoiceResult,
+          cashio: cashioResult,
         },
       };
     } catch (error: any) {
@@ -6045,22 +6096,6 @@ export class SalesService {
   }
 
   /**
-   * Helper: Kiểm tra xem có đơn tương ứng với _X không (ví dụ: SO45.01574458 => SO45.01574458_X)
-   */
-  private async checkOrderExists(docCode: string): Promise<boolean> {
-    if (!docCode) return false;
-    try {
-      const count = await this.saleRepository.count({
-        where: { docCode: docCode },
-      });
-      return count > 0;
-    } catch (error) {
-      this.logger.error(`Error checking order existence for ${docCode}: ${error?.message || error}`);
-      return false;
-    }
-  }
-
-  /**
    * Xử lý đơn hàng có đuôi _X (ví dụ: SO45.01574458_X)
    * Gọi API salesOrder với action: 1
    * Cả đơn có _X và đơn gốc (bỏ _X) đều sẽ có action = 1
@@ -6080,12 +6115,39 @@ export class SalesService {
 
       // Lưu vào bảng kê hóa đơn
       const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
-      const responseMessage = Array.isArray(result) && result.length > 0 
-        ? (result[0].message || 'Tạo đơn hàng thành công')
-        : 'Tạo đơn hàng thành công';
+      const apiMessage = Array.isArray(result) && result.length > 0 ? (result[0].message || '') : '';
+      const shouldUseApiMessage = apiMessage && apiMessage.trim().toUpperCase() !== 'OK';
+      let responseMessage = '';
+      if (responseStatus === 1) {
+        responseMessage = shouldUseApiMessage
+          ? `Tạo đơn hàng thành công cho đơn hàng ${docCode}. ${apiMessage}`
+          : `Tạo đơn hàng thành công cho đơn hàng ${docCode}`;
+      } else {
+        responseMessage = shouldUseApiMessage
+          ? `Tạo đơn hàng thất bại cho đơn hàng ${docCode}. ${apiMessage}`
+          : `Tạo đơn hàng thất bại cho đơn hàng ${docCode}`;
+      }
       const responseGuid = Array.isArray(result) && result.length > 0 && Array.isArray(result[0].guid) 
         ? result[0].guid[0] 
         : (Array.isArray(result) && result.length > 0 ? result[0].guid : null);
+
+      // Xử lý cashio payment (Phiếu thu tiền mặt/Giấy báo có) nếu salesOrder thành công
+      let cashioResult: any = null;
+      if (responseStatus === 1) {
+        this.logger.log(`[Cashio] Bắt đầu xử lý cashio payment cho đơn hàng ${docCode} (đơn có đuôi _X)`);
+        cashioResult = await this.fastApiInvoiceFlowService.processCashioPayment(
+          docCode,
+          orderData,
+          invoiceData,
+        );
+
+        if (cashioResult.cashReceiptResults && cashioResult.cashReceiptResults.length > 0) {
+          this.logger.log(`[Cashio] Đã tạo ${cashioResult.cashReceiptResults.length} cashReceipt thành công cho đơn hàng ${docCode} (đơn có đuôi _X)`);
+        }
+        if (cashioResult.creditAdviceResults && cashioResult.creditAdviceResults.length > 0) {
+          this.logger.log(`[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode} (đơn có đuôi _X)`);
+        }
+      }
 
       await this.saveFastApiInvoice({
         docCode,
@@ -6096,13 +6158,19 @@ export class SalesService {
         status: responseStatus,
         message: responseMessage,
         guid: responseGuid || null,
-        fastApiResponse: JSON.stringify(result),
+        fastApiResponse: JSON.stringify({
+          salesOrder: result,
+          cashio: cashioResult,
+        }),
       });
 
       return {
         success: responseStatus === 1,
         message: responseMessage,
-        result: result,
+        result: {
+          salesOrder: result,
+          cashio: cashioResult,
+        },
       };
     } catch (error: any) {
       // Lấy thông báo lỗi chính xác từ Fast API response
@@ -6123,6 +6191,12 @@ export class SalesService {
         errorMessage = error.message;
       }
 
+      // Format error message
+      const shouldUseApiMessage = errorMessage && errorMessage.trim().toUpperCase() !== 'OK';
+      const formattedErrorMessage = shouldUseApiMessage
+        ? `Tạo đơn hàng thất bại cho đơn hàng ${docCode}. ${errorMessage}`
+        : `Tạo đơn hàng thất bại cho đơn hàng ${docCode}`;
+
       // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
       await this.saveFastApiInvoice({
         docCode,
@@ -6131,16 +6205,16 @@ export class SalesService {
         tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
         ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
         status: 0,
-        message: errorMessage,
+        message: formattedErrorMessage,
         guid: null,
         fastApiResponse: JSON.stringify(error?.response?.data || error),
       });
 
-      this.logger.error(`SALE_ORDER with _X suffix creation failed for order ${docCode}: ${errorMessage}`);
+      this.logger.error(`SALE_ORDER with _X suffix creation failed for order ${docCode}: ${formattedErrorMessage}`);
 
       return {
         success: false,
-        message: errorMessage,
+        message: formattedErrorMessage,
         result: error?.response?.data || error,
       };
     }
@@ -6166,9 +6240,19 @@ export class SalesService {
 
         // Lưu vào bảng kê hóa đơn
         const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
-        const responseMessage = Array.isArray(result) && result.length > 0 
-          ? (result[0].message || 'Tạo hàng bán trả lại thành công')
-          : 'Tạo hàng bán trả lại thành công';
+        let responseMessage = '';
+        const apiMessage = Array.isArray(result) && result.length > 0 ? result[0].message : '';
+        const shouldAppendApiMessage = apiMessage && apiMessage.trim().toUpperCase() !== 'OK';
+        
+        if (responseStatus === 1) {
+          responseMessage = shouldAppendApiMessage
+            ? `Tạo hàng bán trả lại thành công cho đơn hàng ${docCode}. ${apiMessage}`
+            : `Tạo hàng bán trả lại thành công cho đơn hàng ${docCode}`;
+        } else {
+          responseMessage = shouldAppendApiMessage
+            ? `Tạo hàng bán trả lại thất bại cho đơn hàng ${docCode}. ${apiMessage}`
+            : `Tạo hàng bán trả lại thất bại cho đơn hàng ${docCode}`;
+        }
         const responseGuid = Array.isArray(result) && result.length > 0 && Array.isArray(result[0].guid) 
           ? result[0].guid[0] 
           : (Array.isArray(result) && result.length > 0 ? result[0].guid : null);
