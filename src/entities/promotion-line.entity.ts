@@ -42,6 +42,12 @@ export class PromotionLine {
   @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
   buy_combined_qty: number | null;
 
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  buy_fromtotal: number | null;
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  buy_tototal: number | null;
+
   @Column({ type: 'varchar', nullable: true })
   prom_group: string | null;
 
@@ -65,6 +71,12 @@ export class PromotionLine {
 
   @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
   get_discpct: number | null; // 100
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  get_value_range: number | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  get_vouchertype: string | null;
 
   @Column({ type: 'varchar', nullable: true })
   get_item_option: string | null; // "PKG"

@@ -191,7 +191,26 @@ export class ZappyApiService {
         }),
       );
 
-      const rawData = response?.data?.data?.[0] || {};
+      // Menard có cấu trúc: response.data.items[0].data[0]
+      // Các brand khác có cấu trúc: response.data.data[0]
+      let rawData: any = null;
+      
+      if (response?.data?.items && Array.isArray(response.data.items) && response.data.items.length > 0) {
+        // Cấu trúc menard: items[0].data[0]
+        const firstItem = response.data.items[0];
+        if (firstItem?.data && Array.isArray(firstItem.data) && firstItem.data.length > 0) {
+          rawData = firstItem.data[0];
+        }
+      } else if (response?.data?.data && Array.isArray(response.data.data) && response.data.data.length > 0) {
+        // Cấu trúc các brand khác: data[0]
+        rawData = response.data.data[0];
+      }
+
+      if (!rawData) {
+        this.logger.warn(`No promotion line data found for promotionId ${promotionId} (brand: ${brand})`);
+        return {};
+      }
+
       return rawData;
     } catch (error: any) {
       this.logger.error(`Error fetching promotion line from API: ${error?.message || error}`);

@@ -97,5 +97,69 @@ export class SyncTask {
   async handleDailySalesSync3AM() {
     await this.syncSalesForYesterday('Sales Sync 3AM');
   }
+
+  /**
+   * Helper function: Format ngày đầu tháng hiện tại thành format DDMMMYYYY
+   * Ví dụ: 01DEC2025
+   */
+  private formatFirstDayOfCurrentMonth(): string {
+    const now = new Date();
+    const day = '01';
+    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    const month = months[now.getMonth()];
+    const year = now.getFullYear();
+    return `${day}${month}${year}`;
+  }
+
+  /**
+   * Helper function: Format ngày cuối tháng hiện tại thành format DDMMMYYYY
+   * Ví dụ: 31DEC2025
+   */
+  private formatLastDayOfCurrentMonth(): string {
+    const now = new Date();
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const day = lastDay.toString().padStart(2, '0');
+    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    const month = months[now.getMonth()];
+    const year = now.getFullYear();
+    return `${day}${month}${year}`;
+  }
+
+  // Chạy mỗi ngày lúc 4:00 AM - Đồng bộ promotion cho tháng hiện tại
+  @Cron('0 4 * * *', {
+    name: 'daily-promotion-sync-4am',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  async handleDailyPromotionSync4AM() {
+    this.logger.log('Bắt đầu đồng bộ promotion tự động cho tháng hiện tại (scheduled task)...');
+    try {
+      const dateFrom = this.formatFirstDayOfCurrentMonth();
+      const dateTo = this.formatLastDayOfCurrentMonth();
+
+      this.logger.log(`[Scheduled Promotion] Đang đồng bộ promotion cho tháng hiện tại: ${dateFrom} - ${dateTo}`);
+
+      // Đồng bộ promotion cho tất cả brands
+      const brands = ['f3', 'labhair', 'yaman', 'menard'];
+      for (const brand of brands) {
+        try {
+          this.logger.log(`[Scheduled Promotion] Đang đồng bộ promotion brand ${brand} cho tháng ${dateFrom} - ${dateTo}`);
+          const result = await this.syncService.syncPromotion(dateFrom, dateTo, brand);
+          if (result.success) {
+            this.logger.log(
+              `[Scheduled Promotion] Hoàn thành đồng bộ promotion brand ${brand}: ${result.recordsCount} records, ${result.savedCount} saved, ${result.updatedCount} updated`,
+            );
+          } else {
+            this.logger.error(`[Scheduled Promotion] Lỗi khi đồng bộ promotion brand ${brand}: ${result.message}`);
+          }
+        } catch (error: any) {
+          this.logger.error(`[Scheduled Promotion] Lỗi khi đồng bộ promotion ${brand} cho tháng ${dateFrom} - ${dateTo}: ${error?.message || error}`);
+        }
+      }
+
+      this.logger.log('Hoàn thành đồng bộ promotion tự động cho tháng hiện tại');
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ promotion tự động: ${error?.message || error}`);
+    }
+  }
 }
 
