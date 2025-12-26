@@ -1,7 +1,8 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
+import * as XLSX from 'xlsx-js-style';
 import { Customer } from '../../entities/customer.entity';
 import { Sale } from '../../entities/sale.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
@@ -3027,6 +3028,256 @@ export class SyncService {
     } catch (error: any) {
       this.logger.error(`Error getting promotion: ${error?.message || error}`);
       throw error;
+    }
+  }
+
+  /**
+   * Export promotions to Excel file với chi tiết promotion lines
+   */
+  async exportPromotions(params: {
+    brand?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    ptype?: string;
+    status?: string;
+    code?: string;
+  }): Promise<Buffer> {
+    try {
+      // Lấy tất cả promotions (không pagination)
+      const queryBuilder = this.promotionRepository
+        .createQueryBuilder('p')
+        .leftJoinAndSelect('p.lines', 'lines')
+        .orderBy('p.fromdate', 'DESC')
+        .addOrderBy('p.code', 'ASC');
+
+      // Filter by brand
+      if (params.brand) {
+        queryBuilder.andWhere('p.brand = :brand', { brand: params.brand });
+      }
+
+      // Filter by ptype
+      if (params.ptype) {
+        queryBuilder.andWhere('p.ptype = :ptype', { ptype: params.ptype });
+      }
+
+      // Filter by status
+      if (params.status) {
+        queryBuilder.andWhere('p.status = :status', { status: params.status });
+      }
+
+      // Filter by code
+      if (params.code) {
+        queryBuilder.andWhere('p.code LIKE :code', { code: `%${params.code}%` });
+      }
+
+      // Filter by dateFrom
+      if (params.dateFrom) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day);
+        };
+        const fromDate = parseDate(params.dateFrom);
+        queryBuilder.andWhere('p.fromdate >= :dateFrom', { dateFrom: fromDate });
+      }
+
+      // Filter by dateTo
+      if (params.dateTo) {
+        const parseDate = (dateStr: string): Date => {
+          const day = parseInt(dateStr.substring(0, 2));
+          const monthStr = dateStr.substring(2, 5).toUpperCase();
+          const year = parseInt(dateStr.substring(5, 9));
+          const monthMap: Record<string, number> = {
+            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          };
+          const month = monthMap[monthStr] || 0;
+          return new Date(year, month, day, 23, 59, 59);
+        };
+        const toDate = parseDate(params.dateTo);
+        queryBuilder.andWhere('p.fromdate <= :dateTo', { dateTo: toDate });
+      }
+
+      const promotions = await queryBuilder.getMany();
+
+      // Format date helper
+      const formatDate = (date: Date | null | undefined): string => {
+        if (!date) return '-';
+        return new Date(date).toLocaleDateString('vi-VN');
+      };
+
+      // Build Excel data - mỗi promotion line là một row
+      const excelData: any[] = [];
+      
+      for (const promotion of promotions) {
+        const detailCodeBase = promotion.code || `ID: ${promotion.api_id}`;
+        
+        if (promotion.lines && promotion.lines.length > 0) {
+          for (const line of promotion.lines) {
+            const detailCode = line.seq !== null
+              ? `${detailCodeBase}.${String(line.seq).padStart(2, '0')}`
+              : detailCodeBase;
+            
+            excelData.push({
+              'Mã gốc': promotion.code || promotion.api_id,
+              'Mã chi tiết': detailCode,
+              'API ID': promotion.api_id,
+              'Tên': promotion.name || '-',
+              'Loại': promotion.ptype || '-',
+              'Brand': promotion.brand || '-',
+              'Từ ngày': formatDate(promotion.fromdate),
+              'Đến ngày': formatDate(promotion.todate),
+              'Trạng thái': promotion.status || '-',
+              'Người tạo': promotion.enteredby || '-',
+              'Ngày tạo': formatDate(promotion.enteredat),
+              'Brand Code': promotion.brand_code || '-',
+              'Line Type': line.line_type === 'i_lines' ? 'I Lines' : 'V Lines',
+              'Seq': line.seq !== null ? line.seq : '-',
+              'Buy Items': line.buy_items || '-',
+              'Buy Qty': line.buy_qty || 0,
+              'Buy From Total': line.buy_fromtotal !== null && line.buy_fromtotal !== undefined ? line.buy_fromtotal : '-',
+              'Buy To Total': line.buy_tototal !== null && line.buy_tototal !== undefined ? line.buy_tototal : '-',
+              'Buy Type': line.buy_type || '-',
+              'Buy Combined Qty': line.buy_combined_qty !== null && line.buy_combined_qty !== undefined ? line.buy_combined_qty : '-',
+              'Prom Group': line.prom_group || '-',
+              'Card Pattern': line.card_pattern || '-',
+              'Get Items': line.get_items || '-',
+              'Get Item Price': line.get_item_price !== null && line.get_item_price !== undefined ? line.get_item_price : '-',
+              'Get Qty': line.get_qty || 0,
+              'Get Disc Amt': line.get_discamt !== null && line.get_discamt !== undefined ? line.get_discamt : '-',
+              'Get Max Disc Amt': line.get_max_discamt !== null && line.get_max_discamt !== undefined ? line.get_max_discamt : '-',
+              'Get Disc Pct': line.get_discpct !== null && line.get_discpct !== undefined ? `${line.get_discpct}%` : '-',
+              'Get Value Range': line.get_value_range !== null && line.get_value_range !== undefined ? line.get_value_range : '-',
+              'Get Voucher Type': line.get_vouchertype || '-',
+              'Get Item Option': line.get_item_option || '-',
+              'Svc Card Months': line.svc_card_months !== null && line.svc_card_months !== undefined ? line.svc_card_months : '-',
+              'Guideline': line.guideline || '-',
+            });
+          }
+        } else {
+          // Nếu không có lines, vẫn thêm một row cho promotion
+          excelData.push({
+            'Mã gốc': promotion.code || promotion.api_id,
+            'Mã chi tiết': detailCodeBase,
+            'API ID': promotion.api_id,
+            'Tên': promotion.name || '-',
+            'Loại': promotion.ptype || '-',
+            'Brand': promotion.brand || '-',
+            'Từ ngày': formatDate(promotion.fromdate),
+            'Đến ngày': formatDate(promotion.todate),
+            'Trạng thái': promotion.status || '-',
+            'Người tạo': promotion.enteredby || '-',
+            'Ngày tạo': formatDate(promotion.enteredat),
+            'Brand Code': promotion.brand_code || '-',
+            'Line Type': '-',
+            'Seq': '-',
+            'Buy Items': '-',
+            'Buy Qty': '-',
+            'Buy From Total': '-',
+            'Buy To Total': '-',
+            'Buy Type': '-',
+            'Buy Combined Qty': '-',
+            'Prom Group': '-',
+            'Card Pattern': '-',
+            'Get Items': '-',
+            'Get Item Price': '-',
+            'Get Qty': '-',
+            'Get Disc Amt': '-',
+            'Get Max Disc Amt': '-',
+            'Get Disc Pct': '-',
+            'Get Value Range': '-',
+            'Get Voucher Type': '-',
+            'Get Item Option': '-',
+            'Svc Card Months': '-',
+            'Guideline': '-',
+          });
+        }
+      }
+
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(excelData);
+
+      // Style header row
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+      for (let col = range.s.c; col <= range.e.c; col++) {
+        const colLetter = XLSX.utils.encode_col(col);
+        const headerCellAddress = colLetter + '1';
+        if (ws[headerCellAddress]) {
+          ws[headerCellAddress].s = {
+            fill: {
+              fgColor: { rgb: 'E5E7EB' },
+              patternType: 'solid',
+            },
+            font: {
+              bold: true,
+              color: { rgb: '000000' },
+            },
+            alignment: {
+              horizontal: 'left',
+              vertical: 'center',
+            },
+          };
+        }
+      }
+
+      // Set column widths
+      const colWidths = [
+        { wch: 15 }, // Mã gốc
+        { wch: 18 }, // Mã chi tiết
+        { wch: 10 }, // API ID
+        { wch: 20 }, // Tên
+        { wch: 8 }, // Loại
+        { wch: 10 }, // Brand
+        { wch: 12 }, // Từ ngày
+        { wch: 12 }, // Đến ngày
+        { wch: 15 }, // Trạng thái
+        { wch: 25 }, // Người tạo
+        { wch: 12 }, // Ngày tạo
+        { wch: 12 }, // Brand Code
+        { wch: 12 }, // Line Type
+        { wch: 8 }, // Seq
+        { wch: 15 }, // Buy Items
+        { wch: 10 }, // Buy Qty
+        { wch: 15 }, // Buy From Total
+        { wch: 15 }, // Buy To Total
+        { wch: 12 }, // Buy Type
+        { wch: 15 }, // Buy Combined Qty
+        { wch: 12 }, // Prom Group
+        { wch: 15 }, // Card Pattern
+        { wch: 15 }, // Get Items
+        { wch: 15 }, // Get Item Price
+        { wch: 10 }, // Get Qty
+        { wch: 15 }, // Get Disc Amt
+        { wch: 15 }, // Get Max Disc Amt
+        { wch: 12 }, // Get Disc Pct
+        { wch: 15 }, // Get Value Range
+        { wch: 15 }, // Get Voucher Type
+        { wch: 15 }, // Get Item Option
+        { wch: 15 }, // Svc Card Months
+        { wch: 40 }, // Guideline
+      ];
+      ws['!cols'] = colWidths;
+
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, 'CTKM Chi tiết');
+
+      // Convert to buffer
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+      return buffer;
+    } catch (error: any) {
+      this.logger.error(`[exportPromotions] Error: ${error?.message || error}`);
+      this.logger.error(`[exportPromotions] Stack: ${error?.stack || 'No stack trace'}`);
+      throw new InternalServerErrorException(`Error exporting promotions to Excel: ${error?.message || 'Unknown error'}`);
     }
   }
 

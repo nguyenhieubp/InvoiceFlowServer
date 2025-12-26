@@ -1,5 +1,6 @@
-import { Controller, Post, Param, Get, Body, Query, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Param, Get, Body, Query, HttpException, HttpStatus, Res } from '@nestjs/common';
 import { SyncService } from './sync.service';
+import type { Response } from 'express';
 
 @Controller('sync')
 export class SyncController {
@@ -430,6 +431,54 @@ export class SyncController {
         {
           success: false,
           message: 'Lỗi khi lấy danh sách CTKM',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Export promotions to Excel với chi tiết promotion lines
+   */
+  @Get('promotion/export')
+  async exportPromotions(
+    @Res() res: Response,
+    @Query('brand') brand?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('ptype') ptype?: string,
+    @Query('status') status?: string,
+    @Query('code') code?: string,
+  ) {
+    try {
+      const buffer = await this.syncService.exportPromotions({
+        brand,
+        dateFrom,
+        dateTo,
+        ptype,
+        status,
+        code,
+      });
+
+      // Generate filename
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0].replace(/-/g, '');
+      const brandSuffix = brand ? `_${brand.toUpperCase()}` : '';
+      const fileName = `CTKM_ChiTiet_${dateStr}${brandSuffix}.xlsx`;
+
+      // Set headers
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+      res.setHeader('Content-Length', buffer.length);
+
+      // Send buffer
+      res.send(buffer);
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi xuất Excel CTKM',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
