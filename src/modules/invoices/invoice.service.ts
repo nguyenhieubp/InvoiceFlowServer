@@ -1,29 +1,20 @@
 import {
   Injectable,
-  Logger,
   NotFoundException,
-  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Invoice } from '../entities/invoice.entity';
-import { InvoiceItem } from '../entities/invoice-item.entity';
-import { Sale } from '../entities/sale.entity';
-import { CreateInvoiceDto, InvoiceItemDto } from '../dto/create-invoice.dto';
-import { InvoicePrintService } from './invoice-print.service';
+import { Invoice } from '../../entities/invoice.entity';
+import { InvoiceItem } from '../../entities/invoice-item.entity';
+import { CreateInvoiceDto } from '../../dto/create-invoice.dto';
 
 @Injectable()
 export class InvoiceService {
-  private readonly logger = new Logger(InvoiceService.name);
-
   constructor(
     @InjectRepository(Invoice)
     private invoiceRepository: Repository<Invoice>,
     @InjectRepository(InvoiceItem)
     private invoiceItemRepository: Repository<InvoiceItem>,
-    @InjectRepository(Sale)
-    private saleRepository: Repository<Sale>,
-    private invoicePrintService: InvoicePrintService,
   ) {}
 
   async createInvoice(dto: CreateInvoiceDto): Promise<Invoice> {
@@ -119,12 +110,7 @@ export class InvoiceService {
     return result;
   }
 
-  async getInvoice(id: string): Promise<
-    Invoice & {
-      fastStatus: 'printed' | 'pending' | 'missing';
-      fastStatusMessage?: string;
-    }
-  > {
+  async getInvoice(id: string): Promise<Invoice> {
     const invoice = await this.invoiceRepository.findOne({
       where: { id },
       relations: ['items'],
@@ -134,107 +120,14 @@ export class InvoiceService {
       throw new NotFoundException(`Invoice with ID ${id} not found`);
     }
 
-    return this.attachFastStatus(invoice);
+    return invoice;
   }
 
-  async downloadInvoicePdf(id: string): Promise<{ buffer: Buffer; fileName: string }> {
-    const invoice = await this.getInvoice(id);
-    if (!invoice.printResponse) {
-      throw new BadRequestException('Hóa đơn chưa có dữ liệu in');
-    }
-
-    const keySearch = this.extractKeySearch(invoice.printResponse);
-    if (!keySearch) {
-      throw new BadRequestException('Không tìm thấy thông tin hóa đơn thật (keySearch)');
-    }
-
-    const base64Data = await this.invoicePrintService.downloadInvoicePdf(keySearch);
-    const buffer = Buffer.from(base64Data, 'base64');
-
-    return {
-      buffer,
-      fileName: `${invoice.key || invoice.id}.pdf`,
-    };
-  }
-
-  private extractKeySearch(printResponse: string): string | null {
-    try {
-      const parsed = JSON.parse(printResponse);
-      if (parsed?.Message) {
-        try {
-          const messageData = JSON.parse(parsed.Message);
-          if (Array.isArray(messageData) && messageData[0]?.keySearch) {
-            return messageData[0].keySearch;
-          }
-        } catch (messageParseError) {
-          this.logger.warn(`Không parse được Message trong printResponse: ${messageParseError}`);
-        }
-      }
-      if (parsed?.Data && Array.isArray(parsed.Data) && parsed.Data[0]?.keySearch) {
-        return parsed.Data[0].keySearch;
-      }
-    } catch (error) {
-      this.logger.warn(`Không parse được printResponse để lấy keySearch: ${error}`);
-    }
-    return null;
-  }
-
-  private async attachFastStatus(
-    invoice: Invoice,
-  ): Promise<
-    Invoice & {
-      fastStatus: 'printed' | 'pending' | 'missing';
-      fastStatusMessage?: string;
-    }
-  > {
-    try {
-      const result = await this.invoicePrintService.checkInvoiceStatus(
-        invoice.key,
-        invoice.invoiceDate,
-      );
-
-      let fastStatus: 'printed' | 'pending' | 'missing' = 'missing';
-      if (result.taxStatus === 3) {
-        fastStatus = 'printed';
-      } else if (result.taxStatus === 0) {
-        fastStatus = 'pending';
-      } else {
-        fastStatus = 'missing';
-      }
-
-      return {
-        ...invoice,
-        fastStatus,
-        fastStatusMessage: result.record?.feedbackContent || undefined,
-      };
-    } catch (error: any) {
-      return {
-        ...invoice,
-        fastStatus: 'missing',
-        fastStatusMessage:
-          error?.message || 'Không thể kiểm tra trạng thái hóa đơn',
-      };
-    }
-  }
-
-  async getAllInvoices(): Promise<
-    Array<
-      Invoice & {
-        fastStatus: 'printed' | 'pending' | 'missing';
-        fastStatusMessage?: string;
-      }
-    >
-  > {
-    const invoices = await this.invoiceRepository.find({
+  async getAllInvoices(): Promise<Invoice[]> {
+    return this.invoiceRepository.find({
       relations: ['items'],
       order: { createdAt: 'DESC' },
     });
-
-    const invoicesWithStatus = await Promise.all(
-      invoices.map((invoice) => this.attachFastStatus(invoice)),
-    );
-
-    return invoicesWithStatus;
   }
 
   async updateInvoice(id: string, dto: Partial<CreateInvoiceDto>): Promise<Invoice> {
@@ -306,23 +199,6 @@ export class InvoiceService {
     return this.invoiceRepository.save(invoice);
   }
 
-  async printInvoice(id: string): Promise<any> {
-    const invoice = await this.getInvoice(id);
-
-    if (invoice.isPrinted) {
-      this.logger.warn(`Invoice ${id} đã được in rồi`);
-    }
-
-    const result = await this.invoicePrintService.printInvoice(invoice);
-
-    // Cập nhật trạng thái
-    invoice.isPrinted = true;
-    invoice.printResponse = JSON.stringify(result);
-    await this.invoiceRepository.save(invoice);
-
-    return result;
-  }
-
   private parseDate(dateStr: string): Date {
     // Format: DD/MM/YYYY
     const [day, month, year] = dateStr.split('/');
@@ -330,45 +206,6 @@ export class InvoiceService {
   }
 
   private numberToWords(num: number): string {
-    // Hàm chuyển số thành chữ tiếng Việt (đơn giản)
-    // Có thể cải thiện sau
-    const ones = [
-      '',
-      'một',
-      'hai',
-      'ba',
-      'bốn',
-      'năm',
-      'sáu',
-      'bảy',
-      'tám',
-      'chín',
-    ];
-    const tens = [
-      '',
-      'mười',
-      'hai mươi',
-      'ba mươi',
-      'bốn mươi',
-      'năm mươi',
-      'sáu mươi',
-      'bảy mươi',
-      'tám mươi',
-      'chín mươi',
-    ];
-    const hundreds = [
-      '',
-      'một trăm',
-      'hai trăm',
-      'ba trăm',
-      'bốn trăm',
-      'năm trăm',
-      'sáu trăm',
-      'bảy trăm',
-      'tám trăm',
-      'chín trăm',
-    ];
-
     if (num === 0) return 'không';
 
     let result = '';

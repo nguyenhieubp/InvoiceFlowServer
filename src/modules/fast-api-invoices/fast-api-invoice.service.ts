@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, FindOptionsWhere, Like } from 'typeorm';
-import { FastApiInvoice } from '../entities/fast-api-invoice.entity';
+import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
 
 @Injectable()
 export class FastApiInvoiceService {

@@ -3,8 +3,8 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 
 @Injectable()
-export class FastApiService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(FastApiService.name);
+export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(FastApiClientService.name);
   private readonly baseUrl = 'http://103.145.79.169:6688/Fast';
   private readonly credentials = {
     UserName: 'F3',

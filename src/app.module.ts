@@ -11,7 +11,6 @@ import { SalesModule } from './modules/sales/sales.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { FastApiInvoicesModule } from './modules/fast-api-invoices/fast-api-invoices.module';
 import { SyncTask } from './tasks/sync.task';
-import { AutoInvoiceTask } from './tasks/auto-invoice.task';
 import { Sale } from './entities/sale.entity';
 
 @Module({
@@ -33,6 +32,6 @@ import { Sale } from './entities/sale.entity';
     TypeOrmModule.forFeature([Sale]),
   ],
   controllers: [AppController],
-  providers: [AppService, SyncTask, AutoInvoiceTask],
+  providers: [AppService, SyncTask],
 })
 export class AppModule {}

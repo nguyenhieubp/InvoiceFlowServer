@@ -108,18 +108,6 @@ export class SalesController {
     return this.salesService.findByOrderCode(docCode);
   }
 
-  @Post('order/:docCode/print')
-  async printOrder(@Param('docCode') docCode: string) {
-    return this.salesService.printOrder(docCode);
-  }
-
-  @Post('orders/print')
-  async printOrders(@Body('docCodes') docCodes: string[]) {
-    if (!Array.isArray(docCodes) || docCodes.length === 0) {
-      throw new BadRequestException('Danh sách đơn hàng không hợp lệ');
-    }
-    return this.salesService.printMultipleOrders(docCodes);
-  }
 
   @Post('mark-processed-from-invoices')
   async markProcessedOrdersFromInvoices() {

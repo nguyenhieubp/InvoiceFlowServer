@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { SyncService } from '../services/sync.service';
+import { SyncService } from '../modules/sync/sync.service';
 import { SalesService } from '../modules/sales/sales.service';
 import { FastApiInvoiceFlowService } from '../services/fast-api-invoice-flow.service';
 import { InjectRepository } from '@nestjs/typeorm';

@@ -1,7 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HttpModule } from '@nestjs/axios';
-import { SyncService } from '../../services/sync.service';
+import { SyncService } from './sync.service';
 import { SyncController } from './sync.controller';
 import { SyncTask } from '../../tasks/sync.task';
 import { ZappyApiService } from '../../services/zappy-api.service';

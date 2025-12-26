@@ -6,10 +6,8 @@ import { SalesService } from './sales.service';
 import { Sale } from '../../entities/sale.entity';
 import { Customer } from '../../entities/customer.entity';
 import { ProductItem } from '../../entities/product-item.entity';
-import { InvoicePrintService } from '../../services/invoice-print.service';
-import { InvoiceService } from '../../services/invoice.service';
 import { ZappyApiService } from '../../services/zappy-api.service';
-import { FastApiService } from '../../services/fast-api.service';
+import { FastApiClientService } from '../../services/fast-api-client.service';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { LoyaltyService } from '../../services/loyalty.service';
 import { InvoiceValidationService } from '../../services/invoice-validation.service';
@@ -32,7 +30,7 @@ import { SyncModule } from '../sync/sync.module';
     forwardRef(() => SyncModule),
   ],
   controllers: [SalesController],
-  providers: [SalesService, InvoicePrintService, ZappyApiService, FastApiService, FastApiInvoiceFlowService, LoyaltyService, InvoiceValidationService],
+  providers: [SalesService, ZappyApiService, FastApiClientService, FastApiInvoiceFlowService, LoyaltyService, InvoiceValidationService],
   exports: [SalesService, FastApiInvoiceFlowService],
 })
 export class SalesModule {}

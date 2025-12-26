@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException, Inject, forwardRef } from '@nestjs/common';
-import { FastApiService } from './fast-api.service';
+import { FastApiClientService } from './fast-api-client.service';
 import { CategoriesService } from '../modules/categories/categories.service';
-import { SyncService } from './sync.service';
+import { SyncService } from '../modules/sync/sync.service';
 import { LoyaltyService } from './loyalty.service';
 import { FastApiPayloadHelper } from './fast-api-payload.helper';
 
@@ -14,7 +14,7 @@ export class FastApiInvoiceFlowService {
   private readonly logger = new Logger(FastApiInvoiceFlowService.name);
 
   constructor(
-    private readonly fastApiService: FastApiService,
+    private readonly fastApiService: FastApiClientService,
     private readonly categoriesService: CategoriesService,
     @Inject(forwardRef(() => SyncService))
     private readonly syncService: SyncService,
@@ -487,7 +487,8 @@ export class FastApiInvoiceFlowService {
 
 
   /**
-   * Xử lý warehouse receipt/release từ stock transfer
+   * Xử lý warehouse receipt/release từ stock transfer (I/O kho)
+   * Xử lý nhập xuất kho
    * @param stockTransfer - Dữ liệu stock transfer
    * @returns Kết quả từ API
    */
@@ -648,6 +649,7 @@ export class FastApiInvoiceFlowService {
 
   /**
    * Xử lý warehouse transfer từ stock transfer (điều chuyển kho)
+   * Xử lý điều chuyển kho
    * @param stockTransfers - Mảng các stock transfer cùng docCode
    * @returns Kết quả từ API
    */
@@ -688,11 +690,9 @@ export class FastApiInvoiceFlowService {
     // Gọi Customer API trước (Fast/Customer)
     if (firstStockTransfer.branchCode) {
       try {
-        // Lấy tên từ department nếu có, nếu không thì dùng branchCode
-        const tenKh = department?.name  || '';
         await this.createOrUpdateCustomer({
           ma_kh: firstStockTransfer.branchCode,
-          ten_kh: tenKh,
+          ten_kh: firstStockTransfer.branchCode,
         });
         this.logger.log(`[Warehouse Transfer] Đã tạo/cập nhật customer ${firstStockTransfer.branchCode} trước khi xử lý warehouse transfer`);
       } catch (error: any) {
@@ -754,7 +754,6 @@ export class FastApiInvoiceFlowService {
         gia_nt: 0,
         tien_nt: 0,
         ma_lo: stockTransfer.batchSerial || '',
-        ma_nx: stockTransfer.lineInfo1 || '',
         ma_bp: stockTransfer.branchCode || '',
         px_gia_dd: 0,
       });

@@ -11,10 +11,9 @@ import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
 import { StockTransfer } from '../../entities/stock-transfer.entity';
 import { WarehouseProcessed } from '../../entities/warehouse-processed.entity';
-import { InvoicePrintService } from '../../services/invoice-print.service';
-import { InvoiceService } from '../../services/invoice.service';
+import { InvoiceService } from '../invoices/invoice.service';
 import { ZappyApiService } from '../../services/zappy-api.service';
-import { FastApiService } from '../../services/fast-api.service';
+import { FastApiClientService } from '../../services/fast-api-client.service';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { CategoriesService } from '../categories/categories.service';
 import { LoyaltyService } from '../../services/loyalty.service';
@@ -1329,11 +1328,10 @@ export class SalesService {
     private stockTransferRepository: Repository<StockTransfer>,
     @InjectRepository(WarehouseProcessed)
     private warehouseProcessedRepository: Repository<WarehouseProcessed>,
-    private invoicePrintService: InvoicePrintService,
     private invoiceService: InvoiceService,
     private httpService: HttpService,
     private zappyApiService: ZappyApiService,
-    private fastApiService: FastApiService,
+    private fastApiService: FastApiClientService,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private categoriesService: CategoriesService,
     private loyaltyService: LoyaltyService,
@@ -2827,70 +2825,9 @@ export class SalesService {
   }
 
   async printOrder(docCode: string): Promise<any> {
-    const orderData = await this.findByOrderCode(docCode);
-
-    // In hóa đơn
-    const printResult = await this.invoicePrintService.printInvoiceFromOrder(orderData);
-
-    // Tạo và lưu invoice vào database
-    const invoice = await this.createInvoiceFromOrder(orderData, printResult);
-
-    // Đánh dấu tất cả các sale trong đơn hàng là đã xử lý
-    // Đảm bảo luôn được gọi ngay cả khi có lỗi ở trên
-    try {
-      await this.markOrderAsProcessed(docCode);
-    } catch (error) {
-      // Log lỗi nhưng không throw để không ảnh hưởng đến response
-      console.error(`Lỗi khi đánh dấu đơn hàng ${docCode} là đã xử lý:`, error);
-    }
-
-    return {
-      success: true,
-      message: `In hóa đơn ${docCode} thành công`,
-      invoice,
-      printResult,
-    };
+    throw new Error('Print functionality has been removed');
   }
 
-  async printMultipleOrders(docCodes: string[]): Promise<any> {
-    const results: Array<{
-      docCode: string;
-      success: boolean;
-      message: string;
-      invoice?: Invoice;
-      error?: string;
-    }> = [];
-
-    for (const docCode of docCodes) {
-      try {
-        const result = await this.printOrder(docCode);
-        results.push({
-          docCode,
-          success: true,
-          message: result.message,
-          invoice: result.invoice,
-        });
-      } catch (error: any) {
-        this.logger.error(`Lỗi khi in đơn hàng ${docCode}: ${error?.message || error}`);
-        results.push({
-          docCode,
-          success: false,
-          message: `In hóa đơn ${docCode} thất bại`,
-          error: error?.response?.data?.message || error?.message || 'Unknown error',
-        });
-      }
-    }
-
-    const successCount = results.filter((r) => r.success).length;
-    const failureCount = results.length - successCount;
-
-    return {
-      total: results.length,
-      successCount,
-      failureCount,
-      results,
-    };
-  }
 
   /**
    * Lưu hóa đơn vào bảng kê hóa đơn (FastApiInvoice)
@@ -3062,97 +2999,6 @@ export class SalesService {
     };
   }
 
-  private async createInvoiceFromOrder(orderData: any, printResult: any): Promise<any> {
-    // Kiểm tra xem invoice đã tồn tại chưa (dựa trên key = docCode)
-    const existingInvoice = await this.invoiceRepository.findOne({
-      where: { key: orderData.docCode },
-      relations: ['items'],
-    });
-
-    if (existingInvoice) {
-      // Cập nhật invoice đã tồn tại
-      existingInvoice.isPrinted = true;
-      existingInvoice.printResponse = JSON.stringify(printResult);
-      await this.invoiceRepository.save(existingInvoice);
-      return existingInvoice;
-    }
-
-    // Tính toán các giá trị
-    const totalAmount = orderData.totalRevenue || 0;
-    const taxAmount = Math.round(totalAmount * 0.08); // 8% VAT
-    const amountBeforeTax = totalAmount - taxAmount;
-    const discountAmount = 0;
-
-    // Format ngày - đảm bảo parse đúng
-    let invoiceDate: Date;
-    if (orderData.docDate instanceof Date) {
-      invoiceDate = orderData.docDate;
-    } else if (typeof orderData.docDate === 'string') {
-      // Thử parse ISO string trước
-      invoiceDate = new Date(orderData.docDate);
-      // Kiểm tra nếu date không hợp lệ
-      if (isNaN(invoiceDate.getTime())) {
-        // Thử parse format khác hoặc fallback
-        invoiceDate = new Date(); // Fallback to current date
-      }
-    } else {
-      invoiceDate = new Date(); // Fallback to current date
-    }
-
-    // Tạo invoice items từ sales
-    const items = orderData.sales.map((sale: any) => {
-      const qty = Number(sale.qty);
-      const revenue = Number(sale.revenue);
-      const price = qty > 0 ? revenue / qty : 0;
-      const taxRate = 8.0; // 8% VAT
-      const itemTaxAmount = Math.round(revenue * taxRate / 100);
-      const itemAmountBeforeTax = revenue - itemTaxAmount;
-
-      return {
-        processType: '1',
-        itemCode: sale.itemCode || '',
-        itemName: sale.itemName || '',
-        uom: 'Pcs',
-        quantity: qty,
-        price: price,
-        amount: itemAmountBeforeTax,
-        taxRate: taxRate,
-        taxAmount: itemTaxAmount,
-        discountRate: 0.00,
-        discountAmount: 0.00,
-      };
-    });
-
-    // Format date cho DTO - InvoiceService.parseDate() expect DD/MM/YYYY
-    const day = invoiceDate.getDate().toString().padStart(2, '0');
-    const month = (invoiceDate.getMonth() + 1).toString().padStart(2, '0');
-    const year = invoiceDate.getFullYear();
-    const invoiceDateStr = `${day}/${month}/${year}`;
-
-    // Tạo invoice DTO
-    const invoiceDto = {
-      key: orderData.docCode, // Sử dụng docCode làm key
-      invoiceDate: invoiceDateStr,
-      customerCode: orderData.customer?.code || '',
-      customerName: orderData.customer?.name || '',
-      customerTaxCode: '',
-      address: orderData.customer?.street || orderData.customer?.address || '',
-      phoneNumber: orderData.customer?.phone || orderData.customer?.mobile || '',
-      idCardNo: orderData.customer?.idnumber || '',
-      voucherBook: '1C25MCD',
-      items: items,
-    };
-
-    // Tạo invoice
-    const invoice = await this.invoiceService.createInvoice(invoiceDto);
-
-    // Cập nhật trạng thái đã in và lưu response
-    invoice.isPrinted = true;
-    invoice.printResponse = JSON.stringify(printResult);
-    await this.invoiceRepository.save(invoice);
-
-    return invoice;
-  }
 
   /**
    * Đồng bộ dữ liệu từ Zappy API và lưu vào database
