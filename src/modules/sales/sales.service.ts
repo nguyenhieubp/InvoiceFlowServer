@@ -1419,12 +1419,26 @@ export class SalesService {
 
         if (existing) {
           // Update record đã tồn tại
-          existing.ioType = ioTypeForTracking;
-          existing.processedDate = new Date();
-          existing.result = JSON.stringify(result);
-          existing.success = isSuccess;
-          existing.errorMessage = isSuccess ? undefined : errorMessage; // Xóa errorMessage nếu thành công
-          await this.warehouseProcessedRepository.save(existing);
+          // Nếu thành công, xóa errorMessage bằng cách update trực tiếp
+          if (isSuccess) {
+            await this.warehouseProcessedRepository.update(
+              { docCode: stockTransfer.docCode },
+              {
+                ioType: ioTypeForTracking,
+                processedDate: new Date(),
+                result: JSON.stringify(result),
+                success: isSuccess,
+                errorMessage: null as any, // Set null để xóa errorMessage trong database
+              }
+            );
+          } else {
+            existing.ioType = ioTypeForTracking;
+            existing.processedDate = new Date();
+            existing.result = JSON.stringify(result);
+            existing.success = isSuccess;
+            existing.errorMessage = errorMessage;
+            await this.warehouseProcessedRepository.save(existing);
+          }
         } else {
           // Tạo mới nếu chưa tồn tại
           const warehouseProcessed = this.warehouseProcessedRepository.create({
@@ -1768,7 +1782,7 @@ export class SalesService {
         // Fallback to database if Zappy API fails
       }
     }
-      
+
 
     // Đếm tổng số sale items trước (để có total cho pagination)
     const countQuery = this.saleRepository
@@ -2885,7 +2899,7 @@ export class SalesService {
 
   async printOrder(docCode: string): Promise<any> {
     throw new Error('Print functionality has been removed');
-  }
+      }
 
 
   /**

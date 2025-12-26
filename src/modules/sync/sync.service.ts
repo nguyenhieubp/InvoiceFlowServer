@@ -4241,12 +4241,17 @@ export class SyncService {
               where: { docCode },
             });
             if (existingRecord) {
-              existingRecord.ioType = 'T'; // T = Transfer
-              existingRecord.processedDate = new Date();
-              existingRecord.result = JSON.stringify(result);
-              existingRecord.success = true;
-              existingRecord.errorMessage = undefined;
-              await this.warehouseProcessedRepository.save(existingRecord);
+              // Dùng update để set errorMessage = null khi thành công
+              await this.warehouseProcessedRepository.update(
+                { docCode },
+                {
+                  ioType: 'T', // T = Transfer
+                  processedDate: new Date(),
+                  result: JSON.stringify(result),
+                  success: true,
+                  errorMessage: null as any, // Set null để xóa errorMessage trong database
+                }
+              );
             } else {
               const warehouseProcessed = this.warehouseProcessedRepository.create({
                 docCode,
@@ -4297,12 +4302,17 @@ export class SyncService {
             where: { docCode },
           });
           if (existingRecord) {
-            existingRecord.ioType = stockTransfer.ioType;
-            existingRecord.processedDate = new Date();
-            existingRecord.result = JSON.stringify(result);
-            existingRecord.success = true;
-            existingRecord.errorMessage = undefined;
-            await this.warehouseProcessedRepository.save(existingRecord);
+            // Dùng update để set errorMessage = null khi thành công
+            await this.warehouseProcessedRepository.update(
+              { docCode },
+              {
+                ioType: stockTransfer.ioType,
+                processedDate: new Date(),
+                result: JSON.stringify(result),
+                success: true,
+                errorMessage: null as any, // Set null để xóa errorMessage trong database
+              }
+            );
           } else {
             const warehouseProcessed = this.warehouseProcessedRepository.create({
               docCode,
