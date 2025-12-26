@@ -3649,68 +3649,18 @@ export class SalesService {
       }
 
       // ============================================
-      // XỬ LÝ ĐƠN GỐC VÀ ĐƠN _X CÙNG LÚC (cho double-click)
+      // CHỈ XỬ LÝ ĐƠN GỐC, BỎ QUA ĐƠN _X
       // ============================================
-      // Nếu đơn có đuôi _X → xử lý cả đơn _X và đơn gốc
-      // Nếu đơn gốc → kiểm tra có đơn _X không, nếu có thì xử lý cả 2
-      const isUnderscoreX = this.hasUnderscoreX(docCode);
-      const baseDocCode = this.getBaseDocCode(docCode);
-      const docCodeWithX = `${baseDocCode}_X`;
-      
-      let relatedDocCode: string | null = null;
-      if (isUnderscoreX) {
-        // Đơn có đuôi _X → cần xử lý cả đơn gốc
-        relatedDocCode = baseDocCode;
-      } else {
-        // Đơn gốc → kiểm tra có đơn _X không
-        const hasXOrder = await this.checkOrderExists(docCodeWithX);
-        if (hasXOrder) {
-          relatedDocCode = docCodeWithX;
-        }
-      }
-
-      // Nếu có đơn liên quan, xử lý cả 2 đơn
-      if (relatedDocCode) {
-        const results: any[] = [];
-        
-        // Xử lý đơn hiện tại
-        try {
-          const currentResult = await this.processSingleOrder(docCode, forceRetry);
-          results.push({ docCode, ...currentResult });
-        } catch (error: any) {
-          results.push({
-            docCode,
-            success: false,
-            message: error?.message || 'Lỗi khi xử lý đơn hàng',
-            error: error?.message || error,
-          });
-        }
-
-        // Xử lý đơn liên quan
-        try {
-          const relatedResult = await this.processSingleOrder(relatedDocCode, forceRetry);
-          results.push({ docCode: relatedDocCode, ...relatedResult });
-        } catch (error: any) {
-          results.push({
-            docCode: relatedDocCode,
-            success: false,
-            message: error?.message || 'Lỗi khi xử lý đơn hàng liên quan',
-            error: error?.message || error,
-          });
-        }
-
-        // Trả về kết quả tổng hợp
-        const allSuccess = results.every(r => r.success);
+      // Nếu đơn có đuôi _X → bỏ qua, không xử lý
+      if (this.hasUnderscoreX(docCode)) {
         return {
-          success: allSuccess,
-          message: allSuccess 
-            ? `Đã xử lý thành công cả ${docCode} và ${relatedDocCode}`
-            : `Đã xử lý ${results.filter(r => r.success).length}/${results.length} đơn hàng`,
-          results: results,
+          success: false,
+          message: `Đơn hàng có đuôi _X không được xử lý. Vui lòng xử lý đơn gốc.`,
+          result: null,
         };
       }
 
-      // Nếu không có đơn liên quan, xử lý đơn hiện tại như bình thường
+      // Chỉ xử lý đơn gốc (không có _X)
       return await this.processSingleOrder(docCode, forceRetry);
     } catch (error: any) {
       this.logger.error(`Lỗi khi tạo hóa đơn cho ${docCode}: ${error?.message || error}`);
@@ -3781,76 +3731,6 @@ export class SalesService {
           };
         }
         return await this.handleSaleReturnFlow(orderData, docCode);
-      }
-
-      // Xử lý đơn hàng có đuôi _X (ví dụ: SO45.01574458_X)
-      // Cả đơn có _X và đơn gốc (bỏ _X) đều sẽ có action = 1
-      // Nhưng vẫn phải validate chỉ cho phép "01.Thường" và "01. Thường"
-      if (this.hasUnderscoreX(docCode)) {
-        // Validate chỉ cho phép "01.Thường" và "01. Thường"
-        const validationResult = this.invoiceValidationService.validateOrderForInvoice({
-          docCode,
-          sales: orderData.sales,
-        });
-        if (!validationResult.success) {
-          await this.saveFastApiInvoice({
-            docCode,
-            maDvcs: orderData.branchCode || '',
-            maKh: orderData.customer?.code || '',
-            tenKh: orderData.customer?.name || '',
-            ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
-            status: 0,
-            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
-            guid: null,
-            fastApiResponse: undefined,
-          });
-          return {
-            success: false,
-            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
-            result: null,
-          };
-        }
-        const saleOrderResult = await this.handleSaleOrderWithUnderscoreX(orderData, docCode);
-        // Nếu có kết quả, trả về kết quả
-        if (saleOrderResult !== null) {
-          return saleOrderResult;
-        }
-      }
-
-      // Xử lý đơn gốc (không có _X) nếu có đơn tương ứng với _X
-      // Ví dụ: SO45.01574458 nếu có SO45.01574458_X thì cũng sẽ có action = 1
-      // Nhưng vẫn phải validate chỉ cho phép "01.Thường" và "01. Thường"
-      const docCodeWithX = `${docCode}_X`;
-      const hasCorrespondingXOrder = await this.checkOrderExists(docCodeWithX);
-      if (hasCorrespondingXOrder) {
-        // Validate chỉ cho phép "01.Thường" và "01. Thường"
-        const validationResult = this.invoiceValidationService.validateOrderForInvoice({
-          docCode,
-          sales: orderData.sales,
-        });
-        if (!validationResult.success) {
-          await this.saveFastApiInvoice({
-            docCode,
-            maDvcs: orderData.branchCode || '',
-            maKh: orderData.customer?.code || '',
-            tenKh: orderData.customer?.name || '',
-            ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
-            status: 0,
-            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
-            guid: null,
-            fastApiResponse: undefined,
-          });
-          return {
-            success: false,
-            message: validationResult.message || 'Đơn hàng không đủ điều kiện tạo hóa đơn',
-            result: null,
-          };
-        }
-        const saleOrderResult = await this.handleSaleOrderWithUnderscoreX(orderData, docCode);
-        // Nếu có kết quả, trả về kết quả
-        if (saleOrderResult !== null) {
-          return saleOrderResult;
-        }
       }
 
       // ============================================
