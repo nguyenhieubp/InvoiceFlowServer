@@ -457,13 +457,29 @@ export class FastApiInvoiceFlowService {
               if (Array.isArray(creditAdviceResult) && creditAdviceResult.length > 0) {
                 const firstItem = creditAdviceResult[0];
                 if (firstItem.status !== 1) {
-                  const errorMessage = firstItem.message || 'Tạo credit advice thất bại';
+                  const apiMessage = firstItem.message || 'Tạo credit advice thất bại';
+                  // Format message để bao gồm tên hình thức thanh toán
+                  let errorMessage = apiMessage;
+                  const paymentMethodCode = paymentMethod?.code || cashioData.fop_syscode || 'thanh toán';
+                  if (apiMessage.includes('Hình thức thanh toán chưa nhập') || apiMessage.includes('không hợp lệ')) {
+                    errorMessage = `Hình thức ${paymentMethodCode} không hợp lệ hoặc chưa nhập`;
+                  } else if (apiMessage === 'Tạo credit advice thất bại') {
+                    errorMessage = `Hình thức ${paymentMethodCode} không hợp lệ hoặc chưa nhập`;
+                  }
                   this.logger.error(`[Cashio] Credit Advice API trả về status = ${firstItem.status}: ${errorMessage}`);
                   throw new BadRequestException(errorMessage);
                 }
               } else if (creditAdviceResult && typeof creditAdviceResult === 'object' && creditAdviceResult.status !== undefined) {
                 if (creditAdviceResult.status !== 1) {
-                  const errorMessage = creditAdviceResult.message || 'Tạo credit advice thất bại';
+                  const apiMessage = creditAdviceResult.message || 'Tạo credit advice thất bại';
+                  // Format message để bao gồm tên hình thức thanh toán
+                  let errorMessage = apiMessage;
+                  const paymentMethodCode = paymentMethod?.code || cashioData.fop_syscode || 'thanh toán';
+                  if (apiMessage.includes('Hình thức thanh toán chưa nhập') || apiMessage.includes('không hợp lệ')) {
+                    errorMessage = `Hình thức ${paymentMethodCode} không hợp lệ hoặc chưa nhập`;
+                  } else if (apiMessage === 'Tạo credit advice thất bại') {
+                    errorMessage = `Hình thức ${paymentMethodCode} không hợp lệ hoặc chưa nhập`;
+                  }
                   this.logger.error(`[Cashio] Credit Advice API trả về status = ${creditAdviceResult.status}: ${errorMessage}`);
                   throw new BadRequestException(errorMessage);
                 }
