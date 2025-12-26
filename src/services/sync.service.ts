@@ -4462,6 +4462,7 @@ export class SyncService {
     dateTo?: string;
     ioType?: string;
     success?: boolean;
+    docCode?: string;
   }): Promise<{
     success: boolean;
     data: WarehouseProcessed[];
@@ -4499,6 +4500,11 @@ export class SyncService {
       // Filter by success
       if (params.success !== undefined) {
         queryBuilder.andWhere('wp.success = :success', { success: params.success });
+      }
+
+      // Filter by docCode
+      if (params.docCode) {
+        queryBuilder.andWhere('wp.docCode LIKE :docCode', { docCode: `%${params.docCode}%` });
       }
 
       // Filter by dateFrom
@@ -4548,16 +4554,16 @@ export class SyncService {
 
       // Calculate statistics
       const statsQueryBuilder = this.warehouseProcessedRepository.createQueryBuilder('wp');
-
-      // Apply same filters for statistics
-      // Filter by ioType
+      
+      // Apply same filters to stats query
       if (params.ioType) {
         statsQueryBuilder.andWhere('wp.ioType = :ioType', { ioType: params.ioType });
       }
-
-      // Filter by success
       if (params.success !== undefined) {
         statsQueryBuilder.andWhere('wp.success = :success', { success: params.success });
+      }
+      if (params.docCode) {
+        statsQueryBuilder.andWhere('wp.docCode LIKE :docCode', { docCode: `%${params.docCode}%` });
       }
 
       // Filter by dateFrom

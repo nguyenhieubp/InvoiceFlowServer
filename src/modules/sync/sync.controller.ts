@@ -744,6 +744,7 @@ export class SyncController {
     @Query('dateTo') dateTo?: string,
     @Query('ioType') ioType?: string,
     @Query('success') success?: string,
+    @Query('docCode') docCode?: string,
   ) {
     try {
       const result = await this.syncService.getWarehouseProcessed({
@@ -753,6 +754,7 @@ export class SyncController {
         dateTo,
         ioType,
         success: success !== undefined ? success === 'true' : undefined,
+        docCode,
       });
       return result;
     } catch (error: any) {

@@ -41,6 +41,8 @@ export class InvoiceValidationService {
     '07. Bán tài khoản',
     '07.Bán tài khoản',
     '07.  Bán tài khoản',
+    // Đổi vỏ
+    'Đổi vỏ',
   ];
 
   /**

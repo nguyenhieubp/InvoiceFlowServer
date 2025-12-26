@@ -275,6 +275,15 @@ export class SalesController {
     }
   }
 
+  @Post('stock-transfer/doc-code/:docCode/warehouse-retry')
+  async retryWarehouseFromStockTransferByDocCode(@Param('docCode') docCode: string) {
+    try {
+      return await this.salesService.processWarehouseFromStockTransferByDocCode(docCode);
+    } catch (error: any) {
+      throw new BadRequestException(error.message || 'Lỗi khi xử lý lại warehouse');
+    }
+  }
+
   @Post('explain-faceid')
   async explainFaceId(@Body() explainDto: ExplainFaceIdDto) {
     try {
