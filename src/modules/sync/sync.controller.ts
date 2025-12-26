@@ -82,41 +82,6 @@ export class SyncController {
   }
 
   /**
-   * Đồng bộ FaceID data từ API inout-customer theo ngày
-   * @param date - Date format: DDMMMYYYY (ví dụ: 13DEC2025)
-   * @param shopCodes - Optional array of shop codes. Nếu không có, sẽ lấy tất cả data
-   */
-  @Post('faceid')
-  async syncFaceId(@Body('date') date: string, @Body('shopCodes') shopCodes?: string[]) {
-    if (!date) {
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 13DEC2025)',
-        },
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    try {
-      const result = await this.syncService.syncFaceIdByDate(date, shopCodes);
-      return {
-        ...result,
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error: any) {
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Lỗi khi đồng bộ FaceID',
-          error: error.message,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  /**
    * Đồng bộ stock transfer từ ngày đến ngày
    * Phải đặt trước route /:brandName để tránh conflict
    * @param dateFrom - Date format: DDMMMYYYY (ví dụ: 01NOV2025)
@@ -200,45 +165,6 @@ export class SyncController {
     }
   }
 
-  /**
-   * Đồng bộ FaceID theo khoảng thời gian
-   * @param startDate - Date format: DDMMMYYYY (ví dụ: 01OCT2025)
-   * @param endDate - Date format: DDMMMYYYY (ví dụ: 31OCT2025)
-   * @param shopCodes - Optional array of shop codes
-   */
-  @Post('faceid/range')
-  async syncFaceIdByDateRange(
-    @Body('startDate') startDate: string,
-    @Body('endDate') endDate: string,
-    @Body('shopCodes') shopCodes?: string[],
-  ) {
-    if (!startDate || !endDate) {
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
-        },
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    try {
-      const result = await this.syncService.syncFaceIdByDateRange(startDate, endDate, shopCodes);
-      return {
-        ...result,
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error: any) {
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Lỗi khi đồng bộ FaceID theo khoảng thời gian',
-          error: error.message,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
 
   /**
    * Đồng bộ báo cáo nộp quỹ cuối ca theo khoảng thời gian

@@ -1,7 +1,6 @@
 import { Controller, Get, Query, Param, Post, Body, BadRequestException, NotFoundException, Res } from '@nestjs/common';
 import { SalesService } from './sales.service';
 import type { CreateStockTransferDto } from '../../dto/create-stock-transfer.dto';
-import { ExplainFaceIdDto } from '../../dto/explain-faceid.dto';
 import type { Response } from 'express';
 
 @Controller('sales')
@@ -68,30 +67,6 @@ export class SalesController {
     res.send(buffer);
   }
 
-  @Get('giai-trinh-faceid')
-  async getAllGiaiTrinhFaceId(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('date') date?: string,
-    @Query('dateFrom') dateFrom?: string,
-    @Query('dateTo') dateTo?: string,
-    @Query('orderCode') orderCode?: string,
-    @Query('partnerCode') partnerCode?: string,
-    @Query('faceStatus') faceStatus?: 'yes' | 'no',
-    @Query('brandCode') brandCode?: string,
-  ) {
-    return this.salesService.getAllGiaiTrinhFaceId({
-      page: page ? parseInt(page) : undefined,
-      limit: limit ? parseInt(limit) : undefined,
-      date,
-      dateFrom,
-      dateTo,
-      orderCode,
-      partnerCode,
-      faceStatus,
-      brandCode,
-    });
-  }
 
   @Get('status-asys')
   async getStatusAsys(
@@ -233,21 +208,6 @@ export class SalesController {
     return this.salesService.createStockTransfer(createDto);
   }
 
-  @Get('check-face-id/:partnerCode')
-  async getCheckFaceIdByPartnerCode(
-    @Param('partnerCode') partnerCode: string,
-    @Query('date') date?: string,
-  ) {
-    return this.salesService.getCheckFaceIdByPartnerCode(partnerCode, date);
-  }
-
-  @Get('orders-with-check-face-id/:partnerCode')
-  async getOrdersWithCheckFaceId(
-    @Param('partnerCode') partnerCode: string,
-    @Query('date') date?: string,
-  ) {
-    return this.salesService.getOrdersWithCheckFaceId(partnerCode, date);
-  }
 
   @Post('sync-error-orders')
   async syncErrorOrders() {
@@ -284,24 +244,5 @@ export class SalesController {
     }
   }
 
-  @Post('explain-faceid')
-  async explainFaceId(@Body() explainDto: ExplainFaceIdDto) {
-    try {
-      if (!explainDto) {
-        throw new BadRequestException('Request body không hợp lệ');
-      }
-      if (!explainDto.docCode || !explainDto.explanationDate || !explainDto.explanationMessage) {
-        throw new BadRequestException(
-          `Mã đơn, ngày giải trình và thông tin giải trình là bắt buộc. Nhận được: docCode=${explainDto?.docCode}, explanationDate=${explainDto?.explanationDate}, explanationMessage=${explainDto?.explanationMessage}`,
-        );
-      }
-      return await this.salesService.explainFaceId(explainDto);
-    } catch (error: any) {
-      if (error instanceof BadRequestException || error instanceof NotFoundException) {
-        throw error;
-      }
-      throw new BadRequestException(`Lỗi khi giải trình FaceID: ${error?.message || error}`);
-    }
-  }
 }
 

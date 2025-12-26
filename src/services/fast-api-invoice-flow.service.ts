@@ -3,6 +3,7 @@ import { FastApiService } from './fast-api.service';
 import { CategoriesService } from '../modules/categories/categories.service';
 import { SyncService } from './sync.service';
 import { LoyaltyService } from './loyalty.service';
+import { FastApiPayloadHelper } from './fast-api-payload.helper';
 
 /**
  * Service quản lý tạo invoice trong Fast API
@@ -20,66 +21,6 @@ export class FastApiInvoiceFlowService {
     private readonly loyaltyService: LoyaltyService,
   ) { }
 
-  /**
-   * Helper: Loại bỏ các field null, undefined, hoặc empty string
-   * Giữ lại ma_lo và so_serial ngay cả khi null hoặc empty
-   */
-  private removeEmptyFields(obj: any, keepMaLoAndSerial: boolean = true): any {
-    if (obj === null || obj === undefined) {
-      return obj;
-    }
-    if (Array.isArray(obj)) {
-      return obj.map(item => this.removeEmptyFields(item, keepMaLoAndSerial));
-    }
-    if (typeof obj === 'object') {
-      const cleaned: any = {};
-      for (const [key, value] of Object.entries(obj)) {
-        const shouldKeep = value !== null && value !== undefined && value !== ''
-          || (keepMaLoAndSerial && (key === 'ma_lo' || key === 'so_serial'));
-        if (shouldKeep) {
-          cleaned[key] = this.removeEmptyFields(value, keepMaLoAndSerial);
-        }
-      }
-      return cleaned;
-    }
-    return obj;
-  }
-
-  /**
-   * Helper: Build clean payload cho salesOrder và salesInvoice
-   */
-  private buildCleanPayload(orderData: any, action: number = 0): any {
-    return {
-      action,
-      ma_dvcs: orderData.ma_dvcs,
-      ma_kh: orderData.ma_kh,
-      ong_ba: orderData.ong_ba ?? null,
-      ma_gd: orderData.ma_gd ?? '1',
-      ma_tt: orderData.ma_tt ?? null,
-      ma_ca: orderData.ma_ca ?? null,
-      hinh_thuc: orderData.hinh_thuc ?? '0',
-      dien_giai: orderData.dien_giai ?? null,
-      ngay_lct: orderData.ngay_lct,
-      ngay_ct: orderData.ngay_ct,
-      so_ct: orderData.so_ct,
-      so_seri: orderData.so_seri,
-      ma_nt: orderData.ma_nt ?? 'VND',
-      ty_gia: typeof orderData.ty_gia === 'number' ? orderData.ty_gia : parseFloat(orderData.ty_gia) || 1.0,
-      ma_bp: orderData.ma_bp,
-      tk_thue_no: orderData.tk_thue_no ?? '131111',
-      ma_kenh: orderData.ma_kenh ?? 'ONLINE',
-      loai_gd: '01',
-      detail: (orderData.detail || []).map((item: any) => {
-        const { product, ma_bp, ...cleanItem } = item;
-        const result: any = { ...cleanItem };
-        // Giữ lại ma_lo và so_serial (kể cả null)
-        if ('ma_lo' in item) result.ma_lo = item.ma_lo;
-        if ('so_serial' in item) result.so_serial = item.so_serial;
-        return result;
-      }),
-      cbdetail: null,
-    };
-  }
 
   /**
    * Tạo/cập nhật khách hàng trong Fast API
@@ -134,8 +75,8 @@ export class FastApiInvoiceFlowService {
   async createSalesOrder(orderData: any, action: number = 0): Promise<any> {
     this.logger.log(`[Flow] Creating sales order ${orderData.so_ct} with action=${action}...`);
     try {
-      const cleanOrderData = this.buildCleanPayload(orderData, action);
-      const finalPayload = this.removeEmptyFields(cleanOrderData);
+      const cleanOrderData = FastApiPayloadHelper.buildCleanPayload(orderData, action);
+      const finalPayload = FastApiPayloadHelper.removeEmptyFields(cleanOrderData);
 
       const result = await this.fastApiService.submitSalesOrder(finalPayload);
       
@@ -256,8 +197,8 @@ export class FastApiInvoiceFlowService {
       }
 
       // Build clean payload (giống salesOrder nhưng action luôn = 0)
-      const cleanInvoiceData = this.buildCleanPayload(invoiceData, 0);
-      const finalPayload = this.removeEmptyFields(cleanInvoiceData);
+      const cleanInvoiceData = FastApiPayloadHelper.buildCleanPayload(invoiceData, 0);
+      const finalPayload = FastApiPayloadHelper.removeEmptyFields(cleanInvoiceData);
 
       const result = await this.fastApiService.submitSalesInvoice(finalPayload);
       
@@ -294,7 +235,7 @@ export class FastApiInvoiceFlowService {
   async createSalesReturn(salesReturnData: any): Promise<any> {
     this.logger.log(`[Flow] Creating sales return ${salesReturnData.so_ct || 'N/A'}...`);
     try {
-      const finalPayload = this.removeEmptyFields(salesReturnData, false);
+      const finalPayload = FastApiPayloadHelper.removeEmptyFields(salesReturnData, false);
 
       const result = await this.fastApiService.submitSalesReturn(finalPayload);
       
@@ -335,7 +276,7 @@ export class FastApiInvoiceFlowService {
     this.logger.log(`[Flow] Creating gxt invoice ${gxtInvoiceData.so_ct || 'N/A'}...`);
     try {
       this.logger.debug(`[Flow] GxtInvoice payload: ${JSON.stringify(gxtInvoiceData, null, 2)}`);
-      const finalPayload = this.removeEmptyFields(gxtInvoiceData, false);
+      const finalPayload = FastApiPayloadHelper.removeEmptyFields(gxtInvoiceData, false);
 
       const result = await this.fastApiService.submitGxtInvoice(finalPayload);
       
@@ -394,7 +335,7 @@ export class FastApiInvoiceFlowService {
           dien_thoai: invoiceData.customer?.mobile || invoiceData.customer?.phone || undefined,
           so_cccd: invoiceData.customer?.idnumber || undefined,
           ngay_sinh: invoiceData.customer?.birthday
-            ? this.formatDateYYYYMMDD(invoiceData.customer.birthday)
+            ? FastApiPayloadHelper.formatDateYYYYMMDD(invoiceData.customer.birthday)
             : undefined,
           gioi_tinh: invoiceData.customer?.sexual || undefined,
         });
@@ -420,30 +361,6 @@ export class FastApiInvoiceFlowService {
     }
   }
 
-  /**
-   * Format date thành YYYYMMDD
-   */
-  private formatDateYYYYMMDD(date: Date | string): string {
-    const d = typeof date === 'string' ? new Date(date) : date;
-    if (isNaN(d.getTime())) {
-      return '';
-    }
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}${month}${day}`;
-  }
-
-  /**
-   * Format date thành ISO string cho Fast API (YYYY-MM-DDTHH:mm:ss)
-   */
-  private formatDateISO(date: Date | string): string {
-    const d = typeof date === 'string' ? new Date(date) : date;
-    if (isNaN(d.getTime())) {
-      return new Date().toISOString();
-    }
-    return d.toISOString();
-  }
 
   /**
    * Xử lý cashio và gọi API cashReceipt hoặc creditAdvice nếu cần
@@ -482,7 +399,7 @@ export class FastApiInvoiceFlowService {
           try {
             this.logger.log(`[Cashio] Phát hiện CASH payment cho đơn hàng ${docCode} (${cashioData.code}), gọi cashReceipt API`);
 
-            const cashReceiptPayload = this.buildCashReceiptPayload(cashioData, orderData, invoiceData);
+            const cashReceiptPayload = FastApiPayloadHelper.buildCashReceiptPayload(cashioData, orderData, invoiceData);
             const cashReceiptResult = await this.fastApiService.submitCashReceipt(cashReceiptPayload);
             
             // Validate response: status = 1 mới là success
@@ -519,7 +436,7 @@ export class FastApiInvoiceFlowService {
 
             if (paymentMethod && paymentMethod.documentType === 'Giấy báo có') {
 
-              const creditAdvicePayload = this.buildCreditAdvicePayload(cashioData, orderData, invoiceData, paymentMethod);
+              const creditAdvicePayload = FastApiPayloadHelper.buildCreditAdvicePayload(cashioData, orderData, invoiceData, paymentMethod);
               const creditAdviceResult = await this.fastApiService.submitCreditAdvice(creditAdvicePayload);
               
               // Validate response: status = 1 mới là success
@@ -568,83 +485,6 @@ export class FastApiInvoiceFlowService {
     }
   }
 
-  /**
-   * Build payload cho cashReceipt API
-   */
-  private buildCashReceiptPayload(cashioData: any, orderData: any, invoiceData: any): any {
-    const totalIn = parseFloat(String(cashioData.total_in || '0'));
-    const docDate = cashioData.docdate || orderData.docDate || new Date();
-
-    return {
-      action: 0,
-      ma_dvcs: invoiceData.ma_dvcs || cashioData.branch_code || '',
-      ma_kh: invoiceData.ma_kh || cashioData.partner_code || '',
-      ong_ba: orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba || '',
-      loai_ct: '2', // Mặc định 2 - Thu của khách hàng
-      dept_id: invoiceData.ma_bp || cashioData.branch_code || '',
-      dien_giai: `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
-      ngay_lct: this.formatDateISO(docDate),
-      so_ct: orderData.docCode || invoiceData.so_ct || '',
-      so_ct_tc: orderData.docCode || invoiceData.so_ct || '',
-      ma_nt: 'VND',
-      ty_gia: 1,
-      ma_cp1: '',
-      ma_cp2: '',
-      httt: 'CASH',
-      status: '0' as string,
-      detail: [
-        {
-          ma_kh_i: invoiceData.ma_kh || cashioData.partner_code || '',
-          tien: totalIn,
-          dien_giai: cashioData.refno || `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
-          ma_bp: invoiceData.ma_bp || cashioData.branch_code || '',
-          ma_vv: '',
-          ma_hd: '',
-          ma_phi: '',
-          ma_ku: '',
-        },
-      ],
-    };
-  }
-
-  /**
-   * Build payload cho creditAdvice API
-   */
-  private buildCreditAdvicePayload(cashioData: any, orderData: any, invoiceData: any, paymentMethod: any): any {
-    const totalIn = parseFloat(String(cashioData.total_in || '0'));
-    const docDate = cashioData.docdate || orderData.docDate || new Date();
-
-    return {
-      action: 0,
-      ma_dvcs: invoiceData.ma_dvcs || cashioData.branch_code || '',
-      ma_kh: invoiceData.ma_kh || cashioData.partner_code || '',
-      ong_ba: orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba || '',
-      loai_ct: '2', // Mặc định 2 - Thu của khách hàng
-      dept_id: invoiceData.ma_bp || cashioData.branch_code || '',
-      dien_giai: `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
-      ngay_lct: this.formatDateISO(docDate),
-      so_ct: orderData.docCode || invoiceData.so_ct || '',
-      so_ct_tc: orderData.docCode || invoiceData.so_ct || '',
-      ma_nt: 'VND',
-      ty_gia: 1,
-      ma_cp1: '',
-      ma_cp2: '',
-      httt: paymentMethod.code || cashioData.fop_syscode || '',
-      status: '0',
-      detail: [
-        {
-          ma_kh_i: invoiceData.ma_kh || cashioData.partner_code || '',
-          tien: totalIn,
-          dien_giai: cashioData.refno || paymentMethod.description || `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
-          ma_bp: invoiceData.ma_bp || cashioData.branch_code || '',
-          ma_vv: '',
-          ma_hd: '',
-          ma_phi: '',
-          ma_ku: '',
-        },
-      ],
-    };
-  }
 
   /**
    * Xử lý warehouse receipt/release từ stock transfer

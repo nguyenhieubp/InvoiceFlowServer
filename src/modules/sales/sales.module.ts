@@ -17,7 +17,6 @@ import { Invoice } from '../../entities/invoice.entity';
 import { InvoiceItem } from '../../entities/invoice-item.entity';
 import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
-import { CheckFaceId } from '../../entities/check-face-id.entity';
 import { StockTransfer } from '../../entities/stock-transfer.entity';
 import { WarehouseProcessed } from '../../entities/warehouse-processed.entity';
 import { InvoicesModule } from '../invoices/invoices.module';
@@ -26,7 +25,7 @@ import { SyncModule } from '../sync/sync.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Sale, Customer, ProductItem, Invoice, InvoiceItem, FastApiInvoice, DailyCashio, CheckFaceId, StockTransfer, WarehouseProcessed]),
+    TypeOrmModule.forFeature([Sale, Customer, ProductItem, Invoice, InvoiceItem, FastApiInvoice, DailyCashio, StockTransfer, WarehouseProcessed]),
     HttpModule,
     forwardRef(() => InvoicesModule),
     CategoriesModule,

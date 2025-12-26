@@ -13,11 +13,6 @@ export class SyncTask {
 
   constructor(
     private readonly syncService: SyncService,
-    @Inject(forwardRef(() => SalesService))
-    private readonly salesService: SalesService,
-    private readonly fastApiInvoiceFlowService: FastApiInvoiceFlowService,
-    @InjectRepository(Sale)
-    private saleRepository: Repository<Sale>,
   ) {}
 
   /**
