@@ -19,31 +19,60 @@ Khi double-click vào một đơn hàng (order line), hệ thống sẽ kiểm t
 
 ## Bảng Tóm Tắt Các Case
 
-| Case | Tên Case | Điều Kiện | Customer | Sales Order | Sales Invoice | Sales Return | Gxt Invoice | Cash Receipt | Credit Advice | Action |
-|------|----------|-----------|----------|-------------|---------------|--------------|-------------|--------------|---------------|--------|
-| 1 | Đơn Dịch Vụ | `ordertypeName` = "02. Làm dịch vụ" | ✅ | ✅ (0) | ✅ (0) | ❌ | ✅ (0) | ❌ | ❌ | 0 |
-| 2 | Đơn có đuôi _X | `docCode` có `_X` hoặc có đơn tương ứng | ❌ | ✅ (1) | ❌ | ❌ | ❌ | ❌ | ❌ | 1 |
-| 3 | SALE_RETURN không ST | `docSourceType = 'SALE_RETURN'` + không có stock transfer | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | - |
-| 4 | SALE_RETURN có ST | `docSourceType = 'SALE_RETURN'` + có stock transfer | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | - |
-| 5 | Đơn Bình Thường | `ordertypeName` = "01.Thường" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ✅* | ✅* | 0 |
-| 6 | Đổi điểm | `ordertypeName` = "03. Đổi điểm" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ❌ | ❌ | 0 |
-| 7 | Đổi DV | `ordertypeName` = "04. Đổi DV" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ❌ | ❌ | 0 |
-| 8 | Tặng sinh nhật | `ordertypeName` = "05. Tặng sinh nhật" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ❌ | ❌ | 0 |
-| 9 | Đầu tư/Bán TK/Sàn TMDT | `ordertypeName` = "06. Đầu tư" / "07. Bán tài khoản" / "9. Sàn TMDT" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ❌ | ❌ | 0 |
-| 10 | Tách thẻ | `ordertypeName` = "08. Tách thẻ" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ❌ | ❌ | 0 |
-| 11 | Warehouse I/O | `doctype = "STOCK_IO"` + `soCode = "null"` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | - |
-| 12 | Warehouse Transfer | `doctype = "STOCK_TRANSFER"` + `relatedStockCode` có | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | - |
-| 13 | Đổi vỏ | `ordertypeName` = "Đổi vỏ" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ❌ | ❌ | 0 |
+### Loại 1: SALE_ORDER (Đơn Hàng Bán)
+
+| Case | Tên Case | Điều Kiện | Customer | Sales Order | Sales Invoice | Gxt Invoice | Cash Receipt | Credit Advice | Payment | Debit Advice | Action | Ghi Chú |
+|------|----------|-----------|----------|-------------|---------------|-------------|--------------|---------------|---------|--------------|--------|---------|
+| 1 | Đơn Dịch Vụ | `ordertypeName` = "02. Làm dịch vụ" | ✅ | ✅ (0) | ✅ (0) | ✅ (0) | ✅* | ✅* | ✅** | ✅** | 0 | Chỉ invoice cho productType = 'S' |
+| 5 | Đơn Bình Thường | `ordertypeName` = "01.Thường" | ✅ | ✅ (0) | ✅ (0) | ❌ | ✅* | ✅* | ✅** | ✅** | 0 | Có validation, dùng qty từ stock transfer |
+| 6 | Đổi điểm | `ordertypeName` = "03. Đổi điểm" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ❌ | ❌ | ❌ | 0 | Giá = 0, ma_ck01 = "TT DIEM DO" |
+| 7 | Đổi DV | `ordertypeName` = "04. Đổi DV" | ✅ | ✅ (0) | ✅ (0) | ❌ | ✅* | ✅* | ✅** | ✅** | 0 | loai_gd = '11' (qty<0) hoặc '12' (qty>0) |
+| 8 | Tặng sinh nhật | `ordertypeName` = "05. Tặng sinh nhật" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ❌ | ❌ | ❌ | 0 | - |
+| 9 | Đầu tư | `ordertypeName` = "06. Đầu tư" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ❌ | ❌ | ❌ | 0 | Có validation, ma_ctkm_th = "TT DAU TU" |
+| 10 | Bán tài khoản | `ordertypeName` = "07. Bán tài khoản" | ✅ | ✅ (0) | ✅ (0) | ❌ | ✅* | ✅* | ✅** | ✅** | 0 | Có validation, dùng qty từ stock transfer |
+| 11 | Sàn TMDT | `ordertypeName` = "9. Sàn TMDT" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ❌ | ❌ | ❌ | 0 | Có validation, dùng qty từ stock transfer |
+| 12 | Tách thẻ | `ordertypeName` = "08. Tách thẻ" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ❌ | ❌ | ❌ | 0 | loai_gd = '11' (qty<0) hoặc '12' (qty>0) |
+| 15 | Đổi vỏ | `ordertypeName` = "Đổi vỏ" | ✅ | ✅ (0) | ✅ (0) | ❌ | ❌ | ❌ | ❌ | ❌ | 0 | Có validation, giống "01.Thường" |
+
+---
+
+### Loại 2: SALE_RETURN (Đơn Hàng Trả Lại)
+
+| Case | Tên Case | Điều Kiện | Customer | Sales Order | Sales Invoice | Sales Return | Cash Receipt | Credit Advice | Payment | Debit Advice | Action | Ghi Chú |
+|------|----------|-----------|----------|-------------|---------------|--------------|--------------|---------------|---------|--------------|--------|---------|
+| 2 | Đơn có đuôi _X | `docCode` có `_X` | ❌ | ✅ (1) | ❌ | ❌ | ✅* | ✅* | ✅*** | ✅*** | 1 | Đơn hủy, cho phép không có mã kho |
+| 3 | SALE_RETURN không ST | `docSourceType = 'SALE_RETURN'` + không có stock transfer | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | - | **Bỏ qua, không xử lý** |
+| 4 | SALE_RETURN có ST | `docSourceType = 'SALE_RETURN'` + có stock transfer | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ✅** | ✅** | - | Gọi salesReturn API |
+
+---
+
+### Loại 3: WAREHOUSE PROCESSING (Xử Lý Kho)
+
+| Case | Tên Case | Điều Kiện | Customer | Warehouse Receipt | Warehouse Release | Warehouse Transfer | Ghi Chú |
+|------|----------|-----------|----------|-------------------|-------------------|-------------------|---------|
+| 13 | Warehouse I/O | `doctype = "STOCK_IO"` + `soCode = "null"` | ✅ | ✅ (ioType=I) | ✅ (ioType=O) | ❌ | Gọi Customer trước, ma_kh = branchCode |
+| 14 | Warehouse Transfer | `doctype = "STOCK_TRANSFER"` + `relatedStockCode` có | ✅ | ❌ | ❌ | ✅ | Gọi Customer trước, nhóm theo docCode |
+
+---
 
 **Chú thích:**
 - ✅ = Có gọi API
 - ❌ = Không gọi API
-- ✅* = Có gọi API (nếu có cashio data và điều kiện phù hợp - chỉ áp dụng cho Case 5)
-- (0) = `action = 0`
-- (1) = `action = 1`
+- ✅* = Có gọi API (nếu có cashio data và điều kiện phù hợp)
+  - **Cash Receipt**: `fop_syscode = "CASH"` và `total_in > 0`
+  - **Credit Advice**: `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo có"`
+  - Áp dụng cho: Case 1, Case 2, Case 5, Case 7, Case 10
+- ✅** = Có gọi API (nếu có mã kho từ stock transfers và có cashio data với `total_out > 0`)
+  - **Payment**: `fop_syscode = "CASH"` và `total_out > 0` (Phiếu chi tiền mặt)
+  - **Debit Advice**: `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo nợ"` (Giấy báo nợ)
+  - Áp dụng cho: Case 1, Case 4, Case 5, Case 7, Case 10
+- ✅*** = Có gọi API (nếu có cashio data với `total_out > 0` - cho phép không có mã kho cho đơn hủy _X)
+  - **Payment**: `fop_syscode = "CASH"` và `total_out > 0`
+  - **Debit Advice**: `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo nợ"` và `total_out > 0`
+  - Áp dụng cho: Case 2 (đơn hủy _X)
+- (0) = `action = 0` (đơn hàng bán)
+- (1) = `action = 1` (đơn hàng trả lại/hủy)
 - ST = Stock Transfer
-- **Cash Receipt**: Gọi khi `fop_syscode = "CASH"` và `total_in > 0` (chỉ Case 5)
-- **Credit Advice**: Gọi khi `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo có"` (chỉ Case 5)
 
 ---
 
@@ -64,7 +93,18 @@ Khi double-click vào một đơn hàng (order line), hệ thống sẽ kiểm t
    - Chỉ tạo cho các dòng có `productType = 'S'` (dịch vụ)
    - `action: 0`
 
-4. **Tạo Gxt Invoice** (`Fast/gxtInvoice`)
+4. **Xử lý Cashio Payment** (nếu salesInvoice thành công)
+   - **Cash Receipt** (`Fast/cashReceipt`): Gọi khi `fop_syscode = "CASH"` và `total_in > 0`
+   - **Credit Advice** (`Fast/creditAdvice`): Gọi khi `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo có"`
+   - Logic tương tự như Case 5 (Đơn Bình Thường)
+
+5. **Xử lý Payment** (Phiếu chi tiền mặt/Giấy báo nợ) - nếu có mã kho
+   - Điều kiện: Có mã kho (stockCode) từ stock transfers VÀ có cashio data với `total_out > 0`
+   - **Payment** (`Fast/payment`): Gọi khi `fop_syscode = "CASH"` và `total_out > 0` (Phiếu chi tiền mặt)
+   - **Debit Advice** (`Fast/debitAdvice`): Gọi khi `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo nợ"` (Giấy báo nợ)
+   - `loai_ct = "2"` (Chi cho khách hàng)
+
+6. **Tạo Gxt Invoice** (`Fast/gxtInvoice`)
    - `detail`: Các dòng có `productType = 'I'` (xuất)
    - `ndetail`: Các dòng có `productType = 'S'` (nhập)
    - `ma_nx`: "NX01" (cố định)
@@ -79,6 +119,10 @@ Khi double-click vào một đơn hàng (order line), hệ thống sẽ kiểm t
 - `POST http://103.145.79.169:6688/Fast/Customer`
 - `POST http://103.145.79.169:6688/Fast/salesOrder`
 - `POST http://103.145.79.169:6688/Fast/salesInvoice`
+- `POST http://103.145.79.169:6688/Fast/cashReceipt` (nếu có cashio data với CASH payment)
+- `POST http://103.145.79.169:6688/Fast/creditAdvice` (nếu có cashio data với non-CASH payment có documentType = "Giấy báo có")
+- `POST http://103.145.79.169:6688/Fast/payment` (nếu có mã kho, cashio data với total_out > 0 và fop_syscode = "CASH")
+- `POST http://103.145.79.169:6688/Fast/debitAdvice` (nếu có mã kho, cashio data với total_out > 0 và payment method có documentType = "Giấy báo nợ")
 - `POST http://103.145.79.169:6688/Fast/gxtInvoice`
 
 ### GxtInvoice Payload Example
@@ -129,17 +173,36 @@ Khi double-click vào một đơn hàng (order line), hệ thống sẽ kiểm t
 
 ### Điều kiện
 - Đơn hàng có đuôi `_X` (ví dụ: `SO45.01574458_X`)
-- Hoặc đơn gốc (không có `_X`) nhưng có đơn tương ứng với `_X` (ví dụ: `SO45.01574458` nếu có `SO45.01574458_X`)
 
 ### Flow xử lý
 1. **Tạo Sales Order** (`Fast/salesOrder`)
    - Gọi với `action: 1` (đơn hàng có đuôi _X)
    - Sử dụng data từ `buildFastApiInvoiceData`
    - **KHÔNG** cần tạo/cập nhật Customer trước
-   - Cả đơn có `_X` (ví dụ: `SO45.01574458_X`) và đơn gốc (ví dụ: `SO45.01574458`) đều sẽ có `action = 1`
+
+2. **Xử lý Cashio Payment** (nếu salesOrder thành công)
+   - **Cash Receipt** (`Fast/cashReceipt`): Gọi khi `fop_syscode = "CASH"` và `total_in > 0`
+   - **Credit Advice** (`Fast/creditAdvice`): Gọi khi `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo có"`
+   - Logic tương tự như Case 5 (Đơn Bình Thường)
+
+3. **Xử lý Payment** (Phiếu chi tiền mặt/Giấy báo nợ) - nếu có cashio với total_out > 0
+   - **Điều kiện đặc biệt cho đơn hủy (_X)**: Cho phép gọi payment ngay cả khi **KHÔNG có mã kho** (đơn hủy chưa xuất kho)
+   - **Payment** (`Fast/payment`): Gọi khi `fop_syscode = "CASH"` và `total_out > 0` (Phiếu chi tiền mặt)
+   - **Debit Advice** (`Fast/debitAdvice`): Gọi khi `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo nợ"` và `total_out > 0` (Giấy báo nợ)
+   - Nếu có mã kho: Gọi payment như bình thường
+   - Nếu không có mã kho (đơn hủy): Vẫn gọi payment nếu có cashio với `total_out > 0`
 
 ### API Endpoints
 - `POST http://103.145.79.169:6688/Fast/salesOrder` (với `action: 1`)
+- `POST http://103.145.79.169:6688/Fast/cashReceipt` (nếu có cashio data với CASH payment)
+- `POST http://103.145.79.169:6688/Fast/creditAdvice` (nếu có cashio data với non-CASH payment có documentType = "Giấy báo có")
+- `POST http://103.145.79.169:6688/Fast/payment` (nếu có cashio data với total_out > 0 và fop_syscode = "CASH" - cho phép không có mã kho cho đơn hủy)
+- `POST http://103.145.79.169:6688/Fast/debitAdvice` (nếu có cashio data với total_out > 0 và payment method có documentType = "Giấy báo nợ" - cho phép không có mã kho cho đơn hủy)
+
+### Lưu Ý
+- Đơn có đuôi _X chỉ gọi salesOrder với action = 1, không gọi salesInvoice
+- Cashio payment chỉ được xử lý sau khi salesOrder thành công
+- Payment (Phiếu chi tiền mặt/Giấy báo nợ) được gọi ngay cả khi không có mã kho (đơn hủy chưa xuất kho) nếu có cashio với `total_out > 0`
 
 ### Payload Example
 ```json
@@ -185,8 +248,15 @@ Trường hợp SALE_RETURN không có stock transfer không cần xử lý và 
    - Sử dụng data từ `buildSalesReturnData`
    - **KHÔNG** cần tạo/cập nhật Customer trước
 
+2. **Xử lý Payment** (Phiếu chi tiền mặt) - nếu có mã kho (nếu salesReturn thành công)
+   - Điều kiện: Có mã kho (stockCode) từ stock transfers VÀ có cashio data với `total_out > 0`
+   - **Payment** (`Fast/payment`): Gọi cho các cashio records có `total_out > 0`
+   - `loai_ct = "2"` (Chi cho khách hàng)
+
 ### API Endpoints
 - `POST http://103.145.79.169:6688/Fast/salesReturn`
+- `POST http://103.145.79.169:6688/Fast/payment` (nếu có mã kho, cashio data với total_out > 0 và fop_syscode = "CASH")
+- `POST http://103.145.79.169:6688/Fast/debitAdvice` (nếu có mã kho, cashio data với total_out > 0 và payment method có documentType = "Giấy báo nợ")
 
 ### Payload Structure
 ```json
@@ -284,12 +354,23 @@ Trường hợp SALE_RETURN không có stock transfer không cần xử lý và 
    - Một đơn hàng có thể có nhiều phương thức thanh toán (nhiều cashio records)
    - Validate response: chỉ `status = 1` mới được coi là thành công
 
+6. **Xử lý Payment** (Phiếu chi tiền mặt) - nếu có mã kho
+   - Điều kiện: Có mã kho (stockCode) từ stock transfers VÀ có cashio data với `total_out > 0`
+   - Gọi `processPayment()` để xử lý chi tiền
+   - Lấy stock transfers theo `soCode = docCode` để lấy danh sách `stockCode`
+   - Nếu có ít nhất một `stockCode` hợp lệ → lấy cashio data và xử lý các records có `total_out > 0`
+   - **Payment** (`Fast/payment`): Gọi cho các cashio records có `total_out > 0`
+   - `loai_ct = "2"` (Chi cho khách hàng)
+   - Validate response: chỉ `status = 1` mới được coi là thành công
+
 ### API Endpoints
 - `POST http://103.145.79.169:6688/Fast/Customer`
 - `POST http://103.145.79.169:6688/Fast/salesOrder`
 - `POST http://103.145.79.169:6688/Fast/salesInvoice`
 - `POST http://103.145.79.169:6688/Fast/cashReceipt` (nếu có thanh toán bằng tiền mặt)
 - `POST http://103.145.79.169:6688/Fast/creditAdvice` (nếu có thanh toán bằng phương thức khác có "Giấy báo có")
+- `POST http://103.145.79.169:6688/Fast/payment` (nếu có mã kho, cashio data với total_out > 0 và fop_syscode = "CASH")
+- `POST http://103.145.79.169:6688/Fast/debitAdvice` (nếu có mã kho, cashio data với total_out > 0 và payment method có documentType = "Giấy báo nợ")
 
 ### Logic Đặc Biệt cho "01.Thường"
 
@@ -392,10 +473,25 @@ Tất cả các khoản tiền được phân bổ lại:
    - `action: 0`
    - Sử dụng data từ `buildFastApiInvoiceData`
 
+4. **Xử lý Cashio Payment** (nếu salesInvoice thành công)
+   - **Cash Receipt** (`Fast/cashReceipt`): Gọi khi `fop_syscode = "CASH"` và `total_in > 0`
+   - **Credit Advice** (`Fast/creditAdvice`): Gọi khi `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo có"`
+   - Logic tương tự như Case 5 (Đơn Bình Thường)
+
+5. **Xử lý Payment** (Phiếu chi tiền mặt/Giấy báo nợ) - nếu có mã kho
+   - Điều kiện: Có mã kho (stockCode) từ stock transfers VÀ có cashio data với `total_out > 0`
+   - **Payment** (`Fast/payment`): Gọi khi `fop_syscode = "CASH"` và `total_out > 0` (Phiếu chi tiền mặt)
+   - **Debit Advice** (`Fast/debitAdvice`): Gọi khi `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo nợ"` (Giấy báo nợ)
+   - `loai_ct = "2"` (Chi cho khách hàng)
+
 ### API Endpoints
 - `POST http://103.145.79.169:6688/Fast/Customer`
 - `POST http://103.145.79.169:6688/Fast/salesOrder`
 - `POST http://103.145.79.169:6688/Fast/salesInvoice`
+- `POST http://103.145.79.169:6688/Fast/cashReceipt` (nếu có cashio data với CASH payment)
+- `POST http://103.145.79.169:6688/Fast/creditAdvice` (nếu có cashio data với non-CASH payment có documentType = "Giấy báo có")
+- `POST http://103.145.79.169:6688/Fast/payment` (nếu có mã kho, cashio data với total_out > 0 và fop_syscode = "CASH")
+- `POST http://103.145.79.169:6688/Fast/debitAdvice` (nếu có mã kho, cashio data với total_out > 0 và payment method có documentType = "Giấy báo nợ")
 
 ### Logic Đặc Biệt cho "04. Đổi DV"
 
@@ -406,8 +502,10 @@ Tất cả các khoản tiền được phân bổ lại:
 - Các đơn khác (không phải "04. Đổi DV" hoặc "08. Tách thẻ"): `loai_gd = '01'` (mặc định)
 
 ### Lưu Ý
-- Đơn "04. Đổi DV" được xử lý tương tự như đơn hàng bình thường
+- Đơn "04. Đổi DV" được xử lý tương tự như đơn hàng bình thường, bao gồm cả việc xử lý cashio payment (Cash Receipt/Credit Advice) và payment (Phiếu chi tiền mặt) nếu có mã kho
 - Nếu `salesInvoice` thất bại nhưng `salesOrder` thành công, vẫn lưu kết quả `salesOrder` với `status = 0`
+- Cashio payment chỉ được xử lý sau khi `salesInvoice` thành công
+- Payment chỉ được xử lý nếu có mã kho (stockCode) từ stock transfers và có cashio data với `total_out > 0`
 
 ---
 
@@ -439,27 +537,113 @@ Tất cả các khoản tiền được phân bổ lại:
 
 ---
 
-## Case 9: Đơn "06. Đầu tư", "07. Bán tài khoản", "9. Sàn TMDT"
+## Case 9: Đơn "06. Đầu tư"
 
 ### Điều kiện
-- `ordertypeName` = "06. Đầu tư", "06.Đầu tư", "07. Bán tài khoản", "07.Bán tài khoản", "9. Sàn TMDT", hoặc "9.Sàn TMDT"
+- `ordertypeName` = "06. Đầu tư", "06.Đầu tư", hoặc "06.  Đầu tư"
 
 ### Flow xử lý
-- **Xử lý giống Case 5: Đơn Hàng Bình Thường (01.Thường)**
-- Các đơn này được validate và xử lý như đơn "01.Thường"
+1. **Tạo/Cập nhật Customer** (`Fast/Customer`)
+   - Tạo hoặc cập nhật thông tin khách hàng trong Fast API
+
+2. **Tạo Sales Order** (`Fast/salesOrder`)
+   - `action: 0`
+   - Sử dụng data từ `buildFastApiInvoiceData`
+
+3. **Tạo Sales Invoice** (`Fast/salesInvoice`)
+   - `action: 0`
+   - Sử dụng data từ `buildFastApiInvoiceData`
 
 ### Logic Đặc Biệt
-
-#### Đơn "06. Đầu tư"
 - Nếu là hàng tặng → `ma_ctkm_th` = "TT DAU TU"
 - Được xử lý như đơn "01.Thường" với validation và flow tương tự
+- **KHÔNG** gọi Cashio Payment (Phiếu thu tiền mặt/Giấy báo có)
 
-#### Đơn "07. Bán tài khoản" và "9. Sàn TMDT"
+### API Endpoints
+- `POST http://103.145.79.169:6688/Fast/Customer`
+- `POST http://103.145.79.169:6688/Fast/salesOrder`
+- `POST http://103.145.79.169:6688/Fast/salesInvoice`
+
+### Lưu Ý
+- Đơn "06. Đầu tư" được xử lý tương tự như đơn hàng bình thường nhưng không có cashio payment
+- Nếu `salesInvoice` thất bại nhưng `salesOrder` thành công, vẫn lưu kết quả `salesOrder` với `status = 0`
+
+---
+
+## Case 10: Đơn "07. Bán tài khoản"
+
+### Điều kiện
+- `ordertypeName` = "07. Bán tài khoản", "07.Bán tài khoản", hoặc "07.  Bán tài khoản"
+
+### Flow xử lý
+1. **Tạo/Cập nhật Customer** (`Fast/Customer`)
+   - Tạo hoặc cập nhật thông tin khách hàng trong Fast API
+
+2. **Tạo Sales Order** (`Fast/salesOrder`)
+   - `action: 0`
+   - Sử dụng data từ `buildFastApiInvoiceData`
+
+3. **Tạo Sales Invoice** (`Fast/salesInvoice`)
+   - `action: 0`
+   - Sử dụng data từ `buildFastApiInvoiceData`
+
+4. **Xử lý Cashio Payment** (nếu salesInvoice thành công)
+   - **Cash Receipt** (`Fast/cashReceipt`): Gọi khi `fop_syscode = "CASH"` và `total_in > 0`
+   - **Credit Advice** (`Fast/creditAdvice`): Gọi khi `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo có"`
+   - Logic tương tự như Case 5 (Đơn Bình Thường)
+
+### Logic Đặc Biệt
 - Được xử lý hoàn toàn giống đơn "01.Thường"
 - Có validation điều kiện tạo hóa đơn
 - Sử dụng số lượng từ stock transfer cho invoice
 
 ### API Endpoints
+- `POST http://103.145.79.169:6688/Fast/Customer`
+- `POST http://103.145.79.169:6688/Fast/salesOrder`
+- `POST http://103.145.79.169:6688/Fast/salesInvoice`
+- `POST http://103.145.79.169:6688/Fast/cashReceipt` (nếu có cashio data với CASH payment)
+- `POST http://103.145.79.169:6688/Fast/creditAdvice` (nếu có cashio data với non-CASH payment có documentType = "Giấy báo có")
+- `POST http://103.145.79.169:6688/Fast/payment` (nếu có mã kho, cashio data với total_out > 0 và fop_syscode = "CASH")
+- `POST http://103.145.79.169:6688/Fast/debitAdvice` (nếu có mã kho, cashio data với total_out > 0 và payment method có documentType = "Giấy báo nợ")
+
+### Lưu Ý
+- Đơn "07. Bán tài khoản" được xử lý tương tự như đơn hàng bình thường, bao gồm cả việc xử lý cashio payment (Cash Receipt/Credit Advice) và payment (Phiếu chi tiền mặt) nếu có mã kho
+- Nếu `salesInvoice` thất bại nhưng `salesOrder` thành công, vẫn lưu kết quả `salesOrder` với `status = 0`
+- Cashio payment chỉ được xử lý sau khi `salesInvoice` thành công
+
+---
+
+## Case 11: Đơn "9. Sàn TMDT"
+
+### Điều kiện
+- `ordertypeName` = "9. Sàn TMDT", "9.Sàn TMDT", hoặc "9.  Sàn TMDT"
+
+### Flow xử lý
+1. **Tạo/Cập nhật Customer** (`Fast/Customer`)
+   - Tạo hoặc cập nhật thông tin khách hàng trong Fast API
+
+2. **Tạo Sales Order** (`Fast/salesOrder`)
+   - `action: 0`
+   - Sử dụng data từ `buildFastApiInvoiceData`
+
+3. **Tạo Sales Invoice** (`Fast/salesInvoice`)
+   - `action: 0`
+   - Sử dụng data từ `buildFastApiInvoiceData`
+
+### Logic Đặc Biệt
+- Được xử lý hoàn toàn giống đơn "01.Thường"
+- Có validation điều kiện tạo hóa đơn
+- Sử dụng số lượng từ stock transfer cho invoice
+- **KHÔNG** gọi Cashio Payment (Phiếu thu tiền mặt/Giấy báo có)
+
+### API Endpoints
+- `POST http://103.145.79.169:6688/Fast/Customer`
+- `POST http://103.145.79.169:6688/Fast/salesOrder`
+- `POST http://103.145.79.169:6688/Fast/salesInvoice`
+
+### Lưu Ý
+- Đơn "9. Sàn TMDT" được xử lý tương tự như đơn hàng bình thường nhưng không có cashio payment
+- Nếu `salesInvoice` thất bại nhưng `salesOrder` thành công, vẫn lưu kết quả `salesOrder` với `status = 0`
 - `POST http://103.145.79.169:6688/Fast/Customer`
 - `POST http://103.145.79.169:6688/Fast/salesOrder`
 - `POST http://103.145.79.169:6688/Fast/salesInvoice`
@@ -470,7 +654,7 @@ Tất cả các khoản tiền được phân bổ lại:
 
 ---
 
-## Case 10: Đơn "08. Tách thẻ"
+## Case 12: Đơn "08. Tách thẻ"
 
 ### Điều kiện
 - `ordertypeName` = "08. Tách thẻ" hoặc các biến thể tương tự
@@ -524,14 +708,23 @@ Double-click Order
     │   │
     │   └─→ NO → Tiếp tục
     │
-    ├─→ Có đuôi _X hoặc có đơn tương ứng _X?
+    ├─→ Có đuôi _X?
     │   └─→ YES → Case 2: Đơn hàng có đuôi _X
     │
     ├─→ ordertypeName = "02. Làm dịch vụ"?
     │   └─→ YES → Case 1: Đơn Dịch Vụ
     │
+    ├─→ ordertypeName = "06. Đầu tư"?
+    │   └─→ YES → Case 9: Đơn "06. Đầu tư"
+    │
+    ├─→ ordertypeName = "07. Bán tài khoản"?
+    │   └─→ YES → Case 10: Đơn "07. Bán tài khoản"
+    │
+    ├─→ ordertypeName = "9. Sàn TMDT"?
+    │   └─→ YES → Case 11: Đơn "9. Sàn TMDT"
+    │
     ├─→ ordertypeName = "08. Tách thẻ"?
-    │   └─→ YES → Case 10: Đơn "08. Tách thẻ" (xử lý như đơn hàng bình thường, không gọi Gxt Invoice)
+    │   └─→ YES → Case 12: Đơn "08. Tách thẻ" (xử lý như đơn hàng bình thường, không gọi Gxt Invoice)
     │
     ├─→ ordertypeName = "03. Đổi điểm"?
     │   └─→ YES → Case 6: Đơn "03. Đổi điểm"
@@ -542,11 +735,8 @@ Double-click Order
     ├─→ ordertypeName = "05. Tặng sinh nhật"?
     │   └─→ YES → Case 8: Đơn "05. Tặng sinh nhật"
     │
-    ├─→ ordertypeName = "06. Đầu tư" / "07. Bán tài khoản" / "9. Sàn TMDT"?
-    │   └─→ YES → Case 9: Xử lý như "01.Thường"
-    │
     ├─→ ordertypeName = "Đổi vỏ"?
-    │   └─→ YES → Case 13: Đơn "Đổi vỏ"
+    │   └─→ YES → Case 15: Đơn "Đổi vỏ"
     │
     └─→ Case 5: Đơn Hàng Bình Thường (01.Thường)
 ```
@@ -618,12 +808,23 @@ Tất cả các API calls đều được tập trung qua `fast-api-invoice-flow
    - Gọi Customer API trước khi xử lý warehouse transfer
 
 8. **`processCashioPayment(docCode, orderData, invoiceData)`**
-   - Xử lý cashio payment (thanh toán) cho đơn hàng "01. Thường"
-   - Chỉ được gọi khi Sales Invoice tạo thành công
+   - Xử lý cashio payment (thanh toán) cho đơn hàng "01. Thường", "02. Làm dịch vụ", "04. Đổi DV", "07. Bán tài khoản" và đơn có đuôi _X
+   - Chỉ được gọi khi Sales Invoice (hoặc Sales Order cho đơn _X) tạo thành công
    - Endpoints: `POST /Fast/cashReceipt` hoặc `POST /Fast/creditAdvice`
    - Xử lý nhiều phương thức thanh toán (một đơn hàng có thể có nhiều cashio records)
    - Trường hợp 1: `fop_syscode = "CASH"` và `total_in > 0` → Gọi `cashReceipt`
    - Trường hợp 2: `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo có"` → Gọi `creditAdvice`
+   - Validate response: chỉ `status = 1` mới được coi là thành công
+   - Nếu có lỗi, log warning nhưng không throw error (không chặn flow chính)
+
+9. **`processPayment(docCode, orderData, invoiceData, stockCodes)`**
+   - Xử lý payment (Phiếu chi tiền mặt/Giấy báo nợ) cho đơn hàng "01. Thường", "02. Làm dịch vụ", "04. Đổi DV", "07. Bán tài khoản" và SALE_RETURN
+   - Điều kiện: Có mã kho (stockCode) từ stock transfers VÀ có cashio data với `total_out > 0`
+   - Endpoints: 
+     - `POST /Fast/payment` (Phiếu chi tiền mặt): Khi `fop_syscode = "CASH"` và `total_out > 0`
+     - `POST /Fast/debitAdvice` (Giấy báo nợ): Khi `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo nợ"`
+   - Xử lý các cashio records có `total_out > 0`
+   - `loai_ct = "2"` (Chi cho khách hàng)
    - Validate response: chỉ `status = 1` mới được coi là thành công
    - Nếu có lỗi, log warning nhưng không throw error (không chặn flow chính)
 
@@ -634,7 +835,7 @@ Tất cả các API calls đều được tập trung qua `fast-api-invoice-flow
 
 ---
 
-## Case 11: Xử Lý Warehouse I/O Từ Stock Transfer
+## Case 13: Xử Lý Warehouse I/O Từ Stock Transfer
 
 ### Điều kiện
 - `doctype = "STOCK_IO"` (bắt buộc)
@@ -751,7 +952,7 @@ Tất cả các API calls đều được tập trung qua `fast-api-invoice-flow
 
 ---
 
-## Case 12: Xử Lý Warehouse Transfer Từ Stock Transfer (Điều Chuyển Kho)
+## Case 14: Xử Lý Warehouse Transfer Từ Stock Transfer (Điều Chuyển Kho)
 
 ### Điều kiện
 - `doctype = "STOCK_TRANSFER"` (bắt buộc)
@@ -881,7 +1082,7 @@ Tất cả các API calls đều được tập trung qua `fast-api-invoice-flow
 
 ---
 
-## Case 13: Đơn "Đổi vỏ"
+## Case 15: Đơn "Đổi vỏ"
 
 ### Điều kiện
 - `ordertypeName` = "Đổi vỏ" hoặc các biến thể tương tự
@@ -968,8 +1169,8 @@ Tất cả các API calls đều được tập trung qua `fast-api-invoice-flow
     - **Tất cả Fast API calls** đều validate response: chỉ `status = 1` mới được coi là thành công
     - Nếu response có `status != 1`, sẽ throw `BadRequestException` với message từ API
 
-11. **Cashio Payment Processing (cho đơn "01. Thường")**
-    - Chỉ được gọi khi Sales Invoice tạo thành công (`status = 1`)
+11. **Cashio Payment Processing (cho đơn "01. Thường", "02. Làm dịch vụ", "04. Đổi DV", "07. Bán tài khoản" và đơn có đuôi _X)**
+    - Chỉ được gọi khi Sales Invoice (hoặc Sales Order cho đơn _X) tạo thành công (`status = 1`)
     - Lấy cashio data từ database theo `soCode = docCode`
     - Xử lý tất cả các phương thức thanh toán của đơn hàng:
       - **Thanh toán bằng tiền mặt**: `fop_syscode = "CASH"` và `total_in > 0` → Gọi `POST /Fast/cashReceipt` (Phiếu thu tiền mặt)
@@ -979,8 +1180,28 @@ Tất cả các API calls đều được tập trung qua `fast-api-invoice-flow
     - Nếu có lỗi khi xử lý cashio → log warning nhưng không throw error (không chặn flow chính)
     - Validate response: chỉ `status = 1` mới được coi là thành công
 
-12. **Warehouse Processing từ Stock Transfer**
-    - **Case 11: Warehouse I/O** (`doctype = "STOCK_IO"`)
+12. **Payment Processing (Phiếu chi tiền mặt/Giấy báo nợ) - cho đơn "01. Thường", "02. Làm dịch vụ", "04. Đổi DV", "07. Bán tài khoản" và SALE_RETURN có stock transfer**
+    - Điều kiện: Có mã kho (stockCode) từ stock transfers VÀ có cashio data với `total_out > 0`
+    - Lấy stock transfers theo `soCode = docCode` để lấy danh sách `stockCode`
+    - Nếu có ít nhất một `stockCode` hợp lệ → lấy cashio data và xử lý các records có `total_out > 0`
+    - Gọi `processPayment()` để xử lý chi tiền
+    - **Trường hợp 1: Thanh toán bằng tiền mặt (CASH)**
+      - Điều kiện: `fop_syscode = "CASH"` và `total_out > 0`
+      - API: `POST /Fast/payment` (Phiếu chi tiền mặt)
+      - Payload được build từ `FastApiPayloadHelper.buildPaymentPayload()`
+    - **Trường hợp 2: Thanh toán bằng phương thức khác**
+      - Điều kiện: `fop_syscode != "CASH"` và payment method có `documentType = "Giấy báo nợ"`
+      - API: `POST /Fast/debitAdvice` (Giấy báo nợ)
+      - Payload được build từ `FastApiPayloadHelper.buildDebitAdvicePayload()`
+      - Nếu payment method không có `documentType` hoặc không phải "Giấy báo nợ" → không gọi API nào
+    - `loai_ct = "2"` (Chi cho khách hàng)
+    - Validate response: chỉ `status = 1` mới được coi là thành công
+    - Nếu không có mã kho hoặc không có cashio data với `total_out > 0` → bỏ qua, không throw error (không chặn flow chính)
+    - Nếu có lỗi khi xử lý payment → log warning nhưng không throw error (không chặn flow chính)
+    - Với SALE_RETURN: Chỉ được gọi sau khi salesReturn thành công (`status = 1`)
+
+13. **Warehouse Processing từ Stock Transfer**
+    - **Case 13: Warehouse I/O** (`doctype = "STOCK_IO"`)
       - Chỉ xử lý stock transfer có `doctype = "STOCK_IO"` (bắt buộc)
       - Chỉ xử lý stock transfer có `soCode = "null"` hoặc `null` (bắt buộc)
       - `ma_dvcs` được lấy từ department API (Loyalty API) dựa trên `branchCode`
@@ -994,7 +1215,7 @@ Tất cả các API calls đều được tập trung qua `fast-api-invoice-flow
         - Fallback: `stockTransfer.stockCode` gốc
       - Phân biệt nhập kho (I) và xuất kho (O) qua `ioType` để gọi API tương ứng
       - **Bắt buộc gọi Customer API trước** với `ten_kh = department?.name || department?.ten || branchCode`
-    - **Case 12: Warehouse Transfer** (`doctype = "STOCK_TRANSFER"`)
+    - **Case 14: Warehouse Transfer** (`doctype = "STOCK_TRANSFER"`)
       - Chỉ xử lý stock transfer có `doctype = "STOCK_TRANSFER"` (bắt buộc)
       - Chỉ xử lý stock transfer có `relatedStockCode` (bắt buộc)
       - Nhóm tất cả stock transfers cùng `docCode` để xử lý

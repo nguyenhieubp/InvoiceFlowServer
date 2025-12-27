@@ -165,5 +165,93 @@ export class FastApiPayloadHelper {
       ],
     };
   }
+
+  /**
+   * Build payload cho payment API (Phiếu chi tiền mặt)
+   */
+  static buildPaymentPayload(cashioData: any, orderData: any, invoiceData: any, paymentMethod: any, loaiCt: string = '2'): any {
+    const totalOut = parseFloat(String(cashioData.total_out || '0'));
+    const docDate = cashioData.docdate || orderData.docDate || new Date();
+
+    const payload: any = {
+      action: 0,
+      ma_dvcs: invoiceData.ma_dvcs || cashioData.branch_code || '',
+      ma_kh: invoiceData.ma_kh || cashioData.partner_code || '',
+      loai_ct: loaiCt, // Mặc định 2 - Chi cho khách hàng
+      dept_id: invoiceData.ma_bp || cashioData.branch_code || '',
+      ngay_lct: FastApiPayloadHelper.formatDateISO(docDate),
+      so_ct: orderData.docCode || invoiceData.so_ct || '',
+      httt: paymentMethod?.code || cashioData.fop_syscode || '',
+      status: '0',
+      detail: [
+        {
+          tien: totalOut,
+          ma_bp: invoiceData.ma_bp || cashioData.branch_code || '',
+        },
+      ],
+    };
+
+    // Optional fields - chỉ thêm nếu có giá trị
+    if (orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba) {
+      payload.ong_ba = orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba || '';
+    }
+    if (orderData.customer?.address) {
+      payload.dia_chi = orderData.customer.address;
+    }
+    if (orderData.docCode || invoiceData.so_ct) {
+      payload.dien_giai = `Chi tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`;
+    }
+
+    // Chi tiết - chỉ thêm ma_kh_i nếu loai_ct = 3 (required trong trường hợp này)
+    if (loaiCt === '3') {
+      payload.detail[0].ma_kh_i = invoiceData.ma_kh || cashioData.partner_code || '';
+    }
+
+    return payload;
+  }
+
+  /**
+   * Build payload cho debitAdvice API (Giấy báo nợ)
+   */
+  static buildDebitAdvicePayload(cashioData: any, orderData: any, invoiceData: any, paymentMethod: any, loaiCt: string = '2'): any {
+    const totalOut = parseFloat(String(cashioData.total_out || '0'));
+    const docDate = cashioData.docdate || orderData.docDate || new Date();
+
+    const payload: any = {
+      action: 0,
+      ma_dvcs: invoiceData.ma_dvcs || cashioData.branch_code || '',
+      ma_kh: invoiceData.ma_kh || cashioData.partner_code || '',
+      loai_ct: loaiCt, // Mặc định 2 - Chi cho khách hàng
+      dept_id: invoiceData.ma_bp || cashioData.branch_code || '',
+      ngay_lct: FastApiPayloadHelper.formatDateISO(docDate),
+      so_ct: orderData.docCode || invoiceData.so_ct || '',
+      httt: paymentMethod?.code || cashioData.fop_syscode || '',
+      status: '0',
+      detail: [
+        {
+          tien: totalOut,
+          ma_bp: invoiceData.ma_bp || cashioData.branch_code || '',
+        },
+      ],
+    };
+
+    // Optional fields - chỉ thêm nếu có giá trị
+    if (orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba) {
+      payload.ong_ba = orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba || '';
+    }
+    if (orderData.customer?.address) {
+      payload.dia_chi = orderData.customer.address;
+    }
+    if (orderData.docCode || invoiceData.so_ct) {
+      payload.dien_giai = `Chi tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`;
+    }
+
+    // Chi tiết - chỉ thêm ma_kh_i nếu loai_ct = 3 (required trong trường hợp này)
+    if (loaiCt === '3') {
+      payload.detail[0].ma_kh_i = invoiceData.ma_kh || cashioData.partner_code || '';
+    }
+
+    return payload;
+  }
 }
 

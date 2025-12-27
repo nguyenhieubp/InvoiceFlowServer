@@ -836,6 +836,82 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Gọi API payment (Phiếu chi tiền mặt)
+   * @param paymentData - Dữ liệu phiếu chi tiền mặt
+   */
+  async submitPayment(paymentData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Gọi API payment với token
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/payment`,
+          paymentData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('Payment submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`Error submitting payment: ${error?.message || error}`);
+      if (error?.response) {
+        this.logger.error(`Payment error response status: ${error.response.status}`);
+        this.logger.error(`Payment error response data: ${JSON.stringify(error.response.data)}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Gọi API debitAdvice (Giấy báo nợ)
+   * @param debitAdviceData - Dữ liệu giấy báo nợ
+   */
+  async submitDebitAdvice(debitAdviceData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Gọi API debitAdvice với token
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/debitAdvice`,
+          debitAdviceData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('Debit advice submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`Error submitting debit advice: ${error?.message || error}`);
+      if (error?.response) {
+        this.logger.error(`Debit advice error response status: ${error.response.status}`);
+        this.logger.error(`Debit advice error response data: ${JSON.stringify(error.response.data)}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Gọi API warehouseReceipt (Phiếu nhập kho)
    * @param warehouseReceiptData - Dữ liệu phiếu nhập kho
    */

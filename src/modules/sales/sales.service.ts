@@ -3967,6 +3967,47 @@ export class SalesService {
             if (cashioResult.creditAdviceResults && cashioResult.creditAdviceResults.length > 0) {
               this.logger.log(`[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode} (04. Đổi DV)`);
             }
+
+            // Xử lý payment (Phiếu chi tiền mặt) nếu có mã kho
+            // CHỈ xử lý cho đơn có docSourceType = ORDER_RETURN hoặc SALE_RETURN
+            try {
+              // Kiểm tra docSourceType - chỉ xử lý payment cho ORDER_RETURN hoặc SALE_RETURN
+              const firstSale = orderData.sales && orderData.sales.length > 0 ? orderData.sales[0] : null;
+              const docSourceTypeRaw = firstSale?.docSourceType || orderData.docSourceType || '';
+              const docSourceType = docSourceTypeRaw ? String(docSourceTypeRaw).trim().toUpperCase() : '';
+              
+              if (docSourceType === 'ORDER_RETURN' || docSourceType === 'SALE_RETURN') {
+                const docCodesForStockTransfer = this.getDocCodesForStockTransfer([docCode]);
+                const stockTransfers = await this.stockTransferRepository.find({
+                  where: { soCode: In(docCodesForStockTransfer) },
+                });
+                const stockCodes = Array.from(new Set(stockTransfers.map(st => st.stockCode).filter(Boolean)));
+                
+                if (stockCodes.length > 0) {
+                  this.logger.log(`[Payment] Bắt đầu xử lý payment cho đơn hàng ${docCode} (04. Đổi DV, docSourceType: ${docSourceType}) với ${stockCodes.length} mã kho`);
+                  const paymentResult = await this.fastApiInvoiceFlowService.processPayment(
+                    docCode,
+                    orderData,
+                    invoiceData,
+                    stockCodes,
+                  );
+
+                if (paymentResult.paymentResults && paymentResult.paymentResults.length > 0) {
+                  this.logger.log(`[Payment] Đã tạo ${paymentResult.paymentResults.length} payment thành công cho đơn hàng ${docCode} (04. Đổi DV)`);
+                }
+                  if (paymentResult.debitAdviceResults && paymentResult.debitAdviceResults.length > 0) {
+                    this.logger.log(`[Payment] Đã tạo ${paymentResult.debitAdviceResults.length} debitAdvice thành công cho đơn hàng ${docCode} (04. Đổi DV)`);
+                  }
+                } else {
+                  this.logger.debug(`[Payment] Đơn hàng ${docCode} không có mã kho, bỏ qua payment API`);
+                }
+              } else {
+                this.logger.debug(`[Payment] Đơn hàng ${docCode} (04. Đổi DV) có docSourceType = "${docSourceType}", không phải ORDER_RETURN/SALE_RETURN, bỏ qua payment API`);
+              }
+            } catch (paymentError: any) {
+              // Log lỗi nhưng không fail toàn bộ flow
+              this.logger.warn(`[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode}: ${paymentError?.message || paymentError}`);
+            }
           }
 
           // Lưu vào bảng kê hóa đơn
@@ -4511,6 +4552,7 @@ export class SalesService {
       });
 
       // Xử lý cashio payment (cho đơn hàng "01. Thường", "07. Bán tài khoản" và khi tạo invoice thành công)
+      let cashioResult: any = null;
       if (isSuccess) {
         const firstSale = orderData.sales && orderData.sales.length > 0 ? orderData.sales[0] : null;
         const ordertypeName = firstSale?.ordertypeName || firstSale?.ordertype || '';
@@ -4521,7 +4563,7 @@ export class SalesService {
         if (isNormalOrder || isBanTaiKhoanOrder) {
           const orderTypeLabel = isNormalOrder ? '01. Thường' : '07. Bán tài khoản';
           this.logger.log(`[Cashio] Bắt đầu xử lý cashio payment cho đơn hàng ${docCode} (${orderTypeLabel})`);
-          const cashioResult = await this.fastApiInvoiceFlowService.processCashioPayment(
+          cashioResult = await this.fastApiInvoiceFlowService.processCashioPayment(
             docCode,
             orderData,
             invoiceData,
@@ -4532,6 +4574,46 @@ export class SalesService {
           }
           if (cashioResult.creditAdviceResults && cashioResult.creditAdviceResults.length > 0) {
             this.logger.log(`[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode} (${orderTypeLabel})`);
+          }
+
+          // Xử lý payment (Phiếu chi tiền mặt) nếu có mã kho
+          // CHỈ xử lý cho đơn có docSourceType = ORDER_RETURN hoặc SALE_RETURN
+          try {
+            // Kiểm tra docSourceType - chỉ xử lý payment cho ORDER_RETURN hoặc SALE_RETURN
+            const docSourceTypeRaw = firstSale?.docSourceType || orderData.docSourceType || '';
+            const docSourceType = docSourceTypeRaw ? String(docSourceTypeRaw).trim().toUpperCase() : '';
+            
+            if (docSourceType === 'ORDER_RETURN' || docSourceType === 'SALE_RETURN') {
+              const docCodesForStockTransfer = this.getDocCodesForStockTransfer([docCode]);
+              const stockTransfers = await this.stockTransferRepository.find({
+                where: { soCode: In(docCodesForStockTransfer) },
+              });
+              const stockCodes = Array.from(new Set(stockTransfers.map(st => st.stockCode).filter(Boolean)));
+              
+              if (stockCodes.length > 0) {
+                this.logger.log(`[Payment] Bắt đầu xử lý payment cho đơn hàng ${docCode} (${orderTypeLabel}, docSourceType: ${docSourceType}) với ${stockCodes.length} mã kho`);
+                const paymentResult = await this.fastApiInvoiceFlowService.processPayment(
+                  docCode,
+                  orderData,
+                  invoiceData,
+                  stockCodes,
+                );
+
+                if (paymentResult.paymentResults && paymentResult.paymentResults.length > 0) {
+                  this.logger.log(`[Payment] Đã tạo ${paymentResult.paymentResults.length} payment thành công cho đơn hàng ${docCode} (${orderTypeLabel})`);
+                }
+                if (paymentResult.debitAdviceResults && paymentResult.debitAdviceResults.length > 0) {
+                  this.logger.log(`[Payment] Đã tạo ${paymentResult.debitAdviceResults.length} debitAdvice thành công cho đơn hàng ${docCode} (${orderTypeLabel})`);
+                }
+              } else {
+                this.logger.debug(`[Payment] Đơn hàng ${docCode} không có mã kho, bỏ qua payment API`);
+              }
+            } else {
+              this.logger.debug(`[Payment] Đơn hàng ${docCode} (${orderTypeLabel}) có docSourceType = "${docSourceType}", không phải ORDER_RETURN/SALE_RETURN, bỏ qua payment API`);
+            }
+          } catch (paymentError: any) {
+            // Log lỗi nhưng không fail toàn bộ flow
+            this.logger.warn(`[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode}: ${paymentError?.message || paymentError}`);
           }
         }
       }
@@ -4672,6 +4754,47 @@ export class SalesService {
         }
         if (cashioResult.creditAdviceResults && cashioResult.creditAdviceResults.length > 0) {
           this.logger.log(`[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode} (02. Làm dịch vụ)`);
+        }
+
+        // Xử lý payment (Phiếu chi tiền mặt) nếu có mã kho
+        // CHỈ xử lý cho đơn có docSourceType = ORDER_RETURN hoặc SALE_RETURN
+        try {
+          // Kiểm tra docSourceType - chỉ xử lý payment cho ORDER_RETURN hoặc SALE_RETURN
+          const firstSale = orderData.sales && orderData.sales.length > 0 ? orderData.sales[0] : null;
+          const docSourceTypeRaw = firstSale?.docSourceType || orderData.docSourceType || '';
+          const docSourceType = docSourceTypeRaw ? String(docSourceTypeRaw).trim().toUpperCase() : '';
+          
+          if (docSourceType === 'ORDER_RETURN' || docSourceType === 'SALE_RETURN') {
+            const docCodesForStockTransfer = this.getDocCodesForStockTransfer([docCode]);
+            const stockTransfers = await this.stockTransferRepository.find({
+              where: { soCode: In(docCodesForStockTransfer) },
+            });
+            const stockCodes = Array.from(new Set(stockTransfers.map(st => st.stockCode).filter(Boolean)));
+            
+            if (stockCodes.length > 0) {
+              this.logger.log(`[Payment] Bắt đầu xử lý payment cho đơn hàng ${docCode} (02. Làm dịch vụ, docSourceType: ${docSourceType}) với ${stockCodes.length} mã kho`);
+              const paymentResult = await this.fastApiInvoiceFlowService.processPayment(
+                docCode,
+                orderData,
+                invoiceData,
+                stockCodes,
+              );
+
+            if (paymentResult.paymentResults && paymentResult.paymentResults.length > 0) {
+              this.logger.log(`[Payment] Đã tạo ${paymentResult.paymentResults.length} payment thành công cho đơn hàng ${docCode} (02. Làm dịch vụ)`);
+            }
+              if (paymentResult.debitAdviceResults && paymentResult.debitAdviceResults.length > 0) {
+                this.logger.log(`[Payment] Đã tạo ${paymentResult.debitAdviceResults.length} debitAdvice thành công cho đơn hàng ${docCode} (02. Làm dịch vụ)`);
+              }
+            } else {
+              this.logger.debug(`[Payment] Đơn hàng ${docCode} không có mã kho, bỏ qua payment API`);
+            }
+          } else {
+            this.logger.debug(`[Payment] Đơn hàng ${docCode} (02. Làm dịch vụ) có docSourceType = "${docSourceType}", không phải ORDER_RETURN/SALE_RETURN, bỏ qua payment API`);
+          }
+        } catch (paymentError: any) {
+          // Log lỗi nhưng không fail toàn bộ flow
+          this.logger.warn(`[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode}: ${paymentError?.message || paymentError}`);
         }
       }
 
@@ -6133,6 +6256,7 @@ export class SalesService {
 
       // Xử lý cashio payment (Phiếu thu tiền mặt/Giấy báo có) nếu salesOrder thành công
       let cashioResult: any = null;
+      let paymentResult: any = null;
       if (responseStatus === 1) {
         this.logger.log(`[Cashio] Bắt đầu xử lý cashio payment cho đơn hàng ${docCode} (đơn có đuôi _X)`);
         cashioResult = await this.fastApiInvoiceFlowService.processCashioPayment(
@@ -6146,6 +6270,40 @@ export class SalesService {
         }
         if (cashioResult.creditAdviceResults && cashioResult.creditAdviceResults.length > 0) {
           this.logger.log(`[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode} (đơn có đuôi _X)`);
+        }
+
+        // Xử lý Payment (Phiếu chi tiền mặt/Giấy báo nợ) cho đơn hủy (_X) - không cần có mã kho
+        try {
+          // Kiểm tra có stock transfer không
+          const docCodesForStockTransfer = this.getDocCodesForStockTransfer([docCode]);
+          const stockTransfers = await this.stockTransferRepository.find({
+            where: { soCode: In(docCodesForStockTransfer) },
+          });
+          const stockCodes = Array.from(new Set(stockTransfers.map(st => st.stockCode).filter(Boolean)));
+          
+          // Cho đơn _X: Gọi payment ngay cả khi không có mã kho (đơn hủy chưa xuất kho)
+          const allowWithoutStockCodes = stockCodes.length === 0;
+          
+          if (allowWithoutStockCodes || stockCodes.length > 0) {
+            this.logger.log(`[Payment] Bắt đầu xử lý payment cho đơn hàng ${docCode} (đơn có đuôi _X) - ${allowWithoutStockCodes ? 'đơn hủy không có mã kho' : `với ${stockCodes.length} mã kho`}`);
+            paymentResult = await this.fastApiInvoiceFlowService.processPayment(
+              docCode,
+              orderData,
+              invoiceData,
+              stockCodes,
+              allowWithoutStockCodes, // Cho phép gọi payment ngay cả khi không có mã kho
+            );
+
+            if (paymentResult.paymentResults && paymentResult.paymentResults.length > 0) {
+              this.logger.log(`[Payment] Đã tạo ${paymentResult.paymentResults.length} payment thành công cho đơn hàng ${docCode} (đơn có đuôi _X)`);
+            }
+            if (paymentResult.debitAdviceResults && paymentResult.debitAdviceResults.length > 0) {
+              this.logger.log(`[Payment] Đã tạo ${paymentResult.debitAdviceResults.length} debitAdvice thành công cho đơn hàng ${docCode} (đơn có đuôi _X)`);
+            }
+          }
+        } catch (paymentError: any) {
+          // Log lỗi nhưng không fail toàn bộ flow
+          this.logger.warn(`[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode} (đơn có đuôi _X): ${paymentError?.message || paymentError}`);
         }
       }
 
@@ -6161,6 +6319,7 @@ export class SalesService {
         fastApiResponse: JSON.stringify({
           salesOrder: result,
           cashio: cashioResult,
+          payment: paymentResult,
         }),
       });
 
@@ -6170,6 +6329,7 @@ export class SalesService {
         result: {
           salesOrder: result,
           cashio: cashioResult,
+          payment: paymentResult,
         },
       };
     } catch (error: any) {
@@ -6256,6 +6416,38 @@ export class SalesService {
         const responseGuid = Array.isArray(result) && result.length > 0 && Array.isArray(result[0].guid) 
           ? result[0].guid[0] 
           : (Array.isArray(result) && result.length > 0 ? result[0].guid : null);
+
+        // Xử lý Payment (Phiếu chi tiền mặt) nếu có mã kho
+        if (responseStatus === 1) {
+          try {
+            const stockCodes = Array.from(new Set(stockTransfers.map(st => st.stockCode).filter(Boolean)));
+            
+            if (stockCodes.length > 0) {
+              // Build invoiceData để dùng cho payment (tương tự như các case khác)
+              const invoiceData = await this.buildFastApiInvoiceData(orderData);
+              
+              this.logger.log(`[Payment] Bắt đầu xử lý payment cho đơn hàng ${docCode} (SALE_RETURN) với ${stockCodes.length} mã kho`);
+              const paymentResult = await this.fastApiInvoiceFlowService.processPayment(
+                docCode,
+                orderData,
+                invoiceData,
+                stockCodes,
+              );
+
+              if (paymentResult.paymentResults && paymentResult.paymentResults.length > 0) {
+                this.logger.log(`[Payment] Đã tạo ${paymentResult.paymentResults.length} payment thành công cho đơn hàng ${docCode} (SALE_RETURN)`);
+              }
+              if (paymentResult.debitAdviceResults && paymentResult.debitAdviceResults.length > 0) {
+                this.logger.log(`[Payment] Đã tạo ${paymentResult.debitAdviceResults.length} debitAdvice thành công cho đơn hàng ${docCode} (SALE_RETURN)`);
+              }
+            } else {
+              this.logger.debug(`[Payment] Đơn hàng ${docCode} (SALE_RETURN) không có mã kho, bỏ qua payment API`);
+            }
+          } catch (paymentError: any) {
+            // Log lỗi nhưng không fail toàn bộ flow
+            this.logger.warn(`[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode} (SALE_RETURN): ${paymentError?.message || paymentError}`);
+          }
+        }
 
         await this.saveFastApiInvoice({
           docCode,

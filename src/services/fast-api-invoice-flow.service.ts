@@ -430,6 +430,9 @@ export class FastApiInvoiceFlowService {
 
         // Trường hợp 2: fop_syscode != "CASH" → Kiểm tra payment method
         if (cashioData.fop_syscode && cashioData.fop_syscode !== 'CASH') {
+          if(cashioData.fop_syscode === 'VOUCHER') {
+            continue;
+          }
           // Lấy payment method theo code
           const paymentMethod = await this.categoriesService.findPaymentMethodByCode(cashioData.fop_syscode);
 
@@ -527,6 +530,197 @@ export class FastApiInvoiceFlowService {
       // Các lỗi khác (network, API, ...) vẫn log và throw để báo lỗi
       const errorMessage = `Lỗi khi xử lý cashio payment cho đơn hàng ${docCode}: ${error?.message || error}`;
       this.logger.error(`[Cashio] ${errorMessage}`);
+      throw new BadRequestException(errorMessage);
+    }
+  }
+
+  /**
+   * Xử lý payment (Phiếu chi tiền mặt/Giấy báo nợ)
+   * 
+   * Áp dụng cho các case sau:
+   * 1. 01. Thường, 02. Làm dịch vụ, 04. Đổi DV, 07. Bán tài khoản: BẮT BUỘC phải có mã kho
+   * 2. SALE_RETURN: BẮT BUỘC phải có mã kho
+   * 3. Đơn có đuôi _X (hủy): Cho phép không có mã kho (đơn hủy chưa xuất kho)
+   * 
+   * @param docCode - Mã đơn hàng
+   * @param orderData - Dữ liệu đơn hàng
+   * @param invoiceData - Dữ liệu invoice đã build
+   * @param stockCodes - Danh sách mã kho (stockCode) từ stock transfers (có thể rỗng cho đơn hủy _X)
+   * @param allowWithoutStockCodes - Cho phép gọi payment ngay cả khi không có stockCodes (CHỈ cho đơn hủy _X, mặc định false)
+   */
+  async processPayment(docCode: string, orderData: any, invoiceData: any, stockCodes: string[], allowWithoutStockCodes: boolean = false): Promise<{
+    paymentResults?: any[];
+    debitAdviceResults?: any[];
+  }> {
+    try {
+      // Kiểm tra có mã kho không (trừ khi allowWithoutStockCodes = true cho đơn hủy)
+      if ((!stockCodes || stockCodes.length === 0) && !allowWithoutStockCodes) {
+        this.logger.debug(`[Payment] Đơn hàng ${docCode} không có mã kho, bỏ qua payment API`);
+        return {};
+      }
+
+      // Lấy cashio data theo soCode
+      const cashioResult = await this.syncService.getCashio({
+        page: 1,
+        limit: 100,
+        soCode: docCode,
+      });
+
+      if (!cashioResult.success || !cashioResult.data || cashioResult.data.length === 0) {
+        this.logger.debug(`[Payment] Không tìm thấy cashio data cho đơn hàng ${docCode}`);
+        return {};
+      }
+
+      const paymentResults: any[] = [];
+      const debitAdviceResults: any[] = [];
+
+      // Xử lý tất cả các cashio records có total_out > 0
+      for (const cashioData of cashioResult.data) {
+        const totalOut = parseFloat(String(cashioData.total_out || '0'));
+
+        // Chỉ xử lý nếu total_out > 0
+        if (totalOut > 0) {
+          // Trường hợp 1: fop_syscode = "CASH" và total_out > 0 → Gọi Payment (Phiếu chi tiền mặt)
+          if (cashioData.fop_syscode === 'CASH') {
+            try {
+              this.logger.log(`[Payment] Phát hiện CASH payment cho đơn hàng ${docCode} (${cashioData.code}), total_out: ${totalOut}, gọi payment API`);
+
+              const paymentPayload = FastApiPayloadHelper.buildPaymentPayload(
+                cashioData,
+                orderData,
+                invoiceData,
+                null,
+                '2', // loai_ct = 2 (Chi cho khách hàng)
+              );
+              
+              const paymentResult = await this.fastApiService.submitPayment(paymentPayload);
+              
+              // Validate response: status = 1 mới là success
+              if (Array.isArray(paymentResult) && paymentResult.length > 0) {
+                const firstItem = paymentResult[0];
+                if (firstItem.status !== 1) {
+                  const errorMessage = firstItem.message || 'Tạo payment thất bại';
+                  this.logger.error(`[Payment] Payment API trả về status = ${firstItem.status}: ${errorMessage}`);
+                  throw new BadRequestException(errorMessage);
+                }
+              } else if (paymentResult && typeof paymentResult === 'object' && paymentResult.status !== undefined) {
+                if (paymentResult.status !== 1) {
+                  const errorMessage = paymentResult.message || 'Tạo payment thất bại';
+                  this.logger.error(`[Payment] Payment API trả về status = ${paymentResult.status}: ${errorMessage}`);
+                  throw new BadRequestException(errorMessage);
+                }
+              }
+
+              paymentResults.push({
+                cashioCode: cashioData.code,
+                result: paymentResult,
+              });
+            } catch (error: any) {
+              // Nếu là BadRequestException từ validation, throw lại
+              if (error instanceof BadRequestException) {
+                throw error;
+              }
+              // Nếu là lỗi khác, log và throw
+              const errorMessage = `Lỗi khi tạo payment cho cashio ${cashioData.code}: ${error?.message || error}`;
+              this.logger.error(`[Payment] ${errorMessage}`);
+              throw new BadRequestException(errorMessage);
+            }
+            continue;
+          }
+
+          // Trường hợp 2: fop_syscode != "CASH" → Kiểm tra payment method
+          if (cashioData.fop_syscode && cashioData.fop_syscode !== 'CASH') {
+            // Lấy payment method theo code
+            const paymentMethod = await this.categoriesService.findPaymentMethodByCode(cashioData.fop_syscode);
+
+            // Kiểm tra payment method có tồn tại không
+            if (!paymentMethod) {
+              const errorMessage = `Không tìm thấy payment method với code "${cashioData.fop_syscode}" cho cashio ${cashioData.code}`;
+              this.logger.error(`[Payment] ${errorMessage}`);
+              throw new BadRequestException(errorMessage);
+            }
+
+            // Kiểm tra documentType
+            if (!paymentMethod.documentType) {
+              const errorMessage = `Payment method "${cashioData.fop_syscode}" (${cashioData.code}) không có documentType`;
+              this.logger.error(`[Payment] ${errorMessage}`);
+              throw new BadRequestException(errorMessage);
+            }
+
+            // Chỉ xử lý nếu documentType = "Giấy báo nợ"
+            if (paymentMethod.documentType === 'Giấy báo nợ') {
+              try {
+                this.logger.log(`[Payment] Phát hiện non-CASH payment cho đơn hàng ${docCode} (${cashioData.code}), total_out: ${totalOut}, gọi debitAdvice API`);
+
+                const debitAdvicePayload = FastApiPayloadHelper.buildDebitAdvicePayload(
+                  cashioData,
+                  orderData,
+                  invoiceData,
+                  paymentMethod,
+                  '2', // loai_ct = 2 (Chi cho khách hàng)
+                );
+                
+                const debitAdviceResult = await this.fastApiService.submitDebitAdvice(debitAdvicePayload);
+                
+                // Validate response: status = 1 mới là success
+                if (Array.isArray(debitAdviceResult) && debitAdviceResult.length > 0) {
+                  const firstItem = debitAdviceResult[0];
+                  if (firstItem.status !== 1) {
+                    const errorMessage = firstItem.message || 'Tạo debit advice thất bại';
+                    this.logger.error(`[Payment] Debit Advice API trả về status = ${firstItem.status}: ${errorMessage}`);
+                    throw new BadRequestException(errorMessage);
+                  }
+                } else if (debitAdviceResult && typeof debitAdviceResult === 'object' && debitAdviceResult.status !== undefined) {
+                  if (debitAdviceResult.status !== 1) {
+                    const errorMessage = debitAdviceResult.message || 'Tạo debit advice thất bại';
+                    this.logger.error(`[Payment] Debit Advice API trả về status = ${debitAdviceResult.status}: ${errorMessage}`);
+                    throw new BadRequestException(errorMessage);
+                  }
+                }
+
+                debitAdviceResults.push({
+                  cashioCode: cashioData.code,
+                  result: debitAdviceResult,
+                });
+              } catch (error: any) {
+                // Nếu là BadRequestException từ validation, throw lại
+                if (error instanceof BadRequestException) {
+                  throw error;
+                }
+                // Nếu là lỗi khác, log và throw
+                const errorMessage = `Lỗi khi tạo debit advice cho payment method "${cashioData.fop_syscode}" (${cashioData.code}): ${error?.message || error}`;
+                this.logger.error(`[Payment] ${errorMessage}`);
+                throw new BadRequestException(errorMessage);
+              }
+            } else {
+              // Payment method có documentType nhưng không phải "Giấy báo nợ" → báo lỗi
+              const errorMessage = `Payment method "${cashioData.fop_syscode}" (${cashioData.code}) có documentType = "${paymentMethod.documentType}", không phải "Giấy báo nợ"`;
+              this.logger.error(`[Payment] ${errorMessage}`);
+              throw new BadRequestException(errorMessage);
+            }
+          }
+        }
+      }
+
+      // Trả về kết quả (có thể có nhiều kết quả)
+      const result: any = {};
+      if (paymentResults.length > 0) {
+        result.paymentResults = paymentResults;
+      }
+      if (debitAdviceResults.length > 0) {
+        result.debitAdviceResults = debitAdviceResults;
+      }
+
+      return result;
+    } catch (error: any) {
+      // Nếu là BadRequestException (lỗi mapping hoặc validation), throw lại để báo lỗi
+      if (error instanceof BadRequestException) {
+        this.logger.error(`[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode}: ${error?.message || error}`);
+        throw error;
+      }
+      // Các lỗi khác (network, API, ...) vẫn log và throw để báo lỗi
+      const errorMessage = `Lỗi khi xử lý payment cho đơn hàng ${docCode}: ${error?.message || error}`;
+      this.logger.error(`[Payment] ${errorMessage}`);
       throw new BadRequestException(errorMessage);
     }
   }
