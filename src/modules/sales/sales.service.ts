@@ -6272,7 +6272,7 @@ export class SalesService {
           this.logger.log(`[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode} (đơn có đuôi _X)`);
         }
 
-        // Xử lý Payment (Phiếu chi tiền mặt/Giấy báo nợ) cho đơn hủy (_X) - không cần có mã kho
+        // Xử lý Payment (Phiếu chi tiền mặt/Giấy báo nợ) cho đơn hủy (_X) - cho phép không có mã kho
         try {
           // Kiểm tra có stock transfer không
           const docCodesForStockTransfer = this.getDocCodesForStockTransfer([docCode]);
@@ -6281,11 +6281,11 @@ export class SalesService {
           });
           const stockCodes = Array.from(new Set(stockTransfers.map(st => st.stockCode).filter(Boolean)));
           
-          // Cho đơn _X: Gọi payment ngay cả khi không có mã kho (đơn hủy chưa xuất kho)
+          // Cho đơn _X: Gọi payment ngay cả khi không có mã kho (đơn hủy không có khái niệm xuất kho)
           const allowWithoutStockCodes = stockCodes.length === 0;
           
           if (allowWithoutStockCodes || stockCodes.length > 0) {
-            this.logger.log(`[Payment] Bắt đầu xử lý payment cho đơn hàng ${docCode} (đơn có đuôi _X) - ${allowWithoutStockCodes ? 'đơn hủy không có mã kho' : `với ${stockCodes.length} mã kho`}`);
+            this.logger.log(`[Payment] Bắt đầu xử lý payment cho đơn hàng ${docCode} (đơn có đuôi _X) - ${allowWithoutStockCodes ? 'không có mã kho' : `với ${stockCodes.length} mã kho`}`);
             paymentResult = await this.fastApiInvoiceFlowService.processPayment(
               docCode,
               orderData,
