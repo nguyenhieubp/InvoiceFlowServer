@@ -1249,15 +1249,6 @@ export class SalesService {
       });
       const uniqueStockTransfers = Array.from(uniqueStockTransfersMap.values());
       
-      // Debug log chi tiết
-      this.logger.debug(
-        `[StockTransfer] Đơn hàng ${order.docCode}: ` +
-        `orderStockTransfers=${orderStockTransfers.length}, ` +
-        `stockOutTransfers=${stockOutTransfers.length}, ` +
-        `uniqueStockTransfers=${uniqueStockTransfers.length}. ` +
-        `Chi tiết uniqueStockTransfers: ${uniqueStockTransfers.map(st => `docCode=${st.docCode}, doctype=${st.doctype}, qty=${st.qty}`).join('; ')}`
-      );
-      
       // Debug log nếu có duplicate hoặc có RT records bị loại bỏ
       if (orderStockTransfers.length > stockOutTransfers.length) {
         const returnCount = orderStockTransfers.length - stockOutTransfers.length;
@@ -6783,7 +6774,11 @@ export class SalesService {
       // Prepare Excel data với các cột giống frontend (MAIN_COLUMNS)
       // Các cột theo thứ tự: partnerCode, docDate, docCode, kyHieu, description, itemCode, dvt, loai, promCode, maKho, maLo, qty, giaBan, tienHang, tyGia, maThue, tkNo, tkDoanhThu, tkGiaVon, cucThue, maThanhToan, vuViec, boPhan, trangThai, barcode, muaHangGiamGia, chietKhauMuaHangGiamGia, chietKhauCkTheoChinhSach, muaHangCkVip, chietKhauMuaHangCkVip, thanhToanCoupon, chietKhauThanhToanCoupon, thanhToanVoucher, chietKhauThanhToanVoucher, thanhToanTkTienAo, chietKhauThanhToanTkTienAo, voucherDp1, chietKhauVoucherDp1, maCtkmTangHang, maThe, soSerial
       const excelData = allSales.map((sale) => {
-        const product = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
+        // Sử dụng sale.product đã được enrich từ formatSaleForFrontend (ưu tiên)
+        // Fallback về loyaltyProductMap nếu sale.product chưa có
+        const saleProduct = (sale as any).product || null;
+        const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
+        const product = saleProduct || loyaltyProduct || null;
         const department = sale.branchCode ? departmentMap.get(sale.branchCode) : null;
         const brand = sale.customer?.brand || '';
         const brandLower = brand.toLowerCase().trim();
@@ -6799,35 +6794,42 @@ export class SalesService {
         const revenue = sale.revenue || 0;
         const isTangHang = giaBan === 0 && tienHang === 0 && revenue === 0;
 
-        // Tính maKho
+        // Tính maKho - ưu tiên từ sale.maKho đã được tính toán
         const maBp = department?.ma_bp || sale.branchCode || null;
-        const maKho = this.calculateMaKho(sale.ordertype || '', maBp) || sale.maKho || sale.branchCode || '';
+        const maKho = sale.maKho || this.calculateMaKho(sale.ordertype || '', maBp) || sale.branchCode || '';
 
-        // Tính maLo (đơn giản hóa - cần logic đầy đủ từ frontend)
+        // Tính maLo - ưu tiên từ sale.maLo đã được tính toán
         let maLo = sale.maLo || '';
         const serial = sale.serial || '';
         if (!maLo && serial) {
           const underscoreIndex = serial.indexOf('_');
           if (underscoreIndex > 0 && underscoreIndex < serial.length - 1) {
             maLo = serial.substring(underscoreIndex + 1);
-          } else if (product?.trackBatch === true) {
-            if (normalizedBrand === 'f3') {
-              maLo = serial;
-            } else {
-              const productType = product?.productType || product?.producttype || '';
-              const productTypeUpper = productType.toUpperCase().trim();
-              if (productTypeUpper === 'TPCN') {
-                maLo = serial.length >= 8 ? serial.slice(-8) : serial;
+          } else {
+            const trackBatch = saleProduct?.trackBatch ?? loyaltyProduct?.trackBatch ?? product?.trackBatch ?? false;
+            if (trackBatch === true) {
+              if (normalizedBrand === 'f3') {
+                maLo = serial;
               } else {
-                maLo = serial.length >= 4 ? serial.slice(-4) : serial;
+                const productType = saleProduct?.productType || saleProduct?.producttype || 
+                                   loyaltyProduct?.productType || loyaltyProduct?.producttype || 
+                                   product?.productType || product?.producttype || '';
+                const productTypeUpper = productType.toUpperCase().trim();
+                if (productTypeUpper === 'TPCN') {
+                  maLo = serial.length >= 8 ? serial.slice(-8) : serial;
+                } else {
+                  maLo = serial.length >= 4 ? serial.slice(-4) : serial;
+                }
               }
             }
           }
         }
 
-        // Tính soSerial
+        // Tính soSerial - ưu tiên logic từ sale đã được enrich
         let soSerial = '';
-        if (product?.trackSerial === true && product?.trackBatch !== true) {
+        const trackSerial = saleProduct?.trackSerial ?? loyaltyProduct?.trackSerial ?? product?.trackSerial ?? false;
+        const trackBatch = saleProduct?.trackBatch ?? loyaltyProduct?.trackBatch ?? product?.trackBatch ?? false;
+        if (trackSerial === true && trackBatch !== true) {
           if (serial && serial.indexOf('_') <= 0) {
             soSerial = serial;
           }
@@ -6879,15 +6881,27 @@ export class SalesService {
           muaHangGiamGia = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
         }
 
+        // Lấy dvt - giống logic trong formatSaleForFrontend: loyaltyProduct?.unit || sale.dvt
+        // Ưu tiên: sale.product?.dvt (đã được enrich) > sale.dvt > product?.unit (từ Loyalty API)
+        const dvt = saleProduct?.dvt || sale.dvt || product?.unit || loyaltyProduct?.unit || '';
+
+        // Lấy maVatTu - giống logic trong formatSaleForFrontend: loyaltyProduct?.materialCode || sale.itemCode
+        // Ưu tiên: sale.product?.maVatTu (đã được enrich) > product?.materialCode > sale.itemCode
+        const maVatTu = saleProduct?.maVatTu || product?.materialCode || loyaltyProduct?.materialCode || sale.itemCode || '';
+
+        // Lấy loai - loại đơn hàng (ordertypeName) như "01. Thường", "02. Làm dịch vụ", ...
+        // Ưu tiên: sale.ordertypeName > sale.ordertype > sale.loai
+        const loai = sale.ordertypeName || sale.ordertype || sale.loai || '';
+
         return {
           '* Mã khách': sale.partnerCode || sale.customer?.code || '',
           '* Ngày': sale.docDate ? new Date(sale.docDate).toLocaleDateString('vi-VN') : '',
           '* Số hóa đơn': sale.docCode || '',
           '* Ký hiệu': department?.branchcode || sale.branchCode || '',
           'Diễn giải': sale.docCode || '',
-          '* Mã hàng': product?.maVatTu || sale.itemCode || '',
-          'Đvt': product?.dvt || sale.dvt || '',
-          'Loại': sale.loai || (sale.cat1 ? `${sale.cat1}${sale.cat2 ? ` / ${sale.cat2}` : ''}${sale.cat3 ? ` / ${sale.cat3}` : ''}` : '') || '',
+          '* Mã hàng': maVatTu,
+          'Đvt': dvt,
+          'Loại': loai,
           'Khuyến mãi': promCode,
           '* Mã kho': maKho,
           '* Mã lô': maLo,

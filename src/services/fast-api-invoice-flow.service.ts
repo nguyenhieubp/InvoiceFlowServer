@@ -36,7 +36,6 @@ export class FastApiInvoiceFlowService {
     gioi_tinh?: string;
     dien_thoai?: string;
   }): Promise<any> {
-    this.logger.log(`[Flow] Creating/updating customer ${customerData.ma_kh}...`);
     try {
       const result = await this.fastApiService.createOrUpdateCustomer(customerData);
       
@@ -55,8 +54,6 @@ export class FastApiInvoiceFlowService {
           throw new BadRequestException(errorMessage);
         }
       }
-      
-      this.logger.log(`[Flow] Customer ${customerData.ma_kh} created/updated successfully`);
       return result;
     } catch (error: any) {
       this.logger.warn(`[Flow] Customer creation failed but continuing: ${error?.message || error}`);
@@ -363,6 +360,7 @@ export class FastApiInvoiceFlowService {
 
 
   /**
+   * THU TIỀN - XỬ LÝ CASHIO
    * Xử lý cashio và gọi API cashReceipt hoặc creditAdvice nếu cần
    * Chỉ áp dụng cho đơn hàng "01. Thường"
    * Một đơn hàng có thể có nhiều phương thức thanh toán
@@ -536,7 +534,7 @@ export class FastApiInvoiceFlowService {
 
   /**
    * Xử lý payment (Phiếu chi tiền mặt/Giấy báo nợ)
-   * 
+   * Trả tiền - Xử lý payment
    * Áp dụng cho các case sau:
    * 1. 01. Thường, 02. Làm dịch vụ, 04. Đổi DV, 07. Bán tài khoản: BẮT BUỘC phải có mã kho
    * 2. SALE_RETURN: BẮT BUỘC phải có mã kho
