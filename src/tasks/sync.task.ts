@@ -89,6 +89,45 @@ export class SyncTask {
   }
 
 
+  // Chạy mỗi ngày lúc 2:30 AM - Đồng bộ báo cáo nộp quỹ cuối ca (ngày T-1)
+  @Cron('30 2 * * *', {
+    name: 'daily-shift-end-cash-sync-2-30am',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  async handleDailyShiftEndCashSync230AM() {
+    this.logger.log('Bắt đầu đồng bộ báo cáo nộp quỹ cuối ca tự động (scheduled task)...');
+    try {
+      const date = this.formatYesterdayDate();
+
+      // Đồng bộ báo cáo nộp quỹ cuối ca cho tất cả brands
+      const brands = ['f3', 'labhair', 'yaman', 'menard'];
+      for (const brand of brands) {
+        try {
+          this.logger.log(`[Scheduled ShiftEndCash] Đang đồng bộ báo cáo nộp quỹ cuối ca brand ${brand} cho ngày ${date}`);
+          const result = await this.syncService.syncShiftEndCash(date, brand);
+          if (result.success) {
+            this.logger.log(
+              `[Scheduled ShiftEndCash] Hoàn thành đồng bộ brand ${brand}: ${result.recordsCount} records, ${result.savedCount} saved, ${result.updatedCount} updated`,
+            );
+          } else {
+            this.logger.error(`[Scheduled ShiftEndCash] Lỗi khi đồng bộ brand ${brand}: ${result.message}`);
+            if (result.errors && result.errors.length > 0) {
+              result.errors.forEach((error) => {
+                this.logger.error(`[Scheduled ShiftEndCash] ${error}`);
+              });
+            }
+          }
+        } catch (error: any) {
+          this.logger.error(`[Scheduled ShiftEndCash] Lỗi khi đồng bộ ${brand} cho ngày ${date}: ${error?.message || error}`);
+        }
+      }
+
+      this.logger.log('Hoàn thành đồng bộ báo cáo nộp quỹ cuối ca tự động');
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ báo cáo nộp quỹ cuối ca tự động: ${error?.message || error}`);
+    }
+  }
+
   // Chạy mỗi ngày lúc 3:00 AM - Đồng bộ dữ liệu bán hàng (ngày T-1)
   @Cron('0 3 * * *', {
     name: 'daily-sales-sync-3am',

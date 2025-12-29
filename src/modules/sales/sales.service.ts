@@ -1456,6 +1456,13 @@ export class SalesService {
       return result;
     } catch (error: any) {
       const errorMessage = error?.message || String(error);
+      // Lấy result từ error response nếu có (để lưu vào database cho người dùng xem)
+      let errorResult: any = null;
+      if (error?.response?.data) {
+        errorResult = error.response.data;
+      } else if (error?.data) {
+        errorResult = error.data;
+      }
 
       // Lưu vào bảng tracking với success = false (upsert - update nếu đã tồn tại)
       try {
@@ -1472,6 +1479,12 @@ export class SalesService {
           existing.processedDate = new Date();
           existing.errorMessage = errorMessage;
           existing.success = false;
+          // Lưu result từ error response nếu có, nếu không thì giữ result cũ (nếu có)
+          if (errorResult) {
+            existing.result = JSON.stringify(errorResult);
+          }
+          // Nếu không có errorResult và existing cũng không có result, giữ null
+          // Nếu existing đã có result, giữ nguyên
           await this.warehouseProcessedRepository.save(existing);
         } else {
           // Tạo mới nếu chưa tồn tại
@@ -1481,6 +1494,8 @@ export class SalesService {
             processedDate: new Date(),
             errorMessage,
             success: false,
+            // Lưu result từ error response nếu có
+            ...(errorResult && { result: JSON.stringify(errorResult) }),
           });
           await this.warehouseProcessedRepository.save(warehouseProcessed);
         }

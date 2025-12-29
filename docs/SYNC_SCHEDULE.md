@@ -26,7 +26,23 @@ Tất cả các cron job đều chạy theo múi giờ **Asia/Ho_Chi_Minh** và 
 
 ---
 
-### 2. **3:00 AM** - Đồng Bộ Dữ Liệu Bán Hàng
+### 2. **2:30 AM** - Đồng Bộ Báo Cáo Nộp Quỹ Cuối Ca
+- **Cron Expression**: `30 2 * * *`
+- **Tên Job**: `daily-shift-end-cash-sync-2-30am`
+- **Mô tả**: Đồng bộ báo cáo nộp quỹ cuối ca (shift end cash) từ Zappy API
+- **Thời gian xử lý**: Ngày T-1
+- **Brands xử lý**: `f3`, `labhair`, `yaman`, `menard`
+- **Trạng thái**: ✅ **Đang hoạt động**
+
+**Chi tiết:**
+- Đồng bộ tuần tự từng brand
+- Mỗi brand được xử lý độc lập
+- Lỗi của một brand không ảnh hưởng đến các brand khác
+- Format ngày: `DDMMMYYYY` (ví dụ: `21DEC2025`)
+
+---
+
+### 3. **3:00 AM** - Đồng Bộ Dữ Liệu Bán Hàng
 - **Cron Expression**: `0 3 * * *`
 - **Tên Job**: `daily-sales-sync-3am`
 - **Mô tả**: Đồng bộ dữ liệu bán hàng (sales) từ Zappy API
@@ -48,6 +64,7 @@ Tất cả các cron job đều chạy theo múi giờ **Asia/Ho_Chi_Minh** và 
 | Thời Gian | Cron Job | Mô Tả | Trạng Thái |
 |-----------|----------|-------|------------|
 | **1:00 AM** | `daily-stock-transfer-sync` | Đồng bộ xuất kho | ✅ Hoạt động |
+| **2:30 AM** | `daily-shift-end-cash-sync-2-30am` | Đồng bộ báo cáo nộp quỹ cuối ca | ✅ Hoạt động |
 | **3:00 AM** | `daily-sales-sync-3am` | Đồng bộ bán hàng | ✅ Hoạt động |
 
 ---
@@ -56,6 +73,8 @@ Tất cả các cron job đều chạy theo múi giờ **Asia/Ho_Chi_Minh** và 
 
 ```
 1:00 AM → Đồng bộ xuất kho (Stock Transfer)
+    ↓
+2:30 AM → Đồng bộ báo cáo nộp quỹ cuối ca (Shift End Cash)
     ↓
 3:00 AM → Đồng bộ bán hàng (Sales)
 ```

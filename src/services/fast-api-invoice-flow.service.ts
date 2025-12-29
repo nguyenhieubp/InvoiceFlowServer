@@ -867,18 +867,19 @@ export class FastApiInvoiceFlowService {
     }
 
     // Validate response: status = 1 mới là success
+    // KHÔNG throw exception ở đây, trả về result để service layer xử lý và lưu vào database
     if (Array.isArray(result) && result.length > 0) {
       const firstItem = result[0];
       if (firstItem.status !== 1) {
         const errorMessage = firstItem.message || 'Tạo phiếu warehouse thất bại';
         this.logger.error(`[Warehouse] Warehouse API trả về status = ${firstItem.status}: ${errorMessage}`);
-        throw new BadRequestException(errorMessage);
+        // KHÔNG throw - trả về result để lưu vào database
       }
     } else if (result && typeof result === 'object' && result.status !== undefined) {
       if (result.status !== 1) {
         const errorMessage = result.message || 'Tạo phiếu warehouse thất bại';
         this.logger.error(`[Warehouse] Warehouse API trả về status = ${result.status}: ${errorMessage}`);
-        throw new BadRequestException(errorMessage);
+        // KHÔNG throw - trả về result để lưu vào database
       }
     }
 
@@ -1018,18 +1019,19 @@ export class FastApiInvoiceFlowService {
     const result = await this.fastApiService.submitWarehouseTransfer(payload);
 
     // Validate response: status = 1 mới là success
+    // KHÔNG throw exception ở đây, trả về result để service layer xử lý và lưu vào database
     if (Array.isArray(result) && result.length > 0) {
       const firstItem = result[0];
       if (firstItem.status !== 1) {
         const errorMessage = firstItem.message || 'Tạo phiếu warehouse transfer thất bại';
         this.logger.error(`[Warehouse Transfer] Warehouse Transfer API trả về status = ${firstItem.status}: ${errorMessage}`);
-        throw new BadRequestException(errorMessage);
+        // KHÔNG throw - trả về result để lưu vào database
       }
     } else if (result && typeof result === 'object' && result.status !== undefined) {
       if (result.status !== 1) {
         const errorMessage = result.message || 'Tạo phiếu warehouse transfer thất bại';
         this.logger.error(`[Warehouse Transfer] Warehouse Transfer API trả về status = ${result.status}: ${errorMessage}`);
-        throw new BadRequestException(errorMessage);
+        // KHÔNG throw - trả về result để lưu vào database
       }
     }
 

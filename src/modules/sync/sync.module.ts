@@ -6,6 +6,7 @@ import { SyncController } from './sync.controller';
 import { SyncTask } from '../../tasks/sync.task';
 import { ZappyApiService } from '../../services/zappy-api.service';
 import { LoyaltyService } from '../../services/loyalty.service';
+import { FastApiClientService } from '../../services/fast-api-client.service';
 import { SalesModule } from '../sales/sales.module';
 import { Customer } from '../../entities/customer.entity';
 import { Sale } from '../../entities/sale.entity';
@@ -28,7 +29,7 @@ import { VoucherIssueDetail } from '../../entities/voucher-issue-detail.entity';
     forwardRef(() => SalesModule),
   ],
   controllers: [SyncController],
-  providers: [SyncService, SyncTask, ZappyApiService, LoyaltyService],
+  providers: [SyncService, SyncTask, ZappyApiService, LoyaltyService, FastApiClientService],
   exports: [SyncService],
   // Import SalesModule để có thể inject FastApiInvoiceFlowService (đã export từ SalesModule)
 })

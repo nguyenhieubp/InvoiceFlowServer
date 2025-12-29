@@ -20,6 +20,7 @@ import { ZappyApiService } from '../../services/zappy-api.service';
 import { LoyaltyService } from '../../services/loyalty.service';
 import { SalesService } from '../sales/sales.service';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
+import { FastApiClientService } from '../../services/fast-api-client.service';
 
 @Injectable()
 export class SyncService {
@@ -74,6 +75,7 @@ export class SyncService {
     private salesService: SalesService,
     @Inject(forwardRef(() => FastApiInvoiceFlowService))
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
+    private fastApiClientService: FastApiClientService,
   ) {}
 
   async syncBrand(brandName: string, date: string): Promise<{
@@ -1853,6 +1855,134 @@ export class SyncService {
     } catch (error: any) {
       this.logger.error(`Error getting shift end cash: ${error?.message || error}`);
       throw error;
+    }
+  }
+
+  /**
+   * Tạo phiếu chi tiền mặt (payment) từ báo cáo nộp quỹ cuối ca
+   * @param shiftEndCashId - ID của báo cáo nộp quỹ cuối ca
+   * @returns Kết quả tạo payment
+   */
+  async createPaymentFromShiftEndCash(shiftEndCashId: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: any;
+    error?: string;
+  }> {
+    try {
+      // Lấy shift end cash record
+      const shiftEndCash = await this.shiftEndCashRepository.findOne({
+        where: { id: shiftEndCashId },
+        relations: ['lines'],
+      });
+
+      if (!shiftEndCash) {
+        throw new Error(`Không tìm thấy báo cáo nộp quỹ cuối ca với ID: ${shiftEndCashId}`);
+      }
+
+      // Extract branchCode từ draw_code (ví dụ: HMH04_1 -> HMH04)
+      const drawCode = shiftEndCash.draw_code || '';
+      const branchCodeMatch = drawCode.match(/^([A-Z0-9]+)_/);
+      const branchCode = branchCodeMatch ? branchCodeMatch[1] : drawCode;
+
+      // Fetch department để lấy ma_dvcs và ma_bp
+      let maDvcs = '';
+      let maBp = '';
+      try {
+        const response = await this.httpService.axiosRef.get(
+          `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+          { headers: { accept: 'application/json' } },
+        );
+        const department = response?.data?.data?.items?.[0];
+        if (department) {
+          maDvcs = department.ma_dvcs || department.ma_dvcs_ht || branchCode;
+          maBp = department.ma_bp || branchCode;
+        } else {
+          maDvcs = branchCode;
+          maBp = branchCode;
+        }
+      } catch (error) {
+        this.logger.warn(`Không thể lấy department cho branchCode ${branchCode}, dùng giá trị mặc định`);
+        maDvcs = branchCode;
+        maBp = branchCode;
+      }
+
+      // Build payment payload
+      const docDate = shiftEndCash.docdate || shiftEndCash.gl_date || new Date();
+      const totalAmount = Number(shiftEndCash.total || 0);
+
+      // Format date to ISO string
+      const formatDateISO = (date: Date): string => {
+        if (!date) return new Date().toISOString();
+        if (typeof date === 'string') {
+          return new Date(date).toISOString();
+        }
+        return date.toISOString();
+      };
+
+      // Tìm dòng tiền mặt (CASH) từ lines để lấy số tiền
+      const cashLine = shiftEndCash.lines?.find((line: any) => 
+        line.fop_code?.toUpperCase() === 'CASH' || 
+        line.fop_name?.toLowerCase().includes('tiền mặt')
+      );
+
+      // Ưu tiên dùng actual_amt từ cashLine, nếu không có thì dùng system_amt, cuối cùng là total
+      const paymentAmount = cashLine 
+        ? Number(cashLine.actual_amt || cashLine.system_amt || 0)
+        : totalAmount;
+
+      const paymentPayload: any = {
+        action: 0,
+        ma_dvcs: maDvcs,
+        ma_kh: branchCode || '', // Mã khách hàng = branchCode (chi nội bộ cho chi nhánh)
+        loai_ct: '2', // 2 - Chi cho khách hàng
+        dept_id: maBp,
+        ngay_lct: formatDateISO(docDate),
+        so_ct: shiftEndCash.draw_code || '', // Mã chứng từ = draw_code
+        httt: 'CASH', // Hình thức thanh toán = CASH
+        status: '0',
+        dien_giai: shiftEndCash.description || `Chi tiền cho ${shiftEndCash.draw_code}`,
+        detail: [
+          {
+            tien: paymentAmount,
+            ma_bp: maBp,
+          },
+        ],
+      };
+
+      // Gọi payment API
+      const result = await this.fastApiClientService.submitPayment(paymentPayload);
+
+      // Validate response
+      if (Array.isArray(result) && result.length > 0) {
+        const firstItem = result[0];
+        if (firstItem.status !== 1) {
+          const errorMessage = firstItem.message || 'Tạo payment thất bại';
+          this.logger.error(`[ShiftEndCash Payment] Payment API trả về status = ${firstItem.status}: ${errorMessage}`);
+          throw new Error(errorMessage);
+        }
+      } else if (result && typeof result === 'object' && result.status !== undefined) {
+        if (result.status !== 1) {
+          const errorMessage = result.message || 'Tạo payment thất bại';
+          this.logger.error(`[ShiftEndCash Payment] Payment API trả về status = ${result.status}: ${errorMessage}`);
+          throw new Error(errorMessage);
+        }
+      }
+
+      this.logger.log(`[ShiftEndCash Payment] Tạo payment thành công cho shift end cash ${shiftEndCashId}`);
+
+      return {
+        success: true,
+        message: 'Tạo phiếu chi tiền mặt thành công',
+        data: result,
+      };
+    } catch (error: any) {
+      this.logger.error(`[ShiftEndCash Payment] Lỗi khi tạo payment: ${error?.message || error}`);
+      return {
+        success: false,
+        message: 'Lỗi khi tạo phiếu chi tiền mặt',
+        error: error?.message || String(error),
+      };
     }
   }
 

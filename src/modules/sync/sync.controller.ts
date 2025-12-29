@@ -559,6 +559,40 @@ export class SyncController {
   }
 
   /**
+   * Tạo phiếu chi tiền mặt từ báo cáo nộp quỹ cuối ca (double-click)
+   */
+  @Post('shift-end-cash/:id/create-payment')
+  async createPaymentFromShiftEndCash(@Param('id') id: string) {
+    try {
+      const result = await this.syncService.createPaymentFromShiftEndCash(id);
+      if (!result.success) {
+        throw new HttpException(
+          {
+            success: false,
+            message: result.message,
+            error: result.error,
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      return {
+        success: true,
+        message: result.message,
+        data: result.data,
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi tạo phiếu chi tiền mặt từ báo cáo nộp quỹ cuối ca',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
    * Lấy danh sách stock transfers với filter và pagination
    */
   @Get('stock-transfers')
