@@ -1627,27 +1627,31 @@ export class SyncService {
                 where: { api_id: record.id, brand: brandName },
               });
 
-              // Parse dates
-              const openat = record.openat ? new Date(record.openat) : null;
-              const closedat = record.closedat ? new Date(record.closedat) : null;
+              // Parse dates - đảm bảo lưu đúng giá trị, kể cả null
+              const openat = record.openat !== undefined && record.openat !== null && record.openat !== '' 
+                ? new Date(record.openat) 
+                : null;
+              const closedat = record.closedat !== undefined && record.closedat !== null && record.closedat !== '' 
+                ? new Date(record.closedat) 
+                : null;
               const docdate = parseDateString(record.docdate);
               const gl_date = parseDateString(record.gl_date);
               const enteredat = parseDateString(record.enteredat);
 
               if (existingRecord) {
-                // Update existing record
-                existingRecord.draw_code = record.draw_code || existingRecord.draw_code;
-                existingRecord.status = record.status || existingRecord.status;
-                existingRecord.teller_code = record.teller_code || existingRecord.teller_code;
-                existingRecord.openat = openat || existingRecord.openat;
-                existingRecord.closedat = closedat || existingRecord.closedat;
-                existingRecord.shift_status = record.shift_status || existingRecord.shift_status;
-                existingRecord.docdate = docdate || existingRecord.docdate;
-                existingRecord.gl_date = gl_date || existingRecord.gl_date;
-                existingRecord.description = record.description || existingRecord.description;
-                existingRecord.total = record.total ? Number(record.total) : existingRecord.total;
-                existingRecord.enteredat = enteredat || existingRecord.enteredat;
-                existingRecord.enteredby = record.enteredby || existingRecord.enteredby;
+                // Update existing record - lưu TẤT CẢ giá trị từ API, kể cả null, empty string, 0
+                existingRecord.draw_code = record.draw_code !== undefined && record.draw_code !== null ? record.draw_code : existingRecord.draw_code;
+                existingRecord.status = record.status !== undefined && record.status !== null ? record.status : existingRecord.status;
+                existingRecord.teller_code = record.teller_code !== undefined && record.teller_code !== null ? record.teller_code : existingRecord.teller_code;
+                existingRecord.openat = openat !== undefined && openat !== null ? openat : existingRecord.openat;
+                existingRecord.closedat = closedat !== undefined && closedat !== null ? closedat : existingRecord.closedat;
+                existingRecord.shift_status = record.shift_status !== undefined && record.shift_status !== null ? record.shift_status : existingRecord.shift_status;
+                existingRecord.docdate = docdate !== undefined && docdate !== null ? docdate : existingRecord.docdate;
+                existingRecord.gl_date = gl_date !== undefined && gl_date !== null ? gl_date : existingRecord.gl_date;
+                existingRecord.description = record.description !== undefined && record.description !== null ? record.description : existingRecord.description;
+                existingRecord.total = record.total !== undefined && record.total !== null ? Number(record.total) : existingRecord.total;
+                existingRecord.enteredat = enteredat !== undefined && enteredat !== null ? enteredat : existingRecord.enteredat;
+                existingRecord.enteredby = record.enteredby !== undefined && record.enteredby !== null ? record.enteredby : existingRecord.enteredby;
                 existingRecord.sync_date = date;
 
                 // Xóa các lines cũ và tạo mới
@@ -1656,15 +1660,15 @@ export class SyncService {
                   
                   const linesToCreate = record.lines.map((line: any) => ({
                     shiftEndCashId: existingRecord.id,
-                    fop_code: line.fop_code || undefined,
-                    fop_name: line.fop_name || undefined,
-                    system_amt: line.system_amt ? Number(line.system_amt) : 0,
-                    sys_acct_code: line.sys_acct_code || undefined,
-                    actual_amt: line.actual_amt ? Number(line.actual_amt) : 0,
-                    actual_acct_code: line.actual_acct_code || undefined,
-                    diff_amount: line.diff_amount ? Number(line.diff_amount) : 0,
-                    diff_acct_code: line.diff_acct_code || undefined,
-                    template_id: line.template_id ? Number(line.template_id) : undefined,
+                    fop_code: line.fop_code !== undefined && line.fop_code !== null ? line.fop_code : null,
+                    fop_name: line.fop_name !== undefined && line.fop_name !== null ? line.fop_name : null,
+                    system_amt: line.system_amt !== undefined && line.system_amt !== null ? Number(line.system_amt) : 0,
+                    sys_acct_code: line.sys_acct_code !== undefined && line.sys_acct_code !== null ? line.sys_acct_code : null,
+                    actual_amt: line.actual_amt !== undefined && line.actual_amt !== null ? Number(line.actual_amt) : 0,
+                    actual_acct_code: line.actual_acct_code !== undefined && line.actual_acct_code !== null ? line.actual_acct_code : null,
+                    diff_amount: line.diff_amount !== undefined && line.diff_amount !== null ? Number(line.diff_amount) : 0,
+                    diff_acct_code: line.diff_acct_code !== undefined && line.diff_acct_code !== null ? line.diff_acct_code : null,
+                    template_id: line.template_id !== undefined && line.template_id !== null ? Number(line.template_id) : null,
                   }));
                   const lines = this.shiftEndCashLineRepository.create(linesToCreate);
                   await this.shiftEndCashLineRepository.save(lines);
@@ -1673,21 +1677,21 @@ export class SyncService {
                 await this.shiftEndCashRepository.save(existingRecord);
                 brandUpdatedCount++;
               } else {
-                // Tạo record mới
+                // Tạo record mới - lưu TẤT CẢ giá trị từ API
                 const newRecord = this.shiftEndCashRepository.create({
                   api_id: record.id,
-                  draw_code: record.draw_code || '',
-                  status: record.status || null,
-                  teller_code: record.teller_code || null,
-                  openat: openat,
-                  closedat: closedat,
-                  shift_status: record.shift_status || null,
-                  docdate: docdate,
-                  gl_date: gl_date,
-                  description: record.description || null,
-                  total: record.total ? Number(record.total) : 0,
-                  enteredat: enteredat,
-                  enteredby: record.enteredby || null,
+                  draw_code: record.draw_code !== undefined && record.draw_code !== null ? record.draw_code : '',
+                  status: record.status !== undefined && record.status !== null ? record.status : null,
+                  teller_code: record.teller_code !== undefined && record.teller_code !== null ? record.teller_code : null,
+                  openat: openat !== undefined && openat !== null ? openat : null,
+                  closedat: closedat !== undefined && closedat !== null ? closedat : null,
+                  shift_status: record.shift_status !== undefined && record.shift_status !== null ? record.shift_status : null,
+                  docdate: docdate !== undefined && docdate !== null ? docdate : null,
+                  gl_date: gl_date !== undefined && gl_date !== null ? gl_date : null,
+                  description: record.description !== undefined && record.description !== null ? record.description : null,
+                  total: record.total !== undefined && record.total !== null ? Number(record.total) : 0,
+                  enteredat: enteredat !== undefined && enteredat !== null ? enteredat : null,
+                  enteredby: record.enteredby !== undefined && record.enteredby !== null ? record.enteredby : null,
                   sync_date: date,
                   brand: brandName,
                 } as any);
@@ -1698,15 +1702,15 @@ export class SyncService {
                 if (record.lines && Array.isArray(record.lines)) {
                   const linesToCreate = record.lines.map((line: any) => ({
                     shiftEndCashId: savedRecord.id,
-                    fop_code: line.fop_code || undefined,
-                    fop_name: line.fop_name || undefined,
-                    system_amt: line.system_amt ? Number(line.system_amt) : 0,
-                    sys_acct_code: line.sys_acct_code || undefined,
-                    actual_amt: line.actual_amt ? Number(line.actual_amt) : 0,
-                    actual_acct_code: line.actual_acct_code || undefined,
-                    diff_amount: line.diff_amount ? Number(line.diff_amount) : 0,
-                    diff_acct_code: line.diff_acct_code || undefined,
-                    template_id: line.template_id ? Number(line.template_id) : undefined,
+                    fop_code: line.fop_code !== undefined && line.fop_code !== null ? line.fop_code : null,
+                    fop_name: line.fop_name !== undefined && line.fop_name !== null ? line.fop_name : null,
+                    system_amt: line.system_amt !== undefined && line.system_amt !== null ? Number(line.system_amt) : 0,
+                    sys_acct_code: line.sys_acct_code !== undefined && line.sys_acct_code !== null ? line.sys_acct_code : null,
+                    actual_amt: line.actual_amt !== undefined && line.actual_amt !== null ? Number(line.actual_amt) : 0,
+                    actual_acct_code: line.actual_acct_code !== undefined && line.actual_acct_code !== null ? line.actual_acct_code : null,
+                    diff_amount: line.diff_amount !== undefined && line.diff_amount !== null ? Number(line.diff_amount) : 0,
+                    diff_acct_code: line.diff_acct_code !== undefined && line.diff_acct_code !== null ? line.diff_acct_code : null,
+                    template_id: line.template_id !== undefined && line.template_id !== null ? Number(line.template_id) : null,
                   }));
                   const lines = this.shiftEndCashLineRepository.create(linesToCreate as any);
                   await this.shiftEndCashLineRepository.save(lines);
@@ -1759,6 +1763,7 @@ export class SyncService {
     dateTo?: string;
     branchCode?: string;
     drawCode?: string;
+    apiId?: number;
   }): Promise<{
     success: boolean;
     data: any[];
@@ -1795,27 +1800,15 @@ export class SyncService {
         queryBuilder.andWhere('sec.draw_code = :drawCode', { drawCode: params.drawCode });
       }
 
-      // Filter by dateFrom
-      if (params.dateFrom) {
-        const parseDate = (dateStr: string): Date => {
-          const day = parseInt(dateStr.substring(0, 2));
-          const monthStr = dateStr.substring(2, 5).toUpperCase();
-          const year = parseInt(dateStr.substring(5, 9));
-          const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
-          };
-          const month = monthMap[monthStr] || 0;
-          return new Date(year, month, day);
-        };
-        const fromDate = parseDate(params.dateFrom);
-        queryBuilder.andWhere('sec.docdate >= :dateFrom', { dateFrom: fromDate });
+      // Filter by apiId
+      if (params.apiId !== undefined && params.apiId !== null) {
+        queryBuilder.andWhere('sec.api_id = :apiId', { apiId: params.apiId });
       }
 
-      // Filter by dateTo
-      if (params.dateTo) {
-        const parseDate = (dateStr: string): Date => {
+      // Filter by dateFrom và dateTo - filter theo openat và closedat
+      // Filter các record có openat hoặc closedat nằm trong khoảng dateFrom-dateTo
+      if (params.dateFrom || params.dateTo) {
+        const parseDate = (dateStr: string, isEndOfDay: boolean = false): Date => {
           const day = parseInt(dateStr.substring(0, 2));
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
@@ -1825,10 +1818,29 @@ export class SyncService {
             'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
           };
           const month = monthMap[monthStr] || 0;
-          return new Date(year, month, day, 23, 59, 59);
+          if (isEndOfDay) {
+            return new Date(year, month, day, 23, 59, 59, 999);
+          }
+          return new Date(year, month, day, 0, 0, 0, 0);
         };
-        const toDate = parseDate(params.dateTo);
-        queryBuilder.andWhere('sec.docdate <= :dateTo', { dateTo: toDate });
+        
+        if (params.dateFrom && params.dateTo) {
+          // Cả hai đều có: Filter record có openat HOẶC closedat nằm trong khoảng
+          const fromDate = parseDate(params.dateFrom);
+          const toDate = parseDate(params.dateTo, true);
+          queryBuilder.andWhere(
+            '(sec.openat BETWEEN :dateFrom AND :dateTo OR sec.closedat BETWEEN :dateFrom AND :dateTo)',
+            { dateFrom: fromDate, dateTo: toDate }
+          );
+        } else if (params.dateFrom) {
+          // Chỉ có dateFrom: Filter record có openat >= dateFrom HOẶC closedat >= dateFrom
+          const fromDate = parseDate(params.dateFrom);
+          queryBuilder.andWhere('(sec.openat >= :dateFrom OR sec.closedat >= :dateFrom)', { dateFrom: fromDate });
+        } else if (params.dateTo) {
+          // Chỉ có dateTo: Filter record có openat <= dateTo HOẶC closedat <= dateTo
+          const toDate = parseDate(params.dateTo, true);
+          queryBuilder.andWhere('(sec.openat <= :dateTo OR sec.closedat <= :dateTo)', { dateTo: toDate });
+        }
       }
 
       // Get total count

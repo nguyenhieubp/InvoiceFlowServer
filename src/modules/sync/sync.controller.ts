@@ -534,6 +534,7 @@ export class SyncController {
     @Query('dateTo') dateTo?: string,
     @Query('branchCode') branchCode?: string,
     @Query('drawCode') drawCode?: string,
+    @Query('apiId') apiId?: string,
   ) {
     try {
       const result = await this.syncService.getShiftEndCash({
@@ -544,6 +545,7 @@ export class SyncController {
         dateTo,
         branchCode,
         drawCode,
+        apiId: apiId ? parseInt(apiId, 10) : undefined,
       });
       return result;
     } catch (error: any) {
