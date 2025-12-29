@@ -3498,14 +3498,35 @@ export class SalesService {
                   this.logger.debug(`[SalesService] Sale ${order.docCode}/${saleItem.itemCode}: productType từ Loyalty API = "${productTypeFromLoyalty}"`);
                 }
 
-                // Kiểm tra xem sale đã tồn tại chưa (dựa trên docCode, itemCode)
-                const existingSale = await this.saleRepository.findOne({
-                  where: {
-                    docCode: order.docCode,
-                    itemCode: saleItem.itemCode,
-                    customer: { id: customer.id },
-                  },
-                });
+                // Kiểm tra xem sale đã tồn tại chưa
+                // Với đơn "08. Tách thẻ": cần thêm qty vào điều kiện vì có thể có 2 dòng cùng itemCode nhưng qty khác nhau (-1 và 1)
+                // Với các đơn khác: chỉ cần docCode + itemCode + customer
+                const ordertypeName = saleItem.ordertype_name || saleItem.ordertype || '';
+                const isTachThe = ordertypeName.includes('08. Tách thẻ') ||
+                  ordertypeName.includes('08.Tách thẻ') ||
+                  ordertypeName.includes('08.  Tách thẻ');
+                
+                let existingSale: Sale | null = null;
+                if (isTachThe) {
+                  // Với đơn "08. Tách thẻ": tìm theo docCode + itemCode + qty + customer
+                  existingSale = await this.saleRepository.findOne({
+                    where: {
+                      docCode: order.docCode,
+                      itemCode: saleItem.itemCode,
+                      qty: saleItem.qty || 0,
+                      customer: { id: customer.id },
+                    },
+                  });
+                } else {
+                  // Với các đơn khác: tìm theo docCode + itemCode + customer
+                  existingSale = await this.saleRepository.findOne({
+                    where: {
+                      docCode: order.docCode,
+                      itemCode: saleItem.itemCode,
+                      customer: { id: customer.id },
+                    },
+                  });
+                }
 
                 // Enrich voucher data từ get_daily_cash
                 let voucherRefno: string | undefined;

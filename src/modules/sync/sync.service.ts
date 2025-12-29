@@ -1641,6 +1641,7 @@ export class SyncService {
               if (existingRecord) {
                 // Update existing record - lưu TẤT CẢ giá trị từ API, kể cả null, empty string, 0
                 existingRecord.draw_code = record.draw_code !== undefined && record.draw_code !== null ? record.draw_code : existingRecord.draw_code;
+                existingRecord.branch_code = record.branch_code !== undefined && record.branch_code !== null ? record.branch_code : existingRecord.branch_code;
                 existingRecord.status = record.status !== undefined && record.status !== null ? record.status : existingRecord.status;
                 existingRecord.teller_code = record.teller_code !== undefined && record.teller_code !== null ? record.teller_code : existingRecord.teller_code;
                 existingRecord.openat = openat !== undefined && openat !== null ? openat : existingRecord.openat;
@@ -1681,6 +1682,7 @@ export class SyncService {
                 const newRecord = this.shiftEndCashRepository.create({
                   api_id: record.id,
                   draw_code: record.draw_code !== undefined && record.draw_code !== null ? record.draw_code : '',
+                  branch_code: record.branch_code !== undefined && record.branch_code !== null ? record.branch_code : null,
                   status: record.status !== undefined && record.status !== null ? record.status : null,
                   teller_code: record.teller_code !== undefined && record.teller_code !== null ? record.teller_code : null,
                   openat: openat !== undefined && openat !== null ? openat : null,
@@ -1790,9 +1792,9 @@ export class SyncService {
         queryBuilder.andWhere('sec.brand = :brand', { brand: params.brand });
       }
 
-      // Filter by branchCode (extract from draw_code)
+      // Filter by branchCode (sử dụng trường branch_code từ database)
       if (params.branchCode) {
-        queryBuilder.andWhere('sec.draw_code LIKE :branchCode', { branchCode: `${params.branchCode}%` });
+        queryBuilder.andWhere('sec.branch_code = :branchCode', { branchCode: params.branchCode });
       }
 
       // Filter by drawCode
@@ -1892,10 +1894,13 @@ export class SyncService {
         throw new Error(`Không tìm thấy báo cáo nộp quỹ cuối ca với ID: ${shiftEndCashId}`);
       }
 
-      // Extract branchCode từ draw_code (ví dụ: HMH04_1 -> HMH04)
-      const drawCode = shiftEndCash.draw_code || '';
-      const branchCodeMatch = drawCode.match(/^([A-Z0-9]+)_/);
-      const branchCode = branchCodeMatch ? branchCodeMatch[1] : drawCode;
+      // Ưu tiên dùng branch_code từ database, nếu không có thì extract từ draw_code
+      let branchCode = shiftEndCash.branch_code;
+      if (!branchCode) {
+        const drawCode = shiftEndCash.draw_code || '';
+        const branchCodeMatch = drawCode.match(/^([A-Z0-9]+)_/);
+        branchCode = branchCodeMatch ? branchCodeMatch[1] : drawCode;
+      }
 
       // Fetch department để lấy ma_dvcs và ma_bp
       let maDvcs = '';

@@ -27,6 +27,10 @@ export class ShiftEndCash {
   draw_code: string; // HMH04_1, HMS15_05, etc.
 
   @Column({ nullable: true })
+  @Index()
+  branch_code: string; // SMS04A, HMS02, etc.
+
+  @Column({ nullable: true })
   status: string; // "9-Ghi sổ"
 
   @Column({ nullable: true })
