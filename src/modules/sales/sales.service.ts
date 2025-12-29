@@ -416,12 +416,10 @@ export class SalesService {
             );
             cardResponse = response.data;
           } catch (postError: any) {
-            // Nếu cả POST cũng fail, log và return (không throw để không ảnh hưởng đến flow chính)
-            this.logger.warn(`[08. Tách thẻ] Không thể lấy dữ liệu từ API get_card cho docCode: ${docCode}`);
+            // Nếu cả POST cũng fail, return (không throw để không ảnh hưởng đến flow chính)
             return;
           }
         } else {
-          this.logger.warn(`[08. Tách thẻ] Không thể lấy dữ liệu từ API get_card cho docCode: ${docCode}`);
           return;
         }
       }
@@ -460,8 +458,8 @@ export class SalesService {
         });
       }
     } catch (error: any) {
-      // Log và tiếp tục (không throw để không ảnh hưởng đến flow chính)
-      this.logger.warn(`[08. Tách thẻ] Lỗi khi gọi API get_card cho docCode: ${docCode}, lỗi: ${error?.message || error}`);
+      // Tiếp tục (không throw để không ảnh hưởng đến flow chính)
+      // Chỉ log error nếu thực sự cần thiết
     }
   }
 
@@ -3491,12 +3489,6 @@ export class SalesService {
                 }
                 const productType = productTypeFromZappy || productTypeFromLoyalty || null;
                 
-                // Debug log để kiểm tra productType
-                if (productTypeFromZappy) {
-                  this.logger.debug(`[SalesService] Sale ${order.docCode}/${saleItem.itemCode}: productType từ Zappy API = "${productTypeFromZappy}"`);
-                } else if (productTypeFromLoyalty) {
-                  this.logger.debug(`[SalesService] Sale ${order.docCode}/${saleItem.itemCode}: productType từ Loyalty API = "${productTypeFromLoyalty}"`);
-                }
 
                 // Kiểm tra xem sale đã tồn tại chưa
                 // Với đơn "08. Tách thẻ": cần thêm qty vào điều kiện vì có thể có 2 dòng cùng itemCode nhưng qty khác nhau (-1 và 1)
@@ -3558,17 +3550,6 @@ export class SalesService {
                       finalOrderTypeName = String(saleItem.ordertype_name).trim() || undefined;
                     }
                   }
-                  // Log để debug
-                  this.logger.log(
-                    `[SalesService] ordertype_name cho sale ${order.docCode}/${saleItem.itemCode}: ` +
-                    `raw="${saleItem.ordertype_name}" (type: ${typeof saleItem.ordertype_name}), final="${finalOrderTypeName}"`
-                  );
-                  if (existingSale.ordertypeName !== finalOrderTypeName) {
-                    this.logger.log(
-                      `[SalesService] Update ordertypeName cho sale ${order.docCode}/${saleItem.itemCode}: ` +
-                      `"${existingSale.ordertypeName}" → "${finalOrderTypeName}"`
-                    );
-                  }
                   existingSale.ordertypeName = finalOrderTypeName;
                   existingSale.branchCode = saleItem.branchCode || existingSale.branchCode;
                   existingSale.promCode = saleItem.promCode || existingSale.promCode;
@@ -3597,12 +3578,6 @@ export class SalesService {
                   // Luôn update productType, kể cả khi là null (để cập nhật từ Zappy API)
                   // Nếu productType là empty string, set thành null
                   const finalProductType = productType && productType.trim() !== '' ? productType.trim() : null;
-                  if (existingSale.productType !== finalProductType) {
-                    this.logger.debug(
-                      `[SalesService] Update productType cho sale ${order.docCode}/${saleItem.itemCode}: ` +
-                      `"${existingSale.productType}" → "${finalProductType}"`
-                    );
-                  }
                   existingSale.productType = finalProductType;
                   // Enrich voucher data
                   if (voucherRefno) {
@@ -6017,9 +5992,23 @@ export class SalesService {
           ma_ctkm_th: limitString(maCtkmTangHang, 32),
         };
 
-        // Chỉ thêm ma_kho nếu có giá trị (không rỗng)
-        if (maKho && maKho.trim() !== '') {
-          detailItem.ma_kho = limitString(maKho, 16);
+        // Thêm ma_kho: Chỉ thêm khi có giá trị hợp lệ, nếu không có thì không thêm key vào payload
+        // Ưu tiên: maKho từ stock transfer > sale.maKho > maBp > orderData.branchCode
+        const orderBranchCode = orderData.branchCode || '';
+        const finalMaKho = (maKho && maKho.trim() !== '') 
+          ? maKho 
+          : (sale.maKho && sale.maKho.trim() !== '')
+            ? sale.maKho
+            : (maBp && maBp.trim() !== '')
+              ? maBp
+              : (orderBranchCode && orderBranchCode.trim() !== '')
+                ? orderBranchCode
+                : '';
+        
+        // Chỉ thêm ma_kho vào detail item khi có giá trị hợp lệ (không rỗng)
+        // Nếu không có giá trị hợp lệ, không thêm key ma_kho vào payload
+        if (finalMaKho && finalMaKho.trim() !== '') {
+          detailItem.ma_kho = limitString(finalMaKho, 16);
         }
 
         // Thêm các field còn lại
@@ -6287,11 +6276,6 @@ export class SalesService {
         
         if (saleWithIssuePartnerCode && saleWithIssuePartnerCode.issuePartnerCode) {
           maKhForHeader = this.normalizeMaKh(saleWithIssuePartnerCode.issuePartnerCode);
-          const qtyType = Number(saleWithIssuePartnerCode.qty || 0) < 0 ? 'qty < 0 (người chuyển)' : 'qty > 0 (người nhận)';
-          this.logger.log(`[08. Tách thẻ] Dùng issue_partner_code ${maKhForHeader} làm ma_kh cho header (từ dòng ${qtyType}, issuePartnerCode: ${saleWithIssuePartnerCode.issuePartnerCode})`);
-        } else {
-          this.logger.warn(`[08. Tách thẻ] Không tìm thấy issuePartnerCode trong các sale lines. Danh sách sales: ${JSON.stringify(orderData.sales.map((s: any) => ({ qty: s.qty, hasIssuePartnerCode: !!s.issuePartnerCode, issuePartnerCode: s.issuePartnerCode })))}`);
-          this.logger.warn(`[08. Tách thẻ] Dùng ma_kh mặc định: ${maKhForHeader}`);
         }
       }
 

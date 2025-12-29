@@ -194,11 +194,6 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
         throw new Error('Không thể lấy token đăng nhập');
       }
 
-      // Log payload gửi lên API (đã tắt để giảm log)
-      // this.logger.log('==================Sales Invoice API Request Payload:');
-      // this.logger.log(JSON.stringify(invoiceData, null, 2));
-      // this.logger.log('==================End of Sales Invoice API Request Payload');
-
       // Gọi API salesInvoice với token
       const response = await firstValueFrom(
         this.httpService.post(
@@ -214,12 +209,23 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
       );
 
       this.logger.log('Sales invoice submitted successfully');
-      // this.logger.log('==================Sales Invoice API Response:');
-      // this.logger.log(JSON.stringify(response.data, null, 2));
-      // this.logger.log('==================End of Sales Invoice API Response');
       return response.data;
     } catch (error: any) {
-      this.logger.error(`Error submitting sales invoice: ${error?.message || error}`);
+      // Log chi tiết error response (chỉ log message, không log toàn bộ payload)
+      if (error?.response?.data) {
+        const errorData = error.response.data;
+        if (Array.isArray(errorData) && errorData.length > 0) {
+          this.logger.error(`Error submitting sales invoice: ${errorData[0]?.message || error.message || error}`);
+        } else if (typeof errorData === 'object' && errorData.message) {
+          this.logger.error(`Error submitting sales invoice: ${errorData.message}`);
+        } else if (typeof errorData === 'string') {
+          this.logger.error(`Error submitting sales invoice: ${errorData}`);
+        } else {
+          this.logger.error(`Error submitting sales invoice: ${error?.message || error}`);
+        }
+      } else {
+        this.logger.error(`Error submitting sales invoice: ${error?.message || error}`);
+      }
 
       // Nếu lỗi 401 (Unauthorized), refresh token và retry
       if (error?.response?.status === 401) {
@@ -241,11 +247,20 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
               ),
             );
             this.logger.log('Sales invoice submitted successfully (after retry)');
-            // this.logger.log('==================Sales Invoice API Response (after retry):');
-            // this.logger.log(JSON.stringify(retryResponse.data, null, 2));
-            // this.logger.log('==================End of Sales Invoice API Response (after retry)');
             return retryResponse.data;
-          } catch (retryError) {
+          } catch (retryError: any) {
+            if (retryError?.response?.data) {
+              const errorData = retryError.response.data;
+              if (Array.isArray(errorData) && errorData.length > 0) {
+                this.logger.error(`Error submitting sales invoice (retry): ${errorData[0]?.message || retryError.message || retryError}`);
+              } else if (typeof errorData === 'object' && errorData.message) {
+                this.logger.error(`Error submitting sales invoice (retry): ${errorData.message}`);
+              } else {
+                this.logger.error(`Error submitting sales invoice (retry): ${retryError?.message || retryError}`);
+              }
+            } else {
+              this.logger.error(`Error submitting sales invoice (retry): ${retryError?.message || retryError}`);
+            }
             this.logger.error(`Retry failed: ${retryError}`);
             throw retryError;
           }
