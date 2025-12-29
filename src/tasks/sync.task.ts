@@ -101,6 +101,8 @@ export class SyncTask {
 
       // Đồng bộ báo cáo nộp quỹ cuối ca cho tất cả brands
       const brands = ['f3', 'labhair', 'yaman', 'menard'];
+      const allNewRecordIds: string[] = [];
+
       for (const brand of brands) {
         try {
           this.logger.log(`[Scheduled ShiftEndCash] Đang đồng bộ báo cáo nộp quỹ cuối ca brand ${brand} cho ngày ${date}`);
@@ -109,6 +111,11 @@ export class SyncTask {
             this.logger.log(
               `[Scheduled ShiftEndCash] Hoàn thành đồng bộ brand ${brand}: ${result.recordsCount} records, ${result.savedCount} saved, ${result.updatedCount} updated`,
             );
+            
+            // Collect các record mới được tạo
+            if (result.newRecordIds && result.newRecordIds.length > 0) {
+              allNewRecordIds.push(...result.newRecordIds);
+            }
           } else {
             this.logger.error(`[Scheduled ShiftEndCash] Lỗi khi đồng bộ brand ${brand}: ${result.message}`);
             if (result.errors && result.errors.length > 0) {
@@ -120,6 +127,36 @@ export class SyncTask {
         } catch (error: any) {
           this.logger.error(`[Scheduled ShiftEndCash] Lỗi khi đồng bộ ${brand} cho ngày ${date}: ${error?.message || error}`);
         }
+      }
+
+      // Tự động tạo payment cho các records mới
+      if (allNewRecordIds.length > 0) {
+        this.logger.log(`[Scheduled ShiftEndCash] Bắt đầu tự động tạo payment cho ${allNewRecordIds.length} records mới`);
+        let successCount = 0;
+        let failedCount = 0;
+
+        for (const recordId of allNewRecordIds) {
+          try {
+            this.logger.log(`[Scheduled ShiftEndCash Payment] Đang tạo payment cho record ${recordId}`);
+            const paymentResult = await this.syncService.createPaymentFromShiftEndCash(recordId);
+            if (paymentResult.success) {
+              successCount++;
+              this.logger.log(`[Scheduled ShiftEndCash Payment] Tạo payment thành công cho record ${recordId}`);
+            } else {
+              failedCount++;
+              this.logger.error(`[Scheduled ShiftEndCash Payment] Tạo payment thất bại cho record ${recordId}: ${paymentResult.message || paymentResult.error}`);
+            }
+          } catch (error: any) {
+            failedCount++;
+            this.logger.error(`[Scheduled ShiftEndCash Payment] Lỗi khi tạo payment cho record ${recordId}: ${error?.message || error}`);
+          }
+        }
+
+        this.logger.log(
+          `[Scheduled ShiftEndCash Payment] Hoàn thành tự động tạo payment: ${successCount} thành công, ${failedCount} thất bại`,
+        );
+      } else {
+        this.logger.log(`[Scheduled ShiftEndCash Payment] Không có records mới để tạo payment`);
       }
 
       this.logger.log('Hoàn thành đồng bộ báo cáo nộp quỹ cuối ca tự động');

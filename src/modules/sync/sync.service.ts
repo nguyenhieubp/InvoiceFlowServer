@@ -1568,6 +1568,7 @@ export class SyncService {
     savedCount: number;
     updatedCount: number;
     errors?: string[];
+    newRecordIds?: string[]; // Danh sách ID các records mới được tạo
   }> {
     try {
       const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
@@ -1575,6 +1576,7 @@ export class SyncService {
       let totalSavedCount = 0;
       let totalUpdatedCount = 0;
       const allErrors: string[] = [];
+      const allNewRecordIds: string[] = []; // Track các record mới được tạo
 
       for (const brandName of brands) {
         try {
@@ -1591,6 +1593,7 @@ export class SyncService {
           let brandSavedCount = 0;
           let brandUpdatedCount = 0;
           const brandErrors: string[] = [];
+          const brandNewRecordIds: string[] = []; // Track các record mới được tạo trong brand này
 
           // Parse date string sang Date object
           const parseDateString = (dateStr: string | null | undefined): Date | null => {
@@ -1719,6 +1722,7 @@ export class SyncService {
                 }
 
                 brandSavedCount++;
+                brandNewRecordIds.push(savedRecord.id); // Track record mới
               }
             } catch (recordError: any) {
               const errorMsg = `[${brandName}] Lỗi khi xử lý record ${record.id || record.draw_code}: ${recordError?.message || recordError}`;
@@ -1731,6 +1735,7 @@ export class SyncService {
           totalSavedCount += brandSavedCount;
           totalUpdatedCount += brandUpdatedCount;
           allErrors.push(...brandErrors);
+          allNewRecordIds.push(...brandNewRecordIds); // Collect các record mới từ brand này
 
           this.logger.log(`[ShiftEndCash] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`);
         } catch (brandError: any) {
@@ -1747,6 +1752,7 @@ export class SyncService {
         savedCount: totalSavedCount,
         updatedCount: totalUpdatedCount,
         errors: allErrors.length > 0 ? allErrors : undefined,
+        newRecordIds: allNewRecordIds.length > 0 ? allNewRecordIds : undefined, // Trả về danh sách ID các records mới được tạo
       };
     } catch (error: any) {
       this.logger.error(`Lỗi khi đồng bộ shift end cash: ${error?.message || error}`);
