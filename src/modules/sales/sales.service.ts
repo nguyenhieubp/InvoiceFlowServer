@@ -1,7 +1,7 @@
 import { Injectable, InternalServerErrorException, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, Or, IsNull } from 'typeorm';
+import { Repository, In, Or, IsNull, Between } from 'typeorm';
 import * as XLSX from 'xlsx-js-style';
 import { Sale } from '../../entities/sale.entity';
 import { Customer } from '../../entities/customer.entity';
@@ -1353,6 +1353,92 @@ export class SalesService {
     }
 
     return await this.processWarehouseFromStockTransfer(stockTransfer);
+  }
+
+  /**
+   * Retry batch các warehouse processed failed theo date range
+   */
+  async retryWarehouseFailedByDateRange(dateFrom: string, dateTo: string): Promise<{
+    success: boolean;
+    message: string;
+    totalProcessed: number;
+    successCount: number;
+    failedCount: number;
+    errors: string[];
+  }> {
+    try {
+      // Parse dates từ DDMMMYYYY
+      const parseDate = (dateStr: string): Date => {
+        const day = parseInt(dateStr.substring(0, 2));
+        const monthStr = dateStr.substring(2, 5).toUpperCase();
+        const year = parseInt(dateStr.substring(5, 9));
+        const monthMap: Record<string, number> = {
+          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
+          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
+          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+        };
+        const month = monthMap[monthStr] || 0;
+        return new Date(year, month, day);
+      };
+
+      const fromDate = parseDate(dateFrom);
+      const toDate = parseDate(dateTo);
+      toDate.setHours(23, 59, 59, 999); // Set to end of day
+
+      // Tìm tất cả warehouse processed failed trong khoảng thời gian
+      const failedRecords = await this.warehouseProcessedRepository.find({
+        where: {
+          success: false,
+          processedDate: Between(fromDate, toDate),
+        },
+        order: { processedDate: 'ASC' },
+      });
+
+      if (failedRecords.length === 0) {
+        return {
+          success: true,
+          message: 'Không có record nào thất bại trong khoảng thời gian này',
+          totalProcessed: 0,
+          successCount: 0,
+          failedCount: 0,
+          errors: [],
+        };
+      }
+
+      this.logger.log(`[Warehouse Batch Retry] Bắt đầu retry ${failedRecords.length} records từ ${dateFrom} đến ${dateTo}`);
+
+      let successCount = 0;
+      let failedCount = 0;
+      const errors: string[] = [];
+
+      // Retry từng record
+      for (const record of failedRecords) {
+        try {
+          await this.processWarehouseFromStockTransferByDocCode(record.docCode);
+          successCount++;
+          this.logger.log(`[Warehouse Batch Retry] Retry thành công cho docCode: ${record.docCode}`);
+        } catch (error: any) {
+          failedCount++;
+          const errorMsg = `docCode ${record.docCode}: ${error?.message || String(error)}`;
+          errors.push(errorMsg);
+          this.logger.error(`[Warehouse Batch Retry] Retry thất bại cho docCode: ${record.docCode} - ${errorMsg}`);
+        }
+      }
+
+      const message = `Đã xử lý ${failedRecords.length} records: ${successCount} thành công, ${failedCount} thất bại`;
+
+      return {
+        success: failedCount === 0,
+        message,
+        totalProcessed: failedRecords.length,
+        successCount,
+        failedCount,
+        errors: errors.slice(0, 10), // Chỉ trả về 10 lỗi đầu tiên
+      };
+    } catch (error: any) {
+      this.logger.error(`[Warehouse Batch Retry] Lỗi khi retry batch: ${error?.message || error}`);
+      throw error;
+    }
   }
 
   /**

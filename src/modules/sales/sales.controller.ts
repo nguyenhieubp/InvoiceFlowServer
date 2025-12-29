@@ -232,5 +232,22 @@ export class SalesController {
     }
   }
 
+  @Post('stock-transfer/warehouse-retry-failed-by-date-range')
+  async retryWarehouseFailedByDateRange(
+    @Body('dateFrom') dateFrom: string,
+    @Body('dateTo') dateTo: string,
+  ) {
+    if (!dateFrom || !dateTo) {
+      throw new BadRequestException('dateFrom và dateTo là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)');
+    }
+
+    try {
+      const result = await this.salesService.retryWarehouseFailedByDateRange(dateFrom, dateTo);
+      return result;
+    } catch (error: any) {
+      throw new BadRequestException(error.message || 'Lỗi khi xử lý lại warehouse batch');
+    }
+  }
+
 }
 

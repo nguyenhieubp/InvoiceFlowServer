@@ -111,7 +111,6 @@ export class FastApiInvoiceFlowService {
    * FAST 2.4
    */
   async createSalesInvoice(invoiceData: any): Promise<any> {
-    this.logger.log(`[Flow] Creating sales invoice ${invoiceData.so_ct}...`);
     try {
       // FIX: Validate mã CTKM với Loyalty API trước khi gửi lên Fast API
       // Helper function: cắt phần sau dấu "-" để lấy mã CTKM để check (ví dụ: "PRMN.020228-R510SOCOM" → "PRMN.020228")
