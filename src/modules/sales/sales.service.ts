@@ -371,6 +371,101 @@ export class SalesService {
   }
 
   /**
+   * Gọi API get_card để lấy issue_partner_code cho đơn "08. Tách thẻ"
+   */
+  private async fetchCardDataAndMapIssuePartnerCode(docCode: string, sales: any[]): Promise<void> {
+    // Kiểm tra xem có sale nào là "08. Tách thẻ" không
+    const hasTachThe = sales.some((s: any) => 
+      this.isTachTheOrder(s.ordertype, s.ordertypeName)
+    );
+    
+    if (!hasTachThe) {
+      return; // Không phải đơn "08. Tách thẻ", không cần gọi API
+    }
+
+    try {
+      const apiUrl = 'https://n8n.vmt.vn/webhook/vmt/get_card';
+      const requestBody = { doccode: docCode };
+      
+      // API này dùng GET method nhưng có body
+      let cardResponse: any;
+      try {
+        const response = await this.httpService.axiosRef.request({
+          method: 'GET',
+          url: apiUrl,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          data: requestBody,
+          timeout: 30000,
+        });
+        cardResponse = response.data;
+      } catch (getError: any) {
+        // Nếu GET fail, thử POST như fallback
+        if (getError?.response?.status === 404 || getError?.response?.status === 405) {
+          try {
+            const response = await this.httpService.axiosRef.post(
+              apiUrl,
+              requestBody,
+              {
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                timeout: 30000,
+              }
+            );
+            cardResponse = response.data;
+          } catch (postError: any) {
+            // Nếu cả POST cũng fail, log và return (không throw để không ảnh hưởng đến flow chính)
+            this.logger.warn(`[08. Tách thẻ] Không thể lấy dữ liệu từ API get_card cho docCode: ${docCode}`);
+            return;
+          }
+        } else {
+          this.logger.warn(`[08. Tách thẻ] Không thể lấy dữ liệu từ API get_card cho docCode: ${docCode}`);
+          return;
+        }
+      }
+      
+      // Parse response data
+      let cardData: any[] = [];
+      if (cardResponse && Array.isArray(cardResponse) && cardResponse.length > 0) {
+        const firstItem = cardResponse[0];
+        if (firstItem.data && Array.isArray(firstItem.data)) {
+          cardData = firstItem.data;
+        }
+      }
+
+      // Map issue_partner_code vào các sale
+      if (cardData.length > 0) {
+        sales.forEach((sale: any) => {
+          const saleQty = Number(sale.qty || 0);
+          
+          if (saleQty < 0) {
+            const negativeItem = cardData.find((item: any) => Number(item.qty || 0) < 0);
+            if (negativeItem && negativeItem.issue_partner_code) {
+              sale.issuePartnerCode = negativeItem.issue_partner_code;
+            }
+          } else if (saleQty > 0) {
+            const positiveItem = cardData.find((item: any) => Number(item.qty || 0) > 0 && item.action === 'ADJUST');
+            if (positiveItem && positiveItem.issue_partner_code) {
+              sale.issuePartnerCode = positiveItem.issue_partner_code;
+            } else {
+              // Fallback: Tìm item có qty > 0 (không cần action = "ADJUST")
+              const positiveItemFallback = cardData.find((item: any) => Number(item.qty || 0) > 0);
+              if (positiveItemFallback && positiveItemFallback.issue_partner_code) {
+                sale.issuePartnerCode = positiveItemFallback.issue_partner_code;
+              }
+            }
+          }
+        });
+      }
+    } catch (error: any) {
+      // Log và tiếp tục (không throw để không ảnh hưởng đến flow chính)
+      this.logger.warn(`[08. Tách thẻ] Lỗi khi gọi API get_card cho docCode: ${docCode}, lỗi: ${error?.message || error}`);
+    }
+  }
+
+  /**
    * Helper: Kiểm tra xem đơn hàng có phải "Đổi vỏ" không
    */
   private isDoiVoOrder(ordertype: string | null | undefined, ordertypeName: string | null | undefined): boolean {
@@ -1153,6 +1248,12 @@ export class SalesService {
       promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
       // Đảm bảo ordertypeName được trả về (từ database hoặc từ ordertype nếu ordertypeName không có)
       ordertypeName: sale.ordertypeName || sale.ordertype || null,
+      // issuePartnerCode cho đơn "08. Tách thẻ" (từ API get_card)
+      issuePartnerCode: sale.issuePartnerCode || null,
+      // partnerCode: Với đơn "08. Tách thẻ", ưu tiên issuePartnerCode
+      partnerCode: (sale.ordertypeName || sale.ordertype || '').includes('08. Tách thẻ') && sale.issuePartnerCode
+        ? sale.issuePartnerCode
+        : sale.partnerCode || sale.partner_code || null,
       // Các field display từ calculateDisplayFields
       ...displayFields,
       // Ưu tiên productType từ Zappy API (I, S, V) trước Loyalty API (DIVU, VOUC, etc.)
@@ -2259,9 +2360,13 @@ export class SalesService {
     }
 
     // Gắn enriched sales vào orders và thêm stock transfers tổng hợp cho order
+    // Đồng thời gọi API get_card cho đơn "08. Tách thẻ" để lấy issue_partner_code
     for (const [docCode, sales] of enrichedSalesMap.entries()) {
       const order = orderMap.get(docCode);
       if (order) {
+        // Gọi API get_card để lấy issue_partner_code cho đơn "08. Tách thẻ"
+        await this.fetchCardDataAndMapIssuePartnerCode(docCode, sales);
+        
         order.sales = sales;
         // Thêm tất cả stock transfers của đơn hàng này - format để trả về materialCode
         order.stockTransfers = (stockTransferByDocCodeMap.get(docCode) || []).map(st => this.formatStockTransferForFrontend(st));
@@ -4413,6 +4518,9 @@ export class SalesService {
 
       // Nếu là đơn "08. Tách thẻ", gọi Fast/salesOrder và Fast/salesInvoice
       if (hasTachTheOrder) {
+        // Gọi API get_card để lấy issue_partner_code cho đơn "08. Tách thẻ"
+        await this.fetchCardDataAndMapIssuePartnerCode(docCode, orderData.sales || []);
+
         const invoiceData = await this.buildFastApiInvoiceData(orderData);
         try {
           // Bước 1: Gọi Fast/salesOrder với action = 0
@@ -6128,10 +6236,48 @@ export class SalesService {
         || orderData.branchCode
         || '';
 
+      // Với đơn "08. Tách thẻ": Ưu tiên dùng issue_partner_code làm ma_kh
+      // Lấy từ dòng đầu tiên có issuePartnerCode, nếu không có thì dùng customer code mặc định
+      let maKhForHeader = this.normalizeMaKh(orderData.customer?.code);
+      const ordertypeNameForMaKh = firstSale?.ordertype || firstSale?.ordertypeName || '';
+      const isTachTheForMaKh = ordertypeNameForMaKh.includes('08. Tách thẻ') ||
+        ordertypeNameForMaKh.includes('08.Tách thẻ') ||
+        ordertypeNameForMaKh.includes('08.  Tách thẻ');
+      
+      if (isTachTheForMaKh && orderData.sales && Array.isArray(orderData.sales)) {
+        // Tìm dòng có issuePartnerCode
+        // Ưu tiên: dòng qty > 0 (người nhận) trước, sau đó mới đến dòng qty < 0 (người chuyển)
+        // Vì thông thường ma_kh header sẽ là của người nhận (người sở hữu thẻ mới)
+        let saleWithIssuePartnerCode = orderData.sales.find((s: any) => 
+          Number(s.qty || 0) > 0 && s.issuePartnerCode
+        );
+        
+        // Nếu không tìm thấy dòng qty > 0, tìm dòng qty < 0
+        if (!saleWithIssuePartnerCode) {
+          saleWithIssuePartnerCode = orderData.sales.find((s: any) => 
+            Number(s.qty || 0) < 0 && s.issuePartnerCode
+          );
+        }
+        
+        // Nếu vẫn không tìm thấy, lấy dòng đầu tiên có issuePartnerCode
+        if (!saleWithIssuePartnerCode) {
+          saleWithIssuePartnerCode = orderData.sales.find((s: any) => s.issuePartnerCode);
+        }
+        
+        if (saleWithIssuePartnerCode && saleWithIssuePartnerCode.issuePartnerCode) {
+          maKhForHeader = this.normalizeMaKh(saleWithIssuePartnerCode.issuePartnerCode);
+          const qtyType = Number(saleWithIssuePartnerCode.qty || 0) < 0 ? 'qty < 0 (người chuyển)' : 'qty > 0 (người nhận)';
+          this.logger.log(`[08. Tách thẻ] Dùng issue_partner_code ${maKhForHeader} làm ma_kh cho header (từ dòng ${qtyType}, issuePartnerCode: ${saleWithIssuePartnerCode.issuePartnerCode})`);
+        } else {
+          this.logger.warn(`[08. Tách thẻ] Không tìm thấy issuePartnerCode trong các sale lines. Danh sách sales: ${JSON.stringify(orderData.sales.map((s: any) => ({ qty: s.qty, hasIssuePartnerCode: !!s.issuePartnerCode, issuePartnerCode: s.issuePartnerCode })))}`);
+          this.logger.warn(`[08. Tách thẻ] Dùng ma_kh mặc định: ${maKhForHeader}`);
+        }
+      }
+
       return {
         action: 0,
         ma_dvcs: maDvcs,
-        ma_kh: this.normalizeMaKh(orderData.customer?.code),
+        ma_kh: maKhForHeader,
         ong_ba: orderData.customer?.name || null,
         ma_gd: '1',
         ma_tt: null,
