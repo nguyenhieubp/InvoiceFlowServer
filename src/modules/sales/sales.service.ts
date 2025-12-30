@@ -911,7 +911,7 @@ export class SalesService {
       ordertypeName.includes('08. Tách thẻ') ||
       ordertypeName.includes('Đổi thẻ KEEP->Thẻ DV');
 
-    // Tính toán maCtkmTangHang TRƯỚC (cần dùng cho promCodeDisplay)
+      // Tính toán maCtkmTangHang TRƯỚC (cần dùng cho promCodeDisplay)
     // Lấy maCtkmTangHang từ sale (có thể đã có sẵn từ database hoặc tính toán trước đó)
     let maCtkmTangHang: string | null = sale.maCtkmTangHang ? String(sale.maCtkmTangHang).trim() : null;
     if (!maCtkmTangHang || maCtkmTangHang === '') {
@@ -1235,9 +1235,19 @@ export class SalesService {
     const hasChietKhauMuaHangGiamGia = other_discamt != null && other_discamt !== 0;
 
     let muaHangGiamGiaDisplay: string | null = null;
-    if (isDoiDiemForDisplay) {
-      muaHangGiamGiaDisplay = 'TT DIEM DO';
-    } else if (!calculatedFields.isTangHang) {
+    let maCtkmTangHang = calculatedFields.maCtkmTangHang;
+    if(department?.ma_dvcs  === 'TTM' || department?.ma_dvcs === 'AMA' || department?.ma_dvcs === 'TSG'){
+      maCtkmTangHang = 'TTM.KMDIEM';
+    } else if(department?.ma_dvcs === 'FBV'){
+      maCtkmTangHang = 'FBV.KMDIEM';
+    } else if(department?.ma_dvcs  === 'BTH'){  
+      maCtkmTangHang = 'BTH.KMDIEM';
+    } else if( department?.ma_dvcs === 'CDV'){  
+      maCtkmTangHang = 'CDV.KMDIEM';
+    } else if(department?.ma_dvcs === 'LHV'){
+      maCtkmTangHang = 'LHV.KMDIEM';
+    }
+    if (!calculatedFields.isTangHang) {
       muaHangGiamGiaDisplay = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
       if (muaHangGiamGiaDisplay && productTypeUpper === 'I') {
         muaHangGiamGiaDisplay = muaHangGiamGiaDisplay + '.I'
@@ -1263,11 +1273,11 @@ export class SalesService {
 
     // Kiểm tra có mã CTKM không (promCode hoặc maCtkmTangHang)
     const hasMaCtkm = (sale.promCode && sale.promCode.trim() !== '') ||
-      (calculatedFields.maCtkmTangHang && calculatedFields.maCtkmTangHang.trim() !== '') ||
+      (maCtkmTangHang && maCtkmTangHang.trim() !== '') ||
       (sale.maCtkmTangHang && sale.maCtkmTangHang.trim() !== '');
 
     // Kiểm tra có mã CTKM tặng hàng không (chỉ maCtkmTangHang, không tính promCode)
-    const hasMaCtkmTangHang = (calculatedFields.maCtkmTangHang && calculatedFields.maCtkmTangHang.trim() !== '') ||
+    const hasMaCtkmTangHang = (maCtkmTangHang && maCtkmTangHang?.trim() !== '') ||
       (sale.maCtkmTangHang && sale.maCtkmTangHang.trim() !== '');
 
     // Kiểm tra giá bán = 0 (dùng giá bán gốc, trước khi tính lại)
@@ -1351,7 +1361,7 @@ export class SalesService {
       ...sale,
       itemName: sale.itemName || loyaltyProduct?.name || null,
       maKho: calculatedFields.maKho,
-      maCtkmTangHang: calculatedFields.maCtkmTangHang,
+      maCtkmTangHang: maCtkmTangHang,
       muaHangCkVip: calculatedFields.muaHangCkVip,
       maLo: calculatedFields.maLo,
       isTangHang: calculatedFields.isTangHang,
@@ -5770,11 +5780,11 @@ export class SalesService {
         const pkgCode = (sale as any).pkg_code || (sale as any).pkgCode || null;
         let promCode = sale.promCode || sale.prom_code || null;
         promCode = await this.cutCode(promCode);
-        if(sale.productType === 'I'){
+        if (sale.productType === 'I') {
           promCode = promCode + '.I';
-        } else if(sale.productType === 'S'){
+        } else if (sale.productType === 'S') {
           promCode = promCode + '.S'
-        } else if(sale.productType === 'V'){
+        } else if (sale.productType === 'V') {
           promCode = promCode + '.V'
         }
         const soSource = sale.order_source || (sale as any).so_source || null;
@@ -6148,11 +6158,11 @@ export class SalesService {
               // Quy đổi prom_code sang TANGSP - lấy năm/tháng từ ngày đơn hàng
               // Dùng promCode trực tiếp thay vì convertPromCodeToTangSp
               maCtkmTangHang = toString(promCode);
-              if(sale.productType === 'I'){
+              if (sale.productType === 'I') {
                 maCtkmTangHang = maCtkmTangHang + '.I';
-              } else if(sale.productType === 'S'){
+              } else if (sale.productType === 'S') {
                 maCtkmTangHang = maCtkmTangHang + '.S';
-              } else if(sale.productType === 'V'){
+              } else if (sale.productType === 'V') {
                 maCtkmTangHang = maCtkmTangHang + '.V';
               }
             } else {
@@ -6160,11 +6170,11 @@ export class SalesService {
               let promCode = await this.cutCode(sale.promCode || sale.prom_code || null);
               promCode = await this.cutCode(promCode);
               maCtkmTangHang = toString(promCode);
-              if(sale.productType === 'I'){
+              if (sale.productType === 'I') {
                 maCtkmTangHang = maCtkmTangHang + '.I';
-              } else if(sale.productType === 'S'){
+              } else if (sale.productType === 'S') {
                 maCtkmTangHang = maCtkmTangHang + '.S';
-              } else if(sale.productType === 'V'){
+              } else if (sale.productType === 'V') {
                 maCtkmTangHang = maCtkmTangHang + '.V';
               }
             }
@@ -6180,15 +6190,15 @@ export class SalesService {
         const isDoiDiemForCk01 = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
         let maCk01 = isTangHang ? '' : (promCode ? promCode : '');
         if (isDoiDiem || isDoiDiemForCk01) {
-          if(sale.cucThueDisplay  === 'TTM' || 'AMA' || 'TSG'){
+          if (sale.cucThueDisplay === 'TTM' || 'AMA' || 'TSG') {
             maCtkmTangHang = 'TTM.KMDIEM';
-          } else if(sale.cucThueDisplay === 'FBV'){
+          } else if (sale.cucThueDisplay === 'FBV') {
             maCtkmTangHang = 'FBV.KMDIEM';
-          } else if(sale.cucThueDisplay  === 'BTH'){  
+          } else if (sale.cucThueDisplay === 'BTH') {
             maCtkmTangHang = 'BTH.KMDIEM';
-          } else if( sale.cucThueDisplay === 'CDV'){  
+          } else if (sale.cucThueDisplay === 'CDV') {
             maCtkmTangHang = 'CDV.KMDIEM';
-          } else if(sale.cucThueDisplay === 'LHV'){
+          } else if (sale.cucThueDisplay === 'LHV') {
             maCtkmTangHang = 'LHV.KMDIEM';
           }
           ck01_nt = 0;
@@ -7683,5 +7693,5 @@ export class SalesService {
   async cutCode(input: string): Promise<string> {
     return input?.split('-')[0] || '';
   }
-  
+
 }
