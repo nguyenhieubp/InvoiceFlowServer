@@ -1267,7 +1267,8 @@ export class SalesService {
     const isKmVip = sale.grade_discamt;
     
     // Lấy productType từ sale hoặc product
-    const productType = sale.productType || sale.producttype || loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
+    const productType = sale.productType || null;
+    const isTangSP = loyaltyProduct.productType;
     const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
     
     // Kiểm tra "Chiết khấu mua hàng giảm giá" có giá trị không
@@ -1300,12 +1301,15 @@ export class SalesService {
     } else if (isKmVip > 0 && productTypeUpper === 'S') {
       tkChietKhau = '521132';
     }
+    else if (hasVoucher > 0 && isTangSP === 'GIFT') {
+      tkChietKhau = '5211631';
+    }
      else if (hasVoucher > 0 && productTypeUpper === 'I') {
       tkChietKhau = '5211611';
 
     } else if( hasVoucher > 0 && productTypeUpper === 'S') {
       tkChietKhau = '5211621';
-    } 
+    }  
     else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
       // Với đơn có "Chiết khấu mua hàng giảm giá" có giá trị và loại hàng hóa = S (Dịch vụ):
       tkChietKhau = '521131';
