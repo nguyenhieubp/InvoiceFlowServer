@@ -1264,6 +1264,9 @@ export class SalesService {
     const productType = sale.productType || sale.producttype || loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
     const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
     
+    // Kiểm tra "Chiết khấu mua hàng giảm giá" có giá trị không
+    const hasChietKhauMuaHangGiamGia = other_discamt != null && other_discamt !== 0;
+    
     let tkChietKhau: string | null = null;
     let tkChiPhi: string | null = null;
     let maPhi: string | null = null;
@@ -1284,6 +1287,11 @@ export class SalesService {
       tkChietKhau = null; // Để rỗng
       tkChiPhi = '64191';
       maPhi = '161010';
+    } else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
+      // Với đơn có "Chiết khấu mua hàng giảm giá" có giá trị và loại hàng hóa = S (Dịch vụ):
+      tkChietKhau = '521131';
+      tkChiPhi = sale.tkChiPhi || null;
+      maPhi = sale.maPhi || null;
     } else if (isThuong && hasMaCtkm && !(hasMaCtkmTangHang && isGiaBanZero && calculatedFields.isTangHang)) {
       // Với đơn "Thường" có mã CTKM:
       // - Loại S (Dịch vụ): TK Chiết khấu = 521131
@@ -2058,6 +2066,10 @@ export class SalesService {
             const productType = sale.productType || sale.producttype || loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
             const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
             
+            // Kiểm tra "Chiết khấu mua hàng giảm giá" có giá trị không
+            const other_discamt = sale.other_discamt ?? sale.chietKhauMuaHangGiamGia ?? 0;
+            const hasChietKhauMuaHangGiamGia = other_discamt != null && other_discamt !== 0;
+            
             let tkChietKhau: string | null = null;
             let tkChiPhi: string | null = null;
             let maPhi: string | null = null;
@@ -2078,6 +2090,11 @@ export class SalesService {
               tkChietKhau = null; // Để rỗng
               tkChiPhi = '64191';
               maPhi = '161010';
+            } else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
+              // Với đơn có "Chiết khấu mua hàng giảm giá" có giá trị và loại hàng hóa = S (Dịch vụ):
+              tkChietKhau = '521131';
+              tkChiPhi = sale.tkChiPhi || null;
+              maPhi = sale.maPhi || null;
             } else if (isThuong && hasMaCtkm && !(hasMaCtkmTangHang && isGiaBanZero && isTangHang)) {
               // Với đơn "Thường" có mã CTKM:
               // - Loại S (Dịch vụ): TK Chiết khấu = 521131
