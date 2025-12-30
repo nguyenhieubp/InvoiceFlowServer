@@ -1227,6 +1227,28 @@ export class SalesService {
     // Nếu là đơn "03. Đổi điểm": set other_discamt = 0 (chiết khấu mua hàng giảm giá)
     const other_discamt = isDoiDiemForDisplay ? 0 : (sale.other_discamt ?? sale.chietKhauMuaHangGiamGia ?? 0);
 
+    // Logic xử lý tkChietKhau, tkChiPhi, maPhi cho các đơn đặc biệt
+    const ordertypeName = sale.ordertypeName || sale.ordertype || '';
+    const isDoiVo = ordertypeName.toLowerCase().includes('đổi vỏ') || ordertypeName.toLowerCase().includes('doi vo');
+    const isDoiDiem = isDoiDiemForDisplay || ordertypeName.toLowerCase().includes('đổi điểm') || ordertypeName.toLowerCase().includes('doi diem');
+    const isDauTu = ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư') || ordertypeName.toLowerCase().includes('đầu tư') || ordertypeName.toLowerCase().includes('dau tu');
+    
+    let tkChietKhau: string | null = null;
+    let tkChiPhi: string | null = null;
+    let maPhi: string | null = null;
+    
+    if (isDoiVo || isDoiDiem || isDauTu) {
+      // Với đơn "Đổi vỏ", "Đổi điểm", "Đầu tư":
+      tkChietKhau = null; // Để rỗng
+      tkChiPhi = '64191';
+      maPhi = '161010';
+    } else {
+      // Các đơn khác: lấy từ product hoặc sale nếu có
+      tkChietKhau = loyaltyProduct?.tkChietKhau || sale.tkChietKhau || null;
+      tkChiPhi = sale.tkChiPhi || null;
+      maPhi = sale.maPhi || null;
+    }
+
     return {
       ...sale,
       itemName: sale.itemName || loyaltyProduct?.name || null,
@@ -1269,6 +1291,10 @@ export class SalesService {
       } : null,
       department: department,
       dvt: loyaltyProduct?.unit || sale.dvt || null,
+      // Thêm các trường tkChietKhau, tkChiPhi, maPhi
+      tkChietKhau: tkChietKhau,
+      tkChiPhi: tkChiPhi,
+      maPhi: maPhi,
     };
   }
 
@@ -1952,6 +1978,28 @@ export class SalesService {
             // Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
             const maKho = await this.getMaKhoFromStockTransfer(sale, order.docCode, stockTransfers, saleMaterialCode, stockTransferMap);
 
+            // Logic xử lý tkChietKhau, tkChiPhi, maPhi cho các đơn đặc biệt
+            const ordertypeName = sale.ordertype || sale.ordertypeName || '';
+            const isDoiVo = ordertypeName.toLowerCase().includes('đổi vỏ') || ordertypeName.toLowerCase().includes('doi vo');
+            const isDoiDiem = ordertypeName.toLowerCase().includes('đổi điểm') || ordertypeName.toLowerCase().includes('doi diem');
+            const isDauTu = ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư') || ordertypeName.toLowerCase().includes('đầu tư') || ordertypeName.toLowerCase().includes('dau tu');
+            
+            let tkChietKhau: string | null = null;
+            let tkChiPhi: string | null = null;
+            let maPhi: string | null = null;
+            
+            if (isDoiVo || isDoiDiem || isDauTu) {
+              // Với đơn "Đổi vỏ", "Đổi điểm", "Đầu tư":
+              tkChietKhau = null; // Để rỗng
+              tkChiPhi = '64191';
+              maPhi = '161010';
+            } else {
+              // Các đơn khác: lấy từ product hoặc sale nếu có
+              tkChietKhau = loyaltyProduct?.tkChietKhau || sale.tkChietKhau || null;
+              tkChiPhi = sale.tkChiPhi || null;
+              maPhi = sale.maPhi || null;
+            }
+
             return {
               ...sale,
               promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
@@ -1967,6 +2015,10 @@ export class SalesService {
                 productType: loyaltyProduct.productType || loyaltyProduct.producttype || null,
               } : (sale.product || null),
               stockTransfers: saleStockTransfers.map(st => this.formatStockTransferForFrontend(st)),
+              // Thêm các trường tkChietKhau, tkChiPhi, maPhi
+              tkChietKhau: tkChietKhau,
+              tkChiPhi: tkChiPhi,
+              maPhi: maPhi,
             };
           })) || [],
         })));
