@@ -1390,6 +1390,10 @@ export class SalesService {
       calculatedFields.maKho = 'B' + department?.ma_bp;
     }
 
+    if(sale.ordertypeName.includes('03. Đổi điểm')){
+      calculatedFields.promCodeDisplay = '1';
+    }
+
     return {
       ...sale,
       itemName: sale.itemName || loyaltyProduct?.name || null,
