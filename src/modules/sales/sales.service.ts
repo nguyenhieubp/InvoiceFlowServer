@@ -1135,7 +1135,15 @@ export class SalesService {
     }
 
     // cucThueDisplay
-    const cucThueDisplay = sale.cucThue || (normalizedBrand === 'f3' ? 'FBV' : null);
+    // Nếu sale.cucThue có giá trị, dùng nó
+    // Nếu sale.cucThue là null, lấy từ department.ma_dvcs (tương tự cách lấy trong fast-api-invoice-flow.service.ts)
+    // Nếu brand là 'f3' và không có giá trị nào, dùng 'FBV'
+    let cucThueValue = sale.cucThue;
+    if (!cucThueValue) {
+      // Lấy ma_dvcs từ department làm fallback (ưu tiên ma_dvcs, sau đó ma_dvcs_ht)
+      cucThueValue = department?.ma_dvcs || department?.ma_dvcs_ht || null;
+    }
+    const cucThueDisplay = cucThueValue;
 
     // tkDoanhThuDisplay và tkGiaVonDisplay
     const deptType = department?.type?.toLowerCase()?.trim();
@@ -1232,6 +1240,17 @@ export class SalesService {
     const isDoiVo = ordertypeName.toLowerCase().includes('đổi vỏ') || ordertypeName.toLowerCase().includes('doi vo');
     const isDoiDiem = isDoiDiemForDisplay || ordertypeName.toLowerCase().includes('đổi điểm') || ordertypeName.toLowerCase().includes('doi diem');
     const isDauTu = ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư') || ordertypeName.toLowerCase().includes('đầu tư') || ordertypeName.toLowerCase().includes('dau tu');
+    const isSinhNhat = ordertypeName.includes('05. Tặng sinh nhật') || ordertypeName.includes('05.Tặng sinh nhật') || ordertypeName.toLowerCase().includes('tặng sinh nhật') || ordertypeName.toLowerCase().includes('tang sinh nhat') || ordertypeName.toLowerCase().includes('sinh nhật') || ordertypeName.toLowerCase().includes('sinh nhat');
+    const isThuong = ordertypeName.includes('01.Thường') || ordertypeName.includes('01. Thường') || ordertypeName.includes('01.Thường') || ordertypeName.toLowerCase().includes('thường') || ordertypeName.toLowerCase().includes('thuong');
+    
+    // Kiểm tra có mã CTKM không (promCode hoặc maCtkmTangHang)
+    const hasMaCtkm = (sale.promCode && sale.promCode.trim() !== '') || 
+                      (calculatedFields.maCtkmTangHang && calculatedFields.maCtkmTangHang.trim() !== '') ||
+                      (sale.maCtkmTangHang && sale.maCtkmTangHang.trim() !== '');
+    
+    // Lấy productType từ sale hoặc product
+    const productType = sale.productType || sale.producttype || loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
+    const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
     
     let tkChietKhau: string | null = null;
     let tkChiPhi: string | null = null;
@@ -1242,6 +1261,25 @@ export class SalesService {
       tkChietKhau = null; // Để rỗng
       tkChiPhi = '64191';
       maPhi = '161010';
+    } else if (isSinhNhat) {
+      // Với đơn "Sinh nhật":
+      tkChietKhau = null; // Để rỗng
+      tkChiPhi = '64192';
+      maPhi = '162010';
+    } else if (isThuong && hasMaCtkm) {
+      // Với đơn "Thường" có mã CTKM:
+      // - Loại S (Dịch vụ): TK Chiết khấu = 521131
+      // - Loại I (Hàng hóa): TK Chiết khấu = 521111
+      if (productTypeUpper === 'S') {
+        tkChietKhau = '521131';
+      } else if (productTypeUpper === 'I') {
+        tkChietKhau = '521111';
+      } else {
+        // Nếu không xác định được loại, mặc định là hàng hóa
+        tkChietKhau = '521111';
+      }
+      tkChiPhi = sale.tkChiPhi || null;
+      maPhi = sale.maPhi || null;
     } else {
       // Các đơn khác: lấy từ product hoặc sale nếu có
       tkChietKhau = loyaltyProduct?.tkChietKhau || sale.tkChietKhau || null;
@@ -1983,6 +2021,17 @@ export class SalesService {
             const isDoiVo = ordertypeName.toLowerCase().includes('đổi vỏ') || ordertypeName.toLowerCase().includes('doi vo');
             const isDoiDiem = ordertypeName.toLowerCase().includes('đổi điểm') || ordertypeName.toLowerCase().includes('doi diem');
             const isDauTu = ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư') || ordertypeName.toLowerCase().includes('đầu tư') || ordertypeName.toLowerCase().includes('dau tu');
+            const isSinhNhat = ordertypeName.includes('05. Tặng sinh nhật') || ordertypeName.includes('05.Tặng sinh nhật') || ordertypeName.toLowerCase().includes('tặng sinh nhật') || ordertypeName.toLowerCase().includes('tang sinh nhat') || ordertypeName.toLowerCase().includes('sinh nhật') || ordertypeName.toLowerCase().includes('sinh nhat');
+            const isThuong = ordertypeName.includes('01.Thường') || ordertypeName.includes('01. Thường') || ordertypeName.includes('01.Thường') || ordertypeName.toLowerCase().includes('thường') || ordertypeName.toLowerCase().includes('thuong');
+            
+            // Kiểm tra có mã CTKM không (promCode hoặc maCtkmTangHang)
+            const hasMaCtkm = (sale.promCode && sale.promCode.trim() !== '') || 
+                              (maCtkmTangHang && maCtkmTangHang.trim() !== '') ||
+                              (sale.maCtkmTangHang && sale.maCtkmTangHang.trim() !== '');
+            
+            // Lấy productType từ sale hoặc product
+            const productType = sale.productType || sale.producttype || loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
+            const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
             
             let tkChietKhau: string | null = null;
             let tkChiPhi: string | null = null;
@@ -1993,6 +2042,25 @@ export class SalesService {
               tkChietKhau = null; // Để rỗng
               tkChiPhi = '64191';
               maPhi = '161010';
+            } else if (isSinhNhat) {
+              // Với đơn "Sinh nhật":
+              tkChietKhau = null; // Để rỗng
+              tkChiPhi = '64192';
+              maPhi = '162010';
+            } else if (isThuong && hasMaCtkm) {
+              // Với đơn "Thường" có mã CTKM:
+              // - Loại S (Dịch vụ): TK Chiết khấu = 521131
+              // - Loại I (Hàng hóa): TK Chiết khấu = 521111
+              if (productTypeUpper === 'S') {
+                tkChietKhau = '521131';
+              } else if (productTypeUpper === 'I') {
+                tkChietKhau = '521111';
+              } else {
+                // Nếu không xác định được loại, mặc định là hàng hóa
+                tkChietKhau = '521111';
+              }
+              tkChiPhi = sale.tkChiPhi || null;
+              maPhi = sale.maPhi || null;
             } else {
               // Các đơn khác: lấy từ product hoặc sale nếu có
               tkChietKhau = loyaltyProduct?.tkChietKhau || sale.tkChietKhau || null;
