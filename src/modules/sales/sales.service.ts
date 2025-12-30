@@ -1282,14 +1282,21 @@ export class SalesService {
       tkChiPhi = '64192';
       maPhi = '162010';
     } else if (isThuong && hasMaCtkmTangHang && isGiaBanZero && calculatedFields.isTangHang) {
-      // Với đơn "Thường" có mã CTKM tặng hàng, giá bán = 0, và khuyến mại = 1:
-      // Ưu tiên điều kiện này TRƯỚC điều kiện "Thường" có mã CTKM thông thường
-      tkChietKhau = null; // Để rỗng
+      // Với đơn "Thường" có đơn giá = 0, Khuyến mại = 1, và có thông tin mã tại "Mã CTKM tặng hàng":
       tkChiPhi = '64191';
       maPhi = '161010';
+      // tkChietKhau giữ nguyên (có thể được set bởi các điều kiện khác hoặc null)
+      if (tkChietKhau === null) {
+        tkChietKhau = sale.tkChietKhau || null;
+      }
     } else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
       // Với đơn có "Chiết khấu mua hàng giảm giá" có giá trị và loại hàng hóa = S (Dịch vụ):
       tkChietKhau = '521131';
+      tkChiPhi = sale.tkChiPhi || null;
+      maPhi = sale.maPhi || null;
+    } else if (isThuong && hasChietKhauMuaHangGiamGia && productTypeUpper === 'I') {
+      // Với đơn "Thường" có giá trị tiền tại cột "Chiết khấu mua hàng giảm giá" và loại hàng hóa = I (Hàng hóa):
+      tkChietKhau = '521111';
       tkChiPhi = sale.tkChiPhi || null;
       maPhi = sale.maPhi || null;
     } else if (isThuong && hasMaCtkm && !(hasMaCtkmTangHang && isGiaBanZero && calculatedFields.isTangHang)) {
@@ -2085,14 +2092,21 @@ export class SalesService {
               tkChiPhi = '64192';
               maPhi = '162010';
             } else if (isThuong && hasMaCtkmTangHang && isGiaBanZero && isTangHang) {
-              // Với đơn "Thường" có mã CTKM tặng hàng, giá bán = 0, và khuyến mại = 1:
-              // Ưu tiên điều kiện này TRƯỚC điều kiện "Thường" có mã CTKM thông thường
-              tkChietKhau = null; // Để rỗng
+              // Với đơn "Thường" có đơn giá = 0, Khuyến mại = 1, và có thông tin mã tại "Mã CTKM tặng hàng":
               tkChiPhi = '64191';
               maPhi = '161010';
+              // tkChietKhau giữ nguyên (có thể được set bởi các điều kiện khác hoặc null)
+              if (tkChietKhau === null) {
+                tkChietKhau = sale.tkChietKhau || null;
+              }
             } else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
               // Với đơn có "Chiết khấu mua hàng giảm giá" có giá trị và loại hàng hóa = S (Dịch vụ):
               tkChietKhau = '521131';
+              tkChiPhi = sale.tkChiPhi || null;
+              maPhi = sale.maPhi || null;
+            } else if (isThuong && hasChietKhauMuaHangGiamGia && productTypeUpper === 'I') {
+              // Với đơn "Thường" có giá trị tiền tại cột "Chiết khấu mua hàng giảm giá" và loại hàng hóa = I (Hàng hóa):
+              tkChietKhau = '521111';
               tkChiPhi = sale.tkChiPhi || null;
               maPhi = sale.maPhi || null;
             } else if (isThuong && hasMaCtkm && !(hasMaCtkmTangHang && isGiaBanZero && isTangHang)) {
