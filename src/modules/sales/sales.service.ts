@@ -1207,6 +1207,9 @@ export class SalesService {
     const qty = sale.qty || 0;
     let giaBan = sale.giaBan || 0;
     
+    // Lưu giá bán gốc để kiểm tra điều kiện đặc biệt
+    const giaBanGoc = giaBan;
+    
     if (isDoiDiemForDisplay) {
       // Đơn "03. Đổi điểm": fix cứng giaBan = 0 và tienHang = 0
       giaBan = 0;
@@ -1248,6 +1251,15 @@ export class SalesService {
                       (calculatedFields.maCtkmTangHang && calculatedFields.maCtkmTangHang.trim() !== '') ||
                       (sale.maCtkmTangHang && sale.maCtkmTangHang.trim() !== '');
     
+    // Kiểm tra có mã CTKM tặng hàng không (chỉ maCtkmTangHang, không tính promCode)
+    const hasMaCtkmTangHang = (calculatedFields.maCtkmTangHang && calculatedFields.maCtkmTangHang.trim() !== '') ||
+                               (sale.maCtkmTangHang && sale.maCtkmTangHang.trim() !== '');
+    
+    // Kiểm tra giá bán = 0 (dùng giá bán gốc, trước khi tính lại)
+    // Và kiểm tra khuyến mại = 1 (isTangHang = true)
+    // Dùng Math.abs để tránh lỗi số thực
+    const isGiaBanZero = Math.abs(giaBanGoc) < 0.01; // Dùng giá bán gốc
+    
     // Lấy productType từ sale hoặc product
     const productType = sale.productType || sale.producttype || loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
     const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
@@ -1266,7 +1278,13 @@ export class SalesService {
       tkChietKhau = null; // Để rỗng
       tkChiPhi = '64192';
       maPhi = '162010';
-    } else if (isThuong && hasMaCtkm) {
+    } else if (isThuong && hasMaCtkmTangHang && isGiaBanZero && calculatedFields.isTangHang) {
+      // Với đơn "Thường" có mã CTKM tặng hàng, giá bán = 0, và khuyến mại = 1:
+      // Ưu tiên điều kiện này TRƯỚC điều kiện "Thường" có mã CTKM thông thường
+      tkChietKhau = null; // Để rỗng
+      tkChiPhi = '64191';
+      maPhi = '161010';
+    } else if (isThuong && hasMaCtkm && !(hasMaCtkmTangHang && isGiaBanZero && calculatedFields.isTangHang)) {
       // Với đơn "Thường" có mã CTKM:
       // - Loại S (Dịch vụ): TK Chiết khấu = 521131
       // - Loại I (Hàng hóa): TK Chiết khấu = 521111
@@ -2029,6 +2047,13 @@ export class SalesService {
                               (maCtkmTangHang && maCtkmTangHang.trim() !== '') ||
                               (sale.maCtkmTangHang && sale.maCtkmTangHang.trim() !== '');
             
+            // Kiểm tra có mã CTKM tặng hàng không (chỉ maCtkmTangHang, không tính promCode)
+            const hasMaCtkmTangHang = (maCtkmTangHang && maCtkmTangHang.trim() !== '') ||
+                                     (sale.maCtkmTangHang && sale.maCtkmTangHang.trim() !== '');
+            
+            // Kiểm tra giá bán = 0 (sau khi tính toán)
+            const isGiaBanZero = giaBan === 0;
+            
             // Lấy productType từ sale hoặc product
             const productType = sale.productType || sale.producttype || loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
             const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
@@ -2047,7 +2072,13 @@ export class SalesService {
               tkChietKhau = null; // Để rỗng
               tkChiPhi = '64192';
               maPhi = '162010';
-            } else if (isThuong && hasMaCtkm) {
+            } else if (isThuong && hasMaCtkmTangHang && isGiaBanZero && isTangHang) {
+              // Với đơn "Thường" có mã CTKM tặng hàng, giá bán = 0, và khuyến mại = 1:
+              // Ưu tiên điều kiện này TRƯỚC điều kiện "Thường" có mã CTKM thông thường
+              tkChietKhau = null; // Để rỗng
+              tkChiPhi = '64191';
+              maPhi = '161010';
+            } else if (isThuong && hasMaCtkm && !(hasMaCtkmTangHang && isGiaBanZero && isTangHang)) {
               // Với đơn "Thường" có mã CTKM:
               // - Loại S (Dịch vụ): TK Chiết khấu = 521131
               // - Loại I (Hàng hóa): TK Chiết khấu = 521111
