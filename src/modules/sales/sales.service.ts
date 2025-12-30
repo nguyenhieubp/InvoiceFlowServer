@@ -3290,12 +3290,21 @@ export class SalesService {
       };
     });
 
+    // Format customer object để match với frontend interface
+    const formattedCustomer = firstSale.customer ? {
+      ...firstSale.customer,
+      // Map mobile -> phone nếu phone chưa có
+      phone: firstSale.customer.phone || firstSale.customer.mobile || null,
+      // Map address -> street nếu street chưa có
+      street: firstSale.customer.street || firstSale.customer.address || null,
+    } : null;
+
     return {
       docCode: firstSale.docCode,
       docDate: firstSale.docDate,
       branchCode: firstSale.branchCode,
       docSourceType: firstSale.docSourceType || (firstSale as any).docSourceType || null,
-      customer: firstSale.customer,
+      customer: formattedCustomer,
       totalRevenue,
       totalQty,
       totalItems: sales.length,
@@ -6113,7 +6122,7 @@ export class SalesService {
             loaiGd = '12'; // Số lượng dương
           }
         }
-
+        
         const loai = toString(sale.loai || sale.cat1, '');
 
         // Lấy ma_bp - bắt buộc phải có giá trị
@@ -6187,9 +6196,8 @@ export class SalesService {
         // Nếu là hàng tặng, không set ma_ck01 (Mã CTKM mua hàng giảm giá)
         // Nếu là đơn "03. Đổi điểm": set ma_ck01 = "TT DIEM DO" và ck01_nt = 0
         // Nếu không phải hàng tặng và không phải "03. Đổi điểm", set ma_ck01 từ promCode như cũ
-        const isDoiDiemForCk01 = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
         let maCk01 = isTangHang ? '' : (promCode ? promCode : '');
-        if (isDoiDiem || isDoiDiemForCk01) {
+        if (isDoiDiem) {
           if (sale.cucThueDisplay === 'TTM' || 'AMA' || 'TSG') {
             maCtkmTangHang = 'TTM.KMDIEM';
           } else if (sale.cucThueDisplay === 'FBV') {
@@ -6201,6 +6209,9 @@ export class SalesService {
           } else if (sale.cucThueDisplay === 'LHV') {
             maCtkmTangHang = 'LHV.KMDIEM';
           }
+          ck01_nt = 0;
+        } else if (!isDoiDiem) {
+          maCtkmTangHang = '';
           ck01_nt = 0;
         }
 
@@ -6237,7 +6248,7 @@ export class SalesService {
         // Thêm ma_kho: Chỉ thêm khi có giá trị hợp lệ, nếu không có thì không thêm key vào payload
         // Ưu tiên: maKho từ stock transfer > sale.maKho > maBp > orderData.branchCode
         const orderBranchCode = orderData.branchCode || '';
-        const finalMaKho = (maKho && maKho.trim() !== '')
+        let finalMaKho = (maKho && maKho.trim() !== '')
           ? maKho
           : (sale.maKho && sale.maKho.trim() !== '')
             ? sale.maKho
@@ -6246,6 +6257,9 @@ export class SalesService {
               : (orderBranchCode && orderBranchCode.trim() !== '')
                 ? orderBranchCode
                 : '';
+        if(isTachThe){
+          finalMaKho = 'B'+maBp;
+        }
 
         // Chỉ thêm ma_kho vào detail item khi có giá trị hợp lệ (không rỗng)
         // Nếu không có giá trị hợp lệ, không thêm key ma_kho vào payload
