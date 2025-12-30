@@ -1259,6 +1259,12 @@ export class SalesService {
     // Và kiểm tra khuyến mại = 1 (isTangHang = true)
     // Dùng Math.abs để tránh lỗi số thực
     const isGiaBanZero = Math.abs(giaBanGoc) < 0.01; // Dùng giá bán gốc
+
+    // Kiểm tra có voucher không
+    const hasVoucher = sale.paid_by_voucher_ecode_ecoin_bp;
+
+    // KM VIP
+    const isKmVip = sale.grade_discamt;
     
     // Lấy productType từ sale hoặc product
     const productType = sale.productType || sale.producttype || loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
@@ -1289,7 +1295,18 @@ export class SalesService {
       if (tkChietKhau === null) {
         tkChietKhau = sale.tkChietKhau || null;
       }
-    } else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
+    } else if (isKmVip > 0 && productTypeUpper === 'I') {
+      tkChietKhau = '521113';
+    } else if (isKmVip > 0 && productTypeUpper === 'S') {
+      tkChietKhau = '521132';
+    }
+     else if (hasVoucher > 0 && productTypeUpper === 'I') {
+      tkChietKhau = '5211611';
+
+    } else if( hasVoucher > 0 && productTypeUpper === 'S') {
+      tkChietKhau = '5211621';
+    } 
+    else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
       // Với đơn có "Chiết khấu mua hàng giảm giá" có giá trị và loại hàng hóa = S (Dịch vụ):
       tkChietKhau = '521131';
       tkChiPhi = sale.tkChiPhi || null;
