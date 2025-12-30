@@ -2735,15 +2735,6 @@ export class SalesService {
     updated: Array<{ id: string; docCode: string; itemCode: string; oldItemCode: string; newItemCode: string }>;
   }> {
 
-    // Đếm tổng số records cần xử lý
-    const totalCount = await this.saleRepository.count({
-      where: [
-        { statusAsys: false },
-        { statusAsys: IsNull() },
-      ],
-    });
-
-
     let successCount = 0;
     let failCount = 0;
     const updated: Array<{ id: string; docCode: string; itemCode: string; oldItemCode: string; newItemCode: string }> = [];
@@ -5777,9 +5768,16 @@ export class SalesService {
 
         // Kiểm tra các điều kiện để xác định voucher dự phòng
         const pkgCode = (sale as any).pkg_code || (sale as any).pkgCode || null;
-        const promCode = sale.promCode || sale.prom_code || null;
+        let promCode = sale.promCode || sale.prom_code || null;
+        promCode = await this.cutCode(promCode);
+        if(sale.productType === 'I'){
+          promCode = promCode + '.I';
+        } else if(sale.productType === 'S'){
+          promCode = promCode + '.S'
+        } else if(sale.productType === 'V'){
+          promCode = promCode + '.V'
+        }
         const soSource = sale.order_source || (sale as any).so_source || null;
-        const productType = this.getProductType(sale);
 
         const isShopee = soSource && String(soSource).toUpperCase() === 'SHOPEE';
         const hasPkgCode = pkgCode && pkgCode.trim() !== '';
@@ -6149,10 +6147,26 @@ export class SalesService {
             ) {
               // Quy đổi prom_code sang TANGSP - lấy năm/tháng từ ngày đơn hàng
               // Dùng promCode trực tiếp thay vì convertPromCodeToTangSp
-              maCtkmTangHang = toString(sale.promotionDisplayCode || sale.promCode, '');
+              maCtkmTangHang = toString(promCode);
+              if(sale.productType === 'I'){
+                maCtkmTangHang = maCtkmTangHang + '.I';
+              } else if(sale.productType === 'S'){
+                maCtkmTangHang = maCtkmTangHang + '.S';
+              } else if(sale.productType === 'V'){
+                maCtkmTangHang = maCtkmTangHang + '.V';
+              }
             } else {
               // Các trường hợp khác: dùng promCode nếu có
-              maCtkmTangHang = toString(sale.promotionDisplayCode || sale.promCode, '');
+              let promCode = await this.cutCode(sale.promCode || sale.prom_code || null);
+              promCode = await this.cutCode(promCode);
+              maCtkmTangHang = toString(promCode);
+              if(sale.productType === 'I'){
+                maCtkmTangHang = maCtkmTangHang + '.I';
+              } else if(sale.productType === 'S'){
+                maCtkmTangHang = maCtkmTangHang + '.S';
+              } else if(sale.productType === 'V'){
+                maCtkmTangHang = maCtkmTangHang + '.V';
+              }
             }
           }
         } else {
@@ -6165,7 +6179,7 @@ export class SalesService {
         // Nếu không phải hàng tặng và không phải "03. Đổi điểm", set ma_ck01 từ promCode như cũ
         const isDoiDiemForCk01 = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
 
-        let maCk01 = isTangHang ? '' : (sale.promCode ? sale.promCode : '');
+        let maCk01 = isTangHang ? '' : (promCode ? promCode : '');
         if (isDoiDiem || isDoiDiemForCk01) {
           maCk01 = 'TT DIEM DO';
           ck01_nt = 0;
@@ -7656,4 +7670,9 @@ export class SalesService {
       throw new InternalServerErrorException(`Error exporting orders to Excel: ${error?.message || 'Unknown error'}`);
     }
   }
+
+  async cutCode(input: string): Promise<string> {
+    return input.split('-')[0];
+  }
+  
 }
