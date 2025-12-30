@@ -52,11 +52,13 @@ export class FastApiPayloadHelper {
       ma_kenh: orderData.ma_kenh ?? 'ONLINE',
       loai_gd: '01',
       detail: (orderData.detail || []).map((item: any) => {
-        const { product, ma_bp, ...cleanItem } = item;
+        const { product, ...cleanItem } = item;
         const result: any = { ...cleanItem };
         // Giữ lại ma_lo và so_serial (kể cả null)
         if ('ma_lo' in item) result.ma_lo = item.ma_lo;
         if ('so_serial' in item) result.so_serial = item.so_serial;
+        // Giữ lại ma_bp nếu có (không loại bỏ)
+        if ('ma_bp' in item) result.ma_bp = item.ma_bp;
         return result;
       }),
       cbdetail: null,
