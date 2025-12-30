@@ -6258,7 +6258,7 @@ export class SalesService {
                 ? orderBranchCode
                 : '';
         if(isTachThe){
-          finalMaKho = 'B'+maBp;
+          finalMaKho = 'B' + maBp;
         }
 
         // Chỉ thêm ma_kho vào detail item khi có giá trị hợp lệ (không rỗng)
