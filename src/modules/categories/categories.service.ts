@@ -1293,12 +1293,12 @@ export class CategoriesService {
       .skip((page - 1) * limit)
       .take(limit);
 
-    if (search) {
-      query.andWhere(
-        '(paymentMethod.code ILIKE :search OR paymentMethod.description ILIKE :search OR paymentMethod.documentType ILIKE :search)',
-        { search: `%${search}%` },
-      );
-    }
+      if (search) {
+        query.andWhere(
+          '(paymentMethod.code ILIKE :search OR paymentMethod.description ILIKE :search OR paymentMethod.documentType ILIKE :search OR paymentMethod.systemCode ILIKE :search OR paymentMethod.erp ILIKE :search OR paymentMethod.bankUnit ILIKE :search OR paymentMethod.externalId ILIKE :search)',
+          { search: `%${search}%` },
+        );
+      }
 
     const [data, total] = await query.getManyAndCount();
 
@@ -1373,6 +1373,8 @@ export class CategoriesService {
 
   async importPaymentMethodsFromExcel(file: Express.Multer.File): Promise<{
     total: number;
+    processed?: number;
+    emptyRows?: number;
     success: number;
     failed: number;
     errors: Array<{ row: number; error: string }>;
@@ -1386,6 +1388,7 @@ export class CategoriesService {
       const errors: Array<{ row: number; error: string }> = [];
       let success = 0;
       let failed = 0;
+      const totalRowsInFile = data.length; // Tổng số dòng trong file (không tính header)
 
       // Normalize header để xử lý khoảng trắng và chữ hoa/thường
       const normalizeHeader = (header: string): string => {
@@ -1394,15 +1397,26 @@ export class CategoriesService {
 
       // Mapping từ header Excel sang field của entity
       const fieldMapping: Record<string, string> = {
+        'Id': 'externalId',
+        'id': 'externalId',
+        'ID': 'externalId',
         'Mã': 'code',
         'mã': 'code',
         'Mã phương thức thanh toán': 'code',
         'mã phương thức thanh toán': 'code',
         'Diễn giải': 'description',
         'diễn giải': 'description',
+        'Mã hệ thống': 'systemCode',
+        'mã hệ thống': 'systemCode',
+        'Mã Hệ Thống': 'systemCode',
         'Loại chứng từ': 'documentType',
         'loại chứng từ': 'documentType',
         'Loại Chứng Từ': 'documentType',
+        'ERP': 'erp',
+        'erp': 'erp',
+        'Đơn vị ngân hàng': 'bankUnit',
+        'đơn vị ngân hàng': 'bankUnit',
+        'Đơn Vị Ngân Hàng': 'bankUnit',
       };
 
       // Tạo reverse mapping với normalized keys
@@ -1415,20 +1429,14 @@ export class CategoriesService {
       const actualHeaders = data.length > 0 ? Object.keys(data[0]) : [];
       this.logger.log(`Excel headers found: ${actualHeaders.join(', ')}`);
 
-      // Lọc bỏ các dòng trống trước khi xử lý và lưu lại index gốc
-      const nonEmptyRowsWithIndex = data
-        .map((row, index) => ({ row, originalIndex: index }))
-        .filter(({ row }) => {
-          return !actualHeaders.every(header => {
-            const value = row[header];
-            if (value === null || value === undefined) return true;
-            if (typeof value === 'string' && value.trim() === '') return true;
-            return false;
-          });
-        });
+      // Xử lý tất cả các dòng, không lọc bỏ dòng trống
+      const allRowsWithIndex = data
+        .map((row, index) => ({ row, originalIndex: index }));
 
-      for (let i = 0; i < nonEmptyRowsWithIndex.length; i++) {
-        const { row, originalIndex } = nonEmptyRowsWithIndex[i];
+      this.logger.log(`Total rows in file: ${totalRowsInFile}, Processing all rows`);
+
+      for (let i = 0; i < allRowsWithIndex.length; i++) {
+        const { row, originalIndex } = allRowsWithIndex[i];
         const rowNumber = originalIndex + 2; // +2 vì bắt đầu từ row 2 (row 1 là header)
 
         try {
@@ -1493,7 +1501,8 @@ export class CategoriesService {
       }
 
       return {
-        total: nonEmptyRowsWithIndex.length,
+        total: totalRowsInFile, // Tổng số dòng trong file
+        processed: totalRowsInFile, // Số dòng đã xử lý (tất cả)
         success,
         failed,
         errors,

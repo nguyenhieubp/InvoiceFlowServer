@@ -11,6 +11,9 @@ export class PaymentMethod {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ nullable: true })
+  externalId: string; // ID từ hệ thống cũ/Excel (VD: 108505)
+
   @Column({ unique: true })
   code: string; // Mã phương thức thanh toán (VD: BANK298)
 
@@ -19,6 +22,15 @@ export class PaymentMethod {
 
   @Column({ nullable: true })
   documentType: string; // Loại chứng từ (VD: Giấy báo có)
+
+  @Column({ nullable: true })
+  systemCode: string; // Mã hệ thống
+
+  @Column({ nullable: true })
+  erp: string; // ERP
+
+  @Column({ nullable: true })
+  bankUnit: string; // Đơn vị ngân hàng
 
   @Column({ default: 'active' })
   trangThai: string; // Trạng thái (active/inactive)
