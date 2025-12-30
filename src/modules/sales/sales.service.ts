@@ -1386,6 +1386,10 @@ export class SalesService {
       maPhi = sale.maPhi || null;
     }
 
+    if(sale.ordertypeName.includes('08. Tách thẻ')){
+      calculatedFields.maKho = 'B' + department?.ma_bp;
+    }
+
     return {
       ...sale,
       itemName: sale.itemName || loyaltyProduct?.name || null,
