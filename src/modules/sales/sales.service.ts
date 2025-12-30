@@ -6178,10 +6178,19 @@ export class SalesService {
         // Nếu là đơn "03. Đổi điểm": set ma_ck01 = "TT DIEM DO" và ck01_nt = 0
         // Nếu không phải hàng tặng và không phải "03. Đổi điểm", set ma_ck01 từ promCode như cũ
         const isDoiDiemForCk01 = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
-
         let maCk01 = isTangHang ? '' : (promCode ? promCode : '');
         if (isDoiDiem || isDoiDiemForCk01) {
-          maCk01 = 'TT DIEM DO';
+          if(sale.cucThueDisplay  === 'TTM' || 'AMA' || 'TSG'){
+            maCtkmTangHang = 'TTM.KMDIEM';
+          } else if(sale.cucThueDisplay === 'FBV'){
+            maCtkmTangHang = 'FBV.KMDIEM';
+          } else if(sale.cucThueDisplay  === 'BTH'){  
+            maCtkmTangHang = 'BTH.KMDIEM';
+          } else if( sale.cucThueDisplay === 'CDV'){  
+            maCtkmTangHang = 'CDV.KMDIEM';
+          } else if(sale.cucThueDisplay === 'LHV'){
+            maCtkmTangHang = 'LHV.KMDIEM';
+          }
           ck01_nt = 0;
         }
 
@@ -7672,7 +7681,7 @@ export class SalesService {
   }
 
   async cutCode(input: string): Promise<string> {
-    return input.split('-')[0];
+    return input?.split('-')[0] || '';
   }
   
 }
