@@ -16,7 +16,7 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
   private readonly TOKEN_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 phút
   private readonly TOKEN_EXPIRY_BUFFER = 10 * 60 * 1000; // Refresh trước 10 phút khi hết hạn
 
-  constructor(private readonly httpService: HttpService) {}
+  constructor(private readonly httpService: HttpService) { }
 
   /**
    * Đăng nhập và lấy token
@@ -183,6 +183,40 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+
+  //* Call Promotion
+  async callPromotion(promotionData: {
+    ma_ctkm: string;
+    ten_ctkm: string;
+    ma_vt: string;
+    ma_bp: string;
+  }): Promise<any> {
+    try {
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/Promotions`,
+          promotionData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+      return response.data;
+    }
+    catch (error: any) {
+      this.logger.error(`Error calling promotion: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
   /**
    * Gọi API salesInvoice
    */
@@ -323,7 +357,7 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
       return response.data;
     } catch (error: any) {
       this.logger.error(`Error creating/updating customer ${customerData.ma_kh}: ${error?.message || error}`);
-      
+
       // Nếu lỗi 401 (Unauthorized), refresh token và retry
       if (error?.response?.status === 401) {
         this.logger.log('Token expired, refreshing and retrying customer API...');
@@ -418,7 +452,7 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
       return response.data;
     } catch (error: any) {
       this.logger.error(`Error creating/updating item ${itemData.ma_vt}: ${error?.message || error}`);
-      
+
       // Nếu lỗi 401 (Unauthorized), refresh token và retry
       if (error?.response?.status === 401) {
         this.logger.log('Token expired, refreshing and retrying item API...');
@@ -530,7 +564,7 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
       return response.data;
     } catch (error: any) {
       this.logger.error(`Error creating/updating lot ${lotData.ma_lo} for item ${lotData.ma_vt}: ${error?.message || error}`);
-      
+
       // Nếu lỗi 401 (Unauthorized), refresh token và retry
       if (error?.response?.status === 401) {
         this.logger.log('Token expired, refreshing and retrying lot API...');
@@ -632,7 +666,7 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
       return response.data;
     } catch (error: any) {
       this.logger.error(`Error creating/updating site ${siteData.ma_kho} for ma_dvcs ${siteData.ma_dvcs}: ${error?.message || error}`);
-      
+
       // Nếu lỗi 401 (Unauthorized), refresh token và retry
       if (error?.response?.status === 401) {
         this.logger.log('Token expired, refreshing and retrying site API...');
@@ -706,7 +740,7 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
       // Gọi API warehouseRelease với token
       const endpoint = `${this.baseUrl}/warehouseRelease`;
       this.logger.log(`Calling FastAPI endpoint: ${endpoint}`);
-      
+
       const response = await firstValueFrom(
         this.httpService.post(
           endpoint,
@@ -1070,7 +1104,7 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
       return response.data;
     } catch (error: any) {
       this.logger.error(`Error submitting sales return: ${error?.message || error}`);
-      
+
       // Log chi tiết error response để debug
       if (error?.response) {
         this.logger.error(`Sales return error response status: ${error.response.status}`);

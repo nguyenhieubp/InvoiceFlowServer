@@ -910,14 +910,14 @@ export class SalesService {
       ordertypeName.includes('04. Đổi DV') ||
       ordertypeName.includes('08. Tách thẻ') ||
       ordertypeName.includes('Đổi thẻ KEEP->Thẻ DV');
-    
+
     // Kiểm tra đơn "03. Đổi điểm": không coi là hàng tặng (isTangHang = false) để không hiển thị "1" trong cột "Khuyến mãi"
     const isDoiDiem = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
     if (isDoiDiem) {
       isTangHang = false;
     }
 
-      // Tính toán maCtkmTangHang TRƯỚC (cần dùng cho promCodeDisplay)
+    // Tính toán maCtkmTangHang TRƯỚC (cần dùng cho promCodeDisplay)
     // Lấy maCtkmTangHang từ sale (có thể đã có sẵn từ database hoặc tính toán trước đó)
     let maCtkmTangHang: string | null = sale.maCtkmTangHang ? String(sale.maCtkmTangHang).trim() : null;
     if (!maCtkmTangHang || maCtkmTangHang === '') {
@@ -1259,15 +1259,15 @@ export class SalesService {
     let maCtkmTangHang = calculatedFields.maCtkmTangHang;
     // Nếu là đơn "03. Đổi điểm": set maCtkmTangHang và muaHangGiamGiaDisplay theo ma_dvcs
     if (isDoiDiemForDisplay) {
-      if(department?.ma_dvcs === 'TTM' || department?.ma_dvcs === 'AMA' || department?.ma_dvcs === 'TSG'){
+      if (department?.ma_dvcs === 'TTM' || department?.ma_dvcs === 'AMA' || department?.ma_dvcs === 'TSG') {
         maCtkmTangHang = 'TTM.KMDIEM';
-      } else if(department?.ma_dvcs === 'FBV'){
+      } else if (department?.ma_dvcs === 'FBV') {
         maCtkmTangHang = 'FBV.KMDIEM';
-      } else if(department?.ma_dvcs === 'BTH'){
+      } else if (department?.ma_dvcs === 'BTH') {
         maCtkmTangHang = 'BTH.KMDIEM';
-      } else if(department?.ma_dvcs === 'CDV'){
+      } else if (department?.ma_dvcs === 'CDV') {
         maCtkmTangHang = 'CDV.KMDIEM';
-      } else if(department?.ma_dvcs === 'LHV'){
+      } else if (department?.ma_dvcs === 'LHV') {
         maCtkmTangHang = 'LHV.KMDIEM';
       }
     } else if (!calculatedFields.isTangHang) {
@@ -1381,11 +1381,11 @@ export class SalesService {
       maPhi = sale.maPhi || null;
     }
 
-    if(sale.ordertypeName.includes('08. Tách thẻ')){
+    if (sale.ordertypeName.includes('08. Tách thẻ')) {
       calculatedFields.maKho = 'B' + department?.ma_bp;
     }
 
-    if(sale.ordertypeName.includes('03. Đổi điểm')){
+    if (sale.ordertypeName.includes('03. Đổi điểm')) {
       calculatedFields.promCodeDisplay = '1';
     }
 
@@ -6154,7 +6154,7 @@ export class SalesService {
             loaiGd = '12'; // Số lượng dương
           }
         }
-        
+
         const loai = toString(sale.loai || sale.cat1, '');
 
         // Lấy ma_bp - bắt buộc phải có giá trị
@@ -6228,7 +6228,8 @@ export class SalesService {
         // Nếu là hàng tặng, không set ma_ck01 (Mã CTKM mua hàng giảm giá)
         // Nếu là đơn "03. Đổi điểm": set ma_ck01 = "TT DIEM DO" và ck01_nt = 0
         // Nếu không phải hàng tặng và không phải "03. Đổi điểm", set ma_ck01 từ promCode như cũ
-        let maCk01 = isTangHang ? '' : (promCode ? promCode : '');
+        let maCk01 = sale?.muaHangGiamGiaDisplay || '';
+        // let maCk01 = isTangHang ? '' : (promCode ? promCode : '');
         if (isDoiDiem) {
           if (sale.cucThueDisplay === 'TTM' || sale.cucThueDisplay === 'AMA' || sale.cucThueDisplay === 'TSG') {
             maCtkmTangHang = 'TTM.KMDIEM';
@@ -6289,7 +6290,7 @@ export class SalesService {
               : (orderBranchCode && orderBranchCode.trim() !== '')
                 ? orderBranchCode
                 : '';
-        if(isTachThe){
+        if (isTachThe) {
           finalMaKho = 'B' + maBp;
         }
 

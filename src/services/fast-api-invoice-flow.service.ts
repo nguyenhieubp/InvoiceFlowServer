@@ -38,7 +38,7 @@ export class FastApiInvoiceFlowService {
   }): Promise<any> {
     try {
       const result = await this.fastApiService.createOrUpdateCustomer(customerData);
-      
+
       // Validate response: status = 1 mới là success
       if (Array.isArray(result) && result.length > 0) {
         const firstItem = result[0];
@@ -62,6 +62,7 @@ export class FastApiInvoiceFlowService {
     }
   }
 
+
   /**
    * Tạo đơn hàng bán (salesOrder) trong Fast API
    * 2.3/ Đơn hàng bán
@@ -74,9 +75,34 @@ export class FastApiInvoiceFlowService {
     try {
       const cleanOrderData = FastApiPayloadHelper.buildCleanPayload(orderData, action);
       const finalPayload = FastApiPayloadHelper.removeEmptyFields(cleanOrderData);
+      const dataPromotion = finalPayload.detail.filter(
+        (item) => item.ma_ck01
+      );
+      const uniquePromotions = new Map<string, any>();
 
+      for (const item of dataPromotion) {
+        if (!uniquePromotions.has(item.ma_ck01)) {
+          uniquePromotions.set(item.ma_ck01, item);
+        }
+      }
+
+      for (const item of uniquePromotions.values()) {
+        const dataPayload = {
+          ma_ctkm: item.ma_ck01,
+          ten_ctkm: item.ma_ck01,
+          ma_vt: item.ma_vt,
+          ma_bp: item.ma_bp,
+        };
+
+        const resultPromotion = await this.callPromotion(dataPayload);
+
+        if (resultPromotion.code !== 1) {
+          throw new BadRequestException(
+            `Gọi promotion thất bại: ${item.ma_ck01}`,
+          );
+        }
+      }
       const result = await this.fastApiService.submitSalesOrder(finalPayload);
-      
       // Validate response: status = 1 mới là success
       if (Array.isArray(result) && result.length > 0) {
         const firstItem = result[0];
@@ -92,7 +118,7 @@ export class FastApiInvoiceFlowService {
           throw new BadRequestException(errorMessage);
         }
       }
-      
+
       this.logger.log(`[Flow] Sales order ${orderData.so_ct} created successfully`);
       return result;
     } catch (error: any) {
@@ -101,6 +127,15 @@ export class FastApiInvoiceFlowService {
         this.logger.error(`[Flow] Sales order error response status: ${error.response.status}`);
         this.logger.error(`[Flow] Sales order error response data: ${JSON.stringify(error.response.data)}`);
       }
+      throw error;
+    }
+  }
+
+  async callPromotion(promotionData: any): Promise<any> {
+    try {
+      return await this.fastApiService.callPromotion(promotionData);
+    } catch (error: any) {
+      this.logger.error(`[Flow] Failed to call promotion ${JSON.stringify(promotionData)}: ${error?.message || error}`);
       throw error;
     }
   }
@@ -197,7 +232,7 @@ export class FastApiInvoiceFlowService {
       const finalPayload = FastApiPayloadHelper.removeEmptyFields(cleanInvoiceData);
 
       const result = await this.fastApiService.submitSalesInvoice(finalPayload);
-      
+
       // Validate response: status = 1 mới là success
       if (Array.isArray(result) && result.length > 0) {
         const firstItem = result[0];
@@ -213,7 +248,7 @@ export class FastApiInvoiceFlowService {
           throw new BadRequestException(errorMessage);
         }
       }
-      
+
       this.logger.log(`[Flow] Sales invoice ${invoiceData.so_ct} created successfully`);
       return result;
     } catch (error: any) {
@@ -234,7 +269,7 @@ export class FastApiInvoiceFlowService {
       const finalPayload = FastApiPayloadHelper.removeEmptyFields(salesReturnData, false);
 
       const result = await this.fastApiService.submitSalesReturn(finalPayload);
-      
+
       // Validate response: status = 1 mới là success
       if (Array.isArray(result) && result.length > 0) {
         const firstItem = result[0];
@@ -250,7 +285,7 @@ export class FastApiInvoiceFlowService {
           throw new BadRequestException(errorMessage);
         }
       }
-      
+
       this.logger.log(`[Flow] Sales return ${salesReturnData.so_ct || 'N/A'} created successfully`);
       return result;
     } catch (error: any) {
@@ -275,7 +310,7 @@ export class FastApiInvoiceFlowService {
       const finalPayload = FastApiPayloadHelper.removeEmptyFields(gxtInvoiceData, false);
 
       const result = await this.fastApiService.submitGxtInvoice(finalPayload);
-      
+
       // Validate response: status = 1 mới là success
       if (Array.isArray(result) && result.length > 0) {
         const firstItem = result[0];
@@ -291,7 +326,7 @@ export class FastApiInvoiceFlowService {
           throw new BadRequestException(errorMessage);
         }
       }
-      
+
       this.logger.log(`[Flow] GxtInvoice ${gxtInvoiceData.so_ct || 'N/A'} created successfully`);
       return result;
     } catch (error: any) {
@@ -398,7 +433,7 @@ export class FastApiInvoiceFlowService {
 
             const cashReceiptPayload = FastApiPayloadHelper.buildCashReceiptPayload(cashioData, orderData, invoiceData);
             const cashReceiptResult = await this.fastApiService.submitCashReceipt(cashReceiptPayload);
-            
+
             // Validate response: status = 1 mới là success
             if (Array.isArray(cashReceiptResult) && cashReceiptResult.length > 0) {
               const firstItem = cashReceiptResult[0];
@@ -427,7 +462,7 @@ export class FastApiInvoiceFlowService {
 
         // Trường hợp 2: fop_syscode != "CASH" → Kiểm tra payment method
         if (cashioData.fop_syscode && cashioData.fop_syscode !== 'CASH') {
-          if(cashioData.fop_syscode === 'VOUCHER') {
+          if (cashioData.fop_syscode === 'VOUCHER') {
             continue;
           }
           // Lấy payment method theo code
@@ -452,7 +487,7 @@ export class FastApiInvoiceFlowService {
             try {
               const creditAdvicePayload = FastApiPayloadHelper.buildCreditAdvicePayload(cashioData, orderData, invoiceData, paymentMethod);
               const creditAdviceResult = await this.fastApiService.submitCreditAdvice(creditAdvicePayload);
-              
+
               // Validate response: status = 1 mới là success
               if (Array.isArray(creditAdviceResult) && creditAdviceResult.length > 0) {
                 const firstItem = creditAdviceResult[0];
@@ -589,9 +624,9 @@ export class FastApiInvoiceFlowService {
                 null,
                 '2', // loai_ct = 2 (Chi cho khách hàng)
               );
-              
+
               const paymentResult = await this.fastApiService.submitPayment(paymentPayload);
-              
+
               // Validate response: status = 1 mới là success
               if (Array.isArray(paymentResult) && paymentResult.length > 0) {
                 const firstItem = paymentResult[0];
@@ -656,9 +691,9 @@ export class FastApiInvoiceFlowService {
                   paymentMethod,
                   '2', // loai_ct = 2 (Chi cho khách hàng)
                 );
-                
+
                 const debitAdviceResult = await this.fastApiService.submitDebitAdvice(debitAdvicePayload);
-                
+
                 // Validate response: status = 1 mới là success
                 if (Array.isArray(debitAdviceResult) && debitAdviceResult.length > 0) {
                   const firstItem = debitAdviceResult[0];
@@ -925,7 +960,7 @@ export class FastApiInvoiceFlowService {
 
     const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht || '';
     const maBp = department?.ma_bp || '';
-    
+
     // Gọi Customer API trước (Fast/Customer)
     if (firstStockTransfer.branchCode) {
       try {
