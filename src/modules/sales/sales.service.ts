@@ -5581,8 +5581,8 @@ export class SalesService {
 
     // Lấy kho nhập và kho xuất (có thể cần map từ branch/department)
     // Tạm thời dùng branchCode làm kho mặc định
-    const maKhoN = firstSale?.maKho || orderData.branchCode || '';
-    const maKhoX = firstSale?.maKho || orderData.branchCode || '';
+    const maKhoN = orderData?.maKho || '';
+    const maKhoX = orderData?.maKho || '';
 
     return {
       ma_dvcs: maDvcs,
@@ -6259,10 +6259,7 @@ export class SalesService {
           tienThue = tienThue * allocationRatio;
           dtTgNt = dtTgNt * allocationRatio;
         }
-        let ma_kh_i;
-        if (isTachThe) {
-          ma_kh_i = sale?.issuePartnerCode || '';
-        }
+
         // Lấy ma_vt từ materialCode (ưu tiên Loyalty API) - dùng lại materialCode đã fetch ở trên
         // materialCode đã được lấy từ getMaterialCode(sale) và fetch từ Loyalty API
         // Nếu có loyaltyProduct, ưu tiên dùng materialCode từ đó
@@ -6283,23 +6280,16 @@ export class SalesService {
 
         // Thêm ma_kho: Chỉ thêm khi có giá trị hợp lệ, nếu không có thì không thêm key vào payload
         // Ưu tiên: maKho từ stock transfer > sale.maKho > maBp > orderData.branchCode
-        const orderBranchCode = orderData.branchCode || '';
-        let finalMaKho = (maKho && maKho.trim() !== '')
-          ? maKho
-          : (sale.maKho && sale.maKho.trim() !== '')
-            ? sale.maKho
-            : (maBp && maBp.trim() !== '')
-              ? maBp
-              : (orderBranchCode && orderBranchCode.trim() !== '')
-                ? orderBranchCode
-                : '';
+
+        let finalMaKho = maKho || '';
+
         if (isTachThe) {
           finalMaKho = 'B' + maBp;
         }
 
         // Chỉ thêm ma_kho vào detail item khi có giá trị hợp lệ (không rỗng)
         // Nếu không có giá trị hợp lệ, không thêm key ma_kho vào payload
-        if (finalMaKho && finalMaKho.trim() !== '') {
+        if (finalMaKho && finalMaKho?.trim() !== '') {
           detailItem.ma_kho = limitString(finalMaKho, 16);
         }
 
@@ -6476,8 +6466,6 @@ export class SalesService {
           id_goc_ngay: sale.idGocNgay ? formatDateISO(new Date(sale.idGocNgay)) : formatDateISO(new Date()),
           // id_goc_dv: Đơn vị phiếu gốc (String, max 8 ký tự)
           id_goc_dv: limitString(toString(sale.idGocDv, ''), 8),
-          // ma_kh_i: Mã khách hàng (String, max 16 ký tự)
-          ma_kh_i: limitString(toString(ma_kh_i, ''), 16),
         });
 
         return detailItem;
@@ -6890,9 +6878,10 @@ export class SalesService {
 
     // Gọi API salesOrder với action = 1 (không cần tạo/cập nhật customer)
     let result: any;
+    let data = { ...invoiceData, ma_kho: orderData?.maKho || '' }
     try {
       result = await this.fastApiInvoiceFlowService.createSalesOrder({
-        ...invoiceData,
+        ...data,
         customer: orderData.customer,
         ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
       }, 1); // action = 1 cho đơn hàng có đuôi _X
