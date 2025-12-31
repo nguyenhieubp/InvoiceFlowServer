@@ -178,6 +178,8 @@ export class SyncService {
                 total_out: cash.total_out ? Number(cash.total_out) : 0,
                 sync_date: date,
                 brand: brand || undefined,
+                bank_code: cash.bank_code || undefined,
+                period_code: cash.period_code || undefined,
               };
 
               // Insert new record

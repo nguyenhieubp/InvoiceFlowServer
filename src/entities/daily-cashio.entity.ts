@@ -61,6 +61,12 @@ export class DailyCashio {
   @Column({ nullable: true })
   brand: string; // Brand name (menard, labhair, yaman, etc.)
 
+  @Column({ nullable: true })
+  bank_code: string; // Mã ngân hàng
+
+  @Column({ nullable: true })
+  period_code: string; // Mã kỳ
+
   @CreateDateColumn()
   createdAt: Date;
 
