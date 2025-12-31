@@ -6259,7 +6259,10 @@ export class SalesService {
           tienThue = tienThue * allocationRatio;
           dtTgNt = dtTgNt * allocationRatio;
         }
-
+        let ma_kh_i;
+        if (isTachThe) {
+          ma_kh_i = sale?.issuePartnerCode || '';
+        }
         // Lấy ma_vt từ materialCode (ưu tiên Loyalty API) - dùng lại materialCode đã fetch ở trên
         // materialCode đã được lấy từ getMaterialCode(sale) và fetch từ Loyalty API
         // Nếu có loyaltyProduct, ưu tiên dùng materialCode từ đó
@@ -6473,6 +6476,8 @@ export class SalesService {
           id_goc_ngay: sale.idGocNgay ? formatDateISO(new Date(sale.idGocNgay)) : formatDateISO(new Date()),
           // id_goc_dv: Đơn vị phiếu gốc (String, max 8 ký tự)
           id_goc_dv: limitString(toString(sale.idGocDv, ''), 8),
+          // ma_kh_i: Mã khách hàng (String, max 16 ký tự)
+          ma_kh_i: limitString(toString(ma_kh_i, ''), 16),
         });
 
         return detailItem;
