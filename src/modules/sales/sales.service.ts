@@ -1261,19 +1261,14 @@ export class SalesService {
     if (isDoiDiemForDisplay) {
       if(department?.ma_dvcs === 'TTM' || department?.ma_dvcs === 'AMA' || department?.ma_dvcs === 'TSG'){
         maCtkmTangHang = 'TTM.KMDIEM';
-        muaHangGiamGiaDisplay = 'TTM.KMDIEM';
       } else if(department?.ma_dvcs === 'FBV'){
         maCtkmTangHang = 'FBV.KMDIEM';
-        muaHangGiamGiaDisplay = 'FBV.KMDIEM';
       } else if(department?.ma_dvcs === 'BTH'){
         maCtkmTangHang = 'BTH.KMDIEM';
-        muaHangGiamGiaDisplay = 'BTH.KMDIEM';
       } else if(department?.ma_dvcs === 'CDV'){
         maCtkmTangHang = 'CDV.KMDIEM';
-        muaHangGiamGiaDisplay = 'CDV.KMDIEM';
       } else if(department?.ma_dvcs === 'LHV'){
         maCtkmTangHang = 'LHV.KMDIEM';
-        muaHangGiamGiaDisplay = 'LHV.KMDIEM';
       }
     } else if (!calculatedFields.isTangHang) {
       // Nếu không phải hàng tặng và không phải "03. Đổi điểm": dùng promCode
@@ -6235,7 +6230,7 @@ export class SalesService {
         // Nếu không phải hàng tặng và không phải "03. Đổi điểm", set ma_ck01 từ promCode như cũ
         let maCk01 = isTangHang ? '' : (promCode ? promCode : '');
         if (isDoiDiem) {
-          if (sale.cucThueDisplay === 'TTM' || 'AMA' || 'TSG') {
+          if (sale.cucThueDisplay === 'TTM' || sale.cucThueDisplay === 'AMA' || sale.cucThueDisplay === 'TSG') {
             maCtkmTangHang = 'TTM.KMDIEM';
           } else if (sale.cucThueDisplay === 'FBV') {
             maCtkmTangHang = 'FBV.KMDIEM';
