@@ -5789,6 +5789,9 @@ export class SalesService {
         let maCk05Value: string | null = null;
         let formattedMaCk05: string | null = null;
 
+        if(isDoiDiem){
+          ck15_nt_voucherDp1 = 0;
+        };
         // Nếu là đơn "03. Đổi điểm": bỏ ma_ck05 và ck05_nt
         const isDoiDiemForCk05 = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
 
@@ -6188,6 +6191,7 @@ export class SalesService {
 
         // Build detail item, chỉ thêm ma_kho nếu có giá trị (không rỗng)
         const detailItem: any = {
+          ma_kh_i: limitString(toString(sale.partnerCode, ''), 16),
           // ma_vt: Mã vật tư (String, max 16 ký tự) - Bắt buộc
           // Dùng materialCode từ Loyalty API (giống như sales invoice)
           ma_vt: limitString(toString(finalMaterialCode), 16),
