@@ -1,0 +1,26 @@
+[
+    {
+        "brand": "menard",
+        "customers": [
+            "KH254032258",
+            "KH254032264",
+            "KH221134994",
+            "ND13104"
+        ]
+    },
+    {
+        "brand": "yaman",
+        "customers": [
+            "KY2515795",
+            "KY2517425"
+        ]
+    },
+    {
+        "brand": "chando",
+        "customers": [
+            "KD24000003",
+            "KD24000001",
+            "KD24000002"
+        ]
+    }
+]

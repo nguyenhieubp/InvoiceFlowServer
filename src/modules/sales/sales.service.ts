@@ -5538,7 +5538,6 @@ export class SalesService {
   /**
    * Build invoice data cho Fast API (format mới)
    */
-
   private async buildFastApiInvoiceData(orderData: any): Promise<any> {
     try {
       const toNumber = (value: any, defaultValue: number = 0): number => {
@@ -5663,7 +5662,7 @@ export class SalesService {
       // Xử lý từng sale với index để tính dong
       const detail = await Promise.all(allSales.map(async (sale: any, index: number) => {
         // Lấy materialCode từ sale (đã được enrich từ Loyalty API)
-        const saleMaterialCode = sale.product?.materialCode || sale.product?.maVatTu || sale.product?.maERP;
+      const saleMaterialCode = sale.product?.materialCode || sale.product?.maVatTu || sale.product?.maERP;
 
         // Với đơn hàng "01.Thường": Lấy số lượng từ stock transfer xuất kho
         // Với các đơn hàng khác: Dùng số lượng từ sale
@@ -6187,11 +6186,14 @@ export class SalesService {
         // Lấy ma_vt từ materialCode (ưu tiên Loyalty API) - dùng lại materialCode đã fetch ở trên
         // materialCode đã được lấy từ getMaterialCode(sale) và fetch từ Loyalty API
         // Nếu có loyaltyProduct, ưu tiên dùng materialCode từ đó
-        const finalMaterialCode = loyaltyProduct?.materialCode || materialCode || sale.product?.maVatTu || sale.itemCode || '';
+        const finalMaterialCode = loyaltyProduct?.materialCode || sale.product?.maVatTu ||  '';
+        
 
         // Build detail item, chỉ thêm ma_kho nếu có giá trị (không rỗng)
         const detailItem: any = {
-          ma_kh_i: limitString(toString(sale.partnerCode, ''), 16),
+          tien_hang:  Number(sale.qty) * Number(sale.giaBan),
+          so_luong: Number(sale.qty),
+          ma_kh_i: limitString(toString(sale.issuePartnerCode, ''), 16),
           // ma_vt: Mã vật tư (String, max 16 ký tự) - Bắt buộc
           // Dùng materialCode từ Loyalty API (giống như sales invoice)
           ma_vt: limitString(toString(finalMaterialCode), 16),
@@ -6220,12 +6222,8 @@ export class SalesService {
 
         // Thêm các field còn lại
         Object.assign(detailItem, {
-          // so_luong: Số lượng (Decimal)
-          so_luong: Number(qty),
           // gia_ban: Giá bán (Decimal) - giá gốc trước chiết khấu
           gia_ban: Number(giaBan),
-          // tien_hang: Tiền hàng (Decimal) - giá gốc trước chiết khấu
-          tien_hang: Number(tienHangGoc),
           // is_reward_line: is_reward_line (Int)
           is_reward_line: sale.isRewardLine ? 1 : 0,
           // is_bundle_reward_line: is_bundle_reward_line (Int)
