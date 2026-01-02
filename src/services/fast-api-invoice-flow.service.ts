@@ -205,19 +205,20 @@ export class FastApiInvoiceFlowService {
       }
 
       // Validate từng mã CTKM với Loyalty API (chỉ check phần trước dấu "-")
-      for (const promCode of promotionCodes) {
-        try {
-          const promotion = await this.categoriesService.getPromotionFromLoyaltyAPI(promCode);
-          if (!promotion || !promotion.code) {
-            validationErrors.push(`Mã khuyến mãi "${promCode}" không tồn tại trên Loyalty API`);
-          }
-        } catch (error: any) {
-          // Nếu API trả về 404 hoặc không tìm thấy, coi như mã không tồn tại
-          if (error?.response?.status === 404 || error?.message?.includes('404')) {
-            validationErrors.push(`Mã khuyến mãi "${promCode}" không tồn tại trên Loyalty API`);
-          } else {
-            // Lỗi khác (network, timeout, etc.) - log nhưng không block
-            this.logger.warn(`[Flow] Lỗi khi kiểm tra mã khuyến mãi "${promCode}": ${error?.message || error}`);
+      for (const sale of invoiceData.detail) {
+        const promotionData = {
+          ma_ctkm: sale.ma_ck01 || sale.ma_ctkm_th ||'',
+          ten_ctkm: sale.ma_ck01 || sale.ma_ctkm_th ||'',
+          ma_phi: sale.ma_phi || '',
+          tk_cpkm: sale.tk_chi_phi || '',
+          tk_ck: sale.tk_chiet_khau || '',
+        };
+        if(sale.ma_ck01 || sale.ma_ctkm_th) {
+        const resultPromotion = await this.categoriesService.createPromotionFromLoyaltyAPI(promotionData);
+        if (resultPromotion.status !== 1) {
+          throw new BadRequestException(
+              `Tạo promotion thất bại: ${sale.ma_ck01 || sale.ma_ctkm_th}`,
+            );
           }
         }
       }
@@ -1072,6 +1073,16 @@ export class FastApiInvoiceFlowService {
     }
 
     return result;
+  }
+
+
+  async createPromotionFromLoyaltyAPI(promCode: string): Promise<any> {
+    const promotion = await this.categoriesService.createPromotionFromLoyaltyAPI(promCode);
+    if (!promotion || !promotion.code) {
+      throw new BadRequestException(`Mã khuyến mãi "${promCode}" không tồn tại trên Loyalty API`);
+    }
+
+    return promotion;
   }
 }
 

@@ -39,7 +39,7 @@ export class CategoriesService {
     @InjectDataSource()
     private dataSource: DataSource,
     private httpService: HttpService,
-  ) {}
+  ) { }
 
   async findAll(options: {
     page?: number;
@@ -266,10 +266,10 @@ export class CategoriesService {
       const normalizeBoolean = (value: any): boolean | undefined => {
         // Xử lý null/undefined/empty
         if (value === null || value === undefined) return undefined;
-        
+
         // Xử lý boolean trực tiếp
         if (typeof value === 'boolean') return value;
-        
+
         // Xử lý số: 1 = true, 0 = false, các số khác = undefined
         if (typeof value === 'number') {
           // Kiểm tra NaN và Infinity
@@ -278,30 +278,30 @@ export class CategoriesService {
           if (value === 0 || value === 0.0 || Math.abs(value) < 0.0001) return false;
           return undefined;
         }
-        
+
         // Xử lý string
         if (typeof value === 'string') {
           const str = value.trim();
-          
+
           // Nếu là string rỗng hoặc chỉ có khoảng trắng, return undefined
           if (str === '') return undefined;
-          
+
           // Bỏ qua các ký tự đặc biệt không hợp lệ (như $ü)
           // Chỉ xử lý nếu string chứa ký tự hợp lệ
           if (!/^[\d\s\.,\-+eE]+$/.test(str) && !/^(true|false|yes|no|có|không|x|y|n|1|0)$/i.test(str)) {
             // Nếu không phải số hoặc giá trị boolean text hợp lệ, return undefined
             return undefined;
           }
-          
+
           const lowerStr = str.toLowerCase();
-          
+
           // Thử parse thành số trước (để xử lý "1.0", " 1 ", "0", "0.0", etc.)
           const numValue = parseFloat(lowerStr);
           if (!isNaN(numValue) && isFinite(numValue)) {
             if (numValue === 1 || numValue === 1.0 || Math.abs(numValue - 1) < 0.0001) return true;
             if (numValue === 0 || numValue === 0.0 || Math.abs(numValue) < 0.0001) return false;
           }
-          
+
           // Xử lý các giá trị text
           if (lowerStr === 'true' || lowerStr === 'yes' || lowerStr === 'có' || lowerStr === 'x' || lowerStr === 'y' || lowerStr === '1') {
             return true;
@@ -310,7 +310,7 @@ export class CategoriesService {
             return false;
           }
         }
-        
+
         // Nếu không match, return undefined (không set giá trị)
         return undefined;
       };
@@ -326,14 +326,14 @@ export class CategoriesService {
 
       // Tạo reverse mapping từ normalized header sang field name (merge cả fieldMappingVariants và fieldMapping)
       const normalizedMapping: Record<string, string> = {};
-      
+
       // Thêm từ fieldMappingVariants (đã có nhiều biến thể)
       for (const [fieldName, variants] of Object.entries(fieldMappingVariants)) {
         for (const variant of variants) {
           normalizedMapping[normalizeHeader(variant)] = fieldName;
         }
       }
-      
+
       // Thêm từ fieldMapping (cho backward compatibility)
       for (const [excelHeader, fieldName] of Object.entries(fieldMapping)) {
         const normalized = normalizeHeader(excelHeader);
@@ -361,7 +361,7 @@ export class CategoriesService {
 
       // Parse tất cả dữ liệu trước
       const parsedProducts: Array<{ productData: Partial<ProductItem>; rowNumber: number }> = [];
-      
+
       for (let i = 0; i < nonEmptyRowsWithIndex.length; i++) {
         const { row, originalIndex } = nonEmptyRowsWithIndex[i];
         const rowNumber = originalIndex + 2; // +2 vì bắt đầu từ row 2 (row 1 là header)
@@ -375,10 +375,10 @@ export class CategoriesService {
           for (const actualHeader of actualHeaders) {
             const normalizedHeader = normalizeHeader(actualHeader);
             const fieldName = normalizedMapping[normalizedHeader];
-            
+
             if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
               const rawValue = row[actualHeader];
-              
+
               // Xử lý boolean fields trước (để xử lý cả giá trị 0)
               if (fieldName.includes('theoDoi') || fieldName === 'nhieuDvt' || fieldName === 'suaTkVatTu' || fieldName === 'choPhepTaoLoNgayKhiNhap') {
                 const boolValue = normalizeBoolean(rawValue);
@@ -391,7 +391,7 @@ export class CategoriesService {
                 }
                 continue; // Đã xử lý boolean, skip các xử lý khác
               }
-              
+
               // Kiểm tra nếu là string rỗng hoặc chỉ có khoảng trắng (cho các field khác)
               if (typeof rawValue === 'string' && rawValue.trim() === '') {
                 continue;
@@ -454,7 +454,7 @@ export class CategoriesService {
       // Batch processing: xử lý theo từng batch 1000 records
       const BATCH_SIZE = 1000;
       const queryRunner = this.dataSource.createQueryRunner();
-      
+
       try {
         await queryRunner.connect();
         await queryRunner.startTransaction();
@@ -467,12 +467,12 @@ export class CategoriesService {
           for (const { productData, rowNumber } of batch) {
             try {
               const existing = existingMap.get(productData.maVatTu!);
-              
+
               if (existing) {
                 // Xóa record cũ
                 productsToDelete.push(existing);
               }
-              
+
               // Tạo entity mới
               const product = this.productItemRepository.create(productData);
               productsToSave.push(product);
@@ -654,14 +654,14 @@ export class CategoriesService {
 
       // Merge cả fieldMappingVariants và fieldMapping vào normalizedMapping
       const normalizedMapping: Record<string, string> = {};
-      
+
       // Thêm từ fieldMappingVariants (đã có nhiều biến thể)
       for (const [fieldName, variants] of Object.entries(fieldMappingVariants)) {
         for (const variant of variants) {
           normalizedMapping[normalizeHeader(variant)] = fieldName;
         }
       }
-      
+
       // Thêm từ fieldMapping (cho backward compatibility)
       for (const [excelHeader, fieldName] of Object.entries(fieldMapping)) {
         const normalized = normalizeHeader(excelHeader);
@@ -674,10 +674,10 @@ export class CategoriesService {
       const normalizeBoolean = (value: any): boolean | undefined => {
         // Xử lý null/undefined/empty
         if (value === null || value === undefined) return undefined;
-        
+
         // Xử lý boolean trực tiếp
         if (typeof value === 'boolean') return value;
-        
+
         // Xử lý số: 1 = true, 0 = false, các số khác = undefined
         if (typeof value === 'number') {
           // Kiểm tra NaN và Infinity
@@ -686,30 +686,30 @@ export class CategoriesService {
           if (value === 0 || value === 0.0 || Math.abs(value) < 0.0001) return false;
           return undefined;
         }
-        
+
         // Xử lý string
         if (typeof value === 'string') {
           const str = value.trim();
-          
+
           // Nếu là string rỗng hoặc chỉ có khoảng trắng, return undefined
           if (str === '') return undefined;
-          
+
           // Bỏ qua các ký tự đặc biệt không hợp lệ (như $ü)
           // Chỉ xử lý nếu string chứa ký tự hợp lệ
           if (!/^[\d\s\.,\-+eE]+$/.test(str) && !/^(true|false|yes|no|có|không|x|y|n|1|0)$/i.test(str)) {
             // Nếu không phải số hoặc giá trị boolean text hợp lệ, return undefined
             return undefined;
           }
-          
+
           const lowerStr = str.toLowerCase();
-          
+
           // Thử parse thành số trước (để xử lý "1.0", " 1 ", "0", "0.0", etc.)
           const numValue = parseFloat(lowerStr);
           if (!isNaN(numValue) && isFinite(numValue)) {
             if (numValue === 1 || numValue === 1.0 || Math.abs(numValue - 1) < 0.0001) return true;
             if (numValue === 0 || numValue === 0.0 || Math.abs(numValue) < 0.0001) return false;
           }
-          
+
           // Xử lý các giá trị text
           if (lowerStr === 'true' || lowerStr === 'yes' || lowerStr === 'có' || lowerStr === 'x' || lowerStr === 'y' || lowerStr === '1') {
             return true;
@@ -718,7 +718,7 @@ export class CategoriesService {
             return false;
           }
         }
-        
+
         // Nếu không match, return undefined (không set giá trị)
         return undefined;
       };
@@ -753,15 +753,15 @@ export class CategoriesService {
           for (const actualHeader of actualHeaders) {
             const normalizedHeader = normalizeHeader(actualHeader);
             const fieldName = normalizedMapping[normalizedHeader];
-            
+
             if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
               const rawValue = row[actualHeader];
-              
+
               // Kiểm tra nếu là string rỗng hoặc chỉ có khoảng trắng
               if (typeof rawValue === 'string' && rawValue.trim() === '') {
                 continue; // Không set, để null
               }
-              
+
               // Kiểm tra nếu là số 0 hoặc string "0" (kể cả có khoảng trắng) → không set (để null)
               if (typeof rawValue === 'number' && (rawValue === 0 || rawValue === 0.0)) {
                 continue; // Không set, để null
@@ -772,7 +772,7 @@ export class CategoriesService {
                   continue; // Không set, để null
                 }
               }
-              
+
               // Lưu trực tiếp giá trị từ Excel (không normalize boolean)
               // Dữ liệu từ Excel trả ra gì thì viết vào như vậy
               if (rawValue !== null && rawValue !== undefined) {
@@ -801,7 +801,7 @@ export class CategoriesService {
             // Xóa record cũ và tạo mới thay vì cập nhật
             await this.promotionItemRepository.remove(existing);
           }
-          
+
           // Tạo mới (hoặc tạo lại sau khi xóa)
           const promotion = this.promotionItemRepository.create(promotionData);
           await this.promotionItemRepository.save(promotion);
@@ -963,7 +963,7 @@ export class CategoriesService {
           for (const actualHeader of actualHeaders) {
             const normalizedHeader = normalizeHeader(actualHeader);
             const fieldName = normalizedMapping[normalizedHeader];
-            
+
             if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
               const rawValue = row[actualHeader];
               if (typeof rawValue === 'string' && rawValue.trim() === '') {
@@ -998,7 +998,7 @@ export class CategoriesService {
             // Xóa record cũ và tạo mới thay vì cập nhật
             await this.warehouseItemRepository.remove(existing);
           }
-          
+
           // Tạo mới (hoặc tạo lại sau khi xóa)
           const warehouse = this.warehouseItemRepository.create(warehouseData);
           await this.warehouseItemRepository.save(warehouse);
@@ -1088,7 +1088,7 @@ export class CategoriesService {
     }
 
     const mapping = await this.warehouseCodeMappingRepository.findOne({
-      where: { 
+      where: {
         maCu: maCu.trim(),
         trangThai: 'active', // Chỉ lấy mapping đang active
       },
@@ -1205,7 +1205,7 @@ export class CategoriesService {
           for (const actualHeader of actualHeaders) {
             const normalizedHeader = normalizeHeader(actualHeader);
             const fieldName = normalizedMapping[normalizedHeader];
-            
+
             if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
               const rawValue = row[actualHeader];
               if (typeof rawValue === 'string' && rawValue.trim() === '') {
@@ -1250,7 +1250,7 @@ export class CategoriesService {
             // Xóa record cũ và tạo mới thay vì cập nhật
             await this.warehouseCodeMappingRepository.remove(existing);
           }
-          
+
           // Tạo mới (hoặc tạo lại sau khi xóa)
           const mapping = this.warehouseCodeMappingRepository.create(mappingData);
           await this.warehouseCodeMappingRepository.save(mapping);
@@ -1293,12 +1293,12 @@ export class CategoriesService {
       .skip((page - 1) * limit)
       .take(limit);
 
-      if (search) {
-        query.andWhere(
-          '(paymentMethod.code ILIKE :search OR paymentMethod.description ILIKE :search OR paymentMethod.documentType ILIKE :search OR paymentMethod.systemCode ILIKE :search OR paymentMethod.erp ILIKE :search OR paymentMethod.bankUnit ILIKE :search OR paymentMethod.externalId ILIKE :search)',
-          { search: `%${search}%` },
-        );
-      }
+    if (search) {
+      query.andWhere(
+        '(paymentMethod.code ILIKE :search OR paymentMethod.description ILIKE :search OR paymentMethod.documentType ILIKE :search OR paymentMethod.systemCode ILIKE :search OR paymentMethod.erp ILIKE :search OR paymentMethod.bankUnit ILIKE :search OR paymentMethod.externalId ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
 
     const [data, total] = await query.getManyAndCount();
 
@@ -1448,7 +1448,7 @@ export class CategoriesService {
           for (const actualHeader of actualHeaders) {
             const normalizedHeader = normalizeHeader(actualHeader);
             const fieldName = normalizedMapping[normalizedHeader];
-            
+
             if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
               const rawValue = row[actualHeader];
               if (typeof rawValue === 'string' && rawValue.trim() === '') {
@@ -1558,7 +1558,7 @@ export class CategoriesService {
 
     // Format response theo cấu trúc data_customer
     const sales = customer.sales || [];
-    
+
     // Map sales to match the expected format
     // Note: Some fields from the API response may not exist in Sale entity
     // We'll map available fields and set others to null
@@ -1566,7 +1566,7 @@ export class CategoriesService {
       // Format docmonth from docDate
       const docDate = sale.docDate ? new Date(sale.docDate) : null;
       const docmonth = docDate ? `${docDate.getFullYear()}/${String(docDate.getMonth() + 1).padStart(2, '0')}` : null;
-      
+
       return {
         qty: sale.qty,
         cat1: null, // Not in Sale entity
@@ -1678,24 +1678,43 @@ export class CategoriesService {
     }
   }
 
-  /**
-   * Lấy promotion từ Loyalty API theo code
-   */
-  async getPromotionFromLoyaltyAPI(code: string): Promise<any> {
+  // /**
+  //  * Lấy promotion từ Loyalty API theo code
+  //  */
+  // async getPromotionFromLoyaltyAPI(code: string): Promise<any> {
+  //   try {
+  //     const response = await firstValueFrom(
+  //       this.httpService.get(
+  //         `https://loyaltyapi.vmt.vn/promotions/item/code/${encodeURIComponent(code)}`,
+  //         {
+  //           headers: { accept: 'application/json' },
+  //         },
+  //       ),
+  //     );
+
+  //     const promotion = response?.data || null;
+  //     return promotion && promotion.code ? promotion : null;
+  //   } catch (error: any) {
+  //     this.logger.error(`Error fetching promotion ${code} from Loyalty API: ${error?.message || error}`);
+  //     throw error;
+  //   }
+  // }
+
+  async createPromotionFromLoyaltyAPI(promotionData: any): Promise<any> {
     try {
-      const response = await firstValueFrom(
-        this.httpService.get(
-          `https://loyaltyapi.vmt.vn/promotions/item/code/${encodeURIComponent(code)}`,
+      const promotion = await firstValueFrom(
+        this.httpService.post(
+          `https://loyaltyapi.vmt.vn/promotional`,
+          promotionData,
           {
             headers: { accept: 'application/json' },
           },
         ),
       );
 
-      const promotion = response?.data || null;
-      return promotion && promotion.code ? promotion : null;
+      return promotion.data.data;
     } catch (error: any) {
-      this.logger.error(`Error fetching promotion ${code} from Loyalty API: ${error?.message || error}`);
+      this.logger.error(`Error creating promotion from Loyalty API: ${error?.message || error}`);
       throw error;
     }
   }

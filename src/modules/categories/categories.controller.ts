@@ -447,9 +447,5 @@ export class CategoriesController {
     return this.categoriesService.getDepartmentFromLoyaltyAPI(branchcode);
   }
 
-  @Get('loyalty/promotions/item/code/:code')
-  async getPromotionByCode(@Param('code') code: string) {
-    return this.categoriesService.getPromotionFromLoyaltyAPI(code);
-  }
 }
 
