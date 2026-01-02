@@ -76,29 +76,31 @@ export class FastApiInvoiceFlowService {
       const cleanOrderData = FastApiPayloadHelper.buildCleanPayload(orderData, action);
       const finalPayload = FastApiPayloadHelper.removeEmptyFields(cleanOrderData);
       const dataPromotion = finalPayload.detail.filter(
-        (item) => item.ma_ck01
+        (item) => item.ma_ck01 || item.ma_ctkm_th
       );
       const uniquePromotions = new Map<string, any>();
 
       for (const item of dataPromotion) {
-        if (!uniquePromotions.has(item.ma_ck01)) {
-          uniquePromotions.set(item.ma_ck01, item);
+        if (!uniquePromotions.has(item.ma_ck01 || item.ma_ctkm_th)) {
+          uniquePromotions.set(item.ma_ck01 || item.ma_ctkm_th, item)
         }
       }
 
       for (const item of uniquePromotions.values()) {
+        // NOTE: ma_bp thay bằng dvcs theo yêu cầu BA
         const dataPayload = {
-          ma_ctkm: item.ma_ck01,
-          ten_ctkm: item.ma_ck01,
-          ma_vt: item.ma_vt,
-          ma_bp: item.ma_bp,
+          ma_ctkm: item.ma_ck01 || item.ma_ctkm_th,
+          ten_ctkm: item.ma_ck01 || item.ma_ctkm_th,
+          ma_phi: item.ma_phi,
+          tk_cpkm: item.tk_chi_phi,
+          tk_ck: item.tk_chiet_khau,
         };
 
         const resultPromotion = await this.callPromotion(dataPayload);
 
         if (resultPromotion.code !== 1) {
           throw new BadRequestException(
-            `Gọi promotion thất bại: ${item.ma_ck01}`,
+            `Gọi promotion thất bại: ${item.ma_ck01 || item.ma_ctkm_th}`,
           );
         }
       }

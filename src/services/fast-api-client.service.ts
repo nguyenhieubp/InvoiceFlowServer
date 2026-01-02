@@ -188,8 +188,9 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
   async callPromotion(promotionData: {
     ma_ctkm: string;
     ten_ctkm: string;
-    ma_vt: string;
-    ma_bp: string;
+    ma_phi: string;
+    tk_cpkm: string;
+    tk_ck: string;
   }): Promise<any> {
     try {
       const token = await this.getToken();
@@ -197,10 +198,16 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
         throw new Error('Không thể lấy token đăng nhập');
       }
 
+      const result = Object.fromEntries(
+        Object.entries(promotionData).filter(
+          ([_, value]) => value !== undefined && value !== null
+        )
+      );
+
       const response = await firstValueFrom(
         this.httpService.post(
           `${this.baseUrl}/Promotions`,
-          promotionData,
+          result,
           {
             headers: {
               'Content-Type': 'application/json',
