@@ -6464,7 +6464,7 @@ export class SalesService {
         // Ưu tiên: dòng qty > 0 (người nhận) trước, sau đó mới đến dòng qty < 0 (người chuyển)
         // Vì thông thường ma_kh header sẽ là của người nhận (người sở hữu thẻ mới)
         let saleWithIssuePartnerCode = orderData.sales.find((s: any) =>
-          Number(s.qty || 0) > 0 && s.issuePartnerCode
+          Number(s.qty || 0) < 0 && s.issuePartnerCode
         );
 
         // Nếu không tìm thấy dòng qty > 0, tìm dòng qty < 0
