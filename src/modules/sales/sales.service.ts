@@ -6151,7 +6151,7 @@ export class SalesService {
         // Nếu là hàng tặng, không set ma_ck01 (Mã CTKM mua hàng giảm giá)
         // Nếu là đơn "03. Đổi điểm": set ma_ck01 = "TT DIEM DO" và ck01_nt = 0
         // Nếu không phải hàng tặng và không phải "03. Đổi điểm", set ma_ck01 từ promCode như cũ
-        let maCk01 = sale?.muaHangGiamGiaDisplay || '';
+        let maCk01 = sale?.muaHangGiamGiaDisplay;
         // let maCk01 = isTangHang ? '' : (promCode ? promCode : '');
         if (isDoiDiem) {
           if (sale.cucThueDisplay === 'TTM' || sale.cucThueDisplay === 'AMA' || sale.cucThueDisplay === 'TSG') {
@@ -6166,10 +6166,12 @@ export class SalesService {
             maCtkmTangHang = 'LHV.KMDIEM';
           }
           ck01_nt = 0;
-        } else if (!isDoiDiem) {
-          maCtkmTangHang = '';
-          ck01_nt = 0;
-        }
+        } 
+        // else if (!isDoiDiem) {
+        //   maCtkmTangHang = '';
+        //   ck01_nt = 0;
+        // }
+   
 
         // Kiểm tra nếu ma_ctkm_th = "TT DAU TU" thì không set km_yn = 1
         const isTTDauTu = maCtkmTangHang && maCtkmTangHang.trim() === 'TT DAU TU';
