@@ -5738,7 +5738,7 @@ export class SalesService {
         let ck04_nt = toNumber(sale.chietKhauThanhToanCoupon || sale.chietKhau09, 0);
         // ma_ck15: Voucher DP1 dự phòng - Ưu tiên kiểm tra trước
         let ck15_nt_voucherDp1 = toNumber(sale.chietKhauVoucherDp1, 0);
-        const paidByVoucher = toNumber(sale.chietKhauThanhToanVoucher || sale.paid_by_voucher_ecode_ecoin_bp, 0);
+        const paidByVoucher = toNumber(sale.chietKhauThanhToanVoucher, 0);
 
         // Kiểm tra các điều kiện để xác định voucher dự phòng
         const pkgCode = (sale as any).pkg_code || (sale as any).pkgCode || null;
