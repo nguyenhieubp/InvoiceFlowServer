@@ -207,16 +207,16 @@ export class FastApiInvoiceFlowService {
       // Validate từng mã CTKM với Loyalty API (chỉ check phần trước dấu "-")
       for (const sale of invoiceData.detail) {
         const promotionData = {
-          ma_ctkm: sale.ma_ck01 || sale.ma_ctkm_th ||'',
-          ten_ctkm: sale.ma_ck01 || sale.ma_ctkm_th ||'',
+          ma_ctkm: sale.ma_ck01 || sale.ma_ctkm_th || '',
+          ten_ctkm: sale.ma_ck01 || sale.ma_ctkm_th || '',
           ma_phi: sale.ma_phi || '',
           tk_cpkm: sale.tk_chi_phi || '',
           tk_ck: sale.tk_chiet_khau || '',
         };
-        if(sale.ma_ck01 || sale.ma_ctkm_th) {
-        const resultPromotion = await this.categoriesService.createPromotionFromLoyaltyAPI(promotionData);
-        if (resultPromotion.status !== 1) {
-          throw new BadRequestException(
+        if (sale.ma_ck01 || sale.ma_ctkm_th) {
+          const resultPromotion = await this.categoriesService.createPromotionFromLoyaltyAPI(promotionData);
+          if (resultPromotion.status !== 1) {
+            throw new BadRequestException(
               `Tạo promotion thất bại: ${sale.ma_ck01 || sale.ma_ctkm_th}`,
             );
           }

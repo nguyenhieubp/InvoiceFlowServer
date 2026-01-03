@@ -111,41 +111,41 @@ export class SalesService {
     const isGift = sale.product.productType === 'GIFT';
     const trackInventory = this.getTrackInventory(sale);
 
-    if(brand === 'yaman') {
-      if(productType === 'I') {
+    if (brand === 'yaman') {
+      if (productType === 'I') {
         return 'YVC.HB';
       }
-      if(productType === 'S') {
+      if (productType === 'S') {
         return 'YVC.DV';
       }
     }
-    if(brand === 'facialbar') {
-      if(productType === 'I') {
+    if (brand === 'facialbar') {
+      if (productType === 'I') {
         return 'FBV TT VCDV';
       }
-      if(productType === 'S') {
+      if (productType === 'S') {
         return 'FBV TT VCHH';
       }
     }
-    if(brand === 'labhair') {
-      if(productType === 'I') {
-        if(isGift) {
+    if (brand === 'labhair') {
+      if (productType === 'I') {
+        if (isGift) {
           return 'LHVTT.VCKM';
         }
         return 'LHVTT.VCHB';
       }
-      if(productType === 'S') {
+      if (productType === 'S') {
         return 'LHVTT.VCDV';
       }
     }
-    if(brand === 'menard') {
-      if(productType === 'I') {
-        if(isGift) {
+    if (brand === 'menard') {
+      if (productType === 'I') {
+        if (isGift) {
           return 'VC KM';
         }
         return 'VC HB';
       }
-      if(productType === 'S') {
+      if (productType === 'S') {
         return 'VC DV';
       }
     }
@@ -1077,7 +1077,7 @@ export class SalesService {
           product: loyaltyProduct,
         };
         const maCk05Value = this.calculateMaCk05(saleForVoucher);
-          thanhToanVoucherDisplay = maCk05Value;
+        thanhToanVoucherDisplay = maCk05Value;
         chietKhauThanhToanVoucherDisplay = paidByVoucher;
       }
     }
@@ -1225,7 +1225,7 @@ export class SalesService {
     const isKmVip = sale.grade_discamt;
     // Lấy productType từ sale hoặc product
     const productType = sale.productType || null;
-    const isTangSP = loyaltyProduct.productType;
+    const isTangSP = loyaltyProduct.productType || null;
     const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
     // Kiểm tra "Chiết khấu mua hàng giảm giá" có giá trị không
     const hasChietKhauMuaHangGiamGia = other_discamt != null && other_discamt !== 0;
@@ -3971,11 +3971,14 @@ export class SalesService {
   /**
    * Tạo hóa đơn qua Fast API từ đơn hàng
    */
-  async createInvoiceViaFastApi(docCode: string, forceRetry: boolean = false): Promise<any> {
-
+  async createInvoiceViaFastApi(
+    docCode: string,
+    forceRetry: boolean = false,
+  ): Promise<any> {
     try {
-      // Kiểm tra xem đơn hàng đã có trong bảng kê hóa đơn chưa (đã tạo thành công)
-      // Nếu forceRetry = true, bỏ qua check này để cho phép retry
+      // ============================================
+      // 1. CHECK INVOICE ĐÃ TẠO
+      // ============================================
       if (!forceRetry) {
         const existingInvoice = await this.fastApiInvoiceRepository.findOne({
           where: { docCode },
@@ -3985,31 +3988,50 @@ export class SalesService {
           return {
             success: true,
             message: `Đơn hàng ${docCode} đã được tạo hóa đơn thành công trước đó`,
-            result: existingInvoice.fastApiResponse ? JSON.parse(existingInvoice.fastApiResponse) : null,
+            result: existingInvoice.fastApiResponse
+              ? JSON.parse(existingInvoice.fastApiResponse)
+              : null,
             alreadyExists: true,
           };
         }
       }
 
-      // Lấy thông tin đơn hàng
+      // ============================================
+      // 2. LẤY DỮ LIỆU ĐƠN HÀNG
+      // ============================================
       const orderData = await this.findByOrderCode(docCode);
 
       if (!orderData || !orderData.sales || orderData.sales.length === 0) {
-        throw new NotFoundException(`Order ${docCode} not found or has no sales`);
+        throw new NotFoundException(
+          `Order ${docCode} not found or has no sales`,
+        );
       }
 
       // ============================================
-      // XỬ LÝ ĐƠN CÓ ĐUÔI _X
+      // 3. NORMALIZE DOC CODE
       // ============================================
-      // Nếu đơn có đuôi _X → xử lý với action = 1
-      if (this.hasUnderscoreX(docCode)) {
-        return await this.handleSaleOrderWithUnderscoreX(orderData, docCode);
+      const hasX = /_X$/.test(docCode);
+      const normalizedDocCode = docCode.replace(/_X$/, '');
+
+      // ============================================
+      // 4. ROUTING LOGIC (KHÔNG FIX CỨNG FORMAT)
+      // ============================================
+
+      // Có _X → xử lý theo flow _X
+      if (hasX) {
+        return await this.handleSaleOrderWithUnderscoreX(
+          orderData,
+          normalizedDocCode,
+          1,
+        );
       }
 
-      // Xử lý đơn gốc (không có _X)
+      // Không có _X → xử lý bình thường
       return await this.processSingleOrder(docCode, forceRetry);
     } catch (error: any) {
-      this.logger.error(`Lỗi khi tạo hóa đơn cho ${docCode}: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi tạo hóa đơn cho ${docCode}: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -5771,7 +5793,7 @@ export class SalesService {
           const saleWithCustomer = {
             ...sale,
             customer: sale.customer || orderData.customer,
-            brand: sale.customer?.brand || orderData.customer?.brand  || ''
+            brand: sale.customer?.brand || orderData.customer?.brand || ''
           };
           maCk05Value = this.calculateMaCk05(saleWithCustomer);
           formattedMaCk05 = maCk05Value;
@@ -6664,19 +6686,19 @@ export class SalesService {
       // Tìm hóa đơn gốc từ stock transfer hoặc sale
       // Nếu có stock transfer, có thể lấy từ soCode hoặc docCode
       if (stockTransfers && stockTransfers.length > 0) {
-        const firstStockTransfer = stockTransfers[0];
+        const firstStockTransfer = stockTransfers.find((stockTransfer) => stockTransfer.doctype === 'SALE_RETURN');
         // soCode thường là mã đơn hàng gốc
-        soCt0 = firstStockTransfer.soCode || orderData.docCode || null;
+        soCt0 = firstStockTransfer?.soCode || orderData.docCode || null;
         // Ngày có thể lấy từ stock transfer hoặc orderData
-        if (firstStockTransfer.transDate) {
-          ngayCt0 = formatDateISO(firstStockTransfer.transDate);
-        } else if (orderData.docDate) {
-          ngayCt0 = formatDateISO(orderData.docDate);
+        if (firstStockTransfer?.transDate) {
+          ngayCt0 = formatDateISO(firstStockTransfer?.transDate);
+        } else if (orderData?.docDate) {
+          ngayCt0 = formatDateISO(orderData?.docDate);
         }
       } else {
         // Nếu không có stock transfer, lấy từ orderData
         soCt0 = orderData.docCode || null;
-        if (orderData.docDate) {
+        if (orderData?.docDate) {
           ngayCt0 = formatDateISO(orderData.docDate);
         }
       }
@@ -6707,71 +6729,89 @@ export class SalesService {
       // Lấy so_seri
       const soSeri = firstSale?.kyHieu || firstSale?.branchCode || orderData.branchCode || 'DEFAULT';
 
+      // Gom số lượng trả lại theo mã vật tư
+      const stockQtyMap = new Map<string, number>();
+
+      (stockTransfers || [])
+        .filter(st => st.doctype === 'SALE_RETURN')
+        .forEach(st => {
+          const maVt = st.materialCode;
+          const qty = Number(st.qty || 0);
+
+          if (!maVt || qty === 0) return;
+
+          stockQtyMap.set(
+            maVt,
+            (stockQtyMap.get(maVt) || 0) + qty,
+          );
+        });
+
       // Build detail từ invoiceData.detail, chỉ giữ các field cần thiết cho salesReturn
-      const detail = (invoiceData.detail || []).map((item: any, index: number) => {
-        // Chỉ thêm tk_ck nếu có giá trị (không phải null/undefined/empty)
-        const detailItem: any = {
-          // Field bắt buộc
-          ma_vt: item.ma_vt,
-          dvt: item.dvt,
-          ma_kho: item.ma_kho,
-          so_luong: item.so_luong,
-          gia_ban: item.gia_ban,
-          tien_hang: item.tien_hang,
-          // Field tài khoản
-          tk_dt: item.tk_dt || '511', // Tài khoản trả lại (mặc định 511)
-          tk_gv: item.tk_gv || '632', // Tài khoản giá vốn (mặc định 632)
-          // Field khuyến mãi
-          is_reward_line: item.is_reward_line || 0,
-          is_bundle_reward_line: item.is_bundle_reward_line || 0,
-          km_yn: item.km_yn || 0,
-          // Field chiết khấu (ck01_nt đến ck22_nt)
-          ck01_nt: item.ck01_nt || 0,
-          ck02_nt: item.ck02_nt || 0,
-          ck03_nt: item.ck03_nt || 0,
-          ck04_nt: item.ck04_nt || 0,
-          ck05_nt: item.ck05_nt || 0,
-          ck06_nt: item.ck06_nt || 0,
-          ck07_nt: item.ck07_nt || 0,
-          ck08_nt: item.ck08_nt || 0,
-          ck09_nt: item.ck09_nt || 0,
-          ck10_nt: item.ck10_nt || 0,
-          ck11_nt: item.ck11_nt || 0,
-          ck12_nt: item.ck12_nt || 0,
-          ck13_nt: item.ck13_nt || 0,
-          ck14_nt: item.ck14_nt || 0,
-          ck15_nt: item.ck15_nt || 0,
-          ck16_nt: item.ck16_nt || 0,
-          ck17_nt: item.ck17_nt || 0,
-          ck18_nt: item.ck18_nt || 0,
-          ck19_nt: item.ck19_nt || 0,
-          ck20_nt: item.ck20_nt || 0,
-          ck21_nt: item.ck21_nt || 0,
-          ck22_nt: item.ck22_nt || 0,
-          // Field thuế
-          dt_tg_nt: item.dt_tg_nt || 0,
-          ma_thue: item.ma_thue || '00',
-          thue_suat: item.thue_suat || 0,
-          tien_thue: item.tien_thue || 0,
-          // Field bộ phận
-          ma_bp: item.ma_bp,
-          // Field loại giao dịch (cần thiết cho salesReturn)
-          loai_gd: item.loai_gd || '01',
-          // Field dòng (cần thiết cho salesReturn)
-          dong: index + 1,
-          // Field id gốc (cần thiết cho salesReturn)
-          id_goc_so: item.id_goc_so || 0,
-          // Field ngày gốc (cần thiết cho salesReturn)
-          id_goc_ngay: item.id_goc_ngay || formatDateISO(new Date()),
-        };
+      const detail = (invoiceData.detail || [])
+        .map((item: any, index: number) => {
+          const soLuongFromStock = stockQtyMap.get(item.ma_vt) || 0;
 
-        // Chỉ thêm tk_ck nếu có giá trị (không phải null/undefined/empty)
-        if (item.tk_ck && item.tk_ck.trim() !== '') {
-          detailItem.tk_ck = item.tk_ck;
-        }
+          const detailItem: any = {
+            // Field bắt buộc
+            ma_vt: item.ma_vt,
+            dvt: item.dvt,
+            ma_kho: item.ma_kho,
 
-        return detailItem;
-      });
+            so_luong: soLuongFromStock,
+
+            gia_ban: item.gia_ban,
+            tien_hang: item.gia_ban * soLuongFromStock,
+
+            // Field tài khoản
+            tk_dt: item.tk_dt || '511',
+            tk_gv: item.tk_gv || '632',
+
+            // Field khuyến mãi
+            is_reward_line: item.is_reward_line || 0,
+            is_bundle_reward_line: item.is_bundle_reward_line || 0,
+            km_yn: item.km_yn || 0,
+
+            // CK
+            ck01_nt: item.ck01_nt || 0,
+            ck02_nt: item.ck02_nt || 0,
+            ck03_nt: item.ck03_nt || 0,
+            ck04_nt: item.ck04_nt || 0,
+            ck05_nt: item.ck05_nt || 0,
+            ck06_nt: item.ck06_nt || 0,
+            ck07_nt: item.ck07_nt || 0,
+            ck08_nt: item.ck08_nt || 0,
+            ck09_nt: item.ck09_nt || 0,
+            ck10_nt: item.ck10_nt || 0,
+            ck11_nt: item.ck11_nt || 0,
+            ck12_nt: item.ck12_nt || 0,
+            ck13_nt: item.ck13_nt || 0,
+            ck14_nt: item.ck14_nt || 0,
+            ck15_nt: item.ck15_nt || 0,
+            ck16_nt: item.ck16_nt || 0,
+            ck17_nt: item.ck17_nt || 0,
+            ck18_nt: item.ck18_nt || 0,
+            ck19_nt: item.ck19_nt || 0,
+            ck20_nt: item.ck20_nt || 0,
+            ck21_nt: item.ck21_nt || 0,
+            ck22_nt: item.ck22_nt || 0,
+
+            // Thuế
+            dt_tg_nt: item.dt_tg_nt || 0,
+            ma_thue: item.ma_thue || '00',
+            thue_suat: item.thue_suat || 0,
+            tien_thue: item.tien_thue || 0,
+
+            ma_bp: item.ma_bp,
+            loai_gd: item.loai_gd || '01',
+            dong: index + 1,
+            id_goc_so: item.id_goc_so || 0,
+            id_goc_ngay: item.id_goc_ngay || formatDateISO(new Date()),
+          };
+
+          return detailItem;
+        })
+        .filter(Boolean); // ❗ bỏ các dòng không có stock transfer
+
 
       // Build payload, chỉ thêm các field không null
       const salesReturnPayload: any = {
@@ -6913,19 +6953,23 @@ export class SalesService {
    * Gọi API salesOrder với action: 1
    * Cả đơn có _X và đơn gốc (bỏ _X) đều sẽ có action = 1
    */
-  private async handleSaleOrderWithUnderscoreX(orderData: any, docCode: string): Promise<any> {
+  private async handleSaleOrderWithUnderscoreX(orderData: any, docCode: string, action: number): Promise<any> {
     // Đơn có đuôi _X → Gọi API salesOrder với action: 1
     const invoiceData = await this.buildFastApiInvoiceData(orderData);
+    function removeSuffixX(code: string): string {
+      return code.endsWith('_X') ? code.slice(0, -2) : code;
+    }
+    const docCodeWithoutX = removeSuffixX(docCode);
 
     // Gọi API salesOrder với action = 1 (không cần tạo/cập nhật customer)
     let result: any;
-    let data = { ...invoiceData, ma_kho: orderData?.maKho || '' }
+    let data = { ...invoiceData, dien_giai: docCodeWithoutX, so_ct: docCodeWithoutX, ma_kho: orderData?.maKho || '' }
     try {
       result = await this.fastApiInvoiceFlowService.createSalesOrder({
         ...data,
         customer: orderData.customer,
         ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-      }, 1); // action = 1 cho đơn hàng có đuôi _X
+      }, action); // action = 1 cho đơn hàng có đuôi _X
 
       // Lưu vào bảng kê hóa đơn
       const responseStatus = Array.isArray(result) && result.length > 0 && result[0].status === 1 ? 1 : 0;
@@ -7082,7 +7126,8 @@ export class SalesService {
     // Case 1: Có stock transfer → Gọi API salesReturn
     if (stockTransfers && stockTransfers.length > 0) {
       // Build salesReturn data
-      const salesReturnData = await this.buildSalesReturnData(orderData, stockTransfers);
+      const salesReturnStockTransfers = stockTransfers.filter((stockTransfer) => stockTransfer.doctype === 'SALE_RETURN');
+      const salesReturnData = await this.buildSalesReturnData(orderData, salesReturnStockTransfers);
 
       // Gọi API salesReturn (không cần tạo/cập nhật customer)
       let result: any;
