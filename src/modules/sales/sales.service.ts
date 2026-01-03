@@ -108,7 +108,7 @@ export class SalesService {
 
     // Lấy productType và trackInventory từ sale hoặc product
     const productType = this.getProductType(sale);
-    const isGift = sale.product.producttype === 'GIFT';
+    const isGift = sale.product.productType === 'GIFT';
     const trackInventory = this.getTrackInventory(sale);
 
     if(brand === 'yaman') {
@@ -1047,25 +1047,23 @@ export class SalesService {
       thanhToanVoucherDisplay = null;
       chietKhauThanhToanVoucherDisplay = null;
     } else if (!hasEcoin(order)) {
-      const chietKhauVoucherDp1 = Number(sale.chietKhauVoucherDp1 ?? 0) || 0;
       const pkgCode = sale.pkg_code || sale.pkgCode || null;
       const promCode = sale.promCode || null;
       const soSource = sale.order_source || sale.so_source || null;
       const paidByVoucher = Number(sale.paid_by_voucher_ecode_ecoin_bp ?? sale.chietKhauThanhToanVoucher ?? 0) || 0;
       const isVoucherDuPhongValue = isVoucherDuPhong(brand, soSource, promCode, pkgCode);
 
-      if (chietKhauVoucherDp1 > 0 && !isVoucherDuPhongValue) {
+      if (sale.paid_by_voucher_ecode_ecoin_bp > 0 && !isVoucherDuPhongValue) {
         // Chuyển sang voucher chính
         const saleForVoucher = {
           ...sale,
-          paid_by_voucher_ecode_ecoin_bp: chietKhauVoucherDp1,
+          paid_by_voucher_ecode_ecoin_bp: sale.paid_by_voucher_ecode_ecoin_bp,
           customer: order?.customer || sale.customer,
           brand: order?.customer?.brand || order?.brand || sale?.customer?.brand || sale?.brand,
           product: loyaltyProduct,
         };
         const maCk05Value = this.calculateMaCk05(saleForVoucher);
-        thanhToanVoucherDisplay = this.formatVoucherCode(maCk05Value);
-        chietKhauThanhToanVoucherDisplay = chietKhauVoucherDp1;
+        thanhToanVoucherDisplay = maCk05Value;
       } else if (isVoucherDuPhongValue && paidByVoucher > 0) {
         // Voucher dự phòng - không hiển thị
         thanhToanVoucherDisplay = null;
@@ -1079,7 +1077,7 @@ export class SalesService {
           product: loyaltyProduct,
         };
         const maCk05Value = this.calculateMaCk05(saleForVoucher);
-        thanhToanVoucherDisplay = this.formatVoucherCode(maCk05Value);
+          thanhToanVoucherDisplay = maCk05Value;
         chietKhauThanhToanVoucherDisplay = paidByVoucher;
       }
     }
