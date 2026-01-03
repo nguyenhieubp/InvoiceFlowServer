@@ -132,10 +132,10 @@ export class SalesService {
         if(isGift) {
           return 'LHVTT.VCKM';
         }
-        return 'LHVTT.VCDV';
+        return 'LHVTT.VCHB';
       }
       if(productType === 'S') {
-        return 'LHVTT.VCHB';
+        return 'LHVTT.VCDV';
       }
     }
     if(brand === 'menard') {
@@ -143,10 +143,10 @@ export class SalesService {
         if(isGift) {
           return 'VC KM';
         }
-        return 'VC DV';
+        return 'VC HB';
       }
       if(productType === 'S') {
-        return 'VC HB';
+        return 'VC DV';
       }
     }
     return null;
