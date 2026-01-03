@@ -104,75 +104,52 @@ export class SalesService {
       return null;
     }
 
-    let cucThueValue = sale.cucThue || '';
-    if (cucThueValue.includes('F3')) {
-      cucThueValue = 'FBV';
-    }
+    let brand = sale.brand || '';
 
     // Lấy productType và trackInventory từ sale hoặc product
     const productType = this.getProductType(sale);
+    const isGift = sale.product.producttype === 'GIFT';
     const trackInventory = this.getTrackInventory(sale);
 
-    // Sử dụng logic VC mới dựa trên productType và trackInventory
-    const vcType = calculateVCType(productType, trackInventory);
-
-    let vcLabel: string | null = null;
-
-    // Nếu có VC type từ logic mới, dùng nó
-    if (vcType) {
-      vcLabel = vcType;
-    } else {
-      // Fallback: Logic cũ dựa trên cat1 và itemCode (chỉ khi có paid_by_voucher)
-      if (paidByVoucher <= 0) {
-        return null;
+    if(brand === 'yaman') {
+      if(productType === 'I') {
+        return 'YVC.HB';
       }
-
-      const cat1Value = sale.cat1 || sale.catcode1 || sale.product?.cat1 || sale.product?.catcode1 || '';
-      const itemCodeValue = sale.itemCode || '';
-
-      // Tập hợp các nhãn sẽ hiển thị
-      const labels: string[] = [];
-
-      // VCDV: Nếu cat1 = "CHANDO" hoặc itemcode bắt đầu bằng "S" hoặc "H"
-      if (cat1Value === 'CHANDO' || itemCodeValue.toUpperCase().startsWith('S') || itemCodeValue.toUpperCase().startsWith('H')) {
-        labels.push('VCDV');
+      if(productType === 'S') {
+        return 'YVC.DV';
       }
-
-      // VCHB: Nếu cat1 = "FACIALBAR" hoặc itemcode bắt đầu bằng "F" hoặc "V"
-      if (cat1Value === 'FACIALBAR' || itemCodeValue.toUpperCase().startsWith('F') || itemCodeValue.toUpperCase().startsWith('V')) {
-        labels.push('VCHB');
+    }
+    if(brand === 'facialbar') {
+      if(productType === 'I') {
+        return 'FBV TT VCDV';
       }
-
-      vcLabel = labels.length > 0 ? labels.join(' ') : null;
-    }
-
-    // Nếu không có label, trả về null
-    if (!vcLabel) {
-      return null;
-    }
-
-    // Normalize "VC KM" thành "VCKM" và "VC HB" thành "VC HB" (giữ nguyên để xử lý sau cho F3)
-    let normalizedVcLabel = vcLabel;
-    // Normalize "VC KM" thành "VCKM" cho tất cả các brand
-    if (normalizedVcLabel.includes('VC KM')) {
-      normalizedVcLabel = normalizedVcLabel.replace(/VC\s+KM/g, 'VCKM');
-    }
-
-    // Với F3, thêm prefix "FBV TT" trước VC label
-    // Và chuyển tất cả VCHB hoặc VCHH thành VCHH
-    if (cucThueValue === 'FBV') {
-      let finalVcLabel = normalizedVcLabel;
-      // Xử lý cả "VCHB" và "VC HB" (có khoảng trắng) - chuyển thành VCHH
-      if (finalVcLabel.includes('VCHB') || finalVcLabel.includes('VC HB')) {
-        // Thay thế "VC HB" trước, sau đó thay "VCHB"
-        finalVcLabel = finalVcLabel.replace(/VC\s+HB/g, 'VCHH');
-        finalVcLabel = finalVcLabel.replace(/VCHB/g, 'VCHH');
+      if(productType === 'S') {
+        return 'FBV TT VCHH';
       }
-      // Nếu có VCHH thì giữ nguyên (không cần thay thế)
-      return `FBV TT ${finalVcLabel}`;
     }
-
-    return normalizedVcLabel;
+    if(brand === 'labhair') {
+      if(productType === 'I') {
+        if(isGift) {
+          return 'LHVTT.VCKM';
+        }
+        return 'LHVTT.VCDV';
+      }
+      if(productType === 'S') {
+        return 'LHVTT.VCHB';
+      }
+    }
+    if(brand === 'menard') {
+      if(productType === 'I') {
+        if(isGift) {
+          return 'VC KM';
+        }
+        return 'VC DV';
+      }
+      if(productType === 'S') {
+        return 'VC HB';
+      }
+    }
+    return null;
   }
 
   /**
@@ -5738,7 +5715,7 @@ export class SalesService {
         let ck04_nt = toNumber(sale.chietKhauThanhToanCoupon || sale.chietKhau09, 0);
         // ma_ck15: Voucher DP1 dự phòng - Ưu tiên kiểm tra trước
         let ck15_nt_voucherDp1 = toNumber(sale.chietKhauVoucherDp1, 0);
-        const paidByVoucher = toNumber(sale.chietKhauThanhToanVoucher, 0);
+        const paidByVoucher = toNumber(sale.chietKhauThanhToanVoucher || sale.paid_by_voucher_ecode_ecoin_bp, 0);
 
         // Kiểm tra các điều kiện để xác định voucher dự phòng
         const pkgCode = (sale as any).pkg_code || (sale as any).pkgCode || null;
@@ -5771,23 +5748,13 @@ export class SalesService {
         // → Chuyển sang voucher chính (dữ liệu cũ đã sync với logic cũ)
         // Lưu giá trị để chuyển sang voucher chính
         let voucherAmountToMove = 0;
-        if (ck15_nt_voucherDp1 > 0 && !isVoucherDuPhong) {
-          voucherAmountToMove = ck15_nt_voucherDp1;
-          ck15_nt_voucherDp1 = 0;
-        }
-
-        // Fallback: Nếu chietKhauVoucherDp1 = 0 nhưng thỏa điều kiện voucher dự phòng
-        // → Đây là dữ liệu cũ chưa sync, coi là voucher dự phòng
-        if (ck15_nt_voucherDp1 === 0 && paidByVoucher > 0 && isVoucherDuPhong) {
-          ck15_nt_voucherDp1 = paidByVoucher;
-        }
 
         // ma_ck05: Thanh toán voucher chính
         // Chỉ map vào ck05_nt nếu không có voucher dự phòng (ck15_nt_voucherDp1 = 0)
         // Nếu có voucherAmountToMove (chuyển từ DP sang chính), dùng giá trị đó
         // Nếu không, dùng paidByVoucher
         // Nếu là đơn "03. Đổi điểm": bỏ ma_ck05 và ck05_nt (set = 0 và '')
-        let ck05_nt = ck15_nt_voucherDp1 > 0 ? 0 : (voucherAmountToMove > 0 ? voucherAmountToMove : paidByVoucher);
+        let ck05_nt = paidByVoucher > 0 ? paidByVoucher : 0;
         let maCk05Value: string | null = null;
         let formattedMaCk05: string | null = null;
 
@@ -5806,10 +5773,10 @@ export class SalesService {
           const saleWithCustomer = {
             ...sale,
             customer: sale.customer || orderData.customer,
-            brand: sale.customer?.brand || orderData.customer?.brand || sale?.brand || orderData?.brand,
+            brand: sale.customer?.brand || orderData.customer?.brand  || ''
           };
           maCk05Value = this.calculateMaCk05(saleWithCustomer);
-          formattedMaCk05 = this.formatVoucherCode(maCk05Value);
+          formattedMaCk05 = maCk05Value;
         }
         const ck06_nt = 0; // Dự phòng 1 - không sử dụng (không phân bổ vì = 0)
         let ck07_nt = toNumber(sale.chietKhauVoucherDp2, 0);
