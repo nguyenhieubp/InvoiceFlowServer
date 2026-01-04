@@ -6197,6 +6197,7 @@ export class SalesService {
         const hasMaCtkm = (maCk01 && maCk01.trim() !== '') ||
           (sale.maCk01 && sale.maCk01.trim() !== '');
 
+        let converCodeForProductType = sale.producttype;
 
         if (isDoiVo || isDoiDiem || isDauTu) {
           // Với đơn "Đổi vỏ", "Đổi điểm", "Đầu tư":
@@ -6216,26 +6217,26 @@ export class SalesService {
           if (tkChietKhau === null) {
             tkChietKhau = sale.tkChietKhau || null;
           }
-        } else if (isKmVip > 0 && productTypeUpper === 'I') {
+        } else if (isKmVip > 0 && converCodeForProductType === 'I') {
           tkChietKhau = '521113';
-        } else if (isKmVip > 0 && productTypeUpper === 'S') {
+        } else if (isKmVip > 0 && converCodeForProductType === 'S') {
           tkChietKhau = '521132';
         }
         else if (hasVoucher > 0 && isTangSP === 'GIFT') {
           tkChietKhau = '5211631';
         }
-        else if (hasVoucher > 0 && productTypeUpper === 'I') {
+        else if (hasVoucher > 0 && converCodeForProductType === 'I') {
           tkChietKhau = '5211611';
 
-        } else if (hasVoucher > 0 && productTypeUpper === 'S') {
+        } else if (hasVoucher > 0 && converCodeForProductType === 'S') {
           tkChietKhau = '5211621';
         }
-        else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
+        else if (hasChietKhauMuaHangGiamGia && converCodeForProductType === 'S') {
           // Với đơn có "Chiết khấu mua hàng giảm giá" có giá trị và loại hàng hóa = S (Dịch vụ):
           tkChietKhau = '521131';
           tkChiPhi = sale.tkChiPhi || null;
           maPhi = sale.maPhi || null;
-        } else if (isThuong && hasChietKhauMuaHangGiamGia && productTypeUpper === 'I') {
+        } else if (isThuong && hasChietKhauMuaHangGiamGia && converCodeForProductType === 'I') {
           // Với đơn "Thường" có giá trị tiền tại cột "Chiết khấu mua hàng giảm giá" và loại hàng hóa = I (Hàng hóa):
           tkChietKhau = '521111';
           tkChiPhi = sale.tkChiPhi || null;
@@ -6244,9 +6245,9 @@ export class SalesService {
           // Với đơn "Thường" có mã CTKM:
           // - Loại S (Dịch vụ): TK Chiết khấu = 521131
           // - Loại I (Hàng hóa): TK Chiết khấu = 521111
-          if (productTypeUpper === 'S') {
+          if (converCodeForProductType === 'S') {
             tkChietKhau = '521131';
-          } else if (productTypeUpper === 'I') {
+          } else if (converCodeForProductType === 'I') {
             tkChietKhau = '521111';
           } else {
             // Nếu không xác định được loại, mặc định là hàng hóa
@@ -6261,72 +6262,6 @@ export class SalesService {
           maPhi = sale.maPhi || null;
         }
 
-
-        // if (isDoiVo || isDoiDiem || isDauTu) {
-        //   // Với đơn "Đổi vỏ", "Đổi điểm", "Đầu tư":
-        //   tkChietKhau = null; // Để rỗng
-        //   tkChiPhi = '64191';
-        //   maPhi = '161010';
-        // } else if (isSinhNhat) {
-        //   // Với đơn "Sinh nhật":
-        //   tkChietKhau = null; // Để rỗng
-        //   tkChiPhi = '64192';
-        //   maPhi = '162010';
-        // } else if (isThuong && hasMaCtkmTangHang && isGiaBanZero && calculatedFields.isTangHang) {
-        //   // Với đơn "Thường" có đơn giá = 0, Khuyến mại = 1, và có thông tin mã tại "Mã CTKM tặng hàng":
-        //   tkChiPhi = '64191';
-        //   maPhi = '161010';
-        //   // tkChietKhau giữ nguyên (có thể được set bởi các điều kiện khác hoặc null)
-        //   if (tkChietKhau === null) {
-        //     tkChietKhau = sale.tkChietKhau || null;
-        //   }
-        // } else if (isKmVip > 0 && productTypeUpper === 'I') {
-        //   tkChietKhau = '521113';
-        // } else if (isKmVip > 0 && productTypeUpper === 'S') {
-        //   tkChietKhau = '521132';
-        // }
-        // else if (hasVoucher > 0 && isTangSP === 'GIFT') {
-        //   tkChietKhau = '5211631';
-        // }
-        // else if (hasVoucher > 0 && productTypeUpper === 'I') {
-        //   tkChietKhau = '5211611';
-
-        // } else if (hasVoucher > 0 && productTypeUpper === 'S') {
-        //   tkChietKhau = '5211621';
-        // }
-        // else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
-        //   // Với đơn có "Chiết khấu mua hàng giảm giá" có giá trị và loại hàng hóa = S (Dịch vụ):
-        //   tkChietKhau = '521131';
-        //   tkChiPhi = sale.tkChiPhi || null;
-        //   maPhi = sale.maPhi || null;
-        // } else if (isThuong && hasChietKhauMuaHangGiamGia && productTypeUpper === 'I') {
-        //   // Với đơn "Thường" có giá trị tiền tại cột "Chiết khấu mua hàng giảm giá" và loại hàng hóa = I (Hàng hóa):
-        //   tkChietKhau = '521111';
-        //   tkChiPhi = sale.tkChiPhi || null;
-        //   maPhi = sale.maPhi || null;
-        // } else if (isThuong && hasMaCtkm && !(hasMaCtkmTangHang && isGiaBanZero && calculatedFields.isTangHang)) {
-        //   // Với đơn "Thường" có mã CTKM:
-        //   // - Loại S (Dịch vụ): TK Chiết khấu = 521131
-        //   // - Loại I (Hàng hóa): TK Chiết khấu = 521111
-        //   if (productTypeUpper === 'S') {
-        //     tkChietKhau = '521131';
-        //   } else if (productTypeUpper === 'I') {
-        //     tkChietKhau = '521111';
-        //   } else {
-        //     // Nếu không xác định được loại, mặc định là hàng hóa
-        //     tkChietKhau = '521111';
-        //   }
-        //   tkChiPhi = sale.tkChiPhi || null;
-        //   maPhi = sale.maPhi || null;
-        // } else {
-        //   // Các đơn khác: lấy từ product hoặc sale nếu có
-        //   tkChietKhau = loyaltyProduct?.tkChietKhau || sale.tkChietKhau || null;
-        //   tkChiPhi = sale.tkChiPhi || null;
-        //   maPhi = sale.maPhi || null;
-        // }
-
-
-        // Build detail item, chỉ thêm ma_kho nếu có giá trị (không rỗng)
         const detailItem: any = {
           tk_chiet_khau: limitString(toString(tkChietKhau, ''), 16) || '',
           tk_chi_phi: limitString(toString(tkChiPhi, ''), 16) || '',
