@@ -857,7 +857,7 @@ export class SalesService {
     department: any,
     branchCode: string | null
   ): {
-    maLo: string;
+    maLo: string | null;
     maCtkmTangHang: string | null;
     muaHangCkVip: string;
     maKho: string | null;
@@ -950,8 +950,13 @@ export class SalesService {
     const customerBrand = sale.customer?.brand || null;
     const muaHangCkVip = this.calculateMuaHangCkVip(sale, loyaltyProduct, customerBrand, 'calculateSaleFields');
 
+    const useBatchForMaLo = this.shouldUseBatch(loyaltyProduct?.trackBatch, loyaltyProduct?.trackSerial);
+    let maLo: string | null = null;
+    if(useBatchForMaLo) {
+      maLo = sale.serial || '';
+    }
     // Tính toán maLo từ serial nếu chưa có
-    let maLo = sale.serial  || '';
+    
     // if (!maLo) {
     //   const serial = sale.serial || '';
     //   if (serial) {
@@ -1191,7 +1196,7 @@ export class SalesService {
     sale: any,
     loyaltyProduct: any,
     department: any,
-    calculatedFields: { maLo: string; maCtkmTangHang: string | null; muaHangCkVip: string; maKho: string | null; isTangHang: boolean; isDichVu: boolean; promCodeDisplay: string | null },
+    calculatedFields: { maLo: string | null; maCtkmTangHang: string | null; muaHangCkVip: string; maKho: string | null; isTangHang: boolean; isDichVu: boolean; promCodeDisplay: string | null },
     order?: any
   ): any {
     // Kiểm tra đơn "03. Đổi điểm" trước khi tính toán giá
