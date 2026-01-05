@@ -6007,76 +6007,18 @@ export class SalesService {
         // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
         const useBatch = this.shouldUseBatch(trackBatch, trackSerial);
 
-        // Lấy brand để phân biệt logic cho F3 (ma_lo)
-        const brandForMaLo = orderData.customer?.brand || orderData.brand || '';
-        let brandLowerForMaLo = (brandForMaLo || '').toLowerCase().trim();
-        // Normalize: "facialbar" → "f3"
-        if (brandLowerForMaLo === 'facialbar') {
-          brandLowerForMaLo = 'f3';
-        }
-
         // Xác định ma_lo và so_serial dựa trên trackSerial và trackBatch
         let maLo: string | null = null;
         let soSerial: string | null = null;
-
         if (useBatch) {
-          // trackBatch = true → dùng ma_lo với giá trị serial
-          if (serialValue && serialValue.trim() !== '') {
-            // Với F3, lấy toàn bộ serial (không cắt, không xử lý)
-            if (brandLowerForMaLo === 'f3') {
-              maLo = serialValue;
-            } else {
-              // Kiểm tra nếu serial có dạng "XXX_YYYY" (có dấu gạch dưới), lấy phần sau dấu gạch dưới
-              const underscoreIndex = serialValue.indexOf('_');
-              if (underscoreIndex > 0 && underscoreIndex < serialValue.length - 1) {
-                // Lấy phần sau dấu gạch dưới
-                maLo = serialValue.substring(underscoreIndex + 1);
-              } else {
-                // Vẫn cần productType để quyết định cắt bao nhiêu ký tự
-                if (productTypeUpper === 'TPCN') {
-                  // Nếu productType là "TPCN", cắt lấy 8 ký tự cuối
-                  maLo = serialValue.length >= 8 ? serialValue.slice(-8) : serialValue;
-                } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
-                  // Nếu productType là "SKIN" hoặc "GIFT", cắt lấy 4 ký tự cuối
-                  maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
-                } else {
-                  // Các trường hợp khác → lấy 4 ký tự cuối (mặc định)
-                  maLo = serialValue.length >= 4 ? serialValue.slice(-4) : serialValue;
-                }
-              }
-            }
-          } else {
-            maLo = null;
-          }
+          maLo = serialValue;
           soSerial = null;
         } else {
-          // trackSerial = true và trackBatch = false
-          // Nhưng vẫn cần kiểm tra xem có cần ma_lo không (nếu serial có dạng "XXX_YYYY")
-          if (serialValue && serialValue.trim() !== '') {
-            const underscoreIndex = serialValue.indexOf('_');
-            if (underscoreIndex > 0 && underscoreIndex < serialValue.length - 1) {
-              // Nếu serial có dạng "XXX_YYYY", dùng ma_lo với phần sau dấu gạch dưới
-              maLo = serialValue.substring(underscoreIndex + 1);
-              soSerial = null;
-            } else {
-              // Nếu không có dấu gạch dưới, dùng so_serial
-              maLo = null;
-              soSerial = serialValue;
-            }
-          } else {
-            maLo = null;
-            soSerial = null;
-          }
+          maLo = null;
+          soSerial = serialValue;
         }
 
-        // Log kết quả cuối cùng
-
-        // Cảnh báo nếu không có serial nhưng trackSerial/trackBatch yêu cầu
-        if (!serialValue || serialValue.trim() === '') {
-          if (useBatch) {
-          } else if (trackSerial) {
-          }
-        }
+      
 
         const maThe = toString(sale.maThe || sale.mvc_serial, '');
 
