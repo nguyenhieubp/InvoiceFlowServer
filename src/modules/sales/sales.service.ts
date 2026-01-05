@@ -5555,6 +5555,24 @@ export class SalesService {
         return date.toISOString();
       };
 
+      const formatDateKeepLocalDay = (date: Date): string => {
+        if (isNaN(date.getTime())) {
+          throw new Error('Invalid date');
+        }
+      
+        const pad = (n: number) => String(n).padStart(2, '0');
+      
+        return (
+          date.getFullYear() + '-' +
+          pad(date.getMonth() + 1) + '-' +
+          pad(date.getDate()) + 'T' +
+          pad(date.getHours()) + ':' +
+          pad(date.getMinutes()) + ':' +
+          pad(date.getSeconds()) + '.000Z'
+        );
+      };
+      
+
       // Format ngày
       let docDate: Date;
       if (orderData.docDate instanceof Date) {
@@ -5574,8 +5592,8 @@ export class SalesService {
         throw new Error(`Date out of range for SQL Server: ${docDate.toISOString()}`);
       }
 
-      const ngayCt = formatDateISO(docDate);
-      const ngayLct = formatDateISO(docDate);
+      const ngayCt = formatDateKeepLocalDay(docDate);
+      const ngayLct = formatDateKeepLocalDay(docDate);
 
       // Lấy TẤT CẢ sales (giống logic printOrder - không filter)
       // Không filter theo dvt hay statusAsys - lấy tất cả như luồng tạo hóa đơn ban đầu
@@ -5596,6 +5614,7 @@ export class SalesService {
       // Với đơn hàng "01.Thường": Lấy stock transfers để tính số lượng xuất kho
       // Với các đơn hàng khác: Dùng số lượng từ sale
       let stockTransferMapBySoCodeAndMaterialCode: Map<string, { st?: StockTransfer[]; rt?: StockTransfer[] }> = new Map();
+      let stockTransferMapBySoCode: Map<string, StockTransfer[]> = new Map();
       let allStockTransfers: StockTransfer[] = [];
 
       // Luôn fetch stock transfers để lấy mã kho
@@ -5604,7 +5623,8 @@ export class SalesService {
         where: { soCode: In(docCodesForStockTransfer) },
         order: { itemCode: 'ASC', createdAt: 'ASC' },
       });
-
+      
+      let transDate: Date | null = null;
       // Chỉ build map cho đơn hàng "01.Thường" (để tính số lượng)
       if (isNormalOrder) {
         const stockTransfers = allStockTransfers;
@@ -5625,6 +5645,11 @@ export class SalesService {
             stockTransferLoyaltyMap.set(itemCode, product);
           });
         }
+        
+
+        if (isNormalOrder) {
+          transDate = stockTransfers[0]?.transDate || null;
+        }
 
         // Tạo map: soCode_materialCode -> stock transfer (phân biệt ST và RT)
         stockTransfers.forEach((st) => {
@@ -5635,6 +5660,11 @@ export class SalesService {
 
           const soCode = st.soCode || st.docCode || orderData.docCode;
           const key = `${soCode}_${materialCode}`;
+
+          if (!stockTransferMapBySoCode.has(key)) {
+            stockTransferMapBySoCode.set(key, []);
+          }
+          stockTransferMapBySoCode.get(key)!.push(st);
 
           if (!stockTransferMapBySoCodeAndMaterialCode.has(key)) {
             stockTransferMapBySoCodeAndMaterialCode.set(key, {});
@@ -6561,6 +6591,7 @@ export class SalesService {
         }
       }
 
+
       return {
         action: 0,
         ma_dvcs: maDvcs,
@@ -6581,6 +6612,7 @@ export class SalesService {
         tk_thue_no: '131111',
         ma_kenh: maKenh,
         loai_gd: loaiGd,
+        trans_date: transDate ? formatDateKeepLocalDay(new Date(transDate)) : null,
         detail,
         cbdetail,
       };

@@ -231,7 +231,7 @@ export class FastApiInvoiceFlowService {
       }
 
       // Build clean payload (giống salesOrder nhưng action luôn = 0)
-      const cleanInvoiceData = FastApiPayloadHelper.buildCleanPayload(invoiceData, 0);
+      const cleanInvoiceData = FastApiPayloadHelper.buildCleanPayload(invoiceData, 0, 'saleInvoice');
       const finalPayload = FastApiPayloadHelper.removeEmptyFields(cleanInvoiceData);
 
       const result = await this.fastApiService.submitSalesInvoice(finalPayload);

@@ -30,7 +30,43 @@ export class FastApiPayloadHelper {
   /**
    * Helper: Build clean payload cho salesOrder và salesInvoice
    */
-  static buildCleanPayload(orderData: any, action: number = 0): any {
+  static buildCleanPayload(orderData: any, action: number = 0, type?: string): any {
+    if (type === 'saleInvoice') {
+      return {
+        action,
+        ma_dvcs: orderData.ma_dvcs,
+        ma_kh: orderData.ma_kh,
+        ong_ba: orderData.ong_ba ?? null,
+        ma_gd: orderData.ma_gd ?? '1',
+        ma_tt: orderData.ma_tt ?? null,
+        ma_ca: orderData.ma_ca ?? null,
+        hinh_thuc: orderData.hinh_thuc ?? '0',
+        dien_giai: orderData.dien_giai ?? null,
+        ngay_lct: orderData.trans_date,
+        ngay_ct: orderData.trans_date,
+        so_ct: orderData.so_ct,
+        so_seri: orderData.so_seri,
+        ma_nt: orderData.ma_nt ?? 'VND',
+        ty_gia: typeof orderData.ty_gia === 'number' ? orderData.ty_gia : parseFloat(orderData.ty_gia) || 1.0,
+        ma_bp: orderData.ma_bp,
+        tk_thue_no: orderData.tk_thue_no ?? '131111',
+        ma_kenh: orderData.ma_kenh ?? 'ONLINE',
+        loai_gd: '01',
+        detail: (orderData.detail || []).map((item: any) => {
+          const { product, ...cleanItem } = item;
+          const result: any = { ...cleanItem };
+          // Giữ lại ma_lo và so_serial (kể cả null)
+          if ('ma_lo' in item) result.ma_lo = item.ma_lo;
+          if ('so_serial' in item) result.so_serial = item.so_serial;
+          // Giữ lại ma_bp nếu có (không loại bỏ)
+          if ('ma_bp' in item) result.ma_bp = item.ma_bp;
+          return result;
+        }),
+        cbdetail: null
+      };
+    }
+
+
     return {
       action,
       ma_dvcs: orderData.ma_dvcs,
