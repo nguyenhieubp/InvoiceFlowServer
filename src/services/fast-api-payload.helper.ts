@@ -42,8 +42,9 @@ export class FastApiPayloadHelper {
         ma_ca: orderData.ma_ca ?? null,
         hinh_thuc: orderData.hinh_thuc ?? '0',
         dien_giai: orderData.dien_giai ?? null,
-        ngay_lct: orderData.trans_date,
-        ngay_ct: orderData.trans_date,
+        //Ưu tiên lấy trans_date nếu có, nếu không thì lấy ngay_lct và ngay_ct
+        ngay_lct: orderData.trans_date || orderData.ngay_lct,
+        ngay_ct: orderData.trans_date || orderData.ngay_ct,
         so_ct: orderData.so_ct,
         so_seri: orderData.so_seri,
         ma_nt: orderData.ma_nt ?? 'VND',
