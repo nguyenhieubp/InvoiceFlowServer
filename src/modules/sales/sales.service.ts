@@ -1225,7 +1225,7 @@ export class SalesService {
     const isKmVip = sale.grade_discamt;
     // Lấy productType từ sale hoặc product
     const productType = sale.productType || null;
-    const isTangSP = loyaltyProduct.productType || null;
+    const isTangSP = loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
     const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
     // Kiểm tra "Chiết khấu mua hàng giảm giá" có giá trị không
     const hasChietKhauMuaHangGiamGia = other_discamt != null && other_discamt !== 0;
@@ -5478,6 +5478,8 @@ export class SalesService {
       );
 
       return {
+        ma_kho_n: firstSale?.maKho || '',
+        ma_kho_x: firstSale?.maKho || '',
         ma_vt: limitString(materialCode, 16),
         dvt: limitString(dvt, 32),
         ma_lo: limitString(maLo, 16),
@@ -5499,8 +5501,8 @@ export class SalesService {
 
     // Lấy kho nhập và kho xuất (có thể cần map từ branch/department)
     // Tạm thời dùng branchCode làm kho mặc định
-    const maKhoN = orderData?.maKho || '';
-    const maKhoX = orderData?.maKho || '';
+    const maKhoN = firstSale?.maKho || '';
+    const maKhoX = firstSale?.maKho || '';
 
     return {
       ma_dvcs: maDvcs,
