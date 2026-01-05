@@ -951,35 +951,35 @@ export class SalesService {
     const muaHangCkVip = this.calculateMuaHangCkVip(sale, loyaltyProduct, customerBrand, 'calculateSaleFields');
 
     // Tính toán maLo từ serial nếu chưa có
-    let maLo = sale.maLo || '';
-    if (!maLo) {
-      const serial = sale.serial || '';
-      if (serial) {
-        const brand = sale.customer?.brand || '';
-        const brandLower = this.normalizeBrand(brand);
-        const underscoreIndex = serial.indexOf('_');
-        if (underscoreIndex > 0 && underscoreIndex < serial.length - 1) {
-          maLo = serial.substring(underscoreIndex + 1);
-        } else {
-          const productType = this.getProductType(sale, loyaltyProduct);
-          const trackBatch = loyaltyProduct?.trackBatch === true || sale.trackInventory === true;
-          if (trackBatch) {
-            if (brandLower === 'f3') {
-              maLo = serial;
-            } else {
-              const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
-              if (productTypeUpper === 'TPCN') {
-                maLo = serial.length >= 8 ? serial.slice(-8) : serial;
-              } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
-                maLo = serial.length >= 4 ? serial.slice(-4) : serial;
-              } else {
-                maLo = serial.length >= 4 ? serial.slice(-4) : serial;
-              }
-            }
-          }
-        }
-      }
-    }
+    let maLo = sale.serial  || '';
+    // if (!maLo) {
+    //   const serial = sale.serial || '';
+    //   if (serial) {
+    //     const brand = sale.customer?.brand || '';
+    //     const brandLower = this.normalizeBrand(brand);
+    //     const underscoreIndex = serial.indexOf('_');
+    //     if (underscoreIndex > 0 && underscoreIndex < serial.length - 1) {
+    //       maLo = serial.substring(underscoreIndex + 1);
+    //     } else {
+    //       const productType = this.getProductType(sale, loyaltyProduct);
+    //       const trackBatch = loyaltyProduct?.trackBatch === true || sale.trackInventory === true;
+    //       if (trackBatch) {
+    //         if (brandLower === 'f3') {
+    //           maLo = serial;
+    //         } else {
+    //           const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
+    //           if (productTypeUpper === 'TPCN') {
+    //             maLo = serial.length >= 8 ? serial.slice(-8) : serial;
+    //           } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
+    //             maLo = serial.length >= 4 ? serial.slice(-4) : serial;
+    //           } else {
+    //             maLo = serial.length >= 4 ? serial.slice(-4) : serial;
+    //           }
+    //         }
+    //       }
+    //     }
+    //   }
+    // }
 
     return { maLo, maCtkmTangHang, muaHangCkVip, maKho, isTangHang, isDichVu, promCodeDisplay };
   }
