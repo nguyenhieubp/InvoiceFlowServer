@@ -972,7 +972,7 @@ export class SalesService {
   /**
    * Tính toán các field display phức tạp cho frontend
    */
-  private async calculateDisplayFields(sale: any, order: any, loyaltyProduct: any, department: any): Promise<{
+  private calculateDisplayFields(sale: any, order: any, loyaltyProduct: any, department: any): {
     thanhToanCouponDisplay: string | null;
     chietKhauThanhToanCouponDisplay: number | null;
     thanhToanVoucherDisplay: string | null;
@@ -983,18 +983,7 @@ export class SalesService {
     cucThueDisplay: string | null;
     tkDoanhThuDisplay: string | null;
     tkGiaVonDisplay: string | null;
-  }> {
-    // Helper: Kiểm tra voucher dự phòng
-    // const isVoucherDuPhong = (brand: string, soSource: string | null | undefined, promCode: string | null | undefined, pkgCode: string | null | undefined): boolean => {
-    //   const brandLower = this.normalizeBrand(brand);
-    //   const isShopee = Boolean(soSource && String(soSource).toUpperCase() === 'SHOPEE');
-    //   const hasPromCode = Boolean(promCode && promCode.trim() !== '');
-    //   const hasPkgCode = Boolean(pkgCode && pkgCode.trim() !== '');
-    //   if (brandLower === 'f3') {
-    //     return isShopee;
-    //   }
-    //   return isShopee || (hasPromCode && !hasPkgCode);
-    // };
+  } {
 
     // Helper: Kiểm tra ECOIN
     const hasEcoin = (orderData: any): boolean => {
@@ -1027,13 +1016,6 @@ export class SalesService {
       thanhToanVoucherDisplay = null;
       thanhToanVoucher = null;
     } else if (!hasEcoin(order)) {
-      const isEcommerce = await this.categoriesService.findActiveEcommerceCustomerByCode(sale.partnerCode);
-      if (isEcommerce) {
-        thanhToanVoucherDisplay = 'VC CTKM SÀN';
-      } else {
-        thanhToanVoucherDisplay = null;
-        thanhToanVoucher = null;
-      }
       const paidByVoucher = Number(sale.paid_by_voucher_ecode_ecoin_bp ?? sale.chietKhauThanhToanVoucher ?? 0) || 0;
 
       if (paidByVoucher > 0) {
