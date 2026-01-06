@@ -20,7 +20,7 @@ import { LoyaltyService } from '../../services/loyalty.service';
 import { InvoiceValidationService } from '../../services/invoice-validation.service';
 import { Order, SaleItem } from '../../types/order.types';
 import { CreateStockTransferDto, StockTransferItem } from '../../dto/create-stock-transfer.dto';
-import { calculateVCType } from '../../utils/product.utils';
+import * as _ from 'lodash';
 
 @Injectable()
 export class SalesService {
@@ -3954,6 +3954,10 @@ export class SalesService {
       // 2. LẤY DỮ LIỆU ĐƠN HÀNG
       // ============================================
       const orderData = await this.findByOrderCode(docCode);
+      const docCodesForStockTransfer = this.getDocCodesForStockTransfer([docCode]);
+      const stockTransfers = await this.stockTransferRepository.find({
+        where: { soCode: In(docCodesForStockTransfer) },
+      });
 
       if (!orderData || !orderData.sales || orderData.sales.length === 0) {
         throw new NotFoundException(
@@ -3961,23 +3965,15 @@ export class SalesService {
         );
       }
 
-      // ============================================
-      // 3. NORMALIZE DOC CODE
-      // ============================================
       const hasX = /_X$/.test(docCode);
-      const normalizedDocCode = docCode.replace(/_X$/, '');
 
-      // ============================================
-      // 4. ROUTING LOGIC (KHÔNG FIX CỨNG FORMAT)
-      // ============================================
-
-      // Có _X → xử lý theo flow _X
-      if (hasX) {
-        return await this.handleSaleOrderWithUnderscoreX(
-          orderData,
-          normalizedDocCode,
-          1,
-        );
+    
+      if (_.isEmpty(stockTransfers)) {
+        if(hasX) {
+          return await this.handleSaleOrderWithUnderscoreX(orderData, docCode ?? '',1);
+        }else{
+          return await this.handleSaleOrderWithUnderscoreX(orderData, docCode ?? '',0);
+        }
       }
 
       // Không có _X → xử lý bình thường
