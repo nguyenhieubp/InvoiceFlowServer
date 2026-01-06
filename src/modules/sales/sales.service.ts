@@ -1301,7 +1301,11 @@ export class SalesService {
       maPhi = sale.maPhi || null;
     } else {
       // Các đơn khác: lấy từ product hoặc sale nếu có
-      tkChietKhau = loyaltyProduct?.tkChietKhau || sale.tkChietKhau || null;
+      // tkChietKhau = sale.tkChietKhau || null;
+      // tkChiPhi = sale.tkChiPhi || null;
+      // maPhi = sale.maPhi || null;
+   
+      tkChietKhau = sale.tkChietKhau || null;
       tkChiPhi = sale.tkChiPhi || null;
       maPhi = sale.maPhi || null;
     }
@@ -6172,9 +6176,13 @@ export class SalesService {
           maPhi = sale.maPhi || null;
         } else {
           // Các đơn khác: lấy từ product hoặc sale nếu có
-          tkChietKhau = loyaltyProduct?.tkChietKhau || sale.tkChietKhau || null;
-          tkChiPhi = sale.tkChiPhi || null;
-          maPhi = sale.maPhi || null;
+          // tkChietKhau = sale.tkChietKhau || null;
+          // tkChiPhi = sale.tkChiPhi || null;
+          // maPhi = sale.maPhi || null;
+
+          tkChietKhau = null;
+          tkChiPhi = null;
+          maPhi = null;
         }
 
         const detailItem: any = {
