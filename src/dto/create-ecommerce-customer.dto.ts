@@ -9,6 +9,10 @@ export class CreateEcommerceCustomerDto {
     @IsString()
     customerCode: string;
 
+    @IsNotEmpty({ message: 'Ecom Name là bắt buộc' })
+    @IsString()
+    ecomName: string;
+
     @IsOptional()
     @IsString()
     trangThai?: string;
@@ -22,6 +26,10 @@ export class UpdateEcommerceCustomerDto {
     @IsOptional()
     @IsString()
     customerCode?: string;
+
+    @IsOptional()
+    @IsString()
+    ecomName?: string;
 
     @IsOptional()
     @IsString()

@@ -1833,6 +1833,7 @@ export class CategoriesService {
       const fieldMappingVariants: Record<string, string[]> = {
         brand: ['brand', 'thương hiệu', 'thuong hieu'],
         customerCode: ['customer code', 'customercode', 'mã khách hàng', 'ma khach hang', 'mã kh', 'ma kh'],
+        ecomName: ['ecom name', 'ecomname', 'tên sàn', 'ten san', 'ten s', 'ten s'],
       };
 
       const normalizedMapping: Record<string, string> = {};

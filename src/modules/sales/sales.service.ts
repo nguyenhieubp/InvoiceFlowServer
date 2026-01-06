@@ -984,6 +984,7 @@ export class SalesService {
     tkDoanhThuDisplay: string | null;
     tkGiaVonDisplay: string | null;
   }> {
+    const listEcomName = ['shopee', 'lazada', 'tiktok'];
 
     // Helper: Kiểm tra ECOIN
     const hasEcoin = (orderData: any): boolean => {
@@ -1018,37 +1019,40 @@ export class SalesService {
     } else if (!hasEcoin(order)) {
       const ecommerce = await this.categoriesService.findActiveEcommerceCustomerByCode(sale.partnerCode);
       const paidByVoucher = Number(sale.paid_by_voucher_ecode_ecoin_bp ?? sale.chietKhauThanhToanVoucher ?? 0) || 0;
-      if (ecommerce) {
-        const brand = ecommerce.brand.toLowerCase().trim();
-        switch(brand) {
-          case 'menard':
-            thanhToanVoucherDisplay = 'TTM.R601ECOM';
-            thanhToanVoucher = paidByVoucher;
-            break;
-          case 'yaman':
-            thanhToanVoucherDisplay = 'BTH.R601ECOM';
-            thanhToanVoucher = paidByVoucher;
-            break;
-          case 'cdv':
-            thanhToanVoucherDisplay = 'CDV.R601ECOM';
-            thanhToanVoucher = paidByVoucher;
-            break;
-          default:
+      if (paidByVoucher > 0) {
+        if (ecommerce && paidByVoucher > 0) {
+          const isValidEcom =
+            ecommerce?.ecomName &&
+            listEcomName.includes(ecommerce.ecomName.toLowerCase().trim());
+
+          const ecomVoucherMap: Record<string, string> = {
+            menard: 'TTM.R601ECOM',
+            yaman: 'BTH.R601ECOM',
+            cdv: 'CDV.R601ECOM',
+          };
+
+          thanhToanVoucher = paidByVoucher;
+
+          if (isValidEcom && ecomVoucherMap[brand]) {
+            thanhToanVoucherDisplay = ecomVoucherMap[brand];
+          } else {
             thanhToanVoucherDisplay = 'VC CTKM SÀN';
-            thanhToanVoucher = paidByVoucher;
-            break;
+          }
+        } else {
+          const saleForVoucher = {
+            ...sale,
+            paid_by_voucher_ecode_ecoin_bp: paidByVoucher,
+            customer: order?.customer || sale.customer,
+            brand: order?.customer?.brand || order?.brand || sale?.customer?.brand || sale?.brand,
+            product: loyaltyProduct,
+          };
+          const maCk05Value = this.calculateMaCk05(saleForVoucher);
+          thanhToanVoucherDisplay = maCk05Value;
+          thanhToanVoucher = paidByVoucher;
         }
       } else {
-        const saleForVoucher = {
-          ...sale,
-          paid_by_voucher_ecode_ecoin_bp: paidByVoucher,
-          customer: order?.customer || sale.customer,
-          brand: order?.customer?.brand || order?.brand || sale?.customer?.brand || sale?.brand,
-          product: loyaltyProduct,
-        };
-        const maCk05Value = this.calculateMaCk05(saleForVoucher);
-        thanhToanVoucherDisplay = maCk05Value;
-        thanhToanVoucher = paidByVoucher;
+        thanhToanVoucherDisplay = null;
+        thanhToanVoucher = null;
       }
     }
 
@@ -5733,25 +5737,30 @@ export class SalesService {
         let formattedMaCk05: string | null = null;
 
         // UPDATE FOR SÀN THƯƠNG MẠI ĐIỆN TỬ
+        const listEcomName = ['shopee', 'lazada', 'tiktok'];
         const maKh = sale.partnerCode;
-        const customer = await this.categoriesService.findActiveEcommerceCustomerByCode(maKh);
-        if (customer?.brand) {
-          const brand = customer.brand.toLowerCase();
 
-          switch (brand) {
-            case 'menard':
-              maCk05Value = 'TTM.R601ECOM';
-              break;
-            case 'yaman':
-              maCk05Value = 'BTH.R601ECOM';
-              break;
-            default:
-              maCk05Value = 'VC CTKM SÀN';
-              break;
+        const brandCk05Map: Record<string, string> = {
+          menard: 'TTM.R601ECOM',
+          yaman: 'BTH.R601ECOM',
+          cdv: 'CDV.R601ECOM',
+        };
+
+        const customer = await this.categoriesService.findActiveEcommerceCustomerByCode(maKh);
+
+        if (customer) {
+          const customerBrand = customer?.brand?.toLowerCase();
+          if (customer && customerBrand && listEcomName.includes(customer.ecomName?.toLowerCase() ?? '')) {
+            maCk05Value = brandCk05Map[customerBrand];
+          } else {
+            maCk05Value = 'VC CTKM SÀN';
           }
         } else {
-          sale.brand = sale.customer?.brand || '';
-          maCk05Value = this.calculateMaCk05(sale);
+          const saleWithBrand = {
+            ...sale,
+            brand: sale.customer?.brand || '',
+          };
+          maCk05Value = this.calculateMaCk05(saleWithBrand);
         }
 
         // Nếu là đơn "03. Đổi điểm": bỏ ma_ck05 và ck05_nt

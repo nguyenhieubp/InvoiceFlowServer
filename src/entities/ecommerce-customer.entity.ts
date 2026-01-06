@@ -19,6 +19,9 @@ export class EcommerceCustomer {
     @Column({ nullable: false })
     customerCode: string; // Mã khách hàng (vd: KH254032258)
 
+    @Column({ nullable: true })
+    ecomName: string; // Tên sàn
+
     @Column({ nullable: true, default: 'active' })
     trangThai?: string; // Trạng thái
 
