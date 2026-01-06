@@ -64,30 +64,6 @@ export class SalesService {
   }
 
   /**
-   * Format voucher code để hiển thị/gửi lên API
-   * - F3 (facialbar): giữ nguyên "FBV TT VCDV", "FBV TT VCHH" (không có khoảng trắng)
-   * - Các brand khác: chuyển đổi "VCHB" → "VC HB", "VCKM" → "VC KM", "VCDV" → "VC DV"
-   * @param maCk05Value - Giá trị từ calculateMaCk05()
-   * @returns Format voucher code đã được chuyển đổi
-   */
-  private formatVoucherCode(maCk05Value: string | null): string | null {
-    if (!maCk05Value) return null;
-
-    // Riêng với F3 (facialbar): giữ nguyên format "FBV TT VCDV", "FBV TT VCHH" (không có khoảng trắng)
-    if (maCk05Value.includes('FBV TT')) {
-      return maCk05Value;
-    }
-
-    // Các brand khác: chuyển đổi VCHB → VC HB, VCKM → VC KM, VCDV → VC DV
-    let formatted = maCk05Value;
-    formatted = formatted.replace(/VCHB/g, 'VC HB');
-    formatted = formatted.replace(/VCKM/g, 'VC KM');
-    formatted = formatted.replace(/VCDV/g, 'VC DV');
-
-    return formatted;
-  }
-
-  /**
    * Tính và trả về ma_ck05 (Thanh toán voucher) dựa trên productType và trackInventory
    * @param sale - Sale object (có thể có customer.brand)
    * @returns Loại VC: "VCDV" | "VCHB" | "VCKM" | "FBV TT VCDV" | "FBV TT VCHB" | null
@@ -145,6 +121,9 @@ export class SalesService {
       }
       if (productType === 'S') {
         return 'VC DV';
+      }
+      if (productType === 'V') {
+        return 'VC KM';
       }
     }
     return null;
@@ -997,9 +976,7 @@ export class SalesService {
     thanhToanCouponDisplay: string | null;
     chietKhauThanhToanCouponDisplay: number | null;
     thanhToanVoucherDisplay: string | null;
-    chietKhauThanhToanVoucherDisplay: number | null;
-    voucherDp1Display: string | null;
-    chietKhauVoucherDp1Display: number | null;
+    thanhToanVoucher: number | null;
     thanhToanTkTienAoDisplay: string | null;
     chietKhauThanhToanTkTienAoDisplay: number | null;
     soSerialDisplay: string | null;
@@ -1008,16 +985,16 @@ export class SalesService {
     tkGiaVonDisplay: string | null;
   } {
     // Helper: Kiểm tra voucher dự phòng
-    const isVoucherDuPhong = (brand: string, soSource: string | null | undefined, promCode: string | null | undefined, pkgCode: string | null | undefined): boolean => {
-      const brandLower = this.normalizeBrand(brand);
-      const isShopee = Boolean(soSource && String(soSource).toUpperCase() === 'SHOPEE');
-      const hasPromCode = Boolean(promCode && promCode.trim() !== '');
-      const hasPkgCode = Boolean(pkgCode && pkgCode.trim() !== '');
-      if (brandLower === 'f3') {
-        return isShopee;
-      }
-      return isShopee || (hasPromCode && !hasPkgCode);
-    };
+    // const isVoucherDuPhong = (brand: string, soSource: string | null | undefined, promCode: string | null | undefined, pkgCode: string | null | undefined): boolean => {
+    //   const brandLower = this.normalizeBrand(brand);
+    //   const isShopee = Boolean(soSource && String(soSource).toUpperCase() === 'SHOPEE');
+    //   const hasPromCode = Boolean(promCode && promCode.trim() !== '');
+    //   const hasPkgCode = Boolean(pkgCode && pkgCode.trim() !== '');
+    //   if (brandLower === 'f3') {
+    //     return isShopee;
+    //   }
+    //   return isShopee || (hasPromCode && !hasPkgCode);
+    // };
 
     // Helper: Kiểm tra ECOIN
     const hasEcoin = (orderData: any): boolean => {
@@ -1044,34 +1021,15 @@ export class SalesService {
     // thanhToanVoucherDisplay và chietKhauThanhToanVoucherDisplay
     // Nếu là đơn "03. Đổi điểm": set = null và 0
     let thanhToanVoucherDisplay: string | null = null;
-    let chietKhauThanhToanVoucherDisplay: number | null = null;
+    let thanhToanVoucher: number | null = null;
     if (isDoiDiemForDisplayFields) {
       // Đơn "03. Đổi điểm": không hiển thị voucher
       thanhToanVoucherDisplay = null;
-      chietKhauThanhToanVoucherDisplay = null;
+      thanhToanVoucher = null;
     } else if (!hasEcoin(order)) {
-      const pkgCode = sale.pkg_code || sale.pkgCode || null;
-      const promCode = sale.promCode || null;
-      const soSource = sale.order_source || sale.so_source || null;
       const paidByVoucher = Number(sale.paid_by_voucher_ecode_ecoin_bp ?? sale.chietKhauThanhToanVoucher ?? 0) || 0;
-      const isVoucherDuPhongValue = isVoucherDuPhong(brand, soSource, promCode, pkgCode);
 
-      if (sale.paid_by_voucher_ecode_ecoin_bp > 0 && !isVoucherDuPhongValue) {
-        // Chuyển sang voucher chính
-        const saleForVoucher = {
-          ...sale,
-          paid_by_voucher_ecode_ecoin_bp: sale.paid_by_voucher_ecode_ecoin_bp,
-          customer: order?.customer || sale.customer,
-          brand: order?.customer?.brand || order?.brand || sale?.customer?.brand || sale?.brand,
-          product: loyaltyProduct,
-        };
-        const maCk05Value = this.calculateMaCk05(saleForVoucher);
-        thanhToanVoucherDisplay = maCk05Value;
-      } else if (isVoucherDuPhongValue && paidByVoucher > 0) {
-        // Voucher dự phòng - không hiển thị
-        thanhToanVoucherDisplay = null;
-        chietKhauThanhToanVoucherDisplay = null;
-      } else if (paidByVoucher > 0) {
+      if (paidByVoucher > 0) {
         const saleForVoucher = {
           ...sale,
           paid_by_voucher_ecode_ecoin_bp: paidByVoucher,
@@ -1081,31 +1039,8 @@ export class SalesService {
         };
         const maCk05Value = this.calculateMaCk05(saleForVoucher);
         thanhToanVoucherDisplay = maCk05Value;
-        chietKhauThanhToanVoucherDisplay = paidByVoucher;
+        thanhToanVoucher = paidByVoucher;
       }
-    }
-
-    // voucherDp1Display và chietKhauVoucherDp1Display
-    let voucherDp1Display: string | null = null;
-    let chietKhauVoucherDp1Display: number | null = null;
-    const pkgCode = sale.pkg_code || sale.pkgCode || null;
-    const promCode = sale.promCode || null;
-    const soSource = sale.order_source || sale.so_source || null;
-    const paidByVoucher = sale.paid_by_voucher_ecode_ecoin_bp ?? 0;
-    const chietKhauVoucherDp1Value = sale.chietKhauVoucherDp1 ?? 0;
-    const isVoucherDuPhongValue = isVoucherDuPhong(brand, soSource, promCode, pkgCode);
-
-    if (chietKhauVoucherDp1Value > 0 && !isVoucherDuPhongValue) {
-      // Không hiển thị voucher dự phòng nếu không phải voucher dự phòng
-      voucherDp1Display = null;
-      chietKhauVoucherDp1Display = null;
-    } else if (isVoucherDuPhongValue && (chietKhauVoucherDp1Value > 0 || paidByVoucher > 0)) {
-      voucherDp1Display = 'VC CTKM SÀN';
-      let chietKhauVoucherDp1Final = chietKhauVoucherDp1Value;
-      if (chietKhauVoucherDp1Final === 0 && isVoucherDuPhongValue && paidByVoucher > 0) {
-        chietKhauVoucherDp1Final = paidByVoucher;
-      }
-      chietKhauVoucherDp1Display = chietKhauVoucherDp1Final > 0 ? chietKhauVoucherDp1Final : null;
     }
 
     // thanhToanTkTienAoDisplay và chietKhauThanhToanTkTienAoDisplay
@@ -1163,9 +1098,7 @@ export class SalesService {
       thanhToanCouponDisplay,
       chietKhauThanhToanCouponDisplay,
       thanhToanVoucherDisplay,
-      chietKhauThanhToanVoucherDisplay,
-      voucherDp1Display,
-      chietKhauVoucherDp1Display,
+      thanhToanVoucher,
       thanhToanTkTienAoDisplay,
       chietKhauThanhToanTkTienAoDisplay,
       soSerialDisplay,
@@ -5769,8 +5702,7 @@ export class SalesService {
         // ma_ck04: Thanh toán coupon
         let ck04_nt = toNumber(sale.chietKhauThanhToanCoupon || sale.chietKhau09, 0);
         // ma_ck15: Voucher DP1 dự phòng - Ưu tiên kiểm tra trước
-        let ck15_nt_voucherDp1 = toNumber(sale.chietKhauVoucherDp1, 0);
-        const paidByVoucher = toNumber(sale.chietKhauThanhToanVoucher || sale.paid_by_voucher_ecode_ecoin_bp, 0);
+        const paidByVoucher = toNumber(sale.paid_by_voucher_ecode_ecoin_bp , 0);
 
         // Kiểm tra các điều kiện để xác định voucher dự phòng
         const pkgCode = (sale as any).pkg_code || (sale as any).pkgCode || null;
@@ -5785,37 +5717,18 @@ export class SalesService {
         }
         const soSource = sale.order_source || (sale as any).so_source || null;
 
-        const isShopee = soSource && String(soSource).toUpperCase() === 'SHOPEE';
-        const hasPkgCode = pkgCode && pkgCode.trim() !== '';
-        const hasPromCode = promCode && promCode.trim() !== '';
-
-        // Xác định lại voucher dự phòng theo logic mới (để xử lý dữ liệu cũ đã sync với logic cũ)
-        let isVoucherDuPhong = false;
-        if (brandLower === 'f3') {
-          // Với F3: Chỉ khi so_source = "SHOPEE" mới là voucher dự phòng
-          isVoucherDuPhong = isShopee;
-        } else {
-          // Với các brand khác: SHOPEE hoặc (có prom_code và không có pkg_code)
-          isVoucherDuPhong = isShopee || (hasPromCode && !hasPkgCode);
-        }
-
-        // Nếu có chietKhauVoucherDp1 > 0 nhưng theo logic mới không phải voucher dự phòng
-        // → Chuyển sang voucher chính (dữ liệu cũ đã sync với logic cũ)
-        // Lưu giá trị để chuyển sang voucher chính
-        let voucherAmountToMove = 0;
-
         // ma_ck05: Thanh toán voucher chính
-        // Chỉ map vào ck05_nt nếu không có voucher dự phòng (ck15_nt_voucherDp1 = 0)
-        // Nếu có voucherAmountToMove (chuyển từ DP sang chính), dùng giá trị đó
-        // Nếu không, dùng paidByVoucher
-        // Nếu là đơn "03. Đổi điểm": bỏ ma_ck05 và ck05_nt (set = 0 và '')
         let ck05_nt = paidByVoucher > 0 ? paidByVoucher : 0;
         let maCk05Value: string | null = null;
         let formattedMaCk05: string | null = null;
 
-        if (isDoiDiem) {
-          ck15_nt_voucherDp1 = 0;
-        };
+        // UPDATE FOR SÀN THƯƠNG MẠI ĐIỆN TỬ
+        const maKh = sale.partnerCode;
+        const customer = await this.categoriesService.findActiveEcommerceCustomerByCode(maKh);
+        if (customer) {
+          maCk05Value = sale.maCk05;
+        }
+
         // Nếu là đơn "03. Đổi điểm": bỏ ma_ck05 và ck05_nt
         const isDoiDiemForCk05 = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
 
@@ -5857,7 +5770,7 @@ export class SalesService {
         let ck12_nt = toNumber(sale.chietKhau12, 0);
         let ck13_nt = toNumber(sale.chietKhau13, 0);
         let ck14_nt = toNumber(sale.chietKhau14, 0);
-        let ck15_nt = ck15_nt_voucherDp1 > 0 ? ck15_nt_voucherDp1 : toNumber(sale.chietKhau15, 0);
+        let ck15_nt = toNumber(sale.chietKhau15, 0);
         let ck16_nt = toNumber(sale.chietKhau16, 0);
         let ck17_nt = toNumber(sale.chietKhau17, 0);
         let ck18_nt = toNumber(sale.chietKhau18, 0);
@@ -5999,8 +5912,6 @@ export class SalesService {
             sale.product.trackInventory = trackInventory;
           }
         }
-
-        const productTypeUpper = productTypeFromLoyalty ? String(productTypeFromLoyalty).toUpperCase().trim() : null;
 
         // Lấy giá trị serial từ sale (tất cả đều lấy từ field "serial")
         const serialValue = toString(sale.serial || '', '');
@@ -6363,9 +6274,7 @@ export class SalesService {
           // ma_ck15: Voucher DP1 (String, max 32 ký tự)
           // Với F3, thêm prefix "FBV TT " trước "VC CTKM SÀN"
           ma_ck15: limitString(
-            ck15_nt_voucherDp1 > 0
-              ? (brandLower === 'f3' ? 'FBV TT VC CTKM SÀN' : 'VC CTKM SÀN')
-              : toString(sale.maCk15, ''),
+            toString(sale.maCk15, ''),
             32
           ),
           // ck15_nt: Tiền (Decimal)

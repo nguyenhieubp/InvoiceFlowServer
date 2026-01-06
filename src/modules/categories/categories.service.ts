@@ -1775,13 +1775,13 @@ export class CategoriesService {
     });
   }
 
-  async findActiveEcommerceCustomerByCode(code: string): Promise<EcommerceCustomer> {
+  async findActiveEcommerceCustomerByCode(code: string): Promise<EcommerceCustomer | null> {
     const ec = await this.ecommerceCustomerRepository.findOne({
       where: { customerCode: code, trangThai: 'active' },
     });
 
     if (!ec) {
-      throw new NotFoundException(`Active Ecommerce Customer with code ${code} not found`);
+      return null;
     }
 
     return ec;
