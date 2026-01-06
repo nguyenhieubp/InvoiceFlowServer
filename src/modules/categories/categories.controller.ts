@@ -468,6 +468,11 @@ export class CategoriesController {
     return this.categoriesService.findActiveEcommerceCustomers();
   }
 
+  @Get('ecommerce-customers/active/:code')
+  async findActiveEcommerceCustomerByCode(@Param('code') code: string) {
+    return this.categoriesService.findActiveEcommerceCustomerByCode(code);
+  }
+
   @Get('ecommerce-customers/:id')
   async findOneEcommerceCustomer(@Param('id') id: string) {
     return this.categoriesService.findOneEcommerceCustomer(id);

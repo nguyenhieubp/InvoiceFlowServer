@@ -1775,6 +1775,18 @@ export class CategoriesService {
     });
   }
 
+  async findActiveEcommerceCustomerByCode(code: string): Promise<EcommerceCustomer> {
+    const ec = await this.ecommerceCustomerRepository.findOne({
+      where: { customerCode: code, trangThai: 'active' },
+    });
+
+    if (!ec) {
+      throw new NotFoundException(`Active Ecommerce Customer with code ${code} not found`);
+    }
+
+    return ec;
+  }
+
   async createEcommerceCustomer(createDto: CreateEcommerceCustomerDto): Promise<EcommerceCustomer> {
     const ec = this.ecommerceCustomerRepository.create({
       ...createDto,

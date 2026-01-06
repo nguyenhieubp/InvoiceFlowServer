@@ -95,7 +95,6 @@ export class SalesService {
   private calculateMaCk05(sale: any): string | null {
     if (!sale) return null;
 
-    const paidByVoucher = sale.paid_by_voucher_ecode_ecoin_bp ?? 0;
     const revenueValue = sale.revenue ?? 0;
     const linetotalValue = sale.linetotal ?? sale.tienHang ?? 0;
 
@@ -109,7 +108,6 @@ export class SalesService {
     // Lấy productType và trackInventory từ sale hoặc product
     const productType = this.getProductType(sale);
     const isGift = sale.product.productType === 'GIFT';
-    const trackInventory = this.getTrackInventory(sale);
 
     if (brand === 'yaman') {
       if (productType === 'I') {
@@ -952,11 +950,11 @@ export class SalesService {
 
     const useBatchForMaLo = this.shouldUseBatch(loyaltyProduct?.trackBatch, loyaltyProduct?.trackSerial);
     let maLo: string | null = null;
-    if(useBatchForMaLo) {
+    if (useBatchForMaLo) {
       maLo = sale.serial || '';
     }
     // Tính toán maLo từ serial nếu chưa có
-    
+
     // if (!maLo) {
     //   const serial = sale.serial || '';
     //   if (serial) {
@@ -5564,9 +5562,9 @@ export class SalesService {
         if (isNaN(date.getTime())) {
           throw new Error('Invalid date');
         }
-      
+
         const pad = (n: number) => String(n).padStart(2, '0');
-      
+
         return (
           date.getFullYear() + '-' +
           pad(date.getMonth() + 1) + '-' +
@@ -5576,7 +5574,7 @@ export class SalesService {
           pad(date.getSeconds()) + '.000Z'
         );
       };
-      
+
 
       // Format ngày
       let docDate: Date;
@@ -5628,7 +5626,7 @@ export class SalesService {
         where: { soCode: In(docCodesForStockTransfer) },
         order: { itemCode: 'ASC', createdAt: 'ASC' },
       });
-      
+
       let transDate: Date | null = null;
       // Chỉ build map cho đơn hàng "01.Thường" (để tính số lượng)
       if (isNormalOrder) {
@@ -5650,7 +5648,7 @@ export class SalesService {
             stockTransferLoyaltyMap.set(itemCode, product);
           });
         }
-        
+
 
         if (isNormalOrder) {
           transDate = stockTransfers[0]?.transDate || null;
@@ -6023,7 +6021,7 @@ export class SalesService {
           soSerial = serialValue;
         }
 
-      
+
 
         const maThe = toString(sale.maThe || sale.mvc_serial, '');
 
