@@ -972,7 +972,7 @@ export class SalesService {
   /**
    * Tính toán các field display phức tạp cho frontend
    */
-  private calculateDisplayFields(sale: any, order: any, loyaltyProduct: any, department: any): {
+  private async calculateDisplayFields(sale: any, order: any, loyaltyProduct: any, department: any): Promise<{
     thanhToanCouponDisplay: string | null;
     chietKhauThanhToanCouponDisplay: number | null;
     thanhToanVoucherDisplay: string | null;
@@ -983,7 +983,7 @@ export class SalesService {
     cucThueDisplay: string | null;
     tkDoanhThuDisplay: string | null;
     tkGiaVonDisplay: string | null;
-  } {
+  }> {
 
     // Helper: Kiểm tra ECOIN
     const hasEcoin = (orderData: any): boolean => {
@@ -1016,9 +1016,29 @@ export class SalesService {
       thanhToanVoucherDisplay = null;
       thanhToanVoucher = null;
     } else if (!hasEcoin(order)) {
+      const ecommerce = await this.categoriesService.findActiveEcommerceCustomerByCode(sale.partnerCode);
       const paidByVoucher = Number(sale.paid_by_voucher_ecode_ecoin_bp ?? sale.chietKhauThanhToanVoucher ?? 0) || 0;
-
-      if (paidByVoucher > 0) {
+      if (ecommerce) {
+        const brand = ecommerce.brand.toLowerCase().trim();
+        switch(brand) {
+          case 'menard':
+            thanhToanVoucherDisplay = 'TTM.R601ECOM';
+            thanhToanVoucher = paidByVoucher;
+            break;
+          case 'yaman':
+            thanhToanVoucherDisplay = 'BTH.R601ECOM';
+            thanhToanVoucher = paidByVoucher;
+            break;
+          case 'cdv':
+            thanhToanVoucherDisplay = 'CDV.R601ECOM';
+            thanhToanVoucher = paidByVoucher;
+            break;
+          default:
+            thanhToanVoucherDisplay = 'VC CTKM SÀN';
+            thanhToanVoucher = paidByVoucher;
+            break;
+        }
+      } else {
         const saleForVoucher = {
           ...sale,
           paid_by_voucher_ecode_ecoin_bp: paidByVoucher,
@@ -1031,6 +1051,7 @@ export class SalesService {
         thanhToanVoucher = paidByVoucher;
       }
     }
+
 
     // thanhToanTkTienAoDisplay và chietKhauThanhToanTkTienAoDisplay
     let thanhToanTkTienAoDisplay: string | null = null;
@@ -1112,13 +1133,13 @@ export class SalesService {
     };
   }
 
-  private formatSaleForFrontend(
+  private async formatSaleForFrontend(
     sale: any,
     loyaltyProduct: any,
     department: any,
     calculatedFields: { maLo: string | null; maCtkmTangHang: string | null; muaHangCkVip: string; maKho: string | null; isTangHang: boolean; isDichVu: boolean; promCodeDisplay: string | null },
     order?: any
-  ): any {
+  ): Promise<any> {
     // Kiểm tra đơn "03. Đổi điểm" trước khi tính toán giá
     const isDoiDiemForDisplay = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
 
@@ -1183,7 +1204,7 @@ export class SalesService {
     }
 
     // Tính toán các field display phức tạp
-    const displayFields = this.calculateDisplayFields(sale, order || { customer: sale.customer, cashioData: sale.cashioData, cashioFopSyscode: sale.cashioFopSyscode, cashioTotalIn: sale.cashioTotalIn, brand: sale.brand }, loyaltyProduct, department);
+    const displayFields = await this.calculateDisplayFields(sale, order || { customer: sale.customer, cashioData: sale.cashioData, cashioFopSyscode: sale.cashioFopSyscode, cashioTotalIn: sale.cashioTotalIn, brand: sale.brand }, loyaltyProduct, department);
 
     // Nếu là đơn "03. Đổi điểm": set other_discamt = 0 (chiết khấu mua hàng giảm giá)
 
@@ -2500,7 +2521,7 @@ export class SalesService {
       calculatedFields.maKho = maKhoFromStockTransfer;
 
       const order = orderMap.get(sale.docCode);
-      const enrichedSale = this.formatSaleForFrontend(sale, loyaltyProduct, department, calculatedFields, order);
+      const enrichedSale = await this.formatSaleForFrontend(sale, loyaltyProduct, department, calculatedFields, order);
 
       // Thêm stock transfers vào sale
       enrichedSale.stockTransfers = saleStockTransfers.map(st => this.formatStockTransferForFrontend(st));
@@ -3198,7 +3219,7 @@ export class SalesService {
     // Và tính lại muaHangCkVip nếu chưa có hoặc cần override cho f3
     // Format sales giống findAllOrders để đảm bảo consistency với frontend
     // Format sales sau khi đã enrich promotion
-    const formattedSales = enrichedSalesWithDepartment.map((sale) => {
+    const formattedSales = await Promise.all(enrichedSalesWithDepartment.map(async (sale) => {
       const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
       const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
       const calculatedFields = this.calculateSaleFields(sale, loyaltyProduct, department, sale.branchCode);
@@ -3209,7 +3230,7 @@ export class SalesService {
         cashioTotalIn: selectedCashio?.total_in || null,
         brand: firstSale.customer?.brand || null,
       };
-      const formattedSale = this.formatSaleForFrontend(sale, loyaltyProduct, department, calculatedFields, order);
+      const formattedSale = await this.formatSaleForFrontend(sale, loyaltyProduct, department, calculatedFields, order);
 
       // Thêm promotion info nếu có
       const promCode = sale.promCode;
@@ -3220,7 +3241,7 @@ export class SalesService {
         promotion,
         promotionDisplayCode: this.getPromotionDisplayCode(promCode),
       };
-    });
+    }));
 
     // Format customer object để match với frontend interface
     const formattedCustomer = firstSale.customer ? {
@@ -3994,7 +4015,7 @@ export class SalesService {
       // BƯỚC 1: Kiểm tra docSourceType trước (ưu tiên cao nhất)
       // ============================================
       const firstSale = orderData.sales && orderData.sales.length > 0 ? orderData.sales[0] : null;
-      const docSourceTypeRaw = firstSale?.docSourceType || orderData.docSourceType || '';
+      const docSourceTypeRaw = firstSale?.docSourceType ?? orderData.docSourceType ?? '';
       const docSourceType = docSourceTypeRaw ? String(docSourceTypeRaw).trim().toUpperCase() : '';
 
       // Xử lý SALE_RETURN
