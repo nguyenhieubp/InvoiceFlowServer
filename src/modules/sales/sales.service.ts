@@ -972,7 +972,7 @@ export class SalesService {
   /**
    * Tính toán các field display phức tạp cho frontend
    */
-  private calculateDisplayFields(sale: any, order: any, loyaltyProduct: any, department: any): {
+  private async calculateDisplayFields(sale: any, order: any, loyaltyProduct: any, department: any): Promise<{
     thanhToanCouponDisplay: string | null;
     chietKhauThanhToanCouponDisplay: number | null;
     thanhToanVoucherDisplay: string | null;
@@ -983,7 +983,7 @@ export class SalesService {
     cucThueDisplay: string | null;
     tkDoanhThuDisplay: string | null;
     tkGiaVonDisplay: string | null;
-  } {
+  }> {
     // Helper: Kiểm tra voucher dự phòng
     // const isVoucherDuPhong = (brand: string, soSource: string | null | undefined, promCode: string | null | undefined, pkgCode: string | null | undefined): boolean => {
     //   const brandLower = this.normalizeBrand(brand);
@@ -1027,6 +1027,13 @@ export class SalesService {
       thanhToanVoucherDisplay = null;
       thanhToanVoucher = null;
     } else if (!hasEcoin(order)) {
+      const isEcommerce = await this.categoriesService.findActiveEcommerceCustomerByCode(sale.partnerCode);
+      if (isEcommerce) {
+        thanhToanVoucherDisplay = 'VC CTKM SÀN';
+      } else {
+        thanhToanVoucherDisplay = null;
+        thanhToanVoucher = null;
+      }
       const paidByVoucher = Number(sale.paid_by_voucher_ecode_ecoin_bp ?? sale.chietKhauThanhToanVoucher ?? 0) || 0;
 
       if (paidByVoucher > 0) {
@@ -5702,7 +5709,7 @@ export class SalesService {
         // ma_ck04: Thanh toán coupon
         let ck04_nt = toNumber(sale.chietKhauThanhToanCoupon || sale.chietKhau09, 0);
         // ma_ck15: Voucher DP1 dự phòng - Ưu tiên kiểm tra trước
-        const paidByVoucher = toNumber(sale.paid_by_voucher_ecode_ecoin_bp , 0);
+        const paidByVoucher = toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0);
 
         // Kiểm tra các điều kiện để xác định voucher dự phòng
         const pkgCode = (sale as any).pkg_code || (sale as any).pkgCode || null;
@@ -5725,8 +5732,23 @@ export class SalesService {
         // UPDATE FOR SÀN THƯƠNG MẠI ĐIỆN TỬ
         const maKh = sale.partnerCode;
         const customer = await this.categoriesService.findActiveEcommerceCustomerByCode(maKh);
-        if (customer) {
-          maCk05Value = sale.maCk05;
+        if (customer?.brand) {
+          const brand = customer.brand.toLowerCase();
+
+          switch (brand) {
+            case 'menard':
+              maCk05Value = 'TTM.R601ECOM';
+              break;
+            case 'yaman':
+              maCk05Value = 'BTH.R601ECOM';
+              break;
+            default:
+              maCk05Value = 'VC CTKM SÀN';
+              break;
+          }
+        } else {
+          sale.brand = sale.customer?.brand || '';
+          maCk05Value = this.calculateMaCk05(sale);
         }
 
         // Nếu là đơn "03. Đổi điểm": bỏ ma_ck05 và ck05_nt
@@ -5737,13 +5759,6 @@ export class SalesService {
           maCk05Value = null;
           formattedMaCk05 = null;
         } else {
-          // Tính ma_ck05 giống frontend - truyền customer từ orderData nếu sale chưa có
-          const saleWithCustomer = {
-            ...sale,
-            customer: sale.customer || orderData.customer,
-            brand: sale.customer?.brand || orderData.customer?.brand || ''
-          };
-          maCk05Value = this.calculateMaCk05(saleWithCustomer);
           formattedMaCk05 = maCk05Value;
         }
         const ck06_nt = 0; // Dự phòng 1 - không sử dụng (không phân bổ vì = 0)
