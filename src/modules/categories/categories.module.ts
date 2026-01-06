@@ -10,15 +10,15 @@ import { WarehouseCodeMapping } from '../../entities/warehouse-code-mapping.enti
 import { PaymentMethod } from '../../entities/payment-method.entity';
 import { Customer } from '../../entities/customer.entity';
 import { Sale } from '../../entities/sale.entity';
+import { EcommerceCustomer } from '../../entities/ecommerce-customer.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ProductItem, PromotionItem, WarehouseItem, WarehouseCodeMapping, PaymentMethod, Customer, Sale]),
+    TypeOrmModule.forFeature([ProductItem, PromotionItem, WarehouseItem, WarehouseCodeMapping, PaymentMethod, Customer, Sale, EcommerceCustomer]),
     HttpModule,
   ],
   controllers: [CategoriesController],
   providers: [CategoriesService],
   exports: [CategoriesService],
 })
-export class CategoriesModule {}
-
+export class CategoriesModule { }

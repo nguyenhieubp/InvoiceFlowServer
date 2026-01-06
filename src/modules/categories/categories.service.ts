@@ -10,11 +10,13 @@ import { WarehouseCodeMapping } from '../../entities/warehouse-code-mapping.enti
 import { PaymentMethod } from '../../entities/payment-method.entity';
 import { Customer } from '../../entities/customer.entity';
 import { Sale } from '../../entities/sale.entity';
+import { EcommerceCustomer } from '../../entities/ecommerce-customer.entity';
 import { CreateProductItemDto, UpdateProductItemDto } from '../../dto/create-product-item.dto';
 import { CreatePromotionItemDto, UpdatePromotionItemDto } from '../../dto/create-promotion-item.dto';
 import { CreateWarehouseItemDto, UpdateWarehouseItemDto } from '../../dto/create-warehouse-item.dto';
 import { CreateWarehouseCodeMappingDto, UpdateWarehouseCodeMappingDto } from '../../dto/create-warehouse-code-mapping.dto';
 import { CreatePaymentMethodDto, UpdatePaymentMethodDto } from '../../dto/create-payment-method.dto';
+import { CreateEcommerceCustomerDto, UpdateEcommerceCustomerDto } from '../../dto/create-ecommerce-customer.dto';
 import * as XLSX from 'xlsx';
 
 @Injectable()
@@ -36,6 +38,8 @@ export class CategoriesService {
     private customerRepository: Repository<Customer>,
     @InjectRepository(Sale)
     private saleRepository: Repository<Sale>,
+    @InjectRepository(EcommerceCustomer)
+    private ecommerceCustomerRepository: Repository<EcommerceCustomer>,
     @InjectDataSource()
     private dataSource: DataSource,
     private httpService: HttpService,
@@ -1718,5 +1722,242 @@ export class CategoriesService {
       throw error;
     }
   }
-}
 
+  // ========== ECOMMERCE CUSTOMER METHODS ==========
+
+  async findAllEcommerceCustomers(options: {
+    page?: number;
+    limit?: number;
+    search?: string;
+  }) {
+    const { page = 1, limit = 50, search } = options;
+
+    const query = this.ecommerceCustomerRepository
+      .createQueryBuilder('ec')
+      .orderBy('ec.ngayTao', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (search) {
+      query.andWhere(
+        '(ec.brand ILIKE :search OR ec.customerCode ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    const [data, total] = await query.getManyAndCount();
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async findOneEcommerceCustomer(id: string): Promise<EcommerceCustomer> {
+    const ec = await this.ecommerceCustomerRepository.findOne({
+      where: { id },
+    });
+
+    if (!ec) {
+      throw new NotFoundException(`Ecommerce Customer with ID ${id} not found`);
+    }
+
+    return ec;
+  }
+
+  async findActiveEcommerceCustomers(): Promise<EcommerceCustomer[]> {
+    return this.ecommerceCustomerRepository.find({
+      where: { trangThai: 'active' },
+      order: { brand: 'ASC', customerCode: 'ASC' },
+    });
+  }
+
+  async createEcommerceCustomer(createDto: CreateEcommerceCustomerDto): Promise<EcommerceCustomer> {
+    const ec = this.ecommerceCustomerRepository.create({
+      ...createDto,
+      trangThai: createDto.trangThai || 'active',
+    });
+
+    return await this.ecommerceCustomerRepository.save(ec);
+  }
+
+  async updateEcommerceCustomer(id: string, updateDto: UpdateEcommerceCustomerDto): Promise<EcommerceCustomer> {
+    const ec = await this.findOneEcommerceCustomer(id);
+
+    Object.assign(ec, updateDto);
+
+    return await this.ecommerceCustomerRepository.save(ec);
+  }
+
+  async deleteEcommerceCustomer(id: string): Promise<void> {
+    const ec = await this.findOneEcommerceCustomer(id);
+    await this.ecommerceCustomerRepository.remove(ec);
+  }
+
+  async importEcommerceCustomersFromExcel(file: Express.Multer.File): Promise<{
+    total: number;
+    success: number;
+    failed: number;
+    errors: Array<{ row: number; error: string }>;
+  }> {
+    try {
+      const workbook = XLSX.read(file.buffer, { type: 'buffer', cellDates: false, cellNF: false, cellText: false });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(worksheet, { raw: true, defval: null }) as any[];
+
+      const errors: Array<{ row: number; error: string }> = [];
+      let success = 0;
+      let failed = 0;
+
+      const normalizeHeader = (header: string): string => {
+        return String(header).trim().toLowerCase().replace(/\s+/g, ' ');
+      };
+
+      // Mapping từ header Excel sang field
+      const fieldMappingVariants: Record<string, string[]> = {
+        brand: ['brand', 'thương hiệu', 'thuong hieu'],
+        customerCode: ['customer code', 'customercode', 'mã khách hàng', 'ma khach hang', 'mã kh', 'ma kh'],
+      };
+
+      const normalizedMapping: Record<string, string> = {};
+      for (const [fieldName, variants] of Object.entries(fieldMappingVariants)) {
+        for (const variant of variants) {
+          normalizedMapping[normalizeHeader(variant)] = fieldName;
+        }
+      }
+
+      const actualHeaders = data.length > 0 ? Object.keys(data[0]) : [];
+      this.logger.log(`Excel headers found: ${actualHeaders.join(', ')}`);
+
+      // Lọc bỏ các dòng trống
+      const nonEmptyRowsWithIndex = data
+        .map((row, index) => ({ row, originalIndex: index }))
+        .filter(({ row }) => {
+          return !actualHeaders.every(header => {
+            const value = row[header];
+            if (value === null || value === undefined) return true;
+            if (typeof value === 'string' && value.trim() === '') return true;
+            return false;
+          });
+        });
+
+      // Parse data
+      const parsedItems: Array<{ itemData: Partial<EcommerceCustomer>; rowNumber: number }> = [];
+
+      for (let i = 0; i < nonEmptyRowsWithIndex.length; i++) {
+        const { row, originalIndex } = nonEmptyRowsWithIndex[i];
+        const rowNumber = originalIndex + 2;
+
+        try {
+          const itemData: Partial<EcommerceCustomer> = {
+            trangThai: 'active',
+          };
+
+          for (const actualHeader of actualHeaders) {
+            const normalizedHeader = normalizeHeader(actualHeader);
+            const fieldName = normalizedMapping[normalizedHeader];
+
+            if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
+              const rawValue = row[actualHeader];
+              if (typeof rawValue === 'string' && rawValue.trim() === '') {
+                continue;
+              }
+              itemData[fieldName] = String(rawValue).trim();
+            }
+          }
+
+          if (!itemData.brand || !itemData.customerCode) {
+            errors.push({
+              row: rowNumber,
+              error: `Brand và Customer Code là bắt buộc`,
+            });
+            failed++;
+            continue;
+          }
+
+          parsedItems.push({ itemData, rowNumber });
+        } catch (error: any) {
+          this.logger.error(`Error parsing row ${rowNumber}: ${error.message}`);
+          errors.push({
+            row: rowNumber,
+            error: error.message || 'Unknown error',
+          });
+          failed++;
+        }
+      }
+
+      // Load existing records
+      const customerCodeList = parsedItems.map(p => p.itemData.customerCode).filter(Boolean) as string[];
+      const existingItems = await this.ecommerceCustomerRepository.find({
+        where: { customerCode: In(customerCodeList) },
+      });
+      const existingMap = new Map(existingItems.map(p => [p.customerCode, p]));
+
+      // Batch processing
+      const BATCH_SIZE = 1000;
+      const queryRunner = this.dataSource.createQueryRunner();
+
+      try {
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+
+        for (let i = 0; i < parsedItems.length; i += BATCH_SIZE) {
+          const batch = parsedItems.slice(i, i + BATCH_SIZE);
+          const itemsToSave: EcommerceCustomer[] = [];
+          const itemsToDelete: EcommerceCustomer[] = [];
+
+          for (const { itemData, rowNumber } of batch) {
+            try {
+              const existing = existingMap.get(itemData.customerCode!);
+
+              if (existing) {
+                itemsToDelete.push(existing);
+              }
+
+              const item = this.ecommerceCustomerRepository.create(itemData);
+              itemsToSave.push(item);
+            } catch (error: any) {
+              this.logger.error(`Error processing row ${rowNumber}: ${error.message}`);
+              errors.push({
+                row: rowNumber,
+                error: error.message || 'Unknown error',
+              });
+              failed++;
+            }
+          }
+
+          if (itemsToDelete.length > 0) {
+            await queryRunner.manager.remove(itemsToDelete);
+          }
+
+          if (itemsToSave.length > 0) {
+            await queryRunner.manager.save(EcommerceCustomer, itemsToSave);
+            success += itemsToSave.length;
+          }
+        }
+
+        await queryRunner.commitTransaction();
+      } catch (error: any) {
+        await queryRunner.rollbackTransaction();
+        this.logger.error(`Transaction error: ${error.message}`);
+        throw error;
+      } finally {
+        await queryRunner.release();
+      }
+
+      return {
+        total: nonEmptyRowsWithIndex.length,
+        success,
+        failed,
+        errors,
+      };
+    } catch (error: any) {
+      this.logger.error(`Error importing Excel file: ${error.message}`);
+      throw new Error(`Lỗi khi import file Excel: ${error.message}`);
+    }
+  }
+}

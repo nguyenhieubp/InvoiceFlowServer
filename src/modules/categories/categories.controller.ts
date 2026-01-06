@@ -18,10 +18,11 @@ import { CreatePromotionItemDto, UpdatePromotionItemDto } from '../../dto/create
 import { CreateWarehouseItemDto, UpdateWarehouseItemDto } from '../../dto/create-warehouse-item.dto';
 import { CreateWarehouseCodeMappingDto, UpdateWarehouseCodeMappingDto } from '../../dto/create-warehouse-code-mapping.dto';
 import { CreatePaymentMethodDto, UpdatePaymentMethodDto } from '../../dto/create-payment-method.dto';
+import { CreateEcommerceCustomerDto, UpdateEcommerceCustomerDto } from '../../dto/create-ecommerce-customer.dto';
 
 @Controller('categories')
 export class CategoriesController {
-  constructor(private readonly categoriesService: CategoriesService) {}
+  constructor(private readonly categoriesService: CategoriesService) { }
 
   @Get('products')
   async findAll(
@@ -73,7 +74,7 @@ export class CategoriesController {
       'application/vnd.ms-excel',
       'text/csv',
     ];
-    
+
     if (!allowedMimes.includes(file.mimetype)) {
       throw new BadRequestException(
         'File không hợp lệ. Vui lòng upload file Excel (.xlsx, .xls) hoặc CSV',
@@ -145,7 +146,7 @@ export class CategoriesController {
       'application/vnd.ms-excel',
       'text/csv',
     ];
-    
+
     if (!allowedMimes.includes(file.mimetype)) {
       throw new BadRequestException(
         'File không hợp lệ. Vui lòng upload file Excel (.xlsx, .xls) hoặc CSV',
@@ -217,7 +218,7 @@ export class CategoriesController {
       'application/vnd.ms-excel',
       'text/csv',
     ];
-    
+
     if (!allowedMimes.includes(file.mimetype)) {
       throw new BadRequestException(
         'File không hợp lệ. Vui lòng upload file Excel (.xlsx, .xls) hoặc CSV',
@@ -315,7 +316,7 @@ export class CategoriesController {
       'application/vnd.ms-excel',
       'text/csv',
     ];
-    
+
     if (!allowedMimes.includes(file.mimetype)) {
       throw new BadRequestException(
         'File không hợp lệ. Vui lòng upload file Excel (.xlsx, .xls) hoặc CSV',
@@ -392,7 +393,7 @@ export class CategoriesController {
       'application/vnd.ms-excel',
       'text/csv',
     ];
-    
+
     if (!allowedMimes.includes(file.mimetype)) {
       throw new BadRequestException(
         'File không hợp lệ. Vui lòng upload file Excel (.xlsx, .xls) hoặc CSV',
@@ -445,6 +446,83 @@ export class CategoriesController {
       throw new BadRequestException('branchcode parameter is required');
     }
     return this.categoriesService.getDepartmentFromLoyaltyAPI(branchcode);
+  }
+
+  // ========== ECOMMERCE CUSTOMER ENDPOINTS ==========
+
+  @Get('ecommerce-customers')
+  async findAllEcommerceCustomers(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.categoriesService.findAllEcommerceCustomers({
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 50,
+      search,
+    });
+  }
+
+  @Get('ecommerce-customers/active')
+  async findActiveEcommerceCustomers() {
+    return this.categoriesService.findActiveEcommerceCustomers();
+  }
+
+  @Get('ecommerce-customers/:id')
+  async findOneEcommerceCustomer(@Param('id') id: string) {
+    return this.categoriesService.findOneEcommerceCustomer(id);
+  }
+
+  @Post('ecommerce-customers')
+  async createEcommerceCustomer(@Body() createDto: CreateEcommerceCustomerDto) {
+    return this.categoriesService.createEcommerceCustomer(createDto);
+  }
+
+  @Put('ecommerce-customers/:id')
+  async updateEcommerceCustomer(
+    @Param('id') id: string,
+    @Body() updateDto: UpdateEcommerceCustomerDto,
+  ) {
+    return this.categoriesService.updateEcommerceCustomer(id, updateDto);
+  }
+
+  @Delete('ecommerce-customers/:id')
+  async deleteEcommerceCustomer(@Param('id') id: string) {
+    await this.categoriesService.deleteEcommerceCustomer(id);
+    return { message: 'Ecommerce customer deleted successfully' };
+  }
+
+  @Post('ecommerce-customers/import')
+  @UseInterceptors(FileInterceptor('file'))
+  async importEcommerceCustomersExcel(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('File không được tìm thấy');
+    }
+
+    // Validate file type
+    const allowedMimes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'text/csv',
+    ];
+
+    if (!allowedMimes.includes(file.mimetype)) {
+      throw new BadRequestException(
+        'File không hợp lệ. Vui lòng upload file Excel (.xlsx, .xls) hoặc CSV',
+      );
+    }
+
+    try {
+      const result = await this.categoriesService.importEcommerceCustomersFromExcel(file);
+      return {
+        message: `Import thành công ${result.success}/${result.total} bản ghi`,
+        ...result,
+      };
+    } catch (error: any) {
+      throw new BadRequestException(
+        error.message || 'Lỗi khi import file Excel',
+      );
+    }
   }
 
 }
