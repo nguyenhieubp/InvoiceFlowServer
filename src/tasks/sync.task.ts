@@ -31,10 +31,10 @@ export class SyncTask {
 
 
   // Chạy mỗi ngày lúc 1:00 AM - Đồng bộ dữ liệu xuất kho
-  @Cron('0 1 * * *', {
-    name: 'daily-stock-transfer-sync',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  // @Cron('0 1 * * *', {
+  //   name: 'daily-stock-transfer-sync',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
   async handleDailyStockTransferSync() {
     this.logger.log('Bắt đầu đồng bộ dữ liệu xuất kho tự động (scheduled task)...');
     try {
@@ -90,10 +90,10 @@ export class SyncTask {
 
 
   // Chạy mỗi ngày lúc 2:30 AM - Đồng bộ báo cáo nộp quỹ cuối ca (ngày T-1)
-  @Cron('30 2 * * *', {
-    name: 'daily-shift-end-cash-sync-2-30am',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  // @Cron('30 2 * * *', {
+  //   name: 'daily-shift-end-cash-sync-2-30am',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
   async handleDailyShiftEndCashSync230AM() {
     this.logger.log('Bắt đầu đồng bộ báo cáo nộp quỹ cuối ca tự động (scheduled task)...');
     try {
@@ -166,20 +166,20 @@ export class SyncTask {
   }
 
   // Chạy mỗi ngày lúc 3:00 AM - Đồng bộ dữ liệu bán hàng (ngày T-1)
-  @Cron('0 3 * * *', {
-    name: 'daily-sales-sync-3am',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  // @Cron('0 3 * * *', {
+  //   name: 'daily-sales-sync-3am',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
   async handleDailySalesSync3AM() {
     await this.syncSalesForYesterday('Sales Sync 3AM');
   }
 
 
   // Chạy đồng bộ odoo
-  @Cron('0 4 * * *', {
-    name: 'daily-odoo-sync-4am',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  // @Cron('0 4 * * *', {
+  //   name: 'daily-odoo-sync-4am',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
   async handleDailyOdooSync4AM() {
     const today = new Date();
     today.setDate(today.getDate() - 1);
@@ -219,10 +219,10 @@ export class SyncTask {
   }
 
   // Chạy mỗi ngày lúc 4:00 AM - Đồng bộ promotion cho tháng hiện tại
-  @Cron('0 4 * * *', {
-    name: 'daily-promotion-sync-4am',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  // @Cron('0 4 * * *', {
+  //   name: 'daily-promotion-sync-4am',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
   async handleDailyPromotionSync4AM() {
     this.logger.log('Bắt đầu đồng bộ promotion tự động cho tháng hiện tại (scheduled task)...');
     try {
