@@ -1304,17 +1304,17 @@ export class SalesService {
       // tkChietKhau = sale.tkChietKhau || null;
       // tkChiPhi = sale.tkChiPhi || null;
       // maPhi = sale.maPhi || null;
-   
+
       tkChietKhau = sale.tkChietKhau || null;
       tkChiPhi = sale.tkChiPhi || null;
       maPhi = sale.maPhi || null;
     }
 
-    if (sale.ordertypeName.includes('08. Tách thẻ')) {
+    if (sale.ordertypeName?.includes('08. Tách thẻ')) {
       calculatedFields.maKho = 'B' + department?.ma_bp;
     }
 
-    if (sale.ordertypeName.includes('03. Đổi điểm')) {
+    if (sale.ordertypeName?.includes('03. Đổi điểm')) {
       calculatedFields.promCodeDisplay = '1';
     }
 
@@ -3521,21 +3521,22 @@ export class SalesService {
 
       // Fetch departments để lấy company và map sang brand
       const departmentMap = new Map<string, { company?: string }>();
-      for (const branchCode of branchCodes) {
-        try {
-          const response = await this.httpService.axiosRef.get(
-            `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-            { headers: { accept: 'application/json' } },
-          );
-          const department = response?.data?.data?.items?.[0];
-          if (department?.company) {
-            departmentMap.set(branchCode, { company: department.company });
+      if (!brand || brand !== 'chando') {
+        for (const branchCode of branchCodes) {
+          try {
+            const response = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+              { headers: { accept: 'application/json' } },
+            );
+            const department = response?.data?.data?.items?.[0];
+            if (department?.company) {
+              departmentMap.set(branchCode, { company: department.company });
+            }
+          } catch (error) {
+            this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
           }
-        } catch (error) {
-          this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
         }
       }
-
       // Map company sang brand
       const mapCompanyToBrand = (company: string | null | undefined): string => {
         if (!company) return '';
@@ -3544,9 +3545,9 @@ export class SalesService {
           'F3': 'f3',
           'FACIALBAR': 'f3',
           'MENARD': 'menard',
-          'CHANDO': 'chando',
           'LABHAIR': 'labhair',
           'YAMAN': 'yaman',
+          'CHANDO': 'chando',
         };
         return brandMap[companyUpper] || company.toLowerCase();
       };
@@ -3753,6 +3754,7 @@ export class SalesService {
                   voucherDp1: voucherRefno,
                   thanhToanVoucher: voucherAmount && voucherAmount > 0 ? voucherAmount : undefined,
                   customer: customer,
+                  brand: brand,
                   isProcessed: false,
                   statusAsys: statusAsys, // Set statusAsys: true nếu sản phẩm tồn tại, false nếu 404
                 } as Partial<Sale>);
@@ -3809,7 +3811,7 @@ export class SalesService {
     }>;
     errors?: string[];
   }> {
-    const brands = ['f3', 'labhair', 'yaman', 'menard'];
+    const brands = ['f3', 'labhair', 'yaman', 'menard','chando'];
     const allErrors: string[] = [];
     const brandResults: Array<{
       brand: string;
@@ -3967,12 +3969,12 @@ export class SalesService {
 
       const hasX = /_X$/.test(docCode);
 
-    
+
       if (_.isEmpty(stockTransfers)) {
-        if(hasX) {
-          return await this.handleSaleOrderWithUnderscoreX(orderData, docCode ?? '',1);
-        }else{
-          return await this.handleSaleOrderWithUnderscoreX(orderData, docCode ?? '',0);
+        if (hasX) {
+          return await this.handleSaleOrderWithUnderscoreX(orderData, docCode ?? '', 1);
+        } else {
+          return await this.handleSaleOrderWithUnderscoreX(orderData, docCode ?? '', 0);
         }
       }
 
