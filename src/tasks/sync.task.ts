@@ -13,7 +13,7 @@ export class SyncTask {
 
   constructor(
     private readonly syncService: SyncService,
-  ) {}
+  ) { }
 
   /**
    * Helper function: Format ngày hôm qua thành format DDMMMYYYY
@@ -68,7 +68,7 @@ export class SyncTask {
   private async syncSalesForYesterday(cronName: string): Promise<void> {
     const date = this.formatYesterdayDate();
     this.logger.log(`[${cronName}] Bắt đầu đồng bộ dữ liệu bán hàng cho ngày ${date} (T-1)...`);
-    
+
     try {
       // Đồng bộ từng brand tuần tự
       const brands = ['f3', 'labhair', 'yaman', 'menard'];
@@ -111,7 +111,7 @@ export class SyncTask {
             this.logger.log(
               `[Scheduled ShiftEndCash] Hoàn thành đồng bộ brand ${brand}: ${result.recordsCount} records, ${result.savedCount} saved, ${result.updatedCount} updated`,
             );
-            
+
             // Collect các record mới được tạo
             if (result.newRecordIds && result.newRecordIds.length > 0) {
               allNewRecordIds.push(...result.newRecordIds);
@@ -172,6 +172,23 @@ export class SyncTask {
   })
   async handleDailySalesSync3AM() {
     await this.syncSalesForYesterday('Sales Sync 3AM');
+  }
+
+
+  // Chạy đồng bộ odoo
+  @Cron('0 4 * * *', {
+    name: 'daily-odoo-sync-4am',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  async handleDailyOdooSync4AM() {
+    const today = new Date();
+    today.setDate(today.getDate() - 1);
+    const formatted =
+      `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
+    await this.syncService.syncOdoo(formatted, formatted);
+    this.logger.log('Hoàn thành đồng bộ odoo');
+  } catch(error: any) {
+    this.logger.error(`Lỗi khi đồng bộ odoo: ${error?.message || error}`);
   }
 
   /**

@@ -76,7 +76,7 @@ export class SyncService {
     @Inject(forwardRef(() => FastApiInvoiceFlowService))
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private fastApiClientService: FastApiClientService,
-  ) {}
+  ) { }
 
   async syncBrand(brandName: string, date: string): Promise<{
     success: boolean;
@@ -109,7 +109,7 @@ export class SyncService {
     try {
       // Lấy dữ liệu từ Zappy API với brand cụ thể
       const orders = await this.zappyApiService.getDailySales(date, brand);
-      
+
       // Lấy dữ liệu cash/voucher từ get_daily_cash/get_daily_cashio để enrich
       let cashData: any[] = [];
       try {
@@ -160,7 +160,7 @@ export class SyncService {
               }
 
               const parsedRefnoIdate = cash.refno_idate ? parseRefnoIdate(cash.refno_idate) : undefined;
-              
+
               const cashioData: Partial<DailyCashio> = {
                 api_id: cash.id,
                 code: cash.code,
@@ -216,7 +216,7 @@ export class SyncService {
           salesCount: 0,
           customersCount: 0,
         };
-  }
+      }
 
       let salesCount = 0;
       let customersCount = 0;
@@ -237,7 +237,7 @@ export class SyncService {
         try {
           const response = await this.httpService.axiosRef.get(
             `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-            { 
+            {
               headers: { accept: 'application/json' },
               timeout: 5000, // 5 seconds timeout
             },
@@ -259,7 +259,6 @@ export class SyncService {
           'F3': 'f3',
           'FACIALBAR': 'f3',
           'MENARD': 'menard',
-          'CHANDO': 'chando',
           'LABHAIR': 'labhair',
           'YAMAN': 'yaman',
         };
@@ -303,7 +302,7 @@ export class SyncService {
               grade_name: order.customer.grade_name,
               branch_code: order.customer.branch_code,
             } as Partial<Customer>);
-            customer = await this.customerRepository.save(newCustomer);
+            customer = newCustomer;
             customerMap.set(customer.code, customer); // Thêm vào map để dùng lại
             customersCount++;
           } else {
@@ -360,7 +359,7 @@ export class SyncService {
           const orderCashData = cashMapBySoCode.get(order.docCode) || [];
           const voucherData = orderCashData.filter((cash) => cash.fop_syscode === 'VOUCHER');
           const ecoinData = orderCashData.filter((cash) => cash.fop_syscode === 'ECOIN');
-          
+
           // Collect tất cả itemCodes từ order để fetch products từ Loyalty API (đã trim)
           const orderItemCodes = Array.from(
             new Set(
@@ -378,23 +377,23 @@ export class SyncService {
           const productTrackSerialMap = new Map<string, boolean>();
           // Track các itemCodes không tồn tại (404) để bỏ qua khi lưu sale items
           const notFoundItemCodes = new Set<string>();
-          
+
           if (orderItemCodes.length > 0) {
             await Promise.all(
               orderItemCodes.map(async (itemCode) => {
                 const trimmedItemCode = itemCode?.trim();
                 if (!trimmedItemCode) return;
-                
+
                 // Fetch product từ Loyalty API sử dụng LoyaltyService
                 const loyaltyProduct = await this.loyaltyService.checkProduct(trimmedItemCode);
-                
+
                 // Nếu không tìm thấy, đánh dấu not found
                 if (!loyaltyProduct) {
                   notFoundItemCodes.add(trimmedItemCode);
                   this.logger.log(`[Sync] Đã thêm ${trimmedItemCode} vào danh sách bỏ qua (notFoundItemCodes size: ${notFoundItemCodes.size})`);
                   return;
                 }
-                
+
                 // Nếu có dữ liệu từ Loyalty API, lưu vào maps
                 if (loyaltyProduct?.unit) {
                   productDvtMap.set(itemCode, loyaltyProduct.unit);
@@ -417,11 +416,11 @@ export class SyncService {
               }),
             );
           }
-          
+
           // Tạo tất cả compositeKeys trước để batch query check duplicate
           const compositeKeysToCheck: string[] = [];
           const saleItemDataMap = new Map<string, any>(); // Map compositeKey -> saleItem data
-          
+
           if (order.sales && order.sales.length > 0) {
             for (let index = 0; index < order.sales.length; index++) {
               const saleItem = order.sales[index];
@@ -433,7 +432,7 @@ export class SyncService {
                   apiId = parsedId;
                 }
               }
-              
+
               const giaBanValue = saleItem.giaBan || saleItem.price || 0;
               // Thêm index vào compositeKey để phân biệt các items giống nhau trong cùng order
               const compositeKey = [
@@ -447,16 +446,15 @@ export class SyncService {
                 (saleItem.revenue || 0).toString(),
                 saleItem.promCode || 'null',
                 saleItem.serial || 'null',
-                customer.id || '',
                 apiId ? apiId.toString() : 'null',
                 index.toString(), // Thêm index để phân biệt items giống nhau
               ].join('|');
-              
+
               compositeKeysToCheck.push(compositeKey);
               saleItemDataMap.set(compositeKey, { saleItem, apiId, index });
             }
           }
-          
+
           // Batch query tất cả existingSales dựa trên compositeKeys
           const existingSalesMap = new Map<string, Sale>();
           if (compositeKeysToCheck.length > 0) {
@@ -469,7 +467,7 @@ export class SyncService {
               }
             });
           }
-          
+
           // Xử lý từng sale trong order - LƯU TẤT CẢ, đánh dấu statusAsys = false nếu sản phẩm không tồn tại (404)
           if (order.sales && order.sales.length > 0) {
             for (let index = 0; index < order.sales.length; index++) {
@@ -481,16 +479,16 @@ export class SyncService {
                   this.logger.log(`[Sync] Bỏ qua sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - itemcode = TRUTONKEEP`);
                   continue;
                 }
-                
+
                 // Kiểm tra xem sản phẩm có tồn tại trong Loyalty API không
                 const isNotFound = itemCode && notFoundItemCodes.has(itemCode);
                 // Set statusAsys: false nếu không tồn tại (404), true nếu tồn tại
                 const statusAsys = !isNotFound;
-                
+
                 if (isNotFound) {
                   this.logger.warn(`[Sync] Sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - Sản phẩm không tồn tại trong Loyalty API (404), sẽ lưu với statusAsys = false`);
                 }
-                
+
                 // Parse api_id từ saleItem.id
                 let apiId: number | undefined = undefined;
                 if (saleItem.id !== undefined && saleItem.id !== null && saleItem.id !== '') {
@@ -499,13 +497,13 @@ export class SyncService {
                     apiId = parsedId;
                   }
                 }
-                
+
                 // Lấy productType: Ưu tiên từ Zappy API (producttype), nếu không có thì lấy từ Loyalty API
                 // Kiểm tra cả producttype (chữ thường) và productType (camelCase) từ Zappy API
                 const productTypeFromZappy = saleItem.producttype || saleItem.productType || null;
                 const productTypeFromLoyalty = productTypeMap.get(saleItem.itemCode || '');
                 const productType = productTypeFromZappy || productTypeFromLoyalty || null;
-                
+
                 // Debug log để kiểm tra productType
                 if (productTypeFromZappy) {
                   this.logger.log(`[Sync] Sale ${order.docCode}/${saleItem.itemCode}: productType từ Zappy API = "${productTypeFromZappy}" (saleItem.producttype="${saleItem.producttype}", saleItem.productType="${saleItem.productType}")`);
@@ -514,7 +512,7 @@ export class SyncService {
                 } else {
                   this.logger.warn(`[Sync] Sale ${order.docCode}/${saleItem.itemCode}: Không có productType từ cả Zappy và Loyalty API (saleItem.producttype="${saleItem.producttype}", saleItem.productType="${saleItem.productType}")`);
                 }
-                
+
                 // Lấy dvt từ saleItem hoặc từ Loyalty API, nếu không có thì mặc định là "cái"
                 const dvt = saleItem.dvt || productDvtMap.get(saleItem.itemCode || '') || 'cái';
 
@@ -523,7 +521,7 @@ export class SyncService {
                 if (saleItem.grade_discamt && saleItem.grade_discamt > 0) {
                   // Logic VIP khác nhau cho từng brand
                   const brandLower = brand?.toLowerCase() || '';
-                  
+
                   if (brandLower === 'f3') {
                     // Logic cũ cho f3: DIVU → "FBV CKVIP DV", còn lại → "FBV CKVIP SP"
                     if (productType === 'DIVU') {
@@ -536,7 +534,7 @@ export class SyncService {
                     const materialCode = productMaterialCodeMap.get(saleItem.itemCode || '');
                     const trackInventory = productTrackInventoryMap.get(saleItem.itemCode || '');
                     const trackSerial = productTrackSerialMap.get(saleItem.itemCode || '');
-                    
+
                     // Tính VIP type dựa trên quy tắc
                     if (productType === 'DIVU') {
                       muaHangCkVip = 'VIP DV MAT';
@@ -547,10 +545,10 @@ export class SyncService {
                       const materialCodeStr = materialCode || '';
                       const codeStr = saleItem.itemCode || '';
                       // Kiểm tra "VC" trong materialCode, code, hoặc itemCode (không phân biệt hoa thường)
-                      const hasVC = 
+                      const hasVC =
                         materialCodeStr.toUpperCase().includes('VC') ||
                         codeStr.toUpperCase().includes('VC');
-                      
+
                       if (
                         materialCodeStr.startsWith('E.') ||
                         hasVC ||
@@ -573,7 +571,7 @@ export class SyncService {
                   voucherRefno = firstVoucher.refno;
                   voucherAmount = firstVoucher.total_in || 0;
                 }
-                
+
                 // Kiểm tra ECOIN: Nếu có ECOIN trong cashio → v_paid là ECOIN, không phải voucher
                 const hasEcoin = ecoinData.length > 0;
                 let ecoinAmount: number | undefined = undefined;
@@ -582,33 +580,33 @@ export class SyncService {
                   const firstEcoin = ecoinData[0];
                   ecoinAmount = firstEcoin.total_in || 0;
                 }
-                
+
                 const pkgCode = saleItem.pkg_code || saleItem.pkgCode || null;
                 const promCode = saleItem.promCode || saleItem.prom_code || null;
                 const vPaid = saleItem.paid_by_voucher_ecode_ecoin_bp || 0;
                 const soSource = saleItem.order_source || saleItem.so_source || null;
-                
+
                 // Lưu vào đúng trường
                 let paidByVoucherChinh: number | undefined = undefined;
                 let chietKhauVoucherDp1: number | undefined = undefined;
                 let voucherDp1Code: string | undefined = undefined;
                 let chietKhauThanhToanTkTienAo: number | undefined = undefined;
-                
+
                 // Nếu có ECOIN → lưu vào chietKhauThanhToanTkTienAo, không lưu vào voucher
                 if (hasEcoin && vPaid > 0) {
                   chietKhauThanhToanTkTienAo = ecoinAmount && ecoinAmount > 0 ? ecoinAmount : vPaid;
                 } else if (vPaid > 0) {
                   // Không có ECOIN → xử lý voucher như bình thường
                   // Phân biệt voucher chính và voucher dự phòng
-                  
+
                   // Kiểm tra brand để áp dụng logic khác nhau
                   const brandLower = brand?.toLowerCase() || '';
                   const isShopee = soSource && String(soSource).toUpperCase() === 'SHOPEE';
                   const hasPkgCode = pkgCode && pkgCode.trim() !== '';
                   const hasPromCode = promCode && promCode.trim() !== '';
-                  
+
                   let isVoucherDuPhong = false;
-                  
+
                   if (brandLower === 'f3') {
                     // Logic cho F3 (Facialbar):
                     // - Chỉ khi so_source = "SHOPEE" → voucher dự phòng
@@ -621,10 +619,10 @@ export class SyncService {
                     // - Các trường hợp khác → voucher chính
                     isVoucherDuPhong = isShopee || (hasPromCode && !hasPkgCode);
                   }
-                  
+
                   // Voucher chính nếu không phải voucher dự phòng
                   const isVoucherChinh = !isVoucherDuPhong;
-                  
+
                   if (isVoucherChinh && vPaid > 0) {
                     // Voucher chính: lưu vào paid_by_voucher_ecode_ecoin_bp
                     paidByVoucherChinh = vPaid;
@@ -637,14 +635,14 @@ export class SyncService {
                     paidByVoucherChinh = vPaid;
                   }
                 }
-                
+
                 // Set cục thuế mặc định cho F3
                 let cucThue: string | undefined = undefined;
                 const brandLowerForCucThue = (brand || '').toLowerCase().trim();
                 if (brandLowerForCucThue === 'f3') {
                   cucThue = 'FBV';
                 }
-                
+
                 // Tạo composite key từ TẤT CẢ các trường dữ liệu có khả năng khác nhau
                 // Composite key: docCode|itemCode|qty|giaBan|disc_amt|grade_discamt|other_discamt|revenue|promCode|serial|customerId|api_id|index
                 // Thêm index để phân biệt các items giống nhau trong cùng order
@@ -664,10 +662,10 @@ export class SyncService {
                   apiId ? apiId.toString() : 'null',
                   index.toString(), // Thêm index để phân biệt items giống nhau
                 ].join('|');
-                
+
                 // Check duplicate dựa trên compositeKey (đã query batch trước)
                 const existingSale = existingSalesMap.get(compositeKey);
-                
+
                 // Nếu đã có sale với api_id + itemCode này, update; nếu chưa có, tạo mới
                 if (existingSale) {
                   // Update sale đã tồn tại
@@ -729,12 +727,12 @@ export class SyncService {
                   existingSale.thanhToanVoucher = voucherAmount && voucherAmount > 0 ? voucherAmount : undefined;
                   existingSale.customer = customer;
                   existingSale.compositeKey = compositeKey; // Update compositeKey
-                  
+
                   await this.saleRepository.save(existingSale);
                   salesCount++;
                   continue; // Skip tạo mới, đã update rồi
                 }
-                
+
                 // Tạo sale mới (chỉ khi chưa có existingSale)
                 const newSale = this.saleRepository.create({
                     api_id: apiId || null, // Lưu id từ Zappy API
@@ -820,7 +818,7 @@ export class SyncService {
       // Chỉ tạo invoice cho các đơn hàng trong ngày sync (từ orders vừa sync)
       // Lấy docCodes từ các orders vừa sync, sau đó kiểm tra xem có sales được lưu không
       const orderDocCodes = [...new Set(orders.map(order => order.docCode).filter((code: string) => code))];
-      
+
       // Kiểm tra xem các đơn hàng này có sales được lưu trong database không
       // (để tránh lỗi khi order không có sales nào được lưu do filter dvt)
       const savedDocCodes = await this.saleRepository
@@ -829,9 +827,9 @@ export class SyncService {
         .where('sale.docCode IN (:...docCodes)', { docCodes: orderDocCodes })
         .andWhere('sale.isProcessed = :isProcessed', { isProcessed: false })
         .getRawMany();
-      
+
       const docCodes = savedDocCodes.map((item: any) => item.docCode).filter((code: string) => code);
-      
+
       // Tạo invoice ở background (không await) để trả về response ngay
       if (docCodes.length > 0) {
         this.logger.log(`Bắt đầu tạo hóa đơn ngầm cho ${docCodes.length} đơn hàng...`);
@@ -869,12 +867,12 @@ export class SyncService {
     // Giới hạn số lượng concurrent requests để tránh quá tải (batch size = 5)
     const batchSize = 5;
     const totalBatches = Math.ceil(docCodes.length / batchSize);
-    
+
     for (let i = 0; i < docCodes.length; i += batchSize) {
       const batch = docCodes.slice(i, i + batchSize);
       const batchNumber = Math.floor(i / batchSize) + 1;
       this.logger.log(`[Background] Đang tạo hóa đơn batch ${batchNumber}/${totalBatches} (${batch.length} đơn hàng)...`);
-      
+
       await Promise.all(
         batch.map(async (docCode) => {
           try {
@@ -895,7 +893,7 @@ export class SyncService {
           }
         }),
       );
-      
+
       this.logger.log(`[Background] Hoàn thành batch ${batchNumber}/${totalBatches}`);
     }
 
@@ -1131,11 +1129,11 @@ export class SyncService {
   }> {
     try {
       this.logger.log(`[Stock Transfer] Bắt đầu đồng bộ dữ liệu xuất kho cho brand ${brand} ngày ${date}`);
-      
+
       // Gọi API với P_PART=1,2,3 tuần tự để tránh quá tải
       const parts = [1, 2, 3];
       const allStockTransData: any[] = [];
-      
+
       for (const part of parts) {
         try {
           this.logger.log(`[Stock Transfer] Đang lấy dữ liệu part ${part} cho brand ${brand} ngày ${date}`);
@@ -1151,7 +1149,7 @@ export class SyncService {
           // Tiếp tục với part tiếp theo, không throw error
         }
       }
-      
+
       if (!allStockTransData || allStockTransData.length === 0) {
         this.logger.log(`[Stock Transfer] Không có dữ liệu xuất kho cho brand ${brand} ngày ${date}`);
         return {
@@ -1164,11 +1162,11 @@ export class SyncService {
       }
 
       this.logger.log(`[Stock Transfer] Tổng cộng nhận được ${allStockTransData.length} records xuất kho cho brand ${brand} ngày ${date}`);
-      
+
       // KHÔNG deduplicate - giữ lại tất cả records để lưu vào database
       // Mỗi record sẽ có compositeKey unique với timestamp khi lưu
       const stockTransData = allStockTransData;
-      
+
       this.logger.log(`[Stock Transfer] Giữ lại tất cả ${stockTransData.length} records (không deduplicate)`);
 
       // Parse date từ format "01/11/2025 19:00" sang Date object
@@ -1178,7 +1176,7 @@ export class SyncService {
           // Format: "01/11/2025 19:00"
           const [datePart, timePart] = dateStr.split(' ');
           const [day, month, year] = datePart.split('/');
-          
+
           if (timePart) {
             const [hours, minutes] = timePart.split(':');
             return new Date(
@@ -1348,13 +1346,13 @@ export class SyncService {
         const day = parseInt(dateStr.substring(0, 2));
         const monthStr = dateStr.substring(2, 5).toUpperCase();
         const year = parseInt(dateStr.substring(5, 9));
-        
+
         const monthMap: Record<string, number> = {
           'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
           'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
           'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
         };
-        
+
         const month = monthMap[monthStr] || 0;
         return new Date(year, month, day);
       };
@@ -1392,17 +1390,17 @@ export class SyncService {
       let currentDate = new Date(startDate.getTime());
       while (currentDate <= endDate) {
         const dateStr = formatToDDMMMYYYY(currentDate);
-        
+
         // Đồng bộ cho từng brand
         for (const brandItem of brands) {
           try {
             this.logger.log(`[Stock Transfer Range] Đang đồng bộ brand ${brandItem} cho ngày ${dateStr}`);
             const result = await this.syncStockTransfer(dateStr, brandItem);
-            
+
             totalRecordsCount += result.recordsCount;
             totalSavedCount += result.savedCount;
             totalUpdatedCount += result.updatedCount;
-            
+
             details.push({
               date: dateStr,
               brand: brandItem,
@@ -1583,10 +1581,10 @@ export class SyncService {
       for (const brandName of brands) {
         try {
           this.logger.log(`[ShiftEndCash] Đang đồng bộ ${brandName} cho ngày ${date}`);
-          
+
           // Lấy dữ liệu từ API
           const shiftEndCashData = await this.zappyApiService.getShiftEndCash(date, brandName);
-          
+
           if (!shiftEndCashData || shiftEndCashData.length === 0) {
             this.logger.log(`[ShiftEndCash] Không có dữ liệu cho ${brandName} - ngày ${date}`);
             continue;
@@ -1633,11 +1631,11 @@ export class SyncService {
               });
 
               // Parse dates - đảm bảo lưu đúng giá trị, kể cả null
-              const openat = record.openat !== undefined && record.openat !== null && record.openat !== '' 
-                ? new Date(record.openat) 
+              const openat = record.openat !== undefined && record.openat !== null && record.openat !== ''
+                ? new Date(record.openat)
                 : null;
-              const closedat = record.closedat !== undefined && record.closedat !== null && record.closedat !== '' 
-                ? new Date(record.closedat) 
+              const closedat = record.closedat !== undefined && record.closedat !== null && record.closedat !== ''
+                ? new Date(record.closedat)
                 : null;
               const docdate = parseDateString(record.docdate);
               const gl_date = parseDateString(record.gl_date);
@@ -1663,7 +1661,7 @@ export class SyncService {
                 // Xóa các lines cũ và tạo mới
                 if (record.lines && Array.isArray(record.lines)) {
                   await this.shiftEndCashLineRepository.delete({ shiftEndCashId: existingRecord.id });
-                  
+
                   const linesToCreate = record.lines.map((line: any) => ({
                     shiftEndCashId: existingRecord.id,
                     fop_code: line.fop_code !== undefined && line.fop_code !== null ? line.fop_code : null,
@@ -1833,7 +1831,7 @@ export class SyncService {
           }
           return new Date(year, month, day, 0, 0, 0, 0);
         };
-        
+
         if (params.dateFrom && params.dateTo) {
           // Cả hai đều có: Filter record có openat HOẶC closedat nằm trong khoảng
           const fromDate = parseDate(params.dateFrom);
@@ -1876,6 +1874,33 @@ export class SyncService {
       };
     } catch (error: any) {
       this.logger.error(`Error getting shift end cash: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
+  async syncOdoo(dateFrom: string, dateTo: string): Promise<void> {
+    try {
+      this.logger.log(`Bắt đầu đồng bộ odoo từ ${dateFrom} đến ${dateTo}`);
+      const response = await this.httpService.axiosRef.get(
+        'https://ecs.vmt.vn/api/sale-orders',
+        {
+          headers: { accept: 'application/json', 'Content-Type': 'application/json' },
+          params: {
+            token: 'chHIqq7u8bhm5rFD68be',
+            date_from: dateFrom,
+            date_to: dateTo,
+          },
+        },
+      );
+      const data = response?.data?.data;
+      this.logger.log(`Đồng bộ odoo thành công: ${data}`);
+      // return {
+      //   success: true,
+      //   message: 'Đồng bộ odoo thành công',
+      //   data: data,
+      // };
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ odoo: ${error?.message || error}`);
       throw error;
     }
   }
@@ -1946,13 +1971,13 @@ export class SyncService {
       };
 
       // Tìm dòng tiền mặt (CASH) từ lines để lấy số tiền
-      const cashLine = shiftEndCash.lines?.find((line: any) => 
-        line.fop_code?.toUpperCase() === 'CASH' || 
+      const cashLine = shiftEndCash.lines?.find((line: any) =>
+        line.fop_code?.toUpperCase() === 'CASH' ||
         line.fop_name?.toLowerCase().includes('tiền mặt')
       );
 
       // Ưu tiên dùng actual_amt từ cashLine, nếu không có thì dùng system_amt, cuối cùng là total
-      const paymentAmount = cashLine 
+      const paymentAmount = cashLine
         ? Number(cashLine.actual_amt || cashLine.system_amt || 0)
         : totalAmount;
 
@@ -2095,11 +2120,11 @@ export class SyncService {
             try {
               this.logger.log(`[syncShiftEndCashByDateRange] Đồng bộ ${brandName} - ngày ${dateStr}`);
               const result = await this.syncShiftEndCash(dateStr, brandName);
-              
+
               brandRecordsCount += result.recordsCount;
               brandSavedCount += result.savedCount;
               brandUpdatedCount += result.updatedCount;
-              
+
               if (result.errors && result.errors.length > 0) {
                 brandErrors.push(...result.errors.map(err => `[${dateStr}] ${err}`));
               }
@@ -2178,10 +2203,10 @@ export class SyncService {
       for (const brandName of brands) {
         try {
           this.logger.log(`[RepackFormula] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`);
-          
+
           // Lấy dữ liệu từ API
           const repackFormulaData = await this.zappyApiService.getRepackFormula(dateFrom, dateTo, brandName);
-          
+
           if (!repackFormulaData || repackFormulaData.length === 0) {
             this.logger.log(`[RepackFormula] Không có dữ liệu cho ${brandName} - khoảng ${dateFrom} - ${dateTo}`);
             continue;
@@ -2438,11 +2463,11 @@ export class SyncService {
           try {
             this.logger.log(`[syncRepackFormulaByDateRange] Đồng bộ ${brandName} - khoảng ${startDate} - ${endDate}`);
             const result = await this.syncRepackFormula(startDate, endDate, brandName);
-            
+
             brandRecordsCount = result.recordsCount;
             brandSavedCount = result.savedCount;
             brandUpdatedCount = result.updatedCount;
-            
+
             if (result.errors && result.errors.length > 0) {
               brandErrors.push(...result.errors);
             }
@@ -2627,10 +2652,10 @@ export class SyncService {
       for (const brandName of brands) {
         try {
           this.logger.log(`[Promotion] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`);
-          
+
           // Lấy danh sách promotion từ API
           const promotionData = await this.zappyApiService.getPromotion(dateFrom, dateTo, brandName);
-          
+
           if (!promotionData || promotionData.length === 0) {
             this.logger.log(`[Promotion] Không có dữ liệu cho ${brandName} - khoảng ${dateFrom} - ${dateTo}`);
             continue;
@@ -2656,42 +2681,42 @@ export class SyncService {
                 }
                 return isoDate;
               }
-              
+
               // Format: "07/11/2025 21:29"
               const parts = trimmed.split(' ');
               const datePart = parts[0]; // "07/11/2025"
               const timePart = parts[1] || '00:00'; // "21:29"
-              
+
               if (!datePart || !datePart.includes('/')) {
                 this.logger.warn(`Invalid date format (no /): ${dateStr}`);
                 return null;
               }
-              
+
               const [day, month, year] = datePart.split('/');
               const [hours, minutes] = timePart.split(':');
-              
+
               // Validate các giá trị
               const yearNum = parseInt(year, 10);
               const monthNum = parseInt(month, 10);
               const dayNum = parseInt(day, 10);
               const hoursNum = parseInt(hours || '0', 10);
               const minutesNum = parseInt(minutes || '0', 10);
-              
+
               if (isNaN(yearNum) || isNaN(monthNum) || isNaN(dayNum)) {
                 this.logger.warn(`Invalid date values: ${dateStr} (year: ${year}, month: ${month}, day: ${day})`);
                 return null;
               }
-              
+
               if (monthNum < 1 || monthNum > 12) {
                 this.logger.warn(`Invalid month: ${monthNum} in ${dateStr}`);
                 return null;
               }
-              
+
               if (dayNum < 1 || dayNum > 31) {
                 this.logger.warn(`Invalid day: ${dayNum} in ${dateStr}`);
                 return null;
               }
-              
+
               const date = new Date(
                 yearNum,
                 monthNum - 1,
@@ -2699,13 +2724,13 @@ export class SyncService {
                 isNaN(hoursNum) ? 0 : hoursNum,
                 isNaN(minutesNum) ? 0 : minutesNum,
               );
-              
+
               // Kiểm tra Date có hợp lệ không
               if (isNaN(date.getTime())) {
                 this.logger.warn(`Invalid Date object created from: ${dateStr}`);
                 return null;
               }
-              
+
               return date;
             } catch (error) {
               this.logger.warn(`Không thể parse date: ${dateStr} - ${error}`);
@@ -2716,12 +2741,12 @@ export class SyncService {
           for (const promoData of promotionData) {
             // Đảm bảo api_id là number
             const apiId = typeof promoData.id === 'number' ? promoData.id : parseInt(String(promoData.id), 10);
-            
+
             if (isNaN(apiId)) {
               this.logger.warn(`Invalid api_id for promotion: ${promoData.id}`);
               continue;
             }
-            
+
             try {
 
               // Kiểm tra xem đã tồn tại chưa (dựa trên api_id và brand)
@@ -2761,7 +2786,7 @@ export class SyncService {
                 let lines: PromotionLine[] = [];
                 try {
                   const lineData = await this.zappyApiService.getPromotionLine(promoData.id, brandName);
-                  
+
                   // Tạo lại lines từ i_lines và v_lines
                   lines = [];
                   if (lineData.i_lines && Array.isArray(lineData.i_lines)) {
@@ -2861,7 +2886,7 @@ export class SyncService {
                 // Lấy chi tiết lines từ API
                 try {
                   const lineData = await this.zappyApiService.getPromotionLine(apiId, brandName);
-                  
+
                   // Tạo lines từ i_lines và v_lines
                   const lines: PromotionLine[] = [];
                   if (lineData.i_lines && Array.isArray(lineData.i_lines)) {
@@ -3020,11 +3045,11 @@ export class SyncService {
           try {
             this.logger.log(`[syncPromotionByDateRange] Đồng bộ ${brandName} - khoảng ${startDate} - ${endDate}`);
             const result = await this.syncPromotion(startDate, endDate, brandName);
-            
+
             brandRecordsCount = result.recordsCount;
             brandSavedCount = result.savedCount;
             brandUpdatedCount = result.updatedCount;
-            
+
             if (result.errors && result.errors.length > 0) {
               brandErrors.push(...result.errors);
             }
@@ -3271,16 +3296,16 @@ export class SyncService {
 
       // Build Excel data - mỗi promotion line là một row
       const excelData: any[] = [];
-      
+
       for (const promotion of promotions) {
         const detailCodeBase = promotion.code || `ID: ${promotion.api_id}`;
-        
+
         if (promotion.lines && promotion.lines.length > 0) {
           for (const line of promotion.lines) {
             const detailCode = line.seq !== null
               ? `${detailCodeBase}.${String(line.seq).padStart(2, '0')}`
               : detailCodeBase;
-            
+
             excelData.push({
               'Mã gốc': promotion.code || promotion.api_id,
               'Mã chi tiết': detailCode,
@@ -3465,10 +3490,10 @@ export class SyncService {
       for (const brandName of brands) {
         try {
           this.logger.log(`[VoucherIssue] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`);
-          
+
           // Lấy danh sách voucher issue từ API
           const voucherIssueData = await this.zappyApiService.getVoucherIssue(dateFrom, dateTo, brandName);
-          
+
           if (!voucherIssueData || voucherIssueData.length === 0) {
             this.logger.log(`[VoucherIssue] Không có dữ liệu cho ${brandName} - khoảng ${dateFrom} - ${dateTo}`);
             continue;
@@ -3493,35 +3518,35 @@ export class SyncService {
                 }
                 return isoDate;
               }
-              
+
               const parts = trimmed.split(' ');
               const datePart = parts[0];
               const timePart = parts[1] || '00:00';
-              
+
               if (!datePart || !datePart.includes('/')) {
                 this.logger.warn(`Invalid date format (no /): ${dateStr}`);
                 return null;
               }
-              
+
               const [day, month, year] = datePart.split('/');
               const [hours, minutes] = timePart.split(':');
-              
+
               const yearNum = parseInt(year, 10);
               const monthNum = parseInt(month, 10);
               const dayNum = parseInt(day, 10);
               const hoursNum = parseInt(hours || '0', 10);
               const minutesNum = parseInt(minutes || '0', 10);
-              
+
               if (isNaN(yearNum) || isNaN(monthNum) || isNaN(dayNum)) {
                 this.logger.warn(`Invalid date values: ${dateStr}`);
                 return null;
               }
-              
+
               if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31) {
                 this.logger.warn(`Invalid month/day: ${dateStr}`);
                 return null;
               }
-              
+
               const date = new Date(
                 yearNum,
                 monthNum - 1,
@@ -3529,12 +3554,12 @@ export class SyncService {
                 isNaN(hoursNum) ? 0 : hoursNum,
                 isNaN(minutesNum) ? 0 : minutesNum,
               );
-              
+
               if (isNaN(date.getTime())) {
                 this.logger.warn(`Invalid Date object created from: ${dateStr}`);
                 return null;
               }
-              
+
               return date;
             } catch (error) {
               this.logger.warn(`Không thể parse date: ${dateStr} - ${error}`);
@@ -3545,12 +3570,12 @@ export class SyncService {
           for (const voucherData of voucherIssueData) {
             // Đảm bảo api_id là number
             const apiId = typeof voucherData.id === 'number' ? voucherData.id : parseInt(String(voucherData.id), 10);
-            
+
             if (isNaN(apiId)) {
               this.logger.warn(`Invalid api_id for voucher issue: ${voucherData.id}`);
               continue;
             }
-            
+
             try {
               // Kiểm tra xem đã tồn tại chưa (dựa trên api_id và brand)
               const existingRecord = await this.voucherIssueRepository.findOne({
@@ -3567,7 +3592,7 @@ export class SyncService {
 
               if (existingRecord) {
                 this.logger.log(`[VoucherIssue] Cập nhật voucher issue ${apiId} (${voucherData.code || 'N/A'}) cho brand ${brandName}`);
-                
+
                 // Cập nhật record đã tồn tại
                 existingRecord.code = voucherData.code || existingRecord.code;
                 existingRecord.status_lov = voucherData.status_lov || existingRecord.status_lov;
@@ -3618,7 +3643,7 @@ export class SyncService {
                 let details: VoucherIssueDetail[] = [];
                 try {
                   const detailData = await this.zappyApiService.getVoucherIssueDetail(apiId, brandName);
-                  
+
                   // Lưu toàn bộ detail_data dạng JSON
                   if (detailData) {
                     const detail = this.voucherIssueDetailRepository.create({
@@ -3627,7 +3652,7 @@ export class SyncService {
                     });
                     details.push(detail);
                   }
-                  
+
                   if (details.length > 0) {
                     await this.voucherIssueDetailRepository.save(details);
                   }
@@ -3693,7 +3718,7 @@ export class SyncService {
                 // Lấy chi tiết từ API
                 try {
                   const detailData = await this.zappyApiService.getVoucherIssueDetail(apiId, brandName);
-                  
+
                   // Lưu toàn bộ detail_data dạng JSON
                   if (detailData) {
                     const detail = this.voucherIssueDetailRepository.create({
@@ -3795,11 +3820,11 @@ export class SyncService {
           try {
             this.logger.log(`[syncVoucherIssueByDateRange] Đồng bộ ${brandName} - khoảng ${startDate} - ${endDate}`);
             const result = await this.syncVoucherIssue(startDate, endDate, brandName);
-            
+
             brandRecordsCount = result.recordsCount;
             brandSavedCount = result.savedCount;
             brandUpdatedCount = result.updatedCount;
-            
+
             if (result.errors && result.errors.length > 0) {
               brandErrors.push(...result.errors);
             }
@@ -4015,7 +4040,7 @@ export class SyncService {
           }
 
           const parsedRefnoIdate = cash.refno_idate ? parseRefnoIdate(cash.refno_idate) : undefined;
-          
+
           const cashioData: Partial<DailyCashio> = {
             api_id: cash.id,
             code: cash.code,
@@ -4522,7 +4547,7 @@ export class SyncService {
 
       // Calculate statistics
       const statsQueryBuilder = this.warehouseProcessedRepository.createQueryBuilder('wp');
-      
+
       // Apply same filters to stats query
       if (params.ioType) {
         statsQueryBuilder.andWhere('wp.ioType = :ioType', { ioType: params.ioType });
@@ -4693,7 +4718,7 @@ export class SyncService {
           // Xử lý STOCK_IO
           // Chỉ xử lý record đầu tiên (vì các record cùng docCode có thể khác nhau)
           const stockTransfer = firstStockTransfer;
-          
+
           // Kiểm tra doctype phải là "STOCK_IO" mới gọi API warehouse (kiểm tra đầu tiên để tránh check các điều kiện khác)
           if (stockTransfer.doctype !== 'STOCK_IO') {
             this.logger.debug(`[Warehouse Auto] DocCode ${docCode} có doctype = "${stockTransfer.doctype}", bỏ qua (chỉ xử lý doctype = "STOCK_IO" hoặc "STOCK_TRANSFER")`);

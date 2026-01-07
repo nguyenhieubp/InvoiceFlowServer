@@ -416,9 +416,11 @@ export class Sale {
   @Column({ nullable: true })
   api_id?: number; // id từ Zappy API (có thể trùng giữa các dòng khác nhau)
 
-  @Column({ nullable: true, unique: true })
+  @Column({ nullable: true })
   compositeKey?: string; // Composite key tổng hợp: docCode + itemCode + qty + giaBan + disc_amt + grade_discamt + other_discamt + revenue + promCode + serial + customerId + api_id
 
+  @Column({ nullable: true})
+  brand?: string;
 
   @CreateDateColumn()
   createdAt: Date;
