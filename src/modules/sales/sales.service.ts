@@ -2183,7 +2183,7 @@ export class SalesService {
     countQuery.leftJoin('sale.customer', 'customer');
 
     if (brand) {
-      countQuery.andWhere('customer.brand = :brand', { brand });
+      countQuery.andWhere('sale.brand = :brand', { brand });
     }
 
     // Thêm search query filter
@@ -2277,7 +2277,7 @@ export class SalesService {
       fullQuery.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
     }
     if (brand) {
-      fullQuery.andWhere('customer.brand = :brand', { brand });
+      fullQuery.andWhere('sale.brand = :brand', { brand });
     }
     if (search && search.trim() !== '') {
       const searchPattern = `%${search.trim().toLowerCase()}%`;

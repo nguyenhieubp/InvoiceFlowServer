@@ -71,7 +71,7 @@ export class SyncTask {
 
     try {
       // Đồng bộ từng brand tuần tự
-      const brands = ['f3', 'labhair', 'yaman', 'menard'];
+      const brands = ['f3', 'labhair', 'yaman', 'menard', 'chando'];
       for (const brand of brands) {
         try {
           this.logger.log(`[${cronName}] Đang đồng bộ brand ${brand} cho ngày ${date}`);
