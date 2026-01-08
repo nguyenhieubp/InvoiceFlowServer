@@ -843,8 +843,6 @@ export class SalesService {
     promCodeDisplay: string | null;
   } {
     const maBp = department?.ma_bp || branchCode || null;
-    const maKho = this.calculateMaKho(sale.ordertype, maBp) || sale.maKho || branchCode || null;
-
     // Tính toán maCtkmTangHang
     // Lấy tienHang từ các nguồn (không dùng revenue vì revenue có thể khác 0 cho hàng tặng)
     const tienHang = Number(sale.tienHang || sale.linetotal || 0);
@@ -927,42 +925,12 @@ export class SalesService {
     const customerBrand = sale.customer?.brand || null;
     const muaHangCkVip = this.calculateMuaHangCkVip(sale, loyaltyProduct, customerBrand, 'calculateSaleFields');
 
+    const maKho = sale.maKho || null;
     const useBatchForMaLo = this.shouldUseBatch(loyaltyProduct?.trackBatch, loyaltyProduct?.trackSerial);
     let maLo: string | null = null;
     if (useBatchForMaLo) {
       maLo = sale.serial || '';
     }
-    // Tính toán maLo từ serial nếu chưa có
-
-    // if (!maLo) {
-    //   const serial = sale.serial || '';
-    //   if (serial) {
-    //     const brand = sale.customer?.brand || '';
-    //     const brandLower = this.normalizeBrand(brand);
-    //     const underscoreIndex = serial.indexOf('_');
-    //     if (underscoreIndex > 0 && underscoreIndex < serial.length - 1) {
-    //       maLo = serial.substring(underscoreIndex + 1);
-    //     } else {
-    //       const productType = this.getProductType(sale, loyaltyProduct);
-    //       const trackBatch = loyaltyProduct?.trackBatch === true || sale.trackInventory === true;
-    //       if (trackBatch) {
-    //         if (brandLower === 'f3') {
-    //           maLo = serial;
-    //         } else {
-    //           const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
-    //           if (productTypeUpper === 'TPCN') {
-    //             maLo = serial.length >= 8 ? serial.slice(-8) : serial;
-    //           } else if (productTypeUpper === 'SKIN' || productTypeUpper === 'GIFT') {
-    //             maLo = serial.length >= 4 ? serial.slice(-4) : serial;
-    //           } else {
-    //             maLo = serial.length >= 4 ? serial.slice(-4) : serial;
-    //           }
-    //         }
-    //       }
-    //     }
-    //   }
-    // }
-
     return { maLo, maCtkmTangHang, muaHangCkVip, maKho, isTangHang, isDichVu, promCodeDisplay };
   }
 
@@ -1126,7 +1094,11 @@ export class SalesService {
    * Format stock transfer cho frontend - đảm bảo materialCode được trả về
    * Frontend sẽ dùng materialCode để hiển thị "Mã SP" thay vì itemCode
    */
-  private formatStockTransferForFrontend(st: StockTransfer): any {
+  private formatStockTransferForFrontend(st?: StockTransfer | null): any {
+    if (!st) {
+      return null;
+    }
+    
     return {
       ...st,
       // Đảm bảo materialCode được trả về (đã được lưu trong DB khi sync)
@@ -1134,6 +1106,8 @@ export class SalesService {
       materialCode: st.materialCode || null,
       // Giữ lại itemCode để backward compatibility
       itemCode: st.itemCode,
+      maKho: st.itemCode,
+      batchSerial: st.batchSerial,
     };
   }
 
@@ -1142,8 +1116,61 @@ export class SalesService {
     loyaltyProduct: any,
     department: any,
     calculatedFields: { maLo: string | null; maCtkmTangHang: string | null; muaHangCkVip: string; maKho: string | null; isTangHang: boolean; isDichVu: boolean; promCodeDisplay: string | null },
-    order?: any
+    order?: any,
+    stockTransfers?: any[] // Thêm parameter để truyền stock transfers trực tiếp
   ): Promise<any> {
+    // Lấy materialCode từ sale (giống logic buildFastApiInvoiceData)
+    const saleMaterialCode = sale.product?.materialCode || sale.product?.maVatTu || sale.product?.maERP || loyaltyProduct?.materialCode;
+    
+    // Lấy maKho và batchSerial từ stock transfers
+    // Ưu tiên: stockTransfers parameter > order.stockTransfers
+    let maKho: string | null = calculatedFields.maKho;
+    let batchSerial: string | null = null;
+    
+    const availableStockTransfers = stockTransfers || order?.stockTransfers;
+    
+    if (saleMaterialCode && availableStockTransfers && Array.isArray(availableStockTransfers)) {
+      // Tìm stock transfer matching với materialCode của sale item này
+      const matchingStockTransfer = availableStockTransfers.find((st: any) => 
+        st.materialCode === saleMaterialCode
+      );
+      
+      if (matchingStockTransfer) {
+        // Lấy stockCode và batchSerial từ stock transfer
+        if (matchingStockTransfer.stockCode) {
+          maKho = matchingStockTransfer.stockCode;
+        }
+        batchSerial = matchingStockTransfer.batchSerial || null;
+      }
+    }
+    
+    // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
+    // Lấy materialCode từ Loyalty API (ưu tiên materialCode từ product, sau đó itemCode)
+    const materialCode = saleMaterialCode || sale.itemCode;
+    let trackSerial: boolean | null = null;
+    let trackBatch: boolean | null = null;
+    
+    // Luôn fetch từ Loyalty API để lấy trackSerial và trackBatch
+    const loyaltyProductForTracking = await this.loyaltyService.checkProduct(materialCode);
+    if (loyaltyProductForTracking) {
+      trackSerial = loyaltyProductForTracking.trackSerial === true;
+      trackBatch = loyaltyProductForTracking.trackBatch === true;
+    }
+    
+    // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
+    const useBatch = this.shouldUseBatch(trackBatch, trackSerial);
+    
+    // Xác định ma_lo và so_serial dựa trên trackSerial và trackBatch
+    let maLo: string | null = null;
+    let soSerial: string | null = null;
+    if (useBatch) {
+      maLo = batchSerial;
+      soSerial = null;
+    } else {
+      maLo = null;
+      soSerial = batchSerial;
+    }
+    
     // Kiểm tra đơn "03. Đổi điểm" trước khi tính toán giá
     const isDoiDiemForDisplay = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
 
@@ -1311,7 +1338,7 @@ export class SalesService {
     }
 
     if (sale.ordertypeName?.includes('08. Tách thẻ')) {
-      calculatedFields.maKho = 'B' + department?.ma_bp;
+      maKho = 'B' + department?.ma_bp;
     }
 
     if (sale.ordertypeName?.includes('03. Đổi điểm')) {
@@ -1324,7 +1351,8 @@ export class SalesService {
       maKho: calculatedFields.maKho,
       maCtkmTangHang: maCtkmTangHang,
       muaHangCkVip: calculatedFields.muaHangCkVip,
-      maLo: calculatedFields.maLo,
+      maLo: maLo, // Dùng maLo nếu trackBatch = true
+      maSerial: soSerial, // Dùng soSerial nếu trackSerial = true
       isTangHang: calculatedFields.isTangHang,
       isDichVu: calculatedFields.isDichVu,
       promCodeDisplay: calculatedFields.promCodeDisplay,
@@ -2531,7 +2559,7 @@ export class SalesService {
       calculatedFields.maKho = maKhoFromStockTransfer;
 
       const order = orderMap.get(sale.docCode);
-      const enrichedSale = await this.formatSaleForFrontend(sale, loyaltyProduct, department, calculatedFields, order);
+      const enrichedSale = await this.formatSaleForFrontend(sale, loyaltyProduct, department, calculatedFields, order, saleStockTransfers);
 
       // Thêm stock transfers vào sale
       enrichedSale.stockTransfers = saleStockTransfers.map(st => this.formatStockTransferForFrontend(st));
