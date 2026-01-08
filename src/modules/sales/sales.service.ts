@@ -3814,7 +3814,7 @@ export class SalesService {
     }>;
     errors?: string[];
   }> {
-    const brands = ['f3', 'labhair', 'yaman', 'menard','chando'];
+    const brands = ['f3', 'labhair', 'yaman', 'menard', 'chando'];
     const allErrors: string[] = [];
     const brandResults: Array<{
       brand: string;
@@ -5643,6 +5643,14 @@ export class SalesService {
         });
       }
 
+      const stockTransferMapForMaKho = new Map<string, StockTransfer[]>();
+
+      for (const [key, value] of stockTransferMapBySoCodeAndMaterialCode.entries()) {
+        if (value?.st && value.st.length > 0) {
+          stockTransferMapForMaKho.set(key, value.st);
+        }
+      }
+
       // Xử lý từng sale với index để tính dong
       const detail = await Promise.all(allSales.map(async (sale: any, index: number) => {
         // Lấy materialCode từ sale (đã được enrich từ Loyalty API)
@@ -5902,21 +5910,17 @@ export class SalesService {
         // Nếu không có thì dùng 'Cái' làm mặc định (Fast API yêu cầu field này phải có giá trị)
         const dvt = toString(sale.product?.dvt || sale.product?.unit || sale.dvt, 'Cái');
 
-        // Lấy mã kho từ stock_transfers (chỉ lấy từ stock_transfers, không có thì để rỗng)
-        // saleMaterialCode đã được khai báo ở trên (dòng 4234)
-        // Tạo map đơn giản cho getMaKhoFromStockTransfer: docCode_materialCode -> StockTransfer[]
-        const stockTransferMapForMaKho = new Map<string, StockTransfer[]>();
+        let maKho = '';
+        let batchSerial: string | null = null;
+
         if (saleMaterialCode) {
           const key = `${orderData.docCode}_${saleMaterialCode}`;
-          const stockTransferInfo = stockTransferMapBySoCodeAndMaterialCode.get(key);
-          if (stockTransferInfo?.st && stockTransferInfo.st.length > 0) {
-            stockTransferMapForMaKho.set(key, stockTransferInfo.st);
-          }
-        }
-        const maKho = await this.getMaKhoFromStockTransfer(sale, orderData.docCode, allStockTransfers, saleMaterialCode, stockTransferMapForMaKho);
+          const sts = stockTransferMapForMaKho.get(key);
 
-        // Debug: Log maLo value từ sale
-        if (index === 0) {
+          if (sts && sts.length > 0 && sts[0]?.stockCode) {
+            maKho = sts[0].stockCode;
+            batchSerial = sts[0].batchSerial || null;
+          }
         }
 
         // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
@@ -5946,7 +5950,7 @@ export class SalesService {
         }
 
         // Lấy giá trị serial từ sale (tất cả đều lấy từ field "serial")
-        const serialValue = toString(sale.serial || '', '');
+        const serialValue = toString(batchSerial || '', '');
 
         // Debug: Log trackSerial, trackBatch và serial để kiểm tra
 
