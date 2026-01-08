@@ -422,6 +422,9 @@ export class Sale {
   @Column({ nullable: true})
   brand?: string;
 
+  @Column({ nullable: true })
+  type_sale?: string; // Type sale (WS, WS_WH, WS_RETAIL, WS_RETAIL_WH)
+
   @CreateDateColumn()
   createdAt: Date;
 

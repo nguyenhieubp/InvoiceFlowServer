@@ -1,8 +1,11 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { WarehouseProcessed } from '../entities/warehouse-processed.entity';
+import { Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
 
-@Injectable()
+@Injectable() 
 export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FastApiClientService.name);
   private readonly baseUrl = 'http://103.145.79.169:6688/Fast';
@@ -16,7 +19,10 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
   private readonly TOKEN_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 phút
   private readonly TOKEN_EXPIRY_BUFFER = 10 * 60 * 1000; // Refresh trước 10 phút khi hết hạn
 
-  constructor(private readonly httpService: HttpService) { }
+  constructor(private readonly httpService: HttpService,
+    @InjectRepository(WarehouseProcessed)
+    private readonly warehouseProcessedRepository: Repository<WarehouseProcessed>,
+  ) { }
 
   /**
    * Đăng nhập và lấy token

@@ -3,7 +3,7 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Order, OrderCustomer, SaleItem } from '../types/order.types';
 import axios from 'axios';
-import { convertDate, convertOrderToOrderLineFormat } from 'src/utils/convert.utils';
+import { convertDate, convertOrderToOrderLineFormat, formatZappyDate, parseZappyDate } from 'src/utils/convert.utils';
 
 /**
  * Service để gọi API từ Zappy và transform dữ liệu
@@ -33,6 +33,41 @@ export class ZappyApiService {
     return this.DEFAULT_ZAPPY_API_BASE_URL;
   }
 
+
+  /**
+ * Lấy dữ liệu bán buôn theo NGÀY
+ */
+  public async getDailyWsale(
+    date: string,
+    brand?: string,
+  ): Promise<Order[]> {
+    const baseUrl = this.getBaseUrlForBrand(brand);
+
+    try {
+      const url = `${baseUrl}/get_daily_wsale?P_DATE=${date}`;
+      const response = await axios.get(url, {
+        headers: { accept: 'application/json' },
+      });
+
+      const rawData = response?.data?.data || [];
+
+      if (!Array.isArray(rawData) || rawData.length === 0) {
+        this.logger.warn(`No WS sales data found for date ${date}`);
+        return [];
+      }
+
+      return this.transformZappySalesToOrders(
+        rawData,
+        brand,
+        'WHOLESALE',
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `Error fetching daily wsale (${date}): ${error?.message || error}`,
+      );
+      throw error;
+    }
+  }
   /**
    * Lấy dữ liệu đơn hàng từ Zappy API
    * @param date - Ngày theo format DDMMMYYYY (ví dụ: 04DEC2025)
@@ -371,7 +406,7 @@ export class ZappyApiService {
   /**
    * Transform dữ liệu từ Zappy format sang Order format
    */
-  private transformZappySalesToOrders(zappySales: any[], brand?: string): Order[] {
+  private transformZappySalesToOrders(zappySales: any[], brand?: string, typeSale?: string): Order[] {
     return zappySales.map((zappySale) => {
       const docCode = zappySale.code || '';
 
@@ -435,6 +470,7 @@ export class ZappyApiService {
         catcode1: zappySale.catcode1 || undefined,
         catcode2: zappySale.catcode2 || undefined,
         catcode3: zappySale.catcode3 || undefined,
+        type_sale: typeSale || undefined,
       };
 
       const docDate = this.parseZappyDate(zappySale.docdate);

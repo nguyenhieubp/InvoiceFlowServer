@@ -6,13 +6,14 @@ import { FastApiInvoiceFlowService } from '../services/fast-api-invoice-flow.ser
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Sale } from '../entities/sale.entity';
+import { ZappyApiService } from 'src/services/zappy-api.service';
 
 @Injectable()
 export class SyncTask {
   private readonly logger = new Logger(SyncTask.name);
 
   constructor(
-    private readonly syncService: SyncService,
+    private readonly syncService: SyncService
   ) { }
 
   /**
@@ -252,6 +253,34 @@ export class SyncTask {
       this.logger.log('Hoàn thành đồng bộ promotion tự động cho tháng hiện tại');
     } catch (error: any) {
       this.logger.error(`Lỗi khi đồng bộ promotion tự động: ${error?.message || error}`);
+    }
+  }
+
+
+
+  // Chạy mỗi ngày lúc 5:00 AM - Đồng bộ bán buôn cho ngày T-1
+  // @Cron('0 5 * * *', {
+  //   name: 'daily-wsale-sync-5am',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
+  async handleDailyWsaleSync5AM() {
+    this.logger.log('Bắt đầu đồng bộ bán buôn tự động cho ngày hiện tại (scheduled task)...');
+    try {
+      const date = this.formatYesterdayDate();
+      const brands = ['menard'];
+      for (const brand of brands) {
+
+        this.logger.log(`[Scheduled Wsale] Đang đồng bộ bán buôn brand ${brand} cho ngày ${date}`);
+        const orders = await this.syncService.getDailyWsale(date, brand);
+        if (orders.length > 0) {
+          this.logger.log(`[Scheduled Wsale] Hoàn thành đồng bộ bán buôn brand ${brand} cho ngày ${date}: ${orders.length} records`);
+        } else {
+          this.logger.error(`[Scheduled Wsale] Lỗi khi đồng bộ bán buôn brand ${brand} cho ngày ${date}: ${orders.length} records`);
+        }
+      }
+      this.logger.log('Hoàn thành đồng bộ bán buôn tự động cho ngày hiện tại');
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ bán buôn tự động: ${error?.message || error}`);
     }
   }
 }

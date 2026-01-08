@@ -4,7 +4,7 @@ import type { Response } from 'express';
 
 @Controller('sync')
 export class SyncController {
-  constructor(private readonly syncService: SyncService) {}
+  constructor(private readonly syncService: SyncService) { }
 
   @Post('brand/:brandName')
   async syncBrand(@Param('brandName') brandName: string, @Body('date') date: string) {
@@ -64,7 +64,7 @@ export class SyncController {
     const dateFrom = body?.dateFrom || body?.DateFrom;
     const dateTo = body?.dateTo || body?.DateTo;
     const brand = body?.brand || body?.Brand;
-    
+
     if (!dateFrom || !dateTo || (typeof dateFrom === 'string' && dateFrom.trim() === '') || (typeof dateTo === 'string' && dateTo.trim() === '')) {
       throw new HttpException(
         {
@@ -104,7 +104,7 @@ export class SyncController {
     @Body() body: any,
   ) {
     const date = body?.date || body?.Date;
-    
+
     if (!date || (typeof date === 'string' && date.trim() === '')) {
       throw new HttpException(
         {
@@ -747,5 +747,38 @@ export class SyncController {
       );
     }
   }
-}
 
+  @Post('wsale/range')
+  async syncWsaleByDateRange(
+    @Body('startDate') startDate: string,
+    @Body('endDate') endDate: string,
+    @Body('brand') brand?: string,
+  ) {
+    if (!startDate || !endDate || (typeof startDate === 'string' && startDate.trim() === '') || (typeof endDate === 'string' && endDate.trim() === '')) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 04DEC2025)',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const result = await this.syncService.getDailyWsaleByDateRange(startDate, endDate, brand);
+      return {
+        ...result,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi đồng bộ bán buôn',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+}

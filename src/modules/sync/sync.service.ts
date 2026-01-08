@@ -21,6 +21,8 @@ import { LoyaltyService } from '../../services/loyalty.service';
 import { SalesService } from '../sales/sales.service';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { FastApiClientService } from '../../services/fast-api-client.service';
+import { Order } from 'src/types/order.types';
+import { formatZappyDate, parseZappyDate } from 'src/utils/convert.utils';
 
 @Injectable()
 export class SyncService {
@@ -389,6 +391,7 @@ export class SyncService {
                   brand: brand,
                   isProcessed: false,
                   statusAsys: statusAsys, // Set statusAsys: true nếu sản phẩm tồn tại, false nếu 404
+                  type_sale: 'RETAIL',
                 } as Partial<Sale>);
                 await this.saleRepository.save(newSale);
                 salesCount++;
@@ -470,215 +473,6 @@ export class SyncService {
     }
   }
 
-  // Method cũ không còn dùng - đã chuyển sang Zappy API
-  // Giữ lại để tương thích nếu cần, nhưng không được gọi
-  private async processCustomerData_OLD(
-    customerData: any,
-    brand: string,
-  ): Promise<void> {
-    const personalInfo = customerData?.Personal_Info;
-    const sales = customerData?.Sales || [];
-
-    // Tìm hoặc tạo customer
-    let customer = await this.customerRepository.findOne({
-      where: { code: personalInfo.code, brand },
-    });
-
-    if (!customer) {
-      const newCustomerData: Partial<Customer> = {
-        code: personalInfo.code,
-        name: personalInfo.name,
-        brand,
-      };
-
-      // Xử lý địa chỉ: ưu tiên street, nếu không có thì dùng address
-      if (personalInfo.street) {
-        newCustomerData.street = personalInfo.street;
-      } else if (personalInfo.address) {
-        newCustomerData.street = personalInfo.address;
-        newCustomerData.address = personalInfo.address;
-      }
-
-      if (personalInfo.birthday) newCustomerData.birthday = new Date(personalInfo.birthday);
-      if (personalInfo.sexual) newCustomerData.sexual = personalInfo.sexual;
-
-      // Xử lý số điện thoại: lưu cả phone và mobile
-      if (personalInfo.phone) {
-        newCustomerData.phone = personalInfo.phone;
-      }
-      if (personalInfo.mobile) {
-        newCustomerData.mobile = personalInfo.mobile;
-        // Nếu chưa có phone thì dùng mobile
-        if (!newCustomerData.phone) {
-          newCustomerData.phone = personalInfo.mobile;
-        }
-      }
-
-      // Lưu các trường mới
-      if (personalInfo.idnumber) newCustomerData.idnumber = personalInfo.idnumber;
-      if (personalInfo.enteredat) newCustomerData.enteredat = new Date(personalInfo.enteredat);
-      if (personalInfo.crm_lead_source) newCustomerData.crm_lead_source = personalInfo.crm_lead_source;
-      if (personalInfo.province_name) newCustomerData.province_name = personalInfo.province_name;
-      if (personalInfo.grade_name) newCustomerData.grade_name = personalInfo.grade_name;
-      if (personalInfo.branch_code) newCustomerData.branch_code = personalInfo.branch_code;
-
-      customer = this.customerRepository.create(newCustomerData);
-      customer = await this.customerRepository.save(customer);
-    } else {
-      // Cập nhật thông tin nếu có thay đổi
-      customer.name = personalInfo.name;
-
-      // Xử lý địa chỉ
-      if (personalInfo.street !== undefined) {
-        customer.street = personalInfo.street;
-      }
-      if (personalInfo.address !== undefined) {
-        customer.address = personalInfo.address;
-        if (!customer.street) {
-          customer.street = personalInfo.address;
-        }
-      }
-
-      // Xử lý số điện thoại: lưu cả phone và mobile
-      if (personalInfo.phone !== undefined) {
-        customer.phone = personalInfo.phone;
-      }
-      if (personalInfo.mobile !== undefined) {
-        customer.mobile = personalInfo.mobile;
-        // Nếu chưa có phone thì dùng mobile
-        if (!customer.phone) {
-          customer.phone = personalInfo.mobile;
-        }
-      }
-
-      if (personalInfo.birthday) {
-        customer.birthday = new Date(personalInfo.birthday);
-      }
-
-      // Cập nhật các trường mới
-      if (personalInfo.idnumber !== undefined) customer.idnumber = personalInfo.idnumber;
-      if (personalInfo.enteredat) customer.enteredat = new Date(personalInfo.enteredat);
-      if (personalInfo.crm_lead_source !== undefined) customer.crm_lead_source = personalInfo.crm_lead_source;
-      if (personalInfo.province_name !== undefined) customer.province_name = personalInfo.province_name;
-      if (personalInfo.grade_name !== undefined) customer.grade_name = personalInfo.grade_name;
-      if (personalInfo.branch_code !== undefined) customer.branch_code = personalInfo.branch_code;
-
-      await this.customerRepository.save(customer);
-    }
-
-    // Xử lý sales
-    // LOGIC SALE:
-    // Sale = Dòng bán hàng (KHÔNG phải đơn hàng)
-    // Order = Đơn hàng (được nhận diện bởi docCode)
-    // 
-    // Mối quan hệ: 1 Order (docCode) = Nhiều Sale (nhiều sản phẩm)
-    //
-    // 1. Mỗi sale đại diện cho 1 dòng bán hàng (1 sản phẩm trong 1 đơn hàng)
-    // 2. Sale được lưu trực tiếp từ API với các thông tin:
-    //    - qty: Số lượng sản phẩm (từ API, không tính toán)
-    //    - revenue: Doanh thu của dòng này (từ API, có thể = 0 nếu là hàng khuyến mãi/tặng)
-    //    - docCode: Mã đơn hàng (Order) - cùng 1 docCode = cùng 1 đơn hàng
-    //    - itemCode: Mã sản phẩm
-    // 3. Tránh trùng lặp: Kiểm tra sale đã tồn tại dựa trên (docCode + itemCode + customerId)
-    //    - Nếu đã tồn tại: Bỏ qua (không cập nhật)
-    //    - Nếu chưa tồn tại: Tạo mới với isProcessed = false
-    // 4. Lưu ý: 
-    //    - 1 Order (docCode) có thể có nhiều Sale (nhiều sản phẩm trong đơn)
-    //    - Cùng 1 docCode + itemCode có thể có nhiều sale nếu qty khác nhau (tách dòng)
-    //    - revenue có thể = 0 (hàng tặng, khuyến mãi)
-    //    - isProcessed: Đánh dấu sale đã được dùng để tạo invoice chưa
-
-    let salesCreated = 0;
-    let salesSkipped = 0;
-    let salesError = 0;
-
-    for (const saleData of sales) {
-      try {
-        // Kiểm tra xem sale đã tồn tại chưa
-        // Kiểm tra dựa trên: docCode + itemCode + qty + revenue + customerId
-        // Điều này cho phép lưu nhiều sale với cùng docCode + itemCode nếu qty hoặc revenue khác nhau
-        const existingSale = await this.saleRepository.findOne({
-          where: {
-            docCode: saleData.doccode,
-            itemCode: saleData.itemcode,
-            qty: saleData.qty,
-            revenue: saleData.revenue,
-            customerId: customer.id,
-          },
-        });
-
-        if (!existingSale) {
-          // Tạo sale mới - lưu trực tiếp qty và revenue từ API
-          // KHÔNG tính toán lại, chỉ lưu giá trị từ API
-          const saleDataToCreate: Partial<Sale> = {
-            branchCode: saleData.branch_code,
-            docCode: saleData.doccode, // Mã đơn hàng
-            docDate: new Date(saleData.docdate),
-            docSourceType: saleData.docsourcetype || 'sale', // Mặc định 'sale' nếu không có
-            partnerCode: saleData.partner_code || personalInfo.code, // Dùng customer code nếu không có partner_code
-            mobile: personalInfo.mobile || customer.mobile || undefined, // Lưu mobile từ customer tại thời điểm bán
-            itemCode: saleData.itemcode, // Mã sản phẩm
-            itemName: saleData.itemname,
-            qty: saleData.qty, // Số lượng - lưu trực tiếp từ API
-            revenue: saleData.revenue || 0, // Doanh thu - lưu trực tiếp từ API (có thể = 0)
-            customerId: customer.id,
-            isProcessed: false, // Mặc định chưa xử lý (chưa tạo invoice)
-          };
-
-          // Các trường optional
-          if (saleData.description) saleDataToCreate.description = saleData.description;
-          if (saleData.kenh) saleDataToCreate.kenh = saleData.kenh;
-          if (saleData.prom_code) saleDataToCreate.promCode = saleData.prom_code;
-          if (saleData.ordertype) saleDataToCreate.ordertype = saleData.ordertype;
-          if (saleData.ordertype_name) saleDataToCreate.ordertypeName = saleData.ordertype_name;
-
-          // Các trường bổ sung từ API
-          if (saleData.cat1 !== undefined) saleDataToCreate.cat1 = saleData.cat1;
-          if (saleData.cat2 !== undefined) saleDataToCreate.cat2 = saleData.cat2;
-          if (saleData.cat3 !== undefined) saleDataToCreate.cat3 = saleData.cat3;
-          if (saleData.catcode1 !== undefined) saleDataToCreate.catcode1 = saleData.catcode1;
-          if (saleData.catcode2 !== undefined) saleDataToCreate.catcode2 = saleData.catcode2;
-          if (saleData.catcode3 !== undefined) saleDataToCreate.catcode3 = saleData.catcode3;
-          if (saleData.ck_tm !== undefined && saleData.ck_tm !== null) saleDataToCreate.ck_tm = saleData.ck_tm;
-          if (saleData.ck_dly !== undefined && saleData.ck_dly !== null) saleDataToCreate.ck_dly = saleData.ck_dly;
-          if (saleData.docid !== undefined) saleDataToCreate.docid = this.validateInteger(saleData.docid);
-          if (saleData.serial !== undefined && saleData.serial !== null) saleDataToCreate.serial = saleData.serial;
-          if (saleData.cm_code !== undefined && saleData.cm_code !== null) saleDataToCreate.cm_code = saleData.cm_code;
-          if (saleData.line_id !== undefined) saleDataToCreate.line_id = this.validateInteger(saleData.line_id);
-          if (saleData.disc_amt !== undefined) saleDataToCreate.disc_amt = saleData.disc_amt;
-          if (saleData.docmonth !== undefined) saleDataToCreate.docmonth = saleData.docmonth;
-          if (saleData.itemcost !== undefined) saleDataToCreate.itemcost = saleData.itemcost;
-          if (saleData.linetotal !== undefined) saleDataToCreate.linetotal = saleData.linetotal;
-          if (saleData.totalcost !== undefined) saleDataToCreate.totalcost = saleData.totalcost;
-          if (saleData.crm_emp_id !== undefined) saleDataToCreate.crm_emp_id = this.validateInteger(saleData.crm_emp_id);
-          if (saleData.doctype_name !== undefined) saleDataToCreate.doctype_name = saleData.doctype_name;
-          if (saleData.order_source !== undefined && saleData.order_source !== null) saleDataToCreate.order_source = saleData.order_source;
-          if (saleData.partner_name !== undefined) saleDataToCreate.partner_name = saleData.partner_name;
-          if (saleData.crm_branch_id !== undefined) saleDataToCreate.crm_branch_id = this.validateInteger(saleData.crm_branch_id);
-          if (saleData.grade_discamt !== undefined) saleDataToCreate.grade_discamt = saleData.grade_discamt;
-          if (saleData.revenue_wsale !== undefined) saleDataToCreate.revenue_wsale = saleData.revenue_wsale;
-          if (saleData.saleperson_id !== undefined) saleDataToCreate.saleperson_id = this.validateInteger(saleData.saleperson_id);
-          if (saleData.revenue_retail !== undefined) saleDataToCreate.revenue_retail = saleData.revenue_retail;
-          if (saleData.paid_by_voucher_ecode_ecoin_bp !== undefined) saleDataToCreate.paid_by_voucher_ecode_ecoin_bp = saleData.paid_by_voucher_ecode_ecoin_bp;
-
-          const sale = this.saleRepository.create(saleDataToCreate);
-          await this.saleRepository.save(sale);
-          salesCreated++;
-        } else {
-          salesSkipped++;
-        }
-      } catch (error) {
-        salesError++;
-        this.logger.error(
-          `Lỗi khi lưu sale ${saleData.doccode}/${saleData.itemcode} (qty: ${saleData.qty}, revenue: ${saleData.revenue}): ${error.message}`,
-        );
-        // Tiếp tục xử lý sale tiếp theo, không dừng toàn bộ
-      }
-    }
-
-    if (sales.length > 0) {
-    }
-  }
 
 
   /**
@@ -877,6 +671,369 @@ export class SyncService {
         updatedCount: 0,
         errors: [errorMsg],
       };
+    }
+  }
+
+  async getDailyWsaleByDateRange(
+    startDate: string,
+    endDate: string,
+    brand?: string,
+  ): Promise<any> {
+    try {
+      let ordersCount = 0;
+      let salesCount = 0;
+      let customersCount = 0;
+
+      const start = parseZappyDate(startDate);
+      const end = parseZappyDate(endDate);
+
+      for (
+        let date = new Date(start);
+        date <= end;
+        date.setDate(date.getDate() + 1)
+      ) {
+        const zappyDate = formatZappyDate(date);
+
+        const dailyResult = await this.getDailyWsale(zappyDate, brand);
+
+        ordersCount += dailyResult.ordersCount || 0;
+        salesCount += dailyResult.salesCount || 0;
+        customersCount += dailyResult.customersCount || 0;
+      }
+
+      return {
+        success: true,
+        message: `Đồng bộ bán buôn từ ${startDate} đến ${endDate} (brand: ${brand}) thành công`,
+        ordersCount,
+        salesCount,
+        customersCount,
+      };
+    } catch (error: any) {
+      this.logger.error(
+        `Error getting daily Wsale by date range: ${error?.message || error}`,
+      );
+      throw error;
+    }
+  }
+
+
+  async getDailyWsale(date: string, brand?: string): Promise<any> {
+    try {
+      const orders = await this.zappyApiService.getDailyWsale(date, brand);
+
+      // Lấy dữ liệu cash/voucher từ get_daily_cash để enrich
+      let cashData: any[] = [];
+      try {
+        cashData = await this.zappyApiService.getDailyCash(date, brand);
+      } catch (error) {
+      }
+
+      // Tạo map cash data theo so_code để dễ lookup
+      const cashMapBySoCode = new Map<string, any[]>();
+      cashData.forEach((cash) => {
+        const soCode = cash.so_code || cash.master_code;
+        if (soCode) {
+          if (!cashMapBySoCode.has(soCode)) {
+            cashMapBySoCode.set(soCode, []);
+          }
+          cashMapBySoCode.get(soCode)!.push(cash);
+        }
+      });
+
+      if (orders.length === 0) {
+        return {
+          success: true,
+          message: `Không có dữ liệu để đồng bộ cho ngày ${date}`,
+          ordersCount: 0,
+          salesCount: 0,
+          customersCount: 0,
+        };
+      }
+
+      let salesCount = 0;
+      let customersCount = 0;
+      const errors: string[] = [];
+
+      // Collect tất cả branchCodes để fetch departments
+      const branchCodes = Array.from(
+        new Set(
+          orders
+            .map((o) => o.branchCode)
+            .filter((code): code is string => !!code && code.trim() !== '')
+        )
+      );
+
+      // Fetch departments để lấy company và map sang brand
+      const departmentMap = new Map<string, { company?: string }>();
+      if (!brand || brand !== 'chando') {
+        for (const branchCode of branchCodes) {
+          try {
+            const response = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+              { headers: { accept: 'application/json' } },
+            );
+            const department = response?.data?.data?.items?.[0];
+            if (department?.company) {
+              departmentMap.set(branchCode, { company: department.company });
+            }
+          } catch (error) {
+            this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+          }
+        }
+      }
+      // Map company sang brand
+      const mapCompanyToBrand = (company: string | null | undefined): string => {
+        if (!company) return '';
+        const companyUpper = company.toUpperCase();
+        const brandMap: Record<string, string> = {
+          'F3': 'f3',
+          'FACIALBAR': 'f3',
+          'MENARD': 'menard',
+          'LABHAIR': 'labhair',
+          'YAMAN': 'yaman',
+          'CHANDO': 'chando',
+        };
+        return brandMap[companyUpper] || company.toLowerCase();
+      };
+
+      // Xử lý từng order
+      for (const order of orders) {
+        try {
+          // Lấy brand từ department.company
+          const department = departmentMap.get(order.branchCode);
+          const brandFromDepartment = department?.company
+            ? mapCompanyToBrand(department.company)
+            : order.customer.brand || '';
+
+          // Tìm hoặc tạo customer
+          let customer = await this.customerRepository.findOne({
+            where: { code: order.customer.code },
+          });
+
+          if (!customer) {
+            const newCustomer = this.customerRepository.create({
+              code: order.customer.code,
+              name: order.customer.name,
+              brand: brandFromDepartment,
+              mobile: order.customer.mobile,
+              sexual: order.customer.sexual,
+              idnumber: order.customer.idnumber,
+              enteredat: order.customer.enteredat ? new Date(order.customer.enteredat) : null,
+              crm_lead_source: order.customer.crm_lead_source,
+              address: order.customer.address,
+              province_name: order.customer.province_name,
+              birthday: order.customer.birthday ? new Date(order.customer.birthday) : null,
+              grade_name: order.customer.grade_name,
+              branch_code: order.customer.branch_code,
+            } as Partial<Customer>);
+            customer = await this.customerRepository.save(newCustomer);
+            customersCount++;
+          } else {
+            // Cập nhật thông tin customer nếu cần
+            customer.name = order.customer.name || customer.name;
+            customer.mobile = order.customer.mobile || customer.mobile;
+            customer.grade_name = order.customer.grade_name || customer.grade_name;
+            // Cập nhật brand từ department nếu có
+            if (brandFromDepartment) {
+              customer.brand = brandFromDepartment;
+            }
+            customer = await this.customerRepository.save(customer);
+          }
+
+          // Đảm bảo customer không null
+          if (!customer) {
+            const errorMsg = `Không thể tạo hoặc tìm customer với code ${order.customer.code}`;
+            this.logger.error(errorMsg);
+            errors.push(errorMsg);
+            continue;
+          }
+
+          // Lấy cash/voucher data cho order này
+          const orderCashData = cashMapBySoCode.get(order.docCode) || [];
+          const voucherData = orderCashData.filter((cash) => cash.fop_syscode === 'VOUCHER');
+
+          // Collect tất cả itemCodes từ order để fetch products từ Loyalty API và check 404
+          // Đảm bảo trim ngay từ đầu để consistency
+          const orderItemCodes = Array.from(
+            new Set(
+              (order.sales || [])
+                .map((s) => s.itemCode?.trim())
+                .filter((code): code is string => !!code && code !== '')
+            )
+          );
+
+          // Fetch products từ Loyalty API để check sản phẩm không tồn tại (404)
+          const notFoundItemCodes = new Set<string>();
+
+          if (orderItemCodes.length > 0) {
+            // Check products từ Loyalty API sử dụng LoyaltyService
+            await Promise.all(
+              orderItemCodes.map(async (trimmedItemCode) => {
+                const product = await this.loyaltyService.checkProduct(trimmedItemCode);
+                if (!product) {
+                  notFoundItemCodes.add(trimmedItemCode);
+                }
+              }),
+            );
+          }
+
+          // Xử lý từng sale trong order - LƯU TẤT CẢ, đánh dấu statusAsys = false nếu sản phẩm không tồn tại (404)
+          if (order.sales && order.sales.length > 0) {
+            for (const saleItem of order.sales) {
+              try {
+                // Bỏ qua các item có itemcode = "TRUTONKEEP"
+                const itemCode = saleItem.itemCode?.trim();
+                if (itemCode && itemCode.toUpperCase() === 'TRUTONKEEP') {
+                  this.logger.log(`[SalesService] Bỏ qua sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - itemcode = TRUTONKEEP`);
+                  continue;
+                }
+
+                // Kiểm tra xem sản phẩm có tồn tại trong Loyalty API không
+                const isNotFound = itemCode && notFoundItemCodes.has(itemCode);
+                // Set statusAsys: false nếu không tồn tại (404), true nếu tồn tại
+                const statusAsys = !isNotFound;
+
+                if (isNotFound) {
+                  this.logger.warn(`[SalesService] Sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - Sản phẩm không tồn tại trong Loyalty API (404), sẽ lưu với statusAsys = false`);
+                }
+
+                // Lấy productType: Ưu tiên từ Zappy API (producttype), nếu không có thì lấy từ Loyalty API
+                // Kiểm tra cả producttype (chữ thường) và productType (camelCase) từ Zappy API
+                const productTypeFromZappy = saleItem.producttype || saleItem.productType || null;
+                // Fetch productType từ Loyalty API nếu chưa có từ Zappy (đã có sẵn trong notFoundItemCodes check)
+                let productTypeFromLoyalty: string | null = null;
+                if (!productTypeFromZappy && itemCode && !notFoundItemCodes.has(itemCode)) {
+                  try {
+                    const loyaltyProduct = await this.loyaltyService.checkProduct(itemCode);
+                    if (loyaltyProduct) {
+                      productTypeFromLoyalty = loyaltyProduct.productType || loyaltyProduct.producttype || null;
+                    }
+                  } catch (error) {
+                    // Ignore error, sẽ dùng null
+                  }
+                }
+                const productType = productTypeFromZappy || productTypeFromLoyalty || null;
+
+
+                // Kiểm tra xem sale đã tồn tại chưa
+                // Với đơn "08. Tách thẻ": cần thêm qty vào điều kiện vì có thể có 2 dòng cùng itemCode nhưng qty khác nhau (-1 và 1)
+                // Với các đơn khác: chỉ cần docCode + itemCode + customer
+                const ordertypeName = saleItem.ordertype_name || saleItem.ordertype || '';
+                const isTachThe = ordertypeName.includes('08. Tách thẻ') ||
+                  ordertypeName.includes('08.Tách thẻ') ||
+                  ordertypeName.includes('08.  Tách thẻ');
+
+
+
+                // Enrich voucher data từ get_daily_cash
+                let voucherRefno: string | undefined;
+                let voucherAmount: number | undefined;
+                if (voucherData.length > 0) {
+                  // Lấy voucher đầu tiên (có thể có nhiều voucher)
+                  const firstVoucher = voucherData[0];
+                  voucherRefno = firstVoucher.refno;
+                  voucherAmount = firstVoucher.total_in || 0;
+                }
+
+                // Tạo sale mới
+                // Tính toán ordertypeName trước
+                let finalOrderTypeNameForNew: string | undefined = undefined;
+                if (saleItem.ordertype_name !== undefined && saleItem.ordertype_name !== null) {
+                  if (typeof saleItem.ordertype_name === 'string') {
+                    const trimmed = saleItem.ordertype_name.trim();
+                    finalOrderTypeNameForNew = trimmed !== '' ? trimmed : undefined;
+                  } else {
+                    finalOrderTypeNameForNew = String(saleItem.ordertype_name).trim() || undefined;
+                  }
+                }
+                // Log để debug
+                this.logger.log(
+                  `[SalesService] Tạo mới sale ${order.docCode}/${saleItem.itemCode}: ` +
+                  `ordertype_name raw="${saleItem.ordertype_name}" (type: ${typeof saleItem.ordertype_name}), final="${finalOrderTypeNameForNew}"`
+                );
+                const newSale = this.saleRepository.create({
+                  docCode: order.docCode,
+                  docDate: new Date(order.docDate),
+                  branchCode: order.branchCode,
+                  docSourceType: order.docSourceType,
+                  ordertype: saleItem.ordertype,
+                  // Luôn lưu ordertypeName, kể cả khi là undefined (để lưu từ Zappy API)
+                  // Nếu ordertypeName là empty string, set thành undefined
+                  ordertypeName: finalOrderTypeNameForNew,
+                  description: saleItem.description,
+                  partnerCode: saleItem.partnerCode,
+                  itemCode: saleItem.itemCode || '',
+                  itemName: saleItem.itemName || '',
+                  qty: saleItem.qty || 0,
+                  revenue: saleItem.revenue || 0,
+                  linetotal: saleItem.linetotal || saleItem.revenue || 0,
+                  tienHang: saleItem.tienHang || saleItem.linetotal || saleItem.revenue || 0,
+                  giaBan: saleItem.giaBan || 0,
+                  promCode: saleItem.promCode,
+                  serial: saleItem.serial,
+                  soSerial: saleItem.serial,
+                  disc_amt: saleItem.disc_amt,
+                  grade_discamt: saleItem.grade_discamt,
+                  other_discamt: saleItem.other_discamt,
+                  chietKhauMuaHangGiamGia: saleItem.chietKhauMuaHangGiamGia,
+                  paid_by_voucher_ecode_ecoin_bp: saleItem.paid_by_voucher_ecode_ecoin_bp,
+                  maCa: saleItem.shift_code,
+                  // Validate saleperson_id để tránh NaN
+                  saleperson_id: this.validateInteger(saleItem.saleperson_id),
+                  partner_name: saleItem.partner_name,
+                  order_source: saleItem.order_source,
+                  // Lưu mvc_serial vào maThe
+                  maThe: saleItem.mvc_serial,
+                  // Category fields
+                  cat1: saleItem.cat1,
+                  cat2: saleItem.cat2,
+                  cat3: saleItem.cat3,
+                  catcode1: saleItem.catcode1,
+                  catcode2: saleItem.catcode2,
+                  catcode3: saleItem.catcode3,
+                  // Luôn lưu productType, kể cả khi là null (để lưu từ Zappy API)
+                  // Nếu productType là empty string, set thành null
+                  productType: productType && productType.trim() !== '' ? productType.trim() : null,
+                  // Enrich voucher data từ get_daily_cash
+                  voucherDp1: voucherRefno,
+                  thanhToanVoucher: voucherAmount && voucherAmount > 0 ? voucherAmount : undefined,
+                  customer: customer,
+                  brand: brand,
+                  isProcessed: false,
+                  statusAsys: statusAsys, // Set statusAsys: true nếu sản phẩm tồn tại, false nếu 404
+                  type_sale: 'WHOLESALE',
+                } as Partial<Sale>);
+                await this.saleRepository.save(newSale);
+                salesCount++;
+
+              } catch (saleError: any) {
+                const errorMsg = `Lỗi khi lưu sale ${order.docCode}/${saleItem.itemCode}: ${saleError?.message || saleError}`;
+                this.logger.error(errorMsg);
+                errors.push(errorMsg);
+              }
+            }
+          }
+        } catch (orderError: any) {
+          const errorMsg = `Lỗi khi xử lý order ${order.docCode}: ${orderError?.message || orderError}`;
+          this.logger.error(errorMsg);
+          errors.push(errorMsg);
+        }
+      }
+
+
+      return {
+        success: errors.length === 0,
+        message: `Đồng bộ thành công ${orders.length} đơn hàng cho ngày ${date}${brand ? ` (brand: ${brand})` : ''}`,
+        ordersCount: orders.length,
+        salesCount,
+        customersCount,
+        errors: errors.length > 0 ? errors : undefined,
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Error getting daily Wsale: ${error?.message || error}`);
+      throw error;
+
     }
   }
 

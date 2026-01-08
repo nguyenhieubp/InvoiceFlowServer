@@ -41,49 +41,94 @@ export const formatDocDate = (input: string): string => {
 
 export const convertOrderToOrderLineFormat = (order: any) => {
     if (!Array.isArray(order?.lines)) return [];
-  
+
     return order.lines.map((line: any, index: number) => ({
-      id: null,
-      doctype: 'SALE_ORDER',
-      code: order.order_name,
-      docdate: formatDocDate(order.order_date),
-  
-      branch_code: order.warehouse?.code || null,
-      ordertype_name: null,
-      description: order.classify_order || null,
-      shift_code: null,
-  
-      partner_name: order.customer_source?.name || null,
-      partner_code: order.customer_source?.ref || null,
-      partner_grade: null,
-      partner_mobile: order.customer_source?.phone || null,
-  
-      saleperson_code: null,
-  
-      itemcode: line.product_code,
-      itemname: line.product_name,
-      pkg_code: null,
-      prom_code: null,
-      producttype: 'S',
-      serial: null,
-  
-      // ERP line thường là âm (xuất bán)
-      qty: -Math.abs(line.quantity || 0),
-      price: line.price_unit || 0,
-  
-      discamt: line.x_discount_ecom || 0,
-      grade_discamt: 0,
-      other_discamt: 0,
-  
-      mn_linetotal: line.subtotal || 0,
-      v_paid: 0,
-      revenue: line.subtotal || 0,
-  
-      so_source: order.ecom?.name || null,
-      social_page_id: order.ecom?.code || null,
-      sp_email: null,
-      mvc_serial: order.x_order_dms || null,
-      vc_promotion_code: null,
+        id: null,
+        doctype: 'SALE_ORDER',
+        code: order.order_name,
+        docdate: formatDocDate(order.order_date),
+
+        branch_code: order.warehouse?.code || null,
+        ordertype_name: null,
+        description: order.classify_order || null,
+        shift_code: null,
+
+        partner_name: order.customer_source?.name || null,
+        partner_code: order.customer_source?.ref || null,
+        partner_grade: null,
+        partner_mobile: order.customer_source?.phone || null,
+
+        saleperson_code: null,
+
+        itemcode: line.product_code,
+        itemname: line.product_name,
+        pkg_code: null,
+        prom_code: null,
+        producttype: 'S',
+        serial: null,
+
+        // ERP line thường là âm (xuất bán)
+        qty: -Math.abs(line.quantity || 0),
+        price: line.price_unit || 0,
+
+        discamt: line.x_discount_ecom || 0,
+        grade_discamt: 0,
+        other_discamt: 0,
+
+        mn_linetotal: line.subtotal || 0,
+        v_paid: 0,
+        revenue: line.subtotal || 0,
+
+        so_source: order.ecom?.name || null,
+        social_page_id: order.ecom?.code || null,
+        sp_email: null,
+        mvc_serial: order.x_order_dms || null,
+        vc_promotion_code: null,
     }));
-  };
-  
+};
+
+
+export const formatZappyDate = (date: Date): string => {
+    const day = String(date.getDate()).padStart(2, '0');
+
+    const months = [
+        'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+        'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+    ];
+
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+
+    return `${day}${month}${year}`;
+}
+
+
+
+export const parseZappyDate = (dateStr: string): Date => {
+    const day = parseInt(dateStr.slice(0, 2), 10);
+    const monthStr = dateStr.slice(2, 5);
+    const year = parseInt(dateStr.slice(5), 10);
+
+    const monthMap: Record<string, number> = {
+        JAN: 0,
+        FEB: 1,
+        MAR: 2,
+        APR: 3,
+        MAY: 4,
+        JUN: 5,
+        JUL: 6,
+        AUG: 7,
+        SEP: 8,
+        OCT: 9,
+        NOV: 10,
+        DEC: 11,
+    };
+
+    const month = monthMap[monthStr.toUpperCase()];
+
+    if (month === undefined || isNaN(day) || isNaN(year)) {
+        throw new Error(`Invalid Zappy date format: ${dateStr}`);
+    }
+
+    return new Date(year, month, day);
+}

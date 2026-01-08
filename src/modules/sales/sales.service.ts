@@ -1364,6 +1364,8 @@ export class SalesService {
       tkChietKhau: tkChietKhau,
       tkChiPhi: tkChiPhi,
       maPhi: maPhi,
+      brand: sale?.brand?.toUpperCase() || null,
+      type_sale: sale?.type_sale || null,
     };
   }
 
@@ -3757,6 +3759,7 @@ export class SalesService {
                   brand: brand,
                   isProcessed: false,
                   statusAsys: statusAsys, // Set statusAsys: true nếu sản phẩm tồn tại, false nếu 404
+                  type_sale: 'RETAIL',
                 } as Partial<Sale>);
                 await this.saleRepository.save(newSale);
                 salesCount++;
