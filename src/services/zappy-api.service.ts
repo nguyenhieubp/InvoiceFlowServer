@@ -103,7 +103,7 @@ export class ZappyApiService {
         }
 
         // Transform dữ liệu từ Zappy format sang Order format
-        return this.transformZappySalesToOrders(filteredData);
+        return this.transformZappySalesToOrders(filteredData, brand);
       }
     } catch (error: any) {
       this.logger.error(`Error fetching daily sales from Zappy API: ${error?.message || error}`);
@@ -371,7 +371,7 @@ export class ZappyApiService {
   /**
    * Transform dữ liệu từ Zappy format sang Order format
    */
-  private transformZappySalesToOrders(zappySales: any[]): Order[] {
+  private transformZappySalesToOrders(zappySales: any[], brand?: string): Order[] {
     return zappySales.map((zappySale) => {
       const docCode = zappySale.code || '';
 
@@ -379,7 +379,7 @@ export class ZappyApiService {
       const customer: OrderCustomer = {
         code: zappySale.partner_code || '',
         name: zappySale.partner_name || '',
-        brand: '',
+        brand: brand || '',
         mobile: zappySale.partner_mobile || undefined,
         sexual: undefined,
         idnumber: undefined,
