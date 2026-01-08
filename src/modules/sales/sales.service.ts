@@ -5910,7 +5910,7 @@ export class SalesService {
         // Nếu không có thì dùng 'Cái' làm mặc định (Fast API yêu cầu field này phải có giá trị)
         const dvt = toString(sale.product?.dvt || sale.product?.unit || sale.dvt, 'Cái');
 
-        let maKho = '';
+        let maKho: string | null = null;
         let batchSerial: string | null = null;
 
         if (saleMaterialCode) {
@@ -5922,6 +5922,8 @@ export class SalesService {
             batchSerial = sts[0].batchSerial || null;
           }
         }
+        const maKhoMap = await this.categoriesService.mapWarehouseCode(maKho);
+        maKho = maKhoMap || null;
 
         // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
         // Lấy materialCode từ Loyalty API (ưu tiên materialCode từ product, sau đó itemCode)
