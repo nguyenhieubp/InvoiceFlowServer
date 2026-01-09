@@ -1098,7 +1098,7 @@ export class SalesService {
     if (!st) {
       return null;
     }
-    
+
     return {
       ...st,
       // Đảm bảo materialCode được trả về (đã được lưu trong DB khi sync)
@@ -1121,20 +1121,20 @@ export class SalesService {
   ): Promise<any> {
     // Lấy materialCode từ sale (giống logic buildFastApiInvoiceData)
     const saleMaterialCode = sale.product?.materialCode || sale.product?.maVatTu || sale.product?.maERP || loyaltyProduct?.materialCode;
-    
+
     // Lấy maKho và batchSerial từ stock transfers
     // Ưu tiên: stockTransfers parameter > order.stockTransfers
     let maKho: string | null = calculatedFields.maKho;
     let batchSerial: string | null = null;
-    
+
     const availableStockTransfers = stockTransfers || order?.stockTransfers;
-    
+
     if (saleMaterialCode && availableStockTransfers && Array.isArray(availableStockTransfers)) {
       // Tìm stock transfer matching với materialCode của sale item này
-      const matchingStockTransfer = availableStockTransfers.find((st: any) => 
+      const matchingStockTransfer = availableStockTransfers.find((st: any) =>
         st.materialCode === saleMaterialCode
       );
-      
+
       if (matchingStockTransfer) {
         // Lấy stockCode và batchSerial từ stock transfer
         if (matchingStockTransfer.stockCode) {
@@ -1143,23 +1143,23 @@ export class SalesService {
         batchSerial = matchingStockTransfer.batchSerial || null;
       }
     }
-    
+
     // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
     // Lấy materialCode từ Loyalty API (ưu tiên materialCode từ product, sau đó itemCode)
     const materialCode = saleMaterialCode || sale.itemCode;
     let trackSerial: boolean | null = null;
     let trackBatch: boolean | null = null;
-    
+
     // Luôn fetch từ Loyalty API để lấy trackSerial và trackBatch
     const loyaltyProductForTracking = await this.loyaltyService.checkProduct(materialCode);
     if (loyaltyProductForTracking) {
       trackSerial = loyaltyProductForTracking.trackSerial === true;
       trackBatch = loyaltyProductForTracking.trackBatch === true;
     }
-    
+
     // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
     const useBatch = this.shouldUseBatch(trackBatch, trackSerial);
-    
+
     // Xác định ma_lo và so_serial dựa trên trackSerial và trackBatch
     let maLo: string | null = null;
     let soSerial: string | null = null;
@@ -1170,7 +1170,7 @@ export class SalesService {
       maLo = null;
       soSerial = batchSerial;
     }
-    
+
     // Kiểm tra đơn "03. Đổi điểm" trước khi tính toán giá
     const isDoiDiemForDisplay = this.isDoiDiemOrder(sale.ordertype, sale.ordertypeName);
 
@@ -1444,14 +1444,6 @@ export class SalesService {
       // Lấy thông tin stock transfer cho đơn hàng này
       const orderStockTransfers = stockTransferMap.get(order.docCode) || [];
 
-      // Debug: Log tất cả stock transfers để kiểm tra
-      if (orderStockTransfers.length > 0) {
-        this.logger.debug(
-          `[StockTransfer] Đơn hàng ${order.docCode}: Tìm thấy ${orderStockTransfers.length} records. ` +
-          `Chi tiết: ${orderStockTransfers.map(st => `docCode=${st.docCode}, itemCode=${st.itemCode}, qty=${st.qty}, stockCode=${st.stockCode}`).join('; ')}`
-        );
-      }
-
       // Lọc chỉ lấy các stock transfer XUẤT KHO (SALE_STOCKOUT) với qty < 0
       // Bỏ qua các stock transfer nhập lại (RETURN) với qty > 0
       const stockOutTransfers = orderStockTransfers.filter((st) => {
@@ -1500,15 +1492,9 @@ export class SalesService {
       // Lấy giá trị tuyệt đối của qty (vì qty xuất kho là số âm, nhưng số lượng xuất là số dương)
       const totalQty = uniqueStockTransfers.reduce((sum, st) => {
         const qty = Math.abs(Number(st.qty || 0));
-        this.logger.debug(
-          `[StockTransfer] Tính totalQty: docCode=${st.docCode}, qty=${st.qty}, abs(qty)=${qty}, sum=${sum} → ${sum + qty}`
-        );
         return sum + qty;
       }, 0);
 
-      this.logger.debug(
-        `[StockTransfer] Đơn hàng ${order.docCode}: uniqueStockTransfers.length=${uniqueStockTransfers.length}, totalQty=${totalQty}`
-      );
 
       const stockTransferSummary = {
         totalItems: uniqueStockTransfers.length, // Số dòng stock transfer xuất kho (sau khi deduplicate)
@@ -1829,45 +1815,6 @@ export class SalesService {
     }
   }
 
-  async findAll(options: {
-    brand?: string;
-    isProcessed?: boolean;
-    page?: number;
-    limit?: number;
-  }) {
-    const { brand, isProcessed, page = 1, limit = 50 } = options;
-
-    const query = this.saleRepository
-      .createQueryBuilder('sale')
-      .leftJoinAndSelect('sale.customer', 'customer')
-      .orderBy('sale.docDate', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit);
-
-    if (brand) {
-      query.andWhere('customer.brand = :brand', { brand });
-    }
-
-    if (isProcessed !== undefined) {
-      query.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
-    }
-
-    const [data, total] = await query.getManyAndCount();
-
-    // Thêm promotionDisplayCode vào mỗi sale
-    const enrichedData = data.map((sale) => ({
-      ...sale,
-      promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
-    }));
-
-    return {
-      data: enrichedData,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
-  }
 
   async findAllOrders(options: {
     brand?: string;
@@ -1880,418 +1827,101 @@ export class SalesService {
     search?: string; // Search query để tìm theo docCode, customer name, code, mobile
     statusAsys?: boolean; // Filter theo statusAsys (true/false)
     export?: boolean; // Nếu true, trả về sales items riêng lẻ (không group, không paginate) để export Excel
+    typeSale?: string; // Type sale: "WHOLESALE" or "RETAIL"
   }) {
-    const { brand, isProcessed, page = 1, limit = 50, date, dateFrom, dateTo, search, statusAsys, export: isExport } = options;
-
-    // Nếu có search query, luôn search trong database (không dùng Zappy API)
-    // Vì Zappy API chỉ lấy được một ngày, không hỗ trợ date range
-    // Nếu có brand filter, luôn dùng database query (không dùng Zappy API) để tránh fetch tất cả products
-    // Nếu có date parameter và không có search và không có brand, lấy dữ liệu từ Zappy API
-    if (date && !search && !brand) {
-      try {
-        const orders = await this.zappyApiService.getDailySales(date);
-
-        // Filter by brand nếu có
-        let filteredOrders = orders;
-        if (brand) {
-          filteredOrders = orders.filter(
-            (order) => order.customer.brand?.toLowerCase() === brand.toLowerCase()
-          );
-        }
-
-        // Filter by search query nếu có
-        if (search && search.trim() !== '') {
-          const searchLower = search.trim().toLowerCase();
-          filteredOrders = filteredOrders.filter(
-            (order) =>
-              order.docCode.toLowerCase().includes(searchLower) ||
-              (order.customer?.name && order.customer.name.toLowerCase().includes(searchLower)) ||
-              (order.customer?.code && order.customer.code.toLowerCase().includes(searchLower)) ||
-              (order.customer?.mobile && order.customer.mobile.toLowerCase().includes(searchLower))
-          );
-        }
-
-        // Phân trang TRƯỚC khi fetch products/departments để tránh fetch quá nhiều
-        // Tính tổng số rows (sale items) từ tất cả orders
-        let totalRows = 0;
-        filteredOrders.forEach(order => {
-          totalRows += (order.sales && order.sales.length > 0) ? order.sales.length : (order.totalItems > 0 ? order.totalItems : 1);
-        });
-
-        const paginationStartIndex = (page - 1) * limit;
-        const paginationEndIndex = paginationStartIndex + limit;
-
-        // Paginate orders dựa trên số rows
-        let currentRowCount = 0;
-        const paginatedOrders: typeof filteredOrders = [];
-
-        for (const order of filteredOrders) {
-          const orderRowCount = (order.sales && order.sales.length > 0) ? order.sales.length : (order.totalItems > 0 ? order.totalItems : 1);
-          const orderStartRow = currentRowCount;
-          const orderEndRow = currentRowCount + orderRowCount;
-
-          // Nếu order này có overlap với phạm vi pagination, thêm vào
-          if (orderEndRow > paginationStartIndex && orderStartRow < paginationEndIndex) {
-            paginatedOrders.push(order);
-          }
-
-          currentRowCount += orderRowCount;
-
-          // Nếu đã vượt quá phạm vi pagination, dừng lại
-          if (currentRowCount >= paginationEndIndex) {
-            break;
-          }
-        }
-
-        // Fetch departments để tính maKho - CHỈ cho paginated orders
-        const branchCodes = Array.from(
-          new Set(
-            paginatedOrders
-              .flatMap((order) => order.sales || [])
-              .map((sale) => sale.branchCode)
-              .filter((code): code is string => !!code && code.trim() !== '')
-          )
-        );
-
-        const departmentMap = new Map<string, any>();
-        // Fetch parallel thay vì sequential
-        if (branchCodes.length > 0) {
-          const departmentPromises = branchCodes.map(async (branchCode) => {
-            try {
-              const response = await this.httpService.axiosRef.get(
-                `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-                { headers: { accept: 'application/json' } },
-              );
-              const department = response?.data?.data?.items?.[0];
-              return { branchCode, department };
-            } catch (error) {
-              this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
-              return { branchCode, department: null };
-            }
-          });
-
-          const departmentResults = await Promise.all(departmentPromises);
-          departmentResults.forEach(({ branchCode, department }) => {
-            if (department) {
-              departmentMap.set(branchCode, department);
-            }
-          });
-        }
-
-        // Fetch products từ Loyalty API để lấy producttype - CHỈ cho paginated orders
-        // BỎ QUA các sale có statusAsys = false (đơn lỗi) - không fetch từ Loyalty API
-        const itemCodes = Array.from(
-          new Set(
-            paginatedOrders
-              .flatMap((order) => order.sales || [])
-              .filter((sale) => sale.statusAsys !== false) // Bỏ qua đơn lỗi
-              .map((sale) => sale.itemCode)
-              .filter((code): code is string => !!code && code.trim() !== '')
-          )
-        );
-
-        // Fetch stock transfers theo soCode (mã đơn hàng) từ paginated orders
-        // Join theo soCode (của stock transfer) = docCode (của order)
-        // Xử lý đặc biệt cho đơn trả lại: fetch cả theo mã đơn gốc (SO)
-        const paginatedDocCodes = Array.from(new Set(paginatedOrders.map(order => order.docCode).filter(Boolean)));
-        const docCodesForStockTransfer = this.getDocCodesForStockTransfer(paginatedDocCodes);
-        const stockTransfers = docCodesForStockTransfer.length > 0
-          ? await this.stockTransferRepository.find({
-            where: { soCode: In(docCodesForStockTransfer) },
-          })
-          : [];
-
-        // Fetch products từ Loyalty API sử dụng LoyaltyService (cho cả sales và stock transfers)
-        const stockTransferItemCodes = Array.from(
-          new Set(
-            stockTransfers
-              .map((st) => st.itemCode)
-              .filter((code): code is string => !!code && code.trim() !== '')
-          )
-        );
-        const allItemCodes = Array.from(new Set([...itemCodes, ...stockTransferItemCodes]));
-        const loyaltyProductMap = await this.loyaltyService.fetchProducts(allItemCodes);
-
-        // Build stock transfer maps (tổng hợp logic vào một chỗ)
-        const { stockTransferMap, stockTransferByDocCodeMap } = this.buildStockTransferMaps(
-          stockTransfers,
-          loyaltyProductMap,
-          paginatedDocCodes
-        );
-
-        // Thêm promotionDisplayCode, maKho, maCtkmTangHang, producttype và stock transfers vào các sales items
-        const enrichedOrders = await Promise.all(paginatedOrders.map(async (order) => ({
-          ...order,
-          stockTransfers: (stockTransferByDocCodeMap.get(order.docCode) || []).map(st => this.formatStockTransferForFrontend(st)),
-          sales: await Promise.all((order.sales || []).map(async (sale) => {
-            const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
-            const maBp = department?.ma_bp || sale.branchCode || null;
-            const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
-
-            // Tính toán maCtkmTangHang: nếu là hàng tặng (giaBan = 0 và tienHang = 0 và revenue = 0)
-            const tienHang = sale.tienHang || sale.linetotal || sale.revenue || 0;
-            const qty = sale.qty || 0;
-            let giaBan = sale.giaBan || 0;
-            if (giaBan === 0 && tienHang != null && qty > 0) {
-              giaBan = tienHang / qty;
-            }
-            const revenue = sale.revenue || 0;
-            const isTangHang = giaBan === 0 && tienHang === 0 && revenue === 0;
-
-            // Quy tắc: Nếu ordertype_name = "06. Đầu tư" và là hàng tặng → ma_ctkm_th = "TT DAU TU"
-            let maCtkmTangHang: string | null = null;
-            if (isTangHang) {
-              const ordertypeName = sale.ordertype || '';
-              if (ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư')) {
-                maCtkmTangHang = 'TT DAU TU';
-              } else if (
-                (ordertypeName.includes('01.Thường') || ordertypeName.includes('01. Thường')) ||
-                (ordertypeName.includes('07. Bán tài khoản') || ordertypeName.includes('07.Bán tài khoản')) ||
-                (ordertypeName.includes('9. Sàn TMDT') || ordertypeName.includes('9.Sàn TMDT'))
-              ) {
-                // Quy đổi prom_code sang TANGSP - lấy năm/tháng từ ngày đơn hàng
-                const docDate = order.docDate || sale.docDate || sale.docdate;
-                // Dùng promCode trực tiếp thay vì convertPromCodeToTangSp
-                maCtkmTangHang = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
-              } else {
-                // Các trường hợp khác: dùng promCode nếu có
-                maCtkmTangHang = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || null;
-              }
-            }
-
-            // Lấy stock transfers cho sale này (theo docCode + materialCode hoặc itemCode)
-            // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng) hoặc itemCode
-            const saleMaterialCode = loyaltyProduct?.materialCode;
-            let saleStockTransfers: StockTransfer[] = [];
-            if (saleMaterialCode) {
-              const stockTransferKey = `${order.docCode}_${saleMaterialCode}`;
-              saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
-            }
-            // Nếu không match được theo materialCode, match trực tiếp theo itemCode
-            if (saleStockTransfers.length === 0 && sale.itemCode) {
-              saleStockTransfers = stockTransfers.filter(
-                (st) => st.soCode === order.docCode && st.itemCode === sale.itemCode
-              );
-            }
-
-            // Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
-            const maKho = await this.getMaKhoFromStockTransfer(sale, order.docCode, stockTransfers, saleMaterialCode, stockTransferMap);
-
-            // Logic xử lý tkChietKhau, tkChiPhi, maPhi cho các đơn đặc biệt
-            const ordertypeName = sale.ordertype || sale.ordertypeName || '';
-            const isDoiVo = ordertypeName.toLowerCase().includes('đổi vỏ') || ordertypeName.toLowerCase().includes('doi vo');
-            const isDoiDiem = ordertypeName.toLowerCase().includes('đổi điểm') || ordertypeName.toLowerCase().includes('doi diem');
-            const isDauTu = ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư') || ordertypeName.toLowerCase().includes('đầu tư') || ordertypeName.toLowerCase().includes('dau tu');
-            const isSinhNhat = ordertypeName.includes('05. Tặng sinh nhật') || ordertypeName.includes('05.Tặng sinh nhật') || ordertypeName.toLowerCase().includes('tặng sinh nhật') || ordertypeName.toLowerCase().includes('tang sinh nhat') || ordertypeName.toLowerCase().includes('sinh nhật') || ordertypeName.toLowerCase().includes('sinh nhat');
-            const isThuong = ordertypeName.includes('01.Thường') || ordertypeName.includes('01. Thường') || ordertypeName.includes('01.Thường') || ordertypeName.toLowerCase().includes('thường') || ordertypeName.toLowerCase().includes('thuong');
-
-            // Kiểm tra có mã CTKM không (promCode hoặc maCtkmTangHang)
-            const hasMaCtkm = (sale.promCode && sale.promCode.trim() !== '') ||
-              (maCtkmTangHang && maCtkmTangHang.trim() !== '') ||
-              (sale.maCtkmTangHang && sale.maCtkmTangHang.trim() !== '');
-
-            // Kiểm tra có mã CTKM tặng hàng không (chỉ maCtkmTangHang, không tính promCode)
-            const hasMaCtkmTangHang = (maCtkmTangHang && maCtkmTangHang.trim() !== '') ||
-              (sale.maCtkmTangHang && sale.maCtkmTangHang.trim() !== '');
-
-            // Kiểm tra giá bán = 0 (sau khi tính toán)
-            const isGiaBanZero = giaBan === 0;
-
-            // Lấy productType từ sale hoặc product
-            const productType = sale.productType || sale.producttype || loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
-            const productTypeUpper = productType ? String(productType).toUpperCase().trim() : null;
-
-            // Kiểm tra "Chiết khấu mua hàng giảm giá" có giá trị không
-            const other_discamt = sale.other_discamt ?? sale.chietKhauMuaHangGiamGia ?? 0;
-            const hasChietKhauMuaHangGiamGia = other_discamt != null && other_discamt !== 0;
-
-            let tkChietKhau: string | null = null;
-            let tkChiPhi: string | null = null;
-            let maPhi: string | null = null;
-
-            if (isDoiVo || isDoiDiem || isDauTu) {
-              // Với đơn "Đổi vỏ", "Đổi điểm", "Đầu tư":
-              tkChietKhau = null; // Để rỗng
-              tkChiPhi = '64191';
-              maPhi = '161010';
-            } else if (isSinhNhat) {
-              // Với đơn "Sinh nhật":
-              tkChietKhau = null; // Để rỗng
-              tkChiPhi = '64192';
-              maPhi = '162010';
-            } else if (isThuong && hasMaCtkmTangHang && isGiaBanZero && isTangHang) {
-              // Với đơn "Thường" có đơn giá = 0, Khuyến mại = 1, và có thông tin mã tại "Mã CTKM tặng hàng":
-              tkChiPhi = '64191';
-              maPhi = '161010';
-              // tkChietKhau giữ nguyên (có thể được set bởi các điều kiện khác hoặc null)
-              if (tkChietKhau === null) {
-                tkChietKhau = sale.tkChietKhau || null;
-              }
-            } else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
-              // Với đơn có "Chiết khấu mua hàng giảm giá" có giá trị và loại hàng hóa = S (Dịch vụ):
-              tkChietKhau = '521131';
-              tkChiPhi = sale.tkChiPhi || null;
-              maPhi = sale.maPhi || null;
-            } else if (isThuong && hasChietKhauMuaHangGiamGia && productTypeUpper === 'I') {
-              // Với đơn "Thường" có giá trị tiền tại cột "Chiết khấu mua hàng giảm giá" và loại hàng hóa = I (Hàng hóa):
-              tkChietKhau = '521111';
-              tkChiPhi = sale.tkChiPhi || null;
-              maPhi = sale.maPhi || null;
-            } else if (isThuong && hasMaCtkm && !(hasMaCtkmTangHang && isGiaBanZero && isTangHang)) {
-              // Với đơn "Thường" có mã CTKM:
-              // - Loại S (Dịch vụ): TK Chiết khấu = 521131
-              // - Loại I (Hàng hóa): TK Chiết khấu = 521111
-              if (productTypeUpper === 'S') {
-                tkChietKhau = '521131';
-              } else if (productTypeUpper === 'I') {
-                tkChietKhau = '521111';
-              } else {
-                // Nếu không xác định được loại, mặc định là hàng hóa
-                tkChietKhau = '521111';
-              }
-              tkChiPhi = sale.tkChiPhi || null;
-              maPhi = sale.maPhi || null;
-            } else {
-              // Các đơn khác: lấy từ product hoặc sale nếu có
-              tkChietKhau = loyaltyProduct?.tkChietKhau || sale.tkChietKhau || null;
-              tkChiPhi = sale.tkChiPhi || null;
-              maPhi = sale.maPhi || null;
-            }
-
-            return {
-              ...sale,
-              promotionDisplayCode: this.getPromotionDisplayCode(sale.promCode),
-              department: department,
-              maKho: maKho,
-              maCtkmTangHang: maCtkmTangHang,
-              // Lấy producttype từ Loyalty API (không còn trong database)
-              producttype: loyaltyProduct?.producttype || loyaltyProduct?.productType || null,
-              product: loyaltyProduct ? {
-                ...loyaltyProduct,
-                producttype: loyaltyProduct.producttype || loyaltyProduct.productType || null,
-                // Đảm bảo productType từ Loyalty API được giữ lại
-                productType: loyaltyProduct.productType || loyaltyProduct.producttype || null,
-              } : (sale.product || null),
-              stockTransfers: saleStockTransfers.map(st => this.formatStockTransferForFrontend(st)),
-              // Thêm các trường tkChietKhau, tkChiPhi, maPhi
-              tkChietKhau: tkChietKhau,
-              tkChiPhi: tkChiPhi,
-              maPhi: maPhi,
-            };
-          })) || [],
-        })));
-
-        return {
-          data: enrichedOrders,
-          total: totalRows, // Tổng số rows (sale items)
-          page,
-          limit,
-          totalPages: Math.ceil(totalRows / limit),
-        };
-      } catch (error: any) {
-        this.logger.error(`Error fetching orders from Zappy API: ${error?.message || error}`);
-        // Fallback to database if Zappy API fails
-      }
-    }
-
+    const { brand, isProcessed, page = 1, limit = 50, date, dateFrom, dateTo, search, statusAsys, export: isExport, typeSale } = options;
 
     // Đếm tổng số sale items trước (để có total cho pagination)
     const countQuery = this.saleRepository
       .createQueryBuilder('sale')
       .select('COUNT(sale.id)', 'count');
 
-    if (isProcessed !== undefined) {
-      countQuery.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
-    }
-
-    // Thêm filter statusAsys vào count query
-    if (statusAsys !== undefined) {
-      countQuery.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
-    }
-
     // Luôn join với customer để có thể search hoặc export
     countQuery.leftJoin('sale.customer', 'customer');
 
-    if (brand) {
-      countQuery.andWhere('sale.brand = :brand', { brand });
-    }
+    // Helper function để apply filters chung cho cả count và full query
+    const applyFilters = (query: any) => {
+      if (isProcessed !== undefined) {
+        query.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
+      }
+      if (statusAsys !== undefined) {
+        query.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
+      }
+      if (typeSale !== undefined) {
+        query.andWhere('sale.type_sale = :type_sale', { type_sale: typeSale.toUpperCase() });
+      }
+      if (brand) {
+        query.andWhere('sale.brand = :brand', { brand });
+      }
+      if (search && search.trim() !== '') {
+        const searchPattern = `%${search.trim().toLowerCase()}%`;
+        query.andWhere(
+          '(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, \'\')) LIKE :search OR LOWER(COALESCE(customer.code, \'\')) LIKE :search OR LOWER(COALESCE(customer.mobile, \'\')) LIKE :search)',
+          { search: searchPattern }
+        );
+      }
 
-    // Thêm search query filter
-    if (search && search.trim() !== '') {
-      const searchPattern = `%${search.trim().toLowerCase()}%`;
-      countQuery.andWhere(
-        '(LOWER(sale.docCode) LIKE :search OR LOWER(customer.name) LIKE :search OR LOWER(customer.code) LIKE :search OR LOWER(customer.mobile) LIKE :search)',
-        { search: searchPattern }
-      );
-    }
-
-    // Date filter cho count query - PHẢI XỬ LÝ TRƯỚC KHI THỰC THI COUNT QUERY
-    // Brand -> limit (30 ngày) nếu chưa có ngày
-    // Brand -> date -> limit nếu có ngày
-    let countHasDateFilter = false;
-    if (dateFrom || dateTo) {
-      countHasDateFilter = true;
-      // Date range filter
-      if (dateFrom && dateTo) {
-        const startDate = new Date(dateFrom);
-        startDate.setHours(0, 0, 0, 0);
-        const endDate = new Date(dateTo);
+      // Date logic
+      let hasFiltersWithDate = false;
+      if (dateFrom || dateTo) {
+        hasFiltersWithDate = true;
+        if (dateFrom && dateTo) {
+          const startDate = new Date(dateFrom);
+          startDate.setHours(0, 0, 0, 0);
+          const endDate = new Date(dateTo);
+          endDate.setHours(23, 59, 59, 999);
+          query.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+            dateFrom: startDate,
+            dateTo: endDate,
+          });
+        } else if (dateFrom) {
+          const startDate = new Date(dateFrom);
+          startDate.setHours(0, 0, 0, 0);
+          query.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
+        } else if (dateTo) {
+          const endDate = new Date(dateTo);
+          endDate.setHours(23, 59, 59, 999);
+          query.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
+        }
+      } else if (date) {
+        hasFiltersWithDate = true;
+        const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+        if (dateMatch) {
+          const [, day, monthStr, year] = dateMatch;
+          const monthMap: { [key: string]: number } = {
+            JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+            JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+          };
+          const month = monthMap[monthStr.toUpperCase()];
+          if (month !== undefined) {
+            const dateObj = new Date(parseInt(year), month, parseInt(day));
+            const startOfDay = new Date(dateObj);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(dateObj);
+            endOfDay.setHours(23, 59, 59, 999);
+            query.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+              dateFrom: startOfDay,
+              dateTo: endOfDay,
+            });
+          }
+        }
+      } else if (brand && !hasFiltersWithDate) {
+        const endDate = new Date();
         endDate.setHours(23, 59, 59, 999);
-        countQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30);
+        startDate.setHours(0, 0, 0, 0);
+        query.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
           dateFrom: startDate,
           dateTo: endDate,
         });
-      } else if (dateFrom) {
-        const startDate = new Date(dateFrom);
-        startDate.setHours(0, 0, 0, 0);
-        countQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
-      } else if (dateTo) {
-        const endDate = new Date(dateTo);
-        endDate.setHours(23, 59, 59, 999);
-        countQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
       }
-    } else if (date) {
-      countHasDateFilter = true;
-      // Single date filter (format: DDMMMYYYY)
-      const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
-      if (dateMatch) {
-        const [, day, monthStr, year] = dateMatch;
-        const monthMap: { [key: string]: number } = {
-          JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
-          JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
-        };
-        const month = monthMap[monthStr.toUpperCase()];
-        if (month !== undefined) {
-          const dateObj = new Date(parseInt(year), month, parseInt(day));
-          const startOfDay = new Date(dateObj);
-          startOfDay.setHours(0, 0, 0, 0);
-          const endOfDay = new Date(dateObj);
-          endOfDay.setHours(23, 59, 59, 999);
-          countQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
-            dateFrom: startOfDay,
-            dateTo: endOfDay,
-          });
-        }
-      }
-    } else if (brand && !countHasDateFilter) {
-      // Brand -> limit (30 ngày) nếu chưa có ngày
-      const endDate = new Date();
-      endDate.setHours(23, 59, 59, 999);
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 30);
-      startDate.setHours(0, 0, 0, 0);
-      countQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
-        dateFrom: startDate,
-        dateTo: endDate,
-      });
-    }
+    };
 
+    applyFilters(countQuery);
     const totalResult = await countQuery.getRawOne();
-    const totalSaleItems =
+    const totalSaleItems = parseInt(totalResult?.count || '0', 10);
 
-      parseInt(totalResult?.count || '0', 10);
-
-    // Dùng getMany() để lấy đầy đủ entity data với customer relation
     const fullQuery = this.saleRepository
       .createQueryBuilder('sale')
       .leftJoinAndSelect('sale.customer', 'customer')
@@ -2299,82 +1929,8 @@ export class SalesService {
       .addOrderBy('sale.docCode', 'ASC')
       .addOrderBy('sale.id', 'ASC');
 
-    // Apply filters
-    if (isProcessed !== undefined) {
-      fullQuery.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
-    }
-    if (statusAsys !== undefined) {
-      fullQuery.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
-    }
-    if (brand) {
-      fullQuery.andWhere('sale.brand = :brand', { brand });
-    }
-    if (search && search.trim() !== '') {
-      const searchPattern = `%${search.trim().toLowerCase()}%`;
-      fullQuery.andWhere(
-        '(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, \'\')) LIKE :search OR LOWER(COALESCE(customer.code, \'\')) LIKE :search OR LOWER(COALESCE(customer.mobile, \'\')) LIKE :search)',
-        { search: searchPattern }
-      );
-    }
+    applyFilters(fullQuery);
 
-    // Apply date filters
-    let hasDateFilter = false;
-    if (dateFrom || dateTo) {
-      hasDateFilter = true;
-      if (dateFrom && dateTo) {
-        const startDate = new Date(dateFrom);
-        startDate.setHours(0, 0, 0, 0);
-        const endDate = new Date(dateTo);
-        endDate.setHours(23, 59, 59, 999);
-        fullQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
-          dateFrom: startDate,
-          dateTo: endDate,
-        });
-      } else if (dateFrom) {
-        const startDate = new Date(dateFrom);
-        startDate.setHours(0, 0, 0, 0);
-        fullQuery.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
-      } else if (dateTo) {
-        const endDate = new Date(dateTo);
-        endDate.setHours(23, 59, 59, 999);
-        fullQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
-      }
-    } else if (date) {
-      hasDateFilter = true;
-      const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
-      if (dateMatch) {
-        const [, day, monthStr, year] = dateMatch;
-        const monthMap: { [key: string]: number } = {
-          JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
-          JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
-        };
-        const month = monthMap[monthStr.toUpperCase()];
-        if (month !== undefined) {
-          const dateObj = new Date(parseInt(year), month, parseInt(day));
-          const startOfDay = new Date(dateObj);
-          startOfDay.setHours(0, 0, 0, 0);
-          const endOfDay = new Date(dateObj);
-          endOfDay.setHours(23, 59, 59, 999);
-          fullQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
-            dateFrom: startOfDay,
-            dateTo: endOfDay,
-          });
-        }
-      }
-    } else if (brand && !hasDateFilter) {
-      const endDate = new Date();
-      endDate.setHours(23, 59, 59, 999);
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 30);
-      startDate.setHours(0, 0, 0, 0);
-      fullQuery.andWhere('sale.docDate >= :dateFrom AND sale.docDate <= :dateTo', {
-        dateFrom: startDate,
-        dateTo: endDate,
-      });
-    }
-
-    // Nếu export mode, không paginate, lấy tất cả
-    // Nếu không phải export mode, phân trang bình thường
     if (!isExport) {
       const offset = (page - 1) * limit;
       fullQuery.skip(offset).take(limit);
@@ -2382,13 +1938,10 @@ export class SalesService {
 
     const allSales = await fullQuery.getMany();
 
-
-    // Nếu export mode, trả về sales items riêng lẻ (không group)
     if (isExport) {
-      // Trả về đầy đủ entity data với customer relation
       const salesWithCustomer = allSales.map((sale) => {
         return {
-          ...sale, // Trả về tất cả fields từ entity
+          ...sale,
           customer: sale.customer ? {
             code: sale.customer.code || sale.partnerCode || null,
             brand: sale.customer.brand || null,
@@ -2409,29 +1962,9 @@ export class SalesService {
       };
     }
 
-    // Gộp theo docCode và lưu full sales data
-    const orderMap = new Map<string, {
-      docCode: string;
-      docDate: Date;
-      branchCode: string;
-      docSourceType: string;
-      customer: {
-        code: string | null;
-        brand?: string | null;
-        name?: string | null;
-        mobile?: string | null;
-      } | null;
-      totalRevenue: number;
-      totalQty: number;
-      totalItems: number;
-      isProcessed: boolean;
-      sales: any[];
-      stockTransfers?: StockTransfer[];
-    }>();
-
-    // Đã đếm totalSaleItems từ count query ở trên
-    // Lưu full sales data để enrich sau
+    const orderMap = new Map<string, any>();
     const allSalesData: any[] = [];
+
     for (const sale of allSales) {
       const docCode = sale.docCode;
 
@@ -2465,16 +1998,13 @@ export class SalesService {
       order.totalQty += Number(sale.qty || 0);
       order.totalItems += 1;
 
-      // Nếu có ít nhất 1 sale chưa xử lý thì đơn hàng chưa xử lý
       if (!sale.isProcessed) {
         order.isProcessed = false;
       }
 
-      // Lưu sale data để enrich sau
       allSalesData.push(sale);
     }
 
-    // Fetch products và departments từ Loyalty API
     const itemCodes = Array.from(
       new Set(
         allSalesData
@@ -2492,8 +2022,6 @@ export class SalesService {
       )
     );
 
-    // Fetch stock transfers theo soCode (mã đơn hàng) - stock transfer có soCode = docCode của order
-    // Xử lý đặc biệt cho đơn trả lại: fetch cả theo mã đơn gốc (SO)
     const docCodes = Array.from(new Set(allSalesData.map(sale => sale.docCode).filter(Boolean)));
     const docCodesForStockTransfer = this.getDocCodesForStockTransfer(docCodes);
     const stockTransfers = docCodesForStockTransfer.length > 0
@@ -2502,7 +2030,6 @@ export class SalesService {
       })
       : [];
 
-    // Lấy itemCodes từ stock transfers để fetch materialCode từ Loyalty API
     const stockTransferItemCodes = Array.from(
       new Set(
         stockTransfers
@@ -2512,20 +2039,17 @@ export class SalesService {
     );
     const allItemCodes = Array.from(new Set([...itemCodes, ...stockTransferItemCodes]));
 
-    // Fetch products và departments từ Loyalty API (cho cả sales và stock transfers)
     const [loyaltyProductMap, departmentMap] = await Promise.all([
-      this.fetchLoyaltyProducts(allItemCodes),
+      this.loyaltyService.fetchProducts(allItemCodes),
       this.fetchLoyaltyDepartments(branchCodes),
     ]);
 
-    // Build stock transfer maps (tổng hợp logic vào một chỗ)
     const { stockTransferMap, stockTransferByDocCodeMap } = this.buildStockTransferMaps(
       stockTransfers,
       loyaltyProductMap,
       docCodes
     );
 
-    // Enrich sales với products, departments, stock transfers và tính toán các field phức tạp
     const enrichedSalesMap = new Map<string, any[]>();
     for (const sale of allSalesData) {
       const docCode = sale.docCode;
@@ -2536,60 +2060,44 @@ export class SalesService {
       const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
       const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
 
-      // Lấy stock transfers cho sale này (theo docCode + materialCode hoặc itemCode)
-      // Match theo: soCode (Mã ĐH) = docCode (Số hóa đơn) VÀ materialCode (Mã hàng) hoặc itemCode
       const saleMaterialCode = loyaltyProduct?.materialCode;
       let saleStockTransfers: StockTransfer[] = [];
       if (saleMaterialCode) {
         const stockTransferKey = `${docCode}_${saleMaterialCode}`;
         saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
       }
-      // Nếu không match được theo materialCode, match trực tiếp theo itemCode
       if (saleStockTransfers.length === 0 && sale.itemCode) {
         saleStockTransfers = stockTransfers.filter(
           (st) => st.soCode === docCode && st.itemCode === sale.itemCode
         );
       }
 
-      // Lấy mã kho từ stock transfer (Mã kho xuất - stockCode)
       const maKhoFromStockTransfer = await this.getMaKhoFromStockTransfer(sale, docCode, stockTransfers, saleMaterialCode, stockTransferMap);
-
       const calculatedFields = this.calculateSaleFields(sale, loyaltyProduct, department, sale.branchCode);
-      // Override maKho từ calculatedFields bằng maKho từ stock transfer
       calculatedFields.maKho = maKhoFromStockTransfer;
 
       const order = orderMap.get(sale.docCode);
       const enrichedSale = await this.formatSaleForFrontend(sale, loyaltyProduct, department, calculatedFields, order, saleStockTransfers);
-
-      // Thêm stock transfers vào sale
       enrichedSale.stockTransfers = saleStockTransfers.map(st => this.formatStockTransferForFrontend(st));
 
       enrichedSalesMap.get(docCode)!.push(enrichedSale);
     }
 
-    // Gắn enriched sales vào orders và thêm stock transfers tổng hợp cho order
-    // Đồng thời gọi API get_card cho đơn "08. Tách thẻ" để lấy issue_partner_code
     for (const [docCode, sales] of enrichedSalesMap.entries()) {
       const order = orderMap.get(docCode);
       if (order) {
-        // Gọi API get_card để lấy issue_partner_code cho đơn "08. Tách thẻ"
         await this.fetchCardDataAndMapIssuePartnerCode(docCode, sales);
-
         order.sales = sales;
-        // Thêm tất cả stock transfers của đơn hàng này - format để trả về materialCode
         order.stockTransfers = (stockTransferByDocCodeMap.get(docCode) || []).map(st => this.formatStockTransferForFrontend(st));
       }
     }
 
-    // Chuyển Map thành Array và sắp xếp
     const orders = Array.from(orderMap.values()).sort((a, b) => {
       return new Date(b.docDate).getTime() - new Date(a.docDate).getTime();
     });
 
-    // Enrich orders với cashio data
     const enrichedOrders = await this.enrichOrdersWithCashio(orders);
 
-    // Giới hạn số orders trả về
     const maxOrders = limit * 2;
     const limitedOrders = enrichedOrders.slice(0, maxOrders);
 
@@ -2601,6 +2109,7 @@ export class SalesService {
       totalPages: Math.ceil(totalSaleItems / limit),
     };
   }
+
 
   async getStatusAsys(
     statusAsys?: string,
@@ -5770,7 +5279,6 @@ export class SalesService {
         } else if (sale.productType === 'V') {
           promCode = promCode + '.V'
         }
-        const soSource = sale.order_source || (sale as any).so_source || null;
 
         // ma_ck05: Thanh toán voucher chính
         let ck05_nt = paidByVoucher > 0 ? paidByVoucher : 0;
@@ -5951,8 +5459,9 @@ export class SalesService {
           }
         }
         const maKhoMap = await this.categoriesService.mapWarehouseCode(maKho);
-        maKho = maKhoMap || null;
-
+        if (maKhoMap) {
+          maKho = maKhoMap;
+        }
         // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
         // Lấy materialCode từ Loyalty API (ưu tiên materialCode từ product, sau đó itemCode)
         const materialCode = this.getMaterialCode(sale, sale.product) || sale.itemCode;
@@ -7316,398 +6825,6 @@ export class SalesService {
       dien_giai: firstItem.doc_desc || null,
       detail: detail,
     };
-  }
-
-  /**
-   * Export orders to Excel file
-   * Sử dụng getAllOrders với export=true để đảm bảo đồng bộ với UI
-   * Khi getAllOrders thay đổi gì thì export Excel cũng tự động thay đổi theo
-   */
-  async exportOrders(options: {
-    brand?: string;
-    isProcessed?: boolean;
-    date?: string;
-    dateFrom?: string;
-    dateTo?: string;
-    search?: string;
-    statusAsys?: boolean;
-  }): Promise<Buffer> {
-    const { brand, isProcessed, date, dateFrom, dateTo, search, statusAsys } = options;
-
-    try {
-      // Limit số records để tránh quá tải
-      const MAX_EXPORT_RECORDS = 100000;
-
-      // Gọi getAllOrders với export=true để lấy tất cả sales items (đồng bộ với UI)
-      const result = await this.findAllOrders({
-        brand,
-        isProcessed,
-        date,
-        dateFrom,
-        dateTo,
-        search,
-        statusAsys,
-        export: true, // Export mode: trả về sales items riêng lẻ
-      });
-
-      const allSales = result.sales || [];
-      const totalCount = result.total || 0;
-
-      if (totalCount > MAX_EXPORT_RECORDS) {
-        throw new BadRequestException(`Số lượng records quá lớn (${totalCount}). Vui lòng thêm filter để giảm số lượng (tối đa ${MAX_EXPORT_RECORDS} records)`);
-      }
-
-      if (allSales.length === 0) {
-        throw new BadRequestException('Không có dữ liệu để xuất Excel');
-      }
-
-
-      // Debug: Đếm số đơn lỗi
-      const errorCount = allSales.filter(s => s.statusAsys === false).length;
-
-      // Enrich dữ liệu với products và departments (batch process)
-      // Lấy tất cả itemCode và branchCode unique
-      const itemCodes = Array.from(new Set(allSales.map(s => s.itemCode).filter(Boolean)));
-      const branchCodes = Array.from(new Set(allSales.map(s => s.branchCode).filter(Boolean)));
-
-      // Fetch products từ Loyalty API (chỉ cho các sale không phải đơn lỗi)
-      const loyaltyProductMap = new Map<string, any>();
-      const validItemCodes = itemCodes.filter(itemCode => {
-        const sale = allSales.find(s => s.itemCode === itemCode);
-        return sale && sale.statusAsys !== false;
-      });
-
-      // Fetch products từ Loyalty API sử dụng LoyaltyService
-      if (validItemCodes.length > 0) {
-        const fetchedProducts = await this.loyaltyService.fetchProducts(validItemCodes);
-        fetchedProducts.forEach((product, itemCode) => {
-          loyaltyProductMap.set(itemCode, product);
-        });
-      }
-
-      // Fetch departments
-      const departmentMap = new Map<string, any>();
-      if (branchCodes.length > 0) {
-        const departmentPromises = branchCodes.map(async (branchCode) => {
-          try {
-            const response = await this.httpService.axiosRef.get(
-              `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-              { headers: { accept: 'application/json' } },
-            );
-            const department = response?.data?.data?.items?.[0];
-            return { branchCode, department };
-          } catch (error) {
-            this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
-            return { branchCode, department: null };
-          }
-        });
-        const departmentResults = await Promise.all(departmentPromises);
-        departmentResults.forEach(({ branchCode, department }) => {
-          if (department) {
-            departmentMap.set(branchCode, department);
-          }
-        });
-      }
-
-      // Prepare Excel data với các cột giống frontend (MAIN_COLUMNS)
-      // Các cột theo thứ tự: partnerCode, docDate, docCode, kyHieu, description, itemCode, dvt, loai, promCode, maKho, maLo, qty, giaBan, tienHang, tyGia, maThue, tkNo, tkDoanhThu, tkGiaVon, cucThue, maThanhToan, vuViec, boPhan, trangThai, barcode, muaHangGiamGia, chietKhauMuaHangGiamGia, chietKhauCkTheoChinhSach, muaHangCkVip, chietKhauMuaHangCkVip, thanhToanCoupon, chietKhauThanhToanCoupon, thanhToanVoucher, chietKhauThanhToanVoucher, thanhToanTkTienAo, chietKhauThanhToanTkTienAo, voucherDp1, chietKhauVoucherDp1, maCtkmTangHang, maThe, soSerial
-      const excelData = allSales.map((sale) => {
-        // Sử dụng sale.product đã được enrich từ formatSaleForFrontend (ưu tiên)
-        // Fallback về loyaltyProductMap nếu sale.product chưa có
-        const saleProduct = (sale as any).product || null;
-        const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
-        const product = saleProduct || loyaltyProduct || null;
-        const department = sale.branchCode ? departmentMap.get(sale.branchCode) : null;
-        const brand = sale.customer?.brand || '';
-        const brandLower = brand.toLowerCase().trim();
-        const normalizedBrand = brandLower === 'facialbar' ? 'f3' : brandLower;
-
-        // Tính toán các giá trị
-        const tienHang = sale.tienHang || sale.linetotal || 0;
-        const qty = sale.qty || 0;
-        let giaBan = sale.giaBan || 0;
-        if (giaBan === 0 && tienHang != null && qty > 0) {
-          giaBan = tienHang / qty;
-        }
-        const revenue = sale.revenue || 0;
-        const isTangHang = giaBan === 0 && tienHang === 0 && revenue === 0;
-
-        // Tính maKho - ưu tiên từ sale.maKho đã được tính toán
-        const maBp = department?.ma_bp || sale.branchCode || null;
-        const maKho = sale.maKho || this.calculateMaKho(sale.ordertype || '', maBp) || sale.branchCode || '';
-
-        // Tính maLo - ưu tiên từ sale.maLo đã được tính toán
-        let maLo = sale.maLo || '';
-        const serial = sale.serial || '';
-        if (!maLo && serial) {
-          const underscoreIndex = serial.indexOf('_');
-          if (underscoreIndex > 0 && underscoreIndex < serial.length - 1) {
-            maLo = serial.substring(underscoreIndex + 1);
-          } else {
-            const trackBatch = saleProduct?.trackBatch ?? loyaltyProduct?.trackBatch ?? product?.trackBatch ?? false;
-            if (trackBatch === true) {
-              if (normalizedBrand === 'f3') {
-                maLo = serial;
-              } else {
-                const productType = saleProduct?.productType || saleProduct?.producttype ||
-                  loyaltyProduct?.productType || loyaltyProduct?.producttype ||
-                  product?.productType || product?.producttype || '';
-                const productTypeUpper = productType.toUpperCase().trim();
-                if (productTypeUpper === 'TPCN') {
-                  maLo = serial.length >= 8 ? serial.slice(-8) : serial;
-                } else {
-                  maLo = serial.length >= 4 ? serial.slice(-4) : serial;
-                }
-              }
-            }
-          }
-        }
-
-        // Tính soSerial - ưu tiên logic từ sale đã được enrich
-        let soSerial = '';
-        const trackSerial = saleProduct?.trackSerial ?? loyaltyProduct?.trackSerial ?? product?.trackSerial ?? false;
-        const trackBatch = saleProduct?.trackBatch ?? loyaltyProduct?.trackBatch ?? product?.trackBatch ?? false;
-        if (trackSerial === true && trackBatch !== true) {
-          if (serial && serial.indexOf('_') <= 0) {
-            soSerial = serial;
-          }
-        }
-
-        // Tính promCode (Khuyến mãi)
-        let promCode = '';
-        const ordertypeName = sale.ordertype || '';
-        const isDichVu = ordertypeName.includes('02. Làm dịch vụ') ||
-          ordertypeName.includes('04. Đổi DV') ||
-          ordertypeName.includes('08. Tách thẻ') ||
-          ordertypeName.includes('Đổi thẻ KEEP->Thẻ DV');
-        const hasPromCode = sale.promCode && String(sale.promCode).trim() !== '';
-        if (!isDichVu && isTangHang) {
-          const hasMaThe = sale.maThe && String(sale.maThe).trim() !== '';
-          let maCtkmTangHang = sale.maCtkmTangHang || '';
-          if (!maCtkmTangHang && isTangHang) {
-            if (ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư')) {
-              maCtkmTangHang = 'TT DAU TU';
-            }
-          }
-          if (!hasMaThe && maCtkmTangHang !== 'TT DAU TU') {
-            promCode = '1';
-          }
-        }
-
-        // Tính maCtkmTangHang
-        let maCtkmTangHang = sale.maCtkmTangHang || '';
-        if (!maCtkmTangHang && isTangHang) {
-          if (ordertypeName.includes('06. Đầu tư') || ordertypeName.includes('06.Đầu tư')) {
-            maCtkmTangHang = 'TT DAU TU';
-          } else if (
-            ordertypeName.includes('01.Thường') || ordertypeName.includes('01. Thường') ||
-            ordertypeName.includes('07. Bán tài khoản') || ordertypeName.includes('07.Bán tài khoản') ||
-            ordertypeName.includes('9. Sàn TMDT') || ordertypeName.includes('9.Sàn TMDT')
-          ) {
-            // Quy đổi prom_code sang TANGSP - lấy năm/tháng từ ngày đơn hàng
-            const docDate = sale.docDate || (sale as any).order?.docDate;
-            // Dùng promCode trực tiếp thay vì convertPromCodeToTangSp
-            maCtkmTangHang = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
-          } else {
-            maCtkmTangHang = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
-          }
-        }
-
-        // Tính muaHangGiamGia
-        let muaHangGiamGia = '';
-        if (!isTangHang && sale.promCode) {
-          muaHangGiamGia = this.getPromotionDisplayCode(sale.promCode) || sale.promCode || '';
-        }
-
-        // Lấy dvt - giống logic trong formatSaleForFrontend: loyaltyProduct?.unit || sale.dvt
-        // Ưu tiên: sale.product?.dvt (đã được enrich) > sale.dvt > product?.unit (từ Loyalty API)
-        const dvt = saleProduct?.dvt || sale.dvt || product?.unit || loyaltyProduct?.unit || '';
-
-        // Lấy maVatTu - giống logic trong formatSaleForFrontend: loyaltyProduct?.materialCode || sale.itemCode
-        // Ưu tiên: sale.product?.maVatTu (đã được enrich) > product?.materialCode > sale.itemCode
-        const maVatTu = saleProduct?.maVatTu || product?.materialCode || loyaltyProduct?.materialCode || sale.itemCode || '';
-
-        // Lấy loai - loại đơn hàng (ordertypeName) như "01. Thường", "02. Làm dịch vụ", ...
-        // Ưu tiên: sale.ordertypeName > sale.ordertype > sale.loai
-        const loai = sale.ordertypeName || sale.ordertype || sale.loai || '';
-
-        return {
-          '* Mã khách': sale.partnerCode || sale.customer?.code || '',
-          '* Ngày': sale.docDate ? new Date(sale.docDate).toLocaleDateString('vi-VN') : '',
-          '* Số hóa đơn': sale.docCode || '',
-          '* Ký hiệu': department?.branchcode || sale.branchCode || '',
-          'Diễn giải': sale.docCode || '',
-          '* Mã hàng': maVatTu,
-          'Đvt': dvt,
-          'Loại': loai,
-          'Khuyến mãi': promCode,
-          '* Mã kho': maKho,
-          '* Mã lô': maLo,
-          'Số lượng': qty,
-          'Giá bán': giaBan,
-          'Tiền hàng': tienHang,
-          'Tỷ giá': sale.tyGia || 1,
-          '* Mã thuế': sale.maThue,
-          '* Tk nợ': sale.tkNo || '131',
-          '* Tk doanh thu': sale.tkDoanhThu || '',
-          '* Tk giá vốn': sale.tkGiaVon || '',
-          '* Cục thuế': sale.cucThue || '',
-          'Mã thanh toán': sale.maThanhToan || '',
-          'Vụ việc': sale.vuViec || '',
-          'Bộ phận': sale.boPhan || '',
-          'Trạng thai': sale.isProcessed ? 'Đã xử lý' : 'Chưa xử lý',
-          'Barcode': sale.barcode || '',
-          'Mua hàng giảm giá': muaHangGiamGia,
-          'Chiết khấu mua hàng giảm giá': sale.chietKhauMuaHangGiamGia || 0,
-          'Chiết khấu ck theo chính sách': sale.chietKhauCkTheoChinhSach || 0,
-          'Mua hàng CK VIP': sale.muaHangCkVip || '',
-          'Chiết khấu mua hàng CK VIP': sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0,
-          'Thanh toán coupon': sale.thanhToanCoupon || '',
-          'Chiết khấu thanh toán coupon': sale.chietKhauThanhToanCoupon || 0,
-          'Thanh toán voucher': sale.thanhToanVoucher || '',
-          'Chiết khấu thanh toán voucher': sale.chietKhauThanhToanVoucher || 0,
-          'Thanh toán TK tiền ảo': sale.thanhToanTkTienAo || '',
-          'Chiết khấu thanh toán TK tiền ảo': sale.chietKhauThanhToanTkTienAo || 0,
-          'Voucher DP1': sale.voucherDp1 || '',
-          'Chiết khấu Voucher DP1': sale.chietKhauVoucherDp1 || 0,
-          'Mã CTKM tặng hàng': maCtkmTangHang,
-          'Mã thẻ': sale.maThe || '',
-          'Số serial': soSerial,
-        };
-      });
-
-      // Create workbook
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(excelData);
-
-      // Style header row
-      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-      for (let col = range.s.c; col <= range.e.c; col++) {
-        const colLetter = XLSX.utils.encode_col(col);
-        const headerCellAddress = colLetter + '1';
-        if (ws[headerCellAddress]) {
-          ws[headerCellAddress].s = {
-            fill: {
-              fgColor: { rgb: 'E5E7EB' },
-              patternType: 'solid',
-            },
-            font: {
-              bold: true,
-              color: { rgb: '000000' },
-            },
-            alignment: {
-              horizontal: 'left',
-              vertical: 'center'
-            },
-          };
-        }
-      }
-
-      // Style data rows - bôi đỏ các dòng có statusAsys = false
-      // range.s.r = 0 (header row), data rows bắt đầu từ row 1 (Excel row 2)
-      for (let row = range.s.r + 1; row <= range.e.r; row++) {
-        // saleIndex = row - range.s.r - 1 = row - 0 - 1 = row - 1
-        // Row 1 (Excel row 2, data row đầu tiên) -> saleIndex = 0
-        const saleIndex = row - range.s.r - 1;
-        const sale = allSales[saleIndex];
-
-        if (!sale) {
-          this.logger.warn(`[exportOrders] No sale found for row ${row}, saleIndex ${saleIndex}`);
-          continue;
-        }
-
-        // Kiểm tra statusAsys: false = đơn lỗi
-        // Đảm bảo kiểm tra đúng: statusAsys phải là boolean false
-        const statusAsysValue = sale.statusAsys;
-        const isErrorRow = statusAsysValue === false;
-
-        // Log để debug
-        if (isErrorRow) {
-        }
-
-        for (let col = range.s.c; col <= range.e.c; col++) {
-          const colLetter = XLSX.utils.encode_col(col);
-          // Excel rows là 1-based, nên row 0-based + 1 = Excel row number
-          const cellAddress = colLetter + (row + 1);
-          const cell = ws[cellAddress];
-
-          if (!cell) {
-            continue;
-          }
-
-          if (!cell.s) {
-            cell.s = {};
-          }
-
-          // Set background color: đỏ nhạt cho đơn lỗi
-          if (isErrorRow) {
-            // Màu đỏ nhạt: #FFE5E5 (RGB: 255, 229, 229)
-            cell.s.fill = {
-              fgColor: { rgb: 'FFE5E5' },
-              patternType: 'solid',
-            };
-            cell.s.font = {
-              color: { rgb: '000000' },
-              bold: false,
-            };
-
-            // Log sau khi set style (chỉ log cột đầu tiên)
-            if (col === range.s.c) {
-            }
-          } else {
-            // Màu trắng cho các dòng bình thường
-            cell.s.fill = {
-              fgColor: { rgb: 'FFFFFF' },
-              patternType: 'solid',
-            };
-            cell.s.font = {
-              color: { rgb: '000000' },
-              bold: false,
-            };
-          }
-
-          cell.s.alignment = {
-            horizontal: 'left',
-            vertical: 'center'
-          };
-        }
-      }
-
-      // Set column widths
-      const colWidths = [
-        { wch: 15 }, // Mã đơn hàng
-        { wch: 12 }, // Ngày đơn hàng
-        { wch: 12 }, // Mã chi nhánh
-        { wch: 12 }, // Loại đơn
-        { wch: 15 }, // Mã khách hàng
-        { wch: 25 }, // Tên khách hàng
-        { wch: 12 }, // Số điện thoại
-        { wch: 10 }, // Brand
-        { wch: 15 }, // Mã sản phẩm
-        { wch: 10 }, // Số lượng
-        { wch: 12 }, // Giá bán
-        { wch: 12 }, // Thành tiền
-        { wch: 12 }, // Doanh thu
-        { wch: 15 }, // Trạng thái xử lý
-        { wch: 15 }, // Trạng thái sync
-      ];
-      ws['!cols'] = colWidths;
-
-      // Add worksheet to workbook
-      XLSX.utils.book_append_sheet(wb, ws, 'Đơn hàng');
-
-      // Convert to buffer
-      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-
-      return buffer;
-    } catch (error: any) {
-      this.logger.error(`[exportOrders] Error: ${error?.message || error}`);
-      this.logger.error(`[exportOrders] Stack: ${error?.stack || 'No stack trace'}`);
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      throw new InternalServerErrorException(`Error exporting orders to Excel: ${error?.message || 'Unknown error'}`);
-    }
   }
 
   async cutCode(input: string): Promise<string> {

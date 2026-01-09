@@ -17,6 +17,7 @@ export class SalesController {
     @Query('dateFrom') dateFrom?: string, // Format: YYYY-MM-DD hoặc ISO string
     @Query('dateTo') dateTo?: string, // Format: YYYY-MM-DD hoặc ISO string
     @Query('search') search?: string, // Search query để tìm theo docCode, customer name, code, mobile
+    @Query('typeSale') typeSale?: string, // Type sale: "WHOLESALE" or "RETAIL"
   ) {
     // Luôn trả về danh sách đơn hàng (gộp theo docCode) với dữ liệu cơ bản
     return this.salesService.findAllOrders({
@@ -28,43 +29,8 @@ export class SalesController {
       dateFrom, // Pass dateFrom parameter
       dateTo, // Pass dateTo parameter
       search, // Pass search parameter
+      typeSale, // Pass typeSale parameter
     });
-  }
-
-  @Get('export-orders')
-  async exportOrders(
-    @Res() res: Response,
-    @Query('brand') brand?: string,
-    @Query('processed') processed?: string,
-    @Query('date') date?: string,
-    @Query('dateFrom') dateFrom?: string,
-    @Query('dateTo') dateTo?: string,
-    @Query('search') search?: string,
-    @Query('statusAsys') statusAsys?: string,
-  ) {
-    const buffer = await this.salesService.exportOrders({
-      brand,
-      isProcessed: processed === 'true' ? true : processed === 'false' ? false : undefined,
-      date,
-      dateFrom,
-      dateTo,
-      search,
-      statusAsys: statusAsys === 'true' ? true : statusAsys === 'false' ? false : undefined,
-    });
-
-    // Generate filename
-    const now = new Date();
-    const dateStr = now.toISOString().split('T')[0].replace(/-/g, '');
-    const brandSuffix = brand ? `_${brand.toUpperCase()}` : '';
-    const fileName = `DonHang_${dateStr}${brandSuffix}.xlsx`;
-
-    // Set headers
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
-    res.setHeader('Content-Length', buffer.length);
-
-    // Send buffer
-    res.send(buffer);
   }
 
 
