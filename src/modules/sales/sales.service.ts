@@ -4561,7 +4561,7 @@ export class SalesService {
           // CHỈ xử lý cho đơn có docSourceType = ORDER_RETURN hoặc SALE_RETURN
           try {
             // Kiểm tra docSourceType - chỉ xử lý payment cho ORDER_RETURN hoặc SALE_RETURN
-            const docSourceTypeRaw = firstSale?.docSourceType || orderData.docSourceType || '';
+            const docSourceTypeRaw = orderData.docSourceType ||firstSale?.docSourceType ||  '';
             const docSourceType = docSourceTypeRaw ? String(docSourceTypeRaw).trim().toUpperCase() : '';
 
             if (docSourceType === 'ORDER_RETURN' || docSourceType === 'SALE_RETURN') {
@@ -5456,6 +5456,8 @@ export class SalesService {
           if (sts && sts.length > 0 && sts[0]?.stockCode) {
             maKho = sts[0].stockCode;
             batchSerial = sts[0].batchSerial || null;
+          }else {
+            maKho = sale.maKho || null;
           }
         }
         const maKhoMap = await this.categoriesService.mapWarehouseCode(maKho);
@@ -5620,10 +5622,6 @@ export class SalesService {
           }
           ck01_nt = 0;
         }
-        // else if (!isDoiDiem) {
-        //   maCtkmTangHang = '';
-        //   ck01_nt = 0;
-        // }
 
 
         // Kiểm tra nếu ma_ctkm_th = "TT DAU TU" thì không set km_yn = 1
