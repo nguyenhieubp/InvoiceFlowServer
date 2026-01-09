@@ -2060,7 +2060,13 @@ export class SalesService {
     let getMaThe = new Map<string, string>();
     const [dataCard] = await this.fetchCardData(docCodes[0]);
     for (const card of dataCard.data) {
-      getMaThe.set(card.service_item_name, card.serial);
+      if (!card?.service_item_name || !card?.serial) {
+        continue; // bỏ qua record lỗi / rỗng
+      }
+      const itemProduct = await this.loyaltyService.checkProduct(card.service_item_name);
+      if (itemProduct) {
+        getMaThe.set(itemProduct.materialCode, card.serial);
+      }
     }
 
     const enrichedSalesMap = new Map<string, any[]>();
@@ -2069,10 +2075,11 @@ export class SalesService {
       if (!enrichedSalesMap.has(docCode)) {
         enrichedSalesMap.set(docCode, []);
       }
-
+      
       const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
       const department = sale.branchCode ? departmentMap.get(sale.branchCode) || null : null;
-
+      const maThe = getMaThe.get(loyaltyProduct?.materialCode || '') || '';
+      sale.maThe = maThe;
       const saleMaterialCode = loyaltyProduct?.materialCode;
       let saleStockTransfers: StockTransfer[] = [];
       if (saleMaterialCode) {
@@ -2541,10 +2548,22 @@ export class SalesService {
       }
     });
 
+    const getCardCode = new Map<string, string>();
+    const [dataCard] = await this.fetchCardData(docCode);
+    if (dataCard) {
+      for (const card of dataCard.data) {
+        if (!card?.service_item_name || !card?.serial) {
+          continue; // bỏ qua record lỗi / rỗng
+        }
+        getCardCode.set(card.service_item_name, card.serial);
+      }
+    }
+
     // Enrich sales với product information từ database
     const enrichedSales = sales.map((sale) => ({
       ...sale,
       product: sale.itemCode ? productMap.get(sale.itemCode) || null : null,
+      maThe: getCardCode.get(sale.itemCode) || '',
     }));
 
     // Fetch products từ Loyalty API cho các itemCode không có trong database hoặc không có dvt
