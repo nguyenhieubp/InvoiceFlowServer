@@ -1168,9 +1168,6 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
         throw new Error('Không thể lấy token đăng nhập');
       }
 
-      // Log payload để debug
-      this.logger.debug(`GxtInvoice payload: ${JSON.stringify(gxtInvoiceData, null, 2)}`);
-
       // Gọi API gxtInvoice với token
       const response = await firstValueFrom(
         this.httpService.post(

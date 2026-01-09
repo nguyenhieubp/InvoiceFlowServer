@@ -309,7 +309,6 @@ export class FastApiInvoiceFlowService {
   async createGxtInvoice(gxtInvoiceData: any): Promise<any> {
     this.logger.log(`[Flow] Creating gxt invoice ${gxtInvoiceData.so_ct || 'N/A'}...`);
     try {
-      this.logger.debug(`[Flow] GxtInvoice payload: ${JSON.stringify(gxtInvoiceData, null, 2)}`);
       const finalPayload = FastApiPayloadHelper.removeEmptyFields(gxtInvoiceData, false);
 
       const result = await this.fastApiService.submitGxtInvoice(finalPayload);

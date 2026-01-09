@@ -324,6 +324,20 @@ export class SalesService {
       ordertypeValue.includes('08.  Tách thẻ');
   }
 
+  private async fetchCardData(docCode: string): Promise<any[]> {
+    const apiUrl = 'https://n8n.vmt.vn/webhook/vmt/get_card';
+    const requestBody = { doccode: docCode };
+    const response = await this.httpService.axiosRef.request({
+      method: 'GET',
+      url: apiUrl,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      data: requestBody,
+    });
+    return response.data;
+  }
+
   /**
    * Gọi API get_card để lấy issue_partner_code cho đơn "08. Tách thẻ"
    */
@@ -3663,7 +3677,7 @@ export class SalesService {
       // BƯỚC 3: Xử lý các case đặc biệt (sau khi đã validate)
       // ============================================
 
-      // Nếu là đơn dịch vụ, chạy flow dịch vụ
+      // Nếu là đơn dịch vụ, chạy flow dịch vụ - 
       if (hasServiceOrder) {
         return await this.executeServiceOrderFlow(orderData, docCode);
       }
@@ -4561,7 +4575,7 @@ export class SalesService {
           // CHỈ xử lý cho đơn có docSourceType = ORDER_RETURN hoặc SALE_RETURN
           try {
             // Kiểm tra docSourceType - chỉ xử lý payment cho ORDER_RETURN hoặc SALE_RETURN
-            const docSourceTypeRaw = orderData.docSourceType ||firstSale?.docSourceType ||  '';
+            const docSourceTypeRaw = orderData.docSourceType || firstSale?.docSourceType || '';
             const docSourceType = docSourceTypeRaw ? String(docSourceTypeRaw).trim().toUpperCase() : '';
 
             if (docSourceType === 'ORDER_RETURN' || docSourceType === 'SALE_RETURN') {
@@ -4806,11 +4820,6 @@ export class SalesService {
 
         const gxtInvoiceData = await this.buildGxtInvoiceData(orderData, importLines, exportLines);
 
-        // Log payload để verify
-        this.logger.log(
-          `[ServiceOrderFlow] GxtInvoice payload: detail có ${gxtInvoiceData.detail?.length || 0} dòng, ` +
-          `ndetail có ${gxtInvoiceData.ndetail?.length || 0} dòng`
-        );
 
         gxtInvoiceResult = await this.fastApiInvoiceFlowService.createGxtInvoice(gxtInvoiceData);
       } else {
@@ -5188,10 +5197,17 @@ export class SalesService {
         }
       }
 
+      // const getCardCode = new Map<string, string>();
+      // const [dataCard] = await this.fetchCardData(orderData.docCode);
+      // for (const card of dataCard.data) {
+      //   let key = card.service_item_name;
+      //   getCardCode.set(key, card.serial);
+      // }
+
       // Xử lý từng sale với index để tính dong
       const detail = await Promise.all(allSales.map(async (sale: any, index: number) => {
         // Lấy materialCode từ sale (đã được enrich từ Loyalty API)
-        const saleMaterialCode = sale.product?.materialCode || sale.product?.maVatTu || sale.product?.maERP;
+      const saleMaterialCode = sale.product?.materialCode || sale.product?.maVatTu || sale.product?.maERP;
 
         // Với đơn hàng "01.Thường": Lấy số lượng từ stock transfer xuất kho
         // Với các đơn hàng khác: Dùng số lượng từ sale
@@ -5259,7 +5275,6 @@ export class SalesService {
         // Tính VIP type nếu có chiết khấu VIP
         // Lấy brand từ orderData để phân biệt logic VIP
         const brand = orderData.customer?.brand || orderData.brand || '';
-        const brandLower = this.normalizeBrand(brand);
 
         // Tính maCk03 - dùng hàm chung (lấy loyaltyProduct từ sale.product)
         const maCk03 = this.calculateMuaHangCkVip(sale, sale.product, brand, 'buildFastApiInvoiceData');
@@ -5456,7 +5471,7 @@ export class SalesService {
           if (sts && sts.length > 0 && sts[0]?.stockCode) {
             maKho = sts[0].stockCode;
             batchSerial = sts[0].batchSerial || null;
-          }else {
+          } else {
             maKho = sale.maKho || null;
           }
         }
@@ -5508,8 +5523,6 @@ export class SalesService {
           maLo = null;
           soSerial = serialValue;
         }
-
-
 
         const maThe = toString(sale.maThe || sale.mvc_serial, '');
 
@@ -5727,6 +5740,16 @@ export class SalesService {
           maPhi = null;
         }
 
+
+        if (sale.ordertypeName === '02. Làm dịch vụ') {
+          if (sale.linetotal > 0) {
+            loaiGd = '01';
+          } else {
+            loaiGd = '06';
+          }
+        }
+
+
         const detailItem: any = {
           tk_chiet_khau: limitString(toString(tkChietKhau, ''), 16) || '',
           tk_chi_phi: limitString(toString(tkChiPhi, ''), 16) || '',
@@ -5741,6 +5764,7 @@ export class SalesService {
           dvt: limitString(dvt, 32),
           // loai: Loại (String, max 2 ký tự) - 07-phí,lệ phí; 90-giảm thuế (mặc định rỗng)
           loai: limitString(loai, 2),
+          loai_gd: limitString(loaiGd, 2),
           // ma_ctkm_th: Mã ctkm tặng hàng (String, max 32 ký tự)
           ma_ctkm_th: limitString(maCtkmTangHang, 32),
         };
@@ -5932,7 +5956,6 @@ export class SalesService {
         return detailItem;
       }));
 
-
       // Validate sales array
       if (!orderData.sales || orderData.sales.length === 0) {
         throw new Error('Order has no sales items');
@@ -5977,10 +6000,7 @@ export class SalesService {
 
       const firstSale = orderData.sales[0];
       const maKenh = 'ONLINE'; // Fix mã kênh là ONLINE
-      const soSeri = firstSale?.kyHieu || firstSale?.branchCode || orderData.branchCode || 'DEFAULT';
-
-      // loai_gd: Tất cả đều dùng '01'
-      const loaiGd = '01';
+      const soSeri = orderData.branchCode || 'DEFAULT';
 
       // Lấy ma_dvcs từ department API (ưu tiên), nếu không có thì fallback
       const maDvcs = firstSale?.department?.ma_dvcs
@@ -6042,7 +6062,6 @@ export class SalesService {
         ma_bp: firstSale?.department?.ma_bp || firstSale?.branchCode || '',
         tk_thue_no: '131111',
         ma_kenh: maKenh,
-        loai_gd: loaiGd,
         trans_date: transDate ? formatDateKeepLocalDay(new Date(transDate)) : null,
         detail,
         cbdetail,
