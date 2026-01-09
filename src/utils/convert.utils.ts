@@ -64,7 +64,7 @@ export const convertOrderToOrderLineFormat = (order: any) => {
         itemname: line.product_name,
         pkg_code: null,
         prom_code: null,
-        producttype: 'S',
+        producttype: 'I',
         serial: null,
 
         // ERP line thường là âm (xuất bán)
@@ -86,6 +86,47 @@ export const convertOrderToOrderLineFormat = (order: any) => {
         vc_promotion_code: null,
     }));
 };
+
+
+export const convertOrderToOrderLineFormatPOS = (order: any) => {
+    if (!Array.isArray(order?.lines)) return [];
+    return order.lines.map((line: any, index: number) => ({
+        id: null,
+        doctype: 'SALE_ORDER',
+        code: order.customer.phone,
+        docdate: formatDocDate(order.order_date),
+        branch_code:  'CHANDO',
+        ordertype_name: null,
+        description: null,
+        shift_code: null,
+        partner_name: order.customer.name || null,
+        partner_code: order.customer.phone || null,
+        partner_grade: null,
+        partner_mobile: order.customer.phone || null,
+        saleperson_code: null,
+        itemcode: line.product_code,
+        itemname: line.product_name,
+        pkg_code: null,
+        prom_code: null,
+        producttype: 'I',
+        serial: line.pack_lot_ids,
+        // ERP line thường là âm (xuất bán)
+        qty: -Math.abs(line.quantity || 0),
+        price: line.price_unit || 0,
+        discamt: line.x_is_price_promotion || 0,
+        grade_discamt: 0,
+        other_discamt: 0,
+        mn_linetotal: line.subtotal_incl || 0,
+        v_paid: line.amount_promotion_total || 0,
+        revenue: line.subtotal_incl || 0,
+        so_source: null,
+        social_page_id: null,
+        sp_email: null,
+        mvc_serial: null,
+        vc_promotion_code: line.x_product_promotion || null,
+        tax: line.tax || null,
+    }));
+}
 
 
 export const formatZappyDate = (date: Date): string => {

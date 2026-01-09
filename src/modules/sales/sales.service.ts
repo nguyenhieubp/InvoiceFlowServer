@@ -21,6 +21,7 @@ import { InvoiceValidationService } from '../../services/invoice-validation.serv
 import { Order, SaleItem } from '../../types/order.types';
 import { CreateStockTransferDto, StockTransferItem } from '../../dto/create-stock-transfer.dto';
 import * as _ from 'lodash';
+import axios from 'axios';
 
 @Injectable()
 export class SalesService {
@@ -798,14 +799,6 @@ export class SalesService {
     }
     // Mặc định: nếu không có thông tin → dùng so_serial
     return false;
-  }
-
-  /**
-   * Fetch products từ Loyalty API
-   * @deprecated Sử dụng loyaltyService.fetchProducts() thay thế
-   */
-  private async fetchLoyaltyProducts(itemCodes: string[]): Promise<Map<string, any>> {
-    return this.loyaltyService.fetchProducts(itemCodes);
   }
 
   /**
@@ -2063,6 +2056,12 @@ export class SalesService {
       loyaltyProductMap,
       docCodes
     );
+
+    let getMaThe = new Map<string, string>();
+    const [dataCard] = await this.fetchCardData(docCodes[0]);
+    for (const card of dataCard.data) {
+      getMaThe.set(card.service_item_name, card.serial);
+    }
 
     const enrichedSalesMap = new Map<string, any[]>();
     for (const sale of allSalesData) {
@@ -5197,17 +5196,25 @@ export class SalesService {
         }
       }
 
-      // const getCardCode = new Map<string, string>();
-      // const [dataCard] = await this.fetchCardData(orderData.docCode);
-      // for (const card of dataCard.data) {
-      //   let key = card.service_item_name;
-      //   getCardCode.set(key, card.serial);
-      // }
+      const getCardCode = new Map<string, string>();
+      const [dataCard] = await this.fetchCardData(orderData.docCode);
+      if (Array.isArray(dataCard?.data)) {
+        for (const card of dataCard.data) {
+          if (!card?.service_item_name || !card?.serial) {
+            continue; // bỏ qua record lỗi / rỗng
+          }
+
+          const itemProduct = await this.loyaltyService.checkProduct(card.service_item_name);
+          if (itemProduct) {
+            getCardCode.set(itemProduct.materialCode, card.serial);
+          }
+        }
+      }
 
       // Xử lý từng sale với index để tính dong
       const detail = await Promise.all(allSales.map(async (sale: any, index: number) => {
         // Lấy materialCode từ sale (đã được enrich từ Loyalty API)
-      const saleMaterialCode = sale.product?.materialCode || sale.product?.maVatTu || sale.product?.maERP;
+        const saleMaterialCode = sale.product?.materialCode || sale.product?.maVatTu || sale.product?.maERP;
 
         // Với đơn hàng "01.Thường": Lấy số lượng từ stock transfer xuất kho
         // Với các đơn hàng khác: Dùng số lượng từ sale
@@ -5455,6 +5462,9 @@ export class SalesService {
           return str.length > maxLength ? str.substring(0, maxLength) : str;
         };
 
+        let maThe = '';
+        maThe = getCardCode.get(saleMaterialCode) || '';
+
         // Mỗi sale item xử lý riêng, không dùng giá trị mặc định chung
         // Lấy dvt từ product (đã được enrich từ Loyalty API) trước, sau đó mới lấy từ sale
         // Frontend: sale?.product?.dvt || sale?.dvt
@@ -5524,7 +5534,7 @@ export class SalesService {
           soSerial = serialValue;
         }
 
-        const maThe = toString(sale.maThe || sale.mvc_serial, '');
+
 
         // loai_gd: Với đơn "04. Đổi DV" và "08. Tách thẻ":
         //   - Nếu số lượng âm (qty < 0) → loai_gd = '11'

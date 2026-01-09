@@ -425,6 +425,27 @@ export class Sale {
   @Column({ nullable: true, name: 'type_sale' })
   type_sale?: string; // Type sale (WS, WS_WH, WS_RETAIL, WS_RETAIL_WH)
 
+  @Column({ nullable: true })  // POS
+  session?: string; // Session
+
+  @Column({ nullable: true })  // POS
+  promotion_code?: boolean;
+
+  @Column({ nullable: true })  // POS
+  x_is_price_promotion?: string;
+
+  @Column({ nullable: true })  // POS
+  amount_promotion_loyalty?: string;
+
+  @Column({ nullable: true })  // POS
+  amount_promotion_total?: string;
+
+  @Column({ nullable: true })  // POS
+  x_product_promotion?: string;
+
+  @Column({ nullable: true })  // POS
+  tax?: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

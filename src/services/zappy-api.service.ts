@@ -3,7 +3,7 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Order, OrderCustomer, SaleItem } from '../types/order.types';
 import axios from 'axios';
-import { convertDate, convertOrderToOrderLineFormat, formatZappyDate, parseZappyDate } from 'src/utils/convert.utils';
+import { convertDate, convertOrderToOrderLineFormat, convertOrderToOrderLineFormatPOS } from 'src/utils/convert.utils';
 
 /**
  * Service để gọi API từ Zappy và transform dữ liệu
@@ -77,9 +77,10 @@ export class ZappyApiService {
   async getDailySales(date: string, brand?: string): Promise<Order[]> {
     const formattedDate = convertDate(date);
     try {
+      let orderChando: any[] = [];
       if (brand === 'chando') {
-        const url = 'https://ecs.vmt.vn/api/sale-orders';
-        const response = await axios.post(url, {
+        const urlOrder = 'https://ecs.vmt.vn/api/sale-orders';
+        const responseOrder = await axios.post(urlOrder, {
           params: {
             token: 'chHIqq7u8bhm5rFD68be',
             date_from: formattedDate,
@@ -91,14 +92,32 @@ export class ZappyApiService {
           },
         });
 
-        const orderChando = response?.data?.result?.data || [];
-
-        const orders = orderChando.flatMap((order: any) =>
+        let orderChandoOnline = responseOrder?.data?.result?.data || [];
+        orderChandoOnline = orderChandoOnline.flatMap((order: any) =>
           convertOrderToOrderLineFormat(order)
         );
 
-        // orders là MẢNG PHẲNG [{...}, {...}, ...]
-        return this.transformZappySalesToOrders(orders)
+        orderChando.push(...orderChandoOnline);
+
+        let urlPOS = 'https://pos.vmt.vn/api/pos-orders';
+        const responsePOS = await axios.post(urlPOS, {
+          params: {
+            token: '08ZgC22yjuJAJpf',
+            date_from: formattedDate,
+            date_to: formattedDate
+          },
+        }, {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+      
+        let orderChandoPOS = responsePOS?.data?.result?.data || [];
+        orderChandoPOS = orderChandoPOS.flatMap((order: any) =>
+          convertOrderToOrderLineFormatPOS(order)
+        );
+        orderChando.push(...orderChandoPOS);
+        return this.transformZappySalesToOrders(orderChando);
       } else {
         const baseUrl = this.getBaseUrlForBrand(brand);
         const url = `${baseUrl}/get_daily_sale?P_DATE=${date}`;
