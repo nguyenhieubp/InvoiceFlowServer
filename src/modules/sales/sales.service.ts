@@ -1847,7 +1847,7 @@ export class SalesService {
       if (statusAsys !== undefined) {
         query.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
       }
-      if (typeSale !== undefined) {
+      if (typeSale !== undefined && typeSale !== 'ALL') {
         query.andWhere('sale.type_sale = :type_sale', { type_sale: typeSale.toUpperCase() });
       }
       if (brand) {
