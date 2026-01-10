@@ -4423,1057 +4423,53 @@ export class SalesService {
    */
   private async buildFastApiInvoiceData(orderData: any): Promise<any> {
     try {
-      const toNumber = (value: any, defaultValue: number = 0): number => {
-        if (value === null || value === undefined || value === '') {
-          return defaultValue;
-        }
-        const num = Number(value);
-        return isNaN(num) ? defaultValue : num;
-      };
+      // 1. Initialize and validate date
+      const docDate = this.parseInvoiceDate(orderData.docDate);
+      const ngayCt = this.formatDateKeepLocalDay(docDate);
+      const ngayLct = ngayCt;
 
-      // Format ngày theo ISO 8601 với milliseconds và Z
-      const formatDateISO = (date: Date): string => {
-        if (isNaN(date.getTime())) {
-          throw new Error('Invalid date');
-        }
-        return date.toISOString();
-      };
-
-      const formatDateKeepLocalDay = (date: Date): string => {
-        if (isNaN(date.getTime())) {
-          throw new Error('Invalid date');
-        }
-
-        const pad = (n: number) => String(n).padStart(2, '0');
-
-        return (
-          date.getFullYear() +
-          '-' +
-          pad(date.getMonth() + 1) +
-          '-' +
-          pad(date.getDate()) +
-          'T' +
-          pad(date.getHours()) +
-          ':' +
-          pad(date.getMinutes()) +
-          ':' +
-          pad(date.getSeconds()) +
-          '.000Z'
-        );
-      };
-
-      // Format ngày
-      let docDate: Date;
-      if (orderData.docDate instanceof Date) {
-        docDate = orderData.docDate;
-      } else if (typeof orderData.docDate === 'string') {
-        docDate = new Date(orderData.docDate);
-        if (isNaN(docDate.getTime())) {
-          docDate = new Date();
-        }
-      } else {
-        docDate = new Date();
-      }
-
-      const minDate = new Date('1753-01-01T00:00:00');
-      const maxDate = new Date('9999-12-31T23:59:59');
-      if (docDate < minDate || docDate > maxDate) {
-        throw new Error(
-          `Date out of range for SQL Server: ${docDate.toISOString()}`,
-        );
-      }
-
-      const ngayCt = formatDateKeepLocalDay(docDate);
-      const ngayLct = formatDateKeepLocalDay(docDate);
-
-      // Lấy TẤT CẢ sales (giống logic printOrder - không filter)
-      // Không filter theo dvt hay statusAsys - lấy tất cả như luồng tạo hóa đơn ban đầu
       const allSales = orderData.sales || [];
-
-      // Nếu không có sale nào, throw error
       if (allSales.length === 0) {
         throw new Error(
           `Đơn hàng ${orderData.docCode} không có sale item nào, bỏ qua không đồng bộ`,
         );
       }
 
-      const firstSaleForOrderType = allSales[0];
-      const {
-        isDoiDiem,
-        isDoiVo,
-        isDauTu,
-        isSinhNhat,
-        isThuong,
-        isDoiDv,
-        isTachThe,
-        isDichVu,
-      } = InvoiceLogicUtils.getOrderTypes(
-        firstSaleForOrderType?.ordertypeName ||
-          firstSaleForOrderType?.ordertype ||
-          '',
+      // 2. Determine order type (from first sale)
+      const { isThuong: isNormalOrder } = InvoiceLogicUtils.getOrderTypes(
+        allSales[0]?.ordertypeName || allSales[0]?.ordertype || '',
       );
-      const isNormalOrder = isThuong;
 
-      // Luôn fetch stock transfers để lấy mã kho (không chỉ cho "01.Thường")
-      // Với đơn hàng "01.Thường": Lấy stock transfers để tính số lượng xuất kho
-      // Với các đơn hàng khác: Dùng số lượng từ sale
-      let stockTransferMapBySoCodeAndMaterialCode: Map<
-        string,
-        { st?: StockTransfer[]; rt?: StockTransfer[] }
-      > = new Map();
-      let stockTransferMapBySoCode: Map<string, StockTransfer[]> = new Map();
-      let allStockTransfers: StockTransfer[] = [];
+      // 3. Load supporting data
+      const { stockTransferMap, transDate } =
+        await this.getInvoiceStockTransferMap(orderData.docCode, isNormalOrder);
+      const cardSerialMap = await this.getInvoiceCardSerialMap(
+        orderData.docCode,
+      );
 
-      // Luôn fetch stock transfers để lấy mã kho
-      const docCodesForStockTransfer =
-        StockTransferUtils.getDocCodesForStockTransfer([orderData.docCode]);
-      allStockTransfers = await this.stockTransferRepository.find({
-        where: { soCode: In(docCodesForStockTransfer) },
-        order: { itemCode: 'ASC', createdAt: 'ASC' },
-      });
-
-      let transDate: Date | null = null;
-      // Chỉ build map cho đơn hàng "01.Thường" (để tính số lượng)
-      if (isNormalOrder) {
-        const stockTransfers = allStockTransfers;
-
-        // Fetch materialCode từ Loyalty API cho các itemCode trong stock transfers
-        const stockTransferItemCodes = Array.from(
-          new Set(
-            stockTransfers
-              .map((st) => st.itemCode)
-              .filter((code): code is string => !!code && code.trim() !== ''),
-          ),
-        );
-
-        const stockTransferLoyaltyMap = new Map<string, any>();
-        if (stockTransferItemCodes.length > 0) {
-          const fetchedProducts = await this.loyaltyService.fetchProducts(
-            stockTransferItemCodes,
-          );
-          fetchedProducts.forEach((product, itemCode) => {
-            stockTransferLoyaltyMap.set(itemCode, product);
-          });
-        }
-
-        if (isNormalOrder) {
-          transDate = stockTransfers[0]?.transDate || null;
-        }
-
-        // Tạo map: soCode_materialCode -> stock transfer (phân biệt ST và RT)
-        stockTransfers.forEach((st) => {
-          const materialCode =
-            st.materialCode ||
-            stockTransferLoyaltyMap.get(st.itemCode)?.materialCode;
-          if (!materialCode) {
-            return;
-          }
-
-          const soCode = st.soCode || st.docCode || orderData.docCode;
-          const key = `${soCode}_${materialCode}`;
-
-          if (!stockTransferMapBySoCode.has(key)) {
-            stockTransferMapBySoCode.set(key, []);
-          }
-          stockTransferMapBySoCode.get(key)!.push(st);
-
-          if (!stockTransferMapBySoCodeAndMaterialCode.has(key)) {
-            stockTransferMapBySoCodeAndMaterialCode.set(key, {});
-          }
-          const itemMap = stockTransferMapBySoCodeAndMaterialCode.get(key)!;
-
-          // ST* - xuất kho (qty < 0)
-          if (st.docCode.startsWith('ST') || Number(st.qty || 0) < 0) {
-            if (!itemMap.st) {
-              itemMap.st = [];
-            }
-            itemMap.st.push(st);
-          }
-          // RT* - nhập lại (qty > 0)
-          if (st.docCode.startsWith('RT') || Number(st.qty || 0) > 0) {
-            if (!itemMap.rt) {
-              itemMap.rt = [];
-            }
-            itemMap.rt.push(st);
-          }
-        });
-      }
-
-      const stockTransferMapForMaKho = new Map<string, StockTransfer[]>();
-
-      for (const [
-        key,
-        value,
-      ] of stockTransferMapBySoCodeAndMaterialCode.entries()) {
-        if (value?.st && value.st.length > 0) {
-          stockTransferMapForMaKho.set(key, value.st);
-        }
-      }
-
-      const getCardCode = new Map<string, string>();
-      const [dataCard] = await this.n8nService.fetchCardData(orderData.docCode);
-      if (Array.isArray(dataCard?.data)) {
-        for (const card of dataCard.data) {
-          if (!card?.service_item_name || !card?.serial) {
-            continue; // bỏ qua record lỗi / rỗng
-          }
-
-          const itemProduct = await this.loyaltyService.checkProduct(
-            card.service_item_name,
-          );
-          if (itemProduct) {
-            getCardCode.set(itemProduct.materialCode, card.serial);
-          }
-        }
-      }
-
-      // Xử lý từng sale với index để tính dong
+      // 4. Transform sales to details
       const detail = await Promise.all(
-        allSales.map(async (sale: any, index: number) => {
-          // Lấy materialCode từ sale (đã được enrich từ Loyalty API)
-          const saleMaterialCode =
-            sale.product?.materialCode ||
-            sale.product?.maVatTu ||
-            sale.product?.maERP;
-
-          // Với đơn hàng "01.Thường": Lấy số lượng từ stock transfer xuất kho
-          // Với các đơn hàng khác: Dùng số lượng từ sale
-          let qty = toNumber(sale.qty, 0);
-          const saleQty = toNumber(sale.qty, 0); // Lưu qty gốc từ sale để tính tỷ lệ phân bổ
-          let allocationRatio = 1; // Tỷ lệ phân bổ (mặc định = 1 nếu không có stock transfer)
-
-          if (isNormalOrder && saleMaterialCode) {
-            const key = `${orderData.docCode}_${saleMaterialCode}`;
-            const stockTransferInfo =
-              stockTransferMapBySoCodeAndMaterialCode.get(key);
-            const firstSt =
-              stockTransferInfo?.st && stockTransferInfo.st.length > 0
-                ? stockTransferInfo.st[0]
-                : null;
-
-            if (firstSt && saleQty > 0) {
-              // Lấy số lượng từ stock transfer xuất kho (lấy giá trị tuyệt đối vì qty xuất kho là số âm)
-              qty = Math.abs(Number(firstSt.qty || 0));
-
-              // Tính tỷ lệ phân bổ: qty (từ stock transfer) / saleQty (từ sale)
-              // Ví dụ: mua 2 xuất 1 → tỷ lệ = 1/2 = 0.5
-              allocationRatio = qty / saleQty;
-            }
-          }
-
-          const tienHang = toNumber(
-            sale.tienHang || sale.linetotal || sale.revenue,
-            0,
-          );
-          let giaBan = toNumber(sale.giaBan, 0);
-
-          const { isDoiDiem, isDoiVo, isDauTu, isSinhNhat, isThuong } =
-            InvoiceLogicUtils.getOrderTypes(
-              sale.ordertypeName || sale.ordertype,
-            );
-          // Nếu là đơn "03. Đổi điểm": set gia_ban = 0, tien_hang = 0
-          if (isDoiDiem) {
-            giaBan = 0;
-          } else {
-            // Tính gia_ban từ tien_hang và saleQty (luôn dùng qty từ sale để tính giá)
-            if (giaBan === 0 && tienHang > 0 && saleQty > 0) {
-              giaBan = tienHang / saleQty;
-            }
-          }
-
-          // Với đơn hàng "01.Thường": Tính lại tien_hang = qty (từ stock transfer) * gia_ban (từ sale)
-          // Với các đơn hàng khác: Giữ nguyên tien_hang từ sale
-          // Nếu là đơn "03. Đổi điểm": set tien_hang = 0
-          let tienHangGoc = isDoiDiem ? 0 : tienHang;
-          if (!isDoiDiem && isNormalOrder && allocationRatio !== 1) {
-            // Tính lại tien_hang = qty (từ stock transfer) * gia_ban (từ sale)
-            if (qty > 0 && giaBan > 0) {
-              tienHangGoc = qty * giaBan;
-            } else {
-              // Fallback: phân bổ theo tỷ lệ
-              tienHangGoc = tienHang * allocationRatio;
-            }
-          }
-
-          // Tính toán các chiết khấu (dùng let để có thể phân bổ lại cho "01.Thường")
-          let ck01_nt = toNumber(
-            sale.other_discamt || sale.chietKhauMuaHangGiamGia,
-            0,
-          );
-          let ck02_nt = toNumber(sale.chietKhauCkTheoChinhSach, 0);
-          let ck03_nt = toNumber(
-            sale.chietKhauMuaHangCkVip || sale.grade_discamt,
-            0,
-          );
-
-          // Tính VIP type nếu có chiết khấu VIP
-          // Lấy brand từ orderData để phân biệt logic VIP
-          const brand = orderData.customer?.brand || orderData.brand || '';
-
-          // Tính maCk03 - dùng hàm chung (lấy loyaltyProduct từ sale.product)
-          const maCk03 = SalesCalculationUtils.calculateMuaHangCkVip(
-            sale,
-            sale.product,
-            brand,
-          );
-          // ma_ck04: Thanh toán coupon
-          let ck04_nt = toNumber(
-            sale.chietKhauThanhToanCoupon || sale.chietKhau09,
-            0,
-          );
-          // ma_ck15: Voucher DP1 dự phòng - Ưu tiên kiểm tra trước
-          const paidByVoucher = toNumber(
-            sale.paid_by_voucher_ecode_ecoin_bp,
-            0,
-          );
-
-          // Kiểm tra các điều kiện để xác định voucher dự phòng
-          const pkgCode =
-            (sale as any).pkg_code || (sale as any).pkgCode || null;
-          let promCode = sale.promCode || sale.prom_code || null;
-          promCode = await this.cutCode(promCode);
-          if (sale.productType === 'I') {
-            promCode = promCode + '.I';
-          } else if (sale.productType === 'S') {
-            promCode = promCode + '.S';
-          } else if (sale.productType === 'V') {
-            promCode = promCode + '.V';
-          }
-
-          // ma_ck05: Thanh toán voucher chính
-          let ck05_nt = paidByVoucher > 0 ? paidByVoucher : 0;
-          let maCk05Value: string | null = null;
-          let formattedMaCk05: string | null = null;
-
-          const maKh = sale.partnerCode;
-          const customer =
-            await this.categoriesService.findActiveEcommerceCustomerByCode(
-              maKh,
-            );
-
-          maCk05Value = InvoiceLogicUtils.resolveVoucherCode({
-            sale: { ...sale, customer: sale.customer || orderData.customer },
-            customer,
-            brand: orderData.customer?.brand || orderData.brand || '',
-          });
-
-          // Nếu là đơn "03. Đổi điểm": bỏ ma_ck05 và ck05_nt
-          const { isDoiDiem: isDoiDiemOrder } = InvoiceLogicUtils.getOrderTypes(
-            sale.ordertype || sale.ordertypeName,
-          );
-          const isDoiDiemForCk05 = isDoiDiemOrder;
-
-          if (isDoiDiem || isDoiDiemForCk05) {
-            ck05_nt = 0;
-            maCk05Value = null;
-            formattedMaCk05 = null;
-          } else {
-            formattedMaCk05 = maCk05Value;
-          }
-          const ck06_nt = 0; // Dự phòng 1 - không sử dụng (không phân bổ vì = 0)
-          let ck07_nt = toNumber(sale.chietKhauVoucherDp2, 0);
-          let ck08_nt = toNumber(sale.chietKhauVoucherDp3, 0);
-          // Các chiết khấu từ 09-22 mặc định là 0
-          let ck09_nt = toNumber(sale.chietKhau09, 0);
-          let ck10_nt = toNumber(sale.chietKhau10, 0);
-          // ck11_nt: Thanh toán TK tiền ảo
-          // Chỉ map ECOIN nếu sale item có v_paid > 0 (từ paid_by_voucher_ecode_ecoin_bp hoặc chietKhauThanhToanTkTienAo)
-          // Không map ECOIN cho items có v_paid = 0
-          let ck11_nt = toNumber(
-            sale.chietKhauThanhToanTkTienAo || sale.chietKhau11,
-            0,
-          );
-          const vPaidForEcoin = toNumber(
-            sale.paid_by_voucher_ecode_ecoin_bp,
-            0,
-          );
-
-          // Chỉ lấy ECOIN từ cashioData nếu:
-          // 1. Đã có chietKhauThanhToanTkTienAo > 0 (đã được lưu trong sync), HOẶC
-          // 2. v_paid > 0 VÀ có ECOIN trong cashio
-          if (
-            ck11_nt === 0 &&
-            vPaidForEcoin > 0 &&
-            orderData.cashioData &&
-            Array.isArray(orderData.cashioData)
-          ) {
-            const ecoinCashio = orderData.cashioData.find(
-              (c: any) => c.fop_syscode === 'ECOIN',
-            );
-            if (ecoinCashio && ecoinCashio.total_in) {
-              ck11_nt = toNumber(ecoinCashio.total_in, 0);
-            }
-          }
-          let ck12_nt = toNumber(sale.chietKhau12, 0);
-          let ck13_nt = toNumber(sale.chietKhau13, 0);
-          let ck14_nt = toNumber(sale.chietKhau14, 0);
-          let ck15_nt = toNumber(sale.chietKhau15, 0);
-          let ck16_nt = toNumber(sale.chietKhau16, 0);
-          let ck17_nt = toNumber(sale.chietKhau17, 0);
-          let ck18_nt = toNumber(sale.chietKhau18, 0);
-          let ck19_nt = toNumber(sale.chietKhau19, 0);
-          let ck20_nt = toNumber(sale.chietKhau20, 0);
-          let ck21_nt = toNumber(sale.chietKhau21, 0);
-          let ck22_nt = toNumber(sale.chietKhau22, 0);
-          let tienThue = toNumber(sale.tienThue, 0);
-          let dtTgNt = toNumber(sale.dtTgNt, 0);
-
-          // Với đơn hàng "01.Thường": Phân bổ lại tất cả các khoản tiền theo tỷ lệ số lượng từ stock transfer
-          // Tỷ lệ phân bổ = qty (từ stock transfer) / saleQty (từ sale)
-          // Ví dụ: mua 2 xuất 1 → tỷ lệ = 1/2 = 0.5 → tất cả các khoản tiền nhân với 0.5
-          // Lưu ý: Không phân bổ lại cho đơn "03. Đổi điểm" (đã set ck05_nt = 0)
-          if (
-            isNormalOrder &&
-            allocationRatio !== 1 &&
-            allocationRatio > 0 &&
-            !isDoiDiem &&
-            !isDoiDiemForCk05
-          ) {
-            // Phân bổ lại tất cả các chiết khấu
-            ck01_nt = ck01_nt * allocationRatio;
-            ck02_nt = ck02_nt * allocationRatio;
-            ck03_nt = ck03_nt * allocationRatio;
-            ck04_nt = ck04_nt * allocationRatio;
-            ck05_nt = ck05_nt * allocationRatio;
-            ck07_nt = ck07_nt * allocationRatio;
-            ck08_nt = ck08_nt * allocationRatio;
-            ck09_nt = ck09_nt * allocationRatio;
-            ck10_nt = ck10_nt * allocationRatio;
-            ck11_nt = ck11_nt * allocationRatio;
-            ck12_nt = ck12_nt * allocationRatio;
-            ck13_nt = ck13_nt * allocationRatio;
-            ck14_nt = ck14_nt * allocationRatio;
-            ck15_nt = ck15_nt * allocationRatio;
-            ck16_nt = ck16_nt * allocationRatio;
-            ck17_nt = ck17_nt * allocationRatio;
-            ck18_nt = ck18_nt * allocationRatio;
-            ck19_nt = ck19_nt * allocationRatio;
-            ck20_nt = ck20_nt * allocationRatio;
-            ck21_nt = ck21_nt * allocationRatio;
-            ck22_nt = ck22_nt * allocationRatio;
-
-            tienThue = tienThue * allocationRatio;
-            dtTgNt = dtTgNt * allocationRatio;
-
-            this.logger.debug(
-              `[Invoice] Đơn hàng ${orderData.docCode}, sale item ${sale.itemCode}: ` +
-                `Phân bổ lại tất cả các khoản tiền theo tỷ lệ ${allocationRatio} (qty stock transfer=${qty} / qty sale=${saleQty})`,
-            );
-          }
-
-          // Tính tổng chiết khấu (sau khi đã phân bổ nếu có)
-          const tongChietKhau =
-            ck01_nt +
-            ck02_nt +
-            ck03_nt +
-            ck04_nt +
-            ck05_nt +
-            ck06_nt +
-            ck07_nt +
-            ck08_nt +
-            ck09_nt +
-            ck10_nt +
-            ck11_nt +
-            ck12_nt +
-            ck13_nt +
-            ck14_nt +
-            ck15_nt +
-            ck16_nt +
-            ck17_nt +
-            ck18_nt +
-            ck19_nt +
-            ck20_nt +
-            ck21_nt +
-            ck22_nt;
-
-          // Với đơn hàng "03. Đổi điểm": gia_ban và tien_hang luôn = 0, không tính lại
-          // Với đơn hàng "01.Thường": tien_hang đã được tính từ qty (stock transfer) * giaBan ở trên
-          // Với các đơn hàng khác: Tính tien_hang từ sale như bình thường
-          if (!isDoiDiem && !isDoiDiemForCk05) {
-            if (!isNormalOrder) {
-              // tien_hang phải là giá gốc (trước chiết khấu)
-              // Ưu tiên: mn_linetotal > linetotal > tienHang > (revenue + tongChietKhau)
-              tienHangGoc = toNumber(
-                (sale as any).mn_linetotal || sale.linetotal || sale.tienHang,
-                0,
-              );
-              if (tienHangGoc === 0) {
-                // Nếu không có giá gốc, tính từ revenue + chiết khấu
-                tienHangGoc = tienHang + tongChietKhau;
-              }
-
-              // Tính gia_ban: giá gốc (trước chiết khấu)
-              // Nếu sale.giaBan đã có giá trị, dùng nó (đó là giá gốc)
-              // Nếu không, tính từ tienHangGoc
-              if (giaBan === 0 && qty > 0) {
-                giaBan = tienHangGoc / qty;
-              } else if (giaBan === 0 && tienHangGoc > 0 && qty > 0) {
-                // Fallback: nếu không có chiết khấu, dùng tienHangGoc / qty
-                giaBan = tienHangGoc / qty;
-              }
-            } else {
-              // Với đơn hàng "01.Thường": tienHangGoc đã được tính từ qty * giaBan ở trên
-              // Chỉ cần đảm bảo giaBan đã có giá trị
-              if (giaBan === 0 && qty > 0 && tienHangGoc > 0) {
-                giaBan = tienHangGoc / qty;
-              }
-            }
-          }
-
-          // Helper function để đảm bảo giá trị luôn là string, không phải null/undefined
-          const toString = (value: any, defaultValue: string = ''): string => {
-            if (value === null || value === undefined || value === '') {
-              return defaultValue;
-            }
-            return String(value);
-          };
-
-          // Helper function để giới hạn độ dài string theo spec
-          const limitString = (value: string, maxLength: number): string => {
-            if (!value) return '';
-            const str = String(value);
-            return str.length > maxLength ? str.substring(0, maxLength) : str;
-          };
-
-          let maThe = '';
-          maThe = getCardCode.get(saleMaterialCode) || '';
-
-          // Mỗi sale item xử lý riêng, không dùng giá trị mặc định chung
-          // Lấy dvt từ product (đã được enrich từ Loyalty API) trước, sau đó mới lấy từ sale
-          // Frontend: sale?.product?.dvt || sale?.dvt
-          // Nếu không có thì dùng 'Cái' làm mặc định (Fast API yêu cầu field này phải có giá trị)
-          const dvt = toString(
-            sale.product?.dvt || sale.product?.unit || sale.dvt,
-            'Cái',
-          );
-
-          let maKho: string | null = null;
-          let batchSerial: string | null = null;
-
-          if (saleMaterialCode) {
-            const key = `${orderData.docCode}_${saleMaterialCode}`;
-            const sts = stockTransferMapForMaKho.get(key);
-
-            if (sts && sts.length > 0 && sts[0]?.stockCode) {
-              maKho = sts[0].stockCode;
-              batchSerial = sts[0].batchSerial || null;
-            } else {
-              maKho = sale.maKho || null;
-            }
-          }
-          const maKhoMap = await this.categoriesService.mapWarehouseCode(maKho);
-          if (maKhoMap) {
-            maKho = maKhoMap;
-          }
-          // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
-          // Lấy materialCode từ Loyalty API (ưu tiên materialCode từ product, sau đó itemCode)
-          const materialCode =
-            SalesUtils.getMaterialCode(sale, sale.product) || sale.itemCode;
-          let trackSerial: boolean | null = null;
-          let trackBatch: boolean | null = null;
-          let trackInventory: boolean | null = null;
-          let productTypeFromLoyalty: string | null = null;
-
-          // Luôn fetch từ Loyalty API để lấy trackSerial, trackBatch, trackInventory và productType
-          const loyaltyProduct =
-            await this.loyaltyService.checkProduct(materialCode);
-          if (loyaltyProduct) {
-            trackSerial = loyaltyProduct.trackSerial === true;
-            trackBatch = loyaltyProduct.trackBatch === true;
-            trackInventory = loyaltyProduct.trackInventory === true;
-            productTypeFromLoyalty =
-              loyaltyProduct.productType || loyaltyProduct.producttype || null;
-            // Update sale với thông tin từ Loyalty API
-            sale.productType = productTypeFromLoyalty;
-            sale.trackInventory = trackInventory;
-            // Update sale.product với thông tin từ Loyalty API
-            if (sale.product) {
-              sale.product.productType = productTypeFromLoyalty;
-              sale.product.producttype = productTypeFromLoyalty;
-              sale.product.trackInventory = trackInventory;
-            }
-          }
-
-          // Lấy giá trị serial từ sale (tất cả đều lấy từ field "serial")
-          const serialValue = toString(batchSerial || '', '');
-
-          // Debug: Log trackSerial, trackBatch và serial để kiểm tra
-
-          // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
-          const useBatch = SalesUtils.shouldUseBatch(trackBatch, trackSerial);
-
-          // Xác định ma_lo và so_serial dựa trên trackSerial và trackBatch
-          let maLo: string | null = null;
-          let soSerial: string | null = null;
-          if (useBatch) {
-            maLo = serialValue;
-            soSerial = null;
-          } else {
-            maLo = null;
-            soSerial = serialValue;
-          }
-
-          // loai_gd: Với đơn "04. Đổi DV" và "08. Tách thẻ":
-          //   - Nếu số lượng âm (qty < 0) → loai_gd = '11'
-          //   - Nếu số lượng dương (qty > 0) → loai_gd = '12'
-          // Các đơn khác: dùng '01'
-          const ordertypeNameForLoaiGd =
-            sale.ordertype || sale.ordertypeName || '';
-          const isDoiDv = SalesUtils.isDoiDvOrder(
-            sale.ordertype,
-            sale.ordertypeName,
-          );
-          const isTachThe =
-            ordertypeNameForLoaiGd.includes('08. Tách thẻ') ||
-            ordertypeNameForLoaiGd.includes('08.Tách thẻ') ||
-            ordertypeNameForLoaiGd.includes('08.  Tách thẻ');
-          let loaiGd = '01'; // Mặc định
-          if (isDoiDv || isTachThe) {
-            // Với đơn "04. Đổi DV" và "08. Tách thẻ", dùng số lượng gốc từ sale để xác định loai_gd
-            const saleQtyForLoaiGd = toNumber(sale.qty, 0);
-            if (saleQtyForLoaiGd < 0) {
-              loaiGd = '11'; // Số lượng âm
-            } else {
-              loaiGd = '12'; // Số lượng dương
-            }
-          }
-
-          const loai = toString(sale.loai || sale.cat1, '');
-
-          // Lấy ma_bp - bắt buộc phải có giá trị
-          const maBp = toString(
-            sale.department?.ma_bp || sale.branchCode || orderData.branchCode,
-            '',
-          );
-
-          // Validate ma_bp - nếu vẫn empty thì log warning
-          if (!maBp || maBp.trim() === '') {
-          }
-
-          // ma_vt: Mã vật tư
-          const finalMaterialCode =
-            loyaltyProduct?.materialCode || sale.product?.maVatTu || '';
-
-          // Xác định hàng tặng: giaBan = 0 và tienHang = 0
-          const isTangHang =
-            Math.abs(giaBan) < 0.01 && Math.abs(tienHang) < 0.01;
-          const maDvcs = toString(
-            sale.department?.ma_dvcs || sale.department?.ma_dvcs_ht || '',
-            '',
-          );
-          const productType =
-            sale.productType ||
-            loyaltyProduct?.productType ||
-            loyaltyProduct?.producttype ||
-            null;
-          const productTypeUpper = productType
-            ? String(productType).toUpperCase().trim()
-            : null;
-
-          // Tính toán ma_ctkm_th và ma_ck01
-          const { maCk01, maCtkmTangHang: resolvedMaCtkmTangHang } =
-            InvoiceLogicUtils.resolvePromotionCodes({
-              sale,
-              isDoiDiem,
-              isDauTu,
-              isThuong,
-              isTangHang,
-              maDvcs,
-              productTypeUpper,
-              promCode,
-            });
-          let maCtkmTangHang = resolvedMaCtkmTangHang;
-          const isTTDauTu = maCtkmTangHang === 'TT DAU TU';
-
-          // Tính toán tài khoản hạch toán
-          const isGiaBanZero = Math.abs(sale.giaBanGoc || 0) < 0.01;
-          const { tkChietKhau, tkChiPhi, maPhi } =
-            InvoiceLogicUtils.resolveAccountingAccounts({
-              sale,
-              loyaltyProduct,
-              isDoiVo,
-              isDoiDiem,
-              isDauTu,
-              isSinhNhat,
-              isThuong,
-              isTangHang,
-              isGiaBanZero,
-              hasMaCtkm: !!(maCk01 || resolvedMaCtkmTangHang),
-              hasMaCtkmTangHang: !!resolvedMaCtkmTangHang,
-            });
-          if (sale.ordertypeName === '02. Làm dịch vụ') {
-            if (sale.linetotal > 0) {
-              loaiGd = '01';
-            } else {
-              loaiGd = '06';
-            }
-          }
-
-          const detailItem: any = {
-            tk_chiet_khau: limitString(toString(tkChietKhau, ''), 16) || '',
-            tk_chi_phi: limitString(toString(tkChiPhi, ''), 16) || '',
-            ma_phi: limitString(toString(maPhi, ''), 16) || '',
-            tien_hang: Number(sale.qty) * Number(sale.giaBan),
-            so_luong: Number(sale.qty),
-            ma_kh_i: limitString(toString(sale.issuePartnerCode, ''), 16),
-            // ma_vt: Mã vật tư (String, max 16 ký tự) - Bắt buộc
-            // Dùng materialCode từ Loyalty API (giống như sales invoice)
-            ma_vt: limitString(toString(finalMaterialCode), 16),
-            // dvt: Đơn vị tính (String, max 32 ký tự) - Bắt buộc
-            dvt: limitString(dvt, 32),
-            // loai: Loại (String, max 2 ký tự) - 07-phí,lệ phí; 90-giảm thuế (mặc định rỗng)
-            loai: limitString(loai, 2),
-            loai_gd: limitString(loaiGd, 2),
-            // ma_ctkm_th: Mã ctkm tặng hàng (String, max 32 ký tự)
-            ma_ctkm_th: limitString(maCtkmTangHang, 32),
-          };
-
-          // Thêm ma_kho: Chỉ thêm khi có giá trị hợp lệ, nếu không có thì không thêm key vào payload
-          // Ưu tiên: maKho từ stock transfer > sale.maKho > maBp > orderData.branchCode
-
-          let finalMaKho = maKho || '';
-
-          if (isTachThe) {
-            finalMaKho = 'B' + maBp;
-          }
-
-          // Chỉ thêm ma_kho vào detail item khi có giá trị hợp lệ (không rỗng)
-          // Nếu không có giá trị hợp lệ, không thêm key ma_kho vào payload
-          if (finalMaKho && finalMaKho?.trim() !== '') {
-            detailItem.ma_kho = limitString(finalMaKho, 16);
-          }
-
-          // Thêm các field còn lại
-          Object.assign(detailItem, {
-            // gia_ban: Giá bán (Decimal) - giá gốc trước chiết khấu
-            gia_ban: Number(giaBan),
-            // is_reward_line: is_reward_line (Int)
-            is_reward_line: sale.isRewardLine ? 1 : 0,
-            // is_bundle_reward_line: is_bundle_reward_line (Int)
-            is_bundle_reward_line: sale.isBundleRewardLine ? 1 : 0,
-            // km_yn: Khuyến mãi (Int)
-            // - = 1 CHỈ KHI là hàng tặng (giaBan = 0 && tienHang = 0)
-            // - KHÔNG set = 1 khi chỉ có promCode (promCode là mã CTKM mua hàng giảm giá, không phải hàng tặng)
-            // - Nếu ma_ctkm_th = "TT DAU TU" thì km_yn = 0
-            km_yn: isTTDauTu ? 0 : isTangHang ? 1 : 0,
-            // dong_thuoc_goi: dong_thuoc_goi (String, max 32 ký tự)
-            dong_thuoc_goi: limitString(toString(sale.dongThuocGoi, ''), 32),
-            // trang_thai: trang_thai (String, max 32 ký tự)
-            trang_thai: limitString(toString(sale.trangThai, ''), 32),
-            // barcode: Barcode (String, max 32 ký tự)
-            barcode: limitString(toString(sale.barcode, ''), 32),
-            // ma_ck01: Mã ctkm mua hàng giảm giá (String, max 32 ký tự)
-            ma_ck01: limitString(maCk01, 32),
-            // ck01_nt: Tiền (Decimal)
-            ck01_nt: Number(ck01_nt),
-            // ma_ck02: Mã ck theo chính sách (String, max 32 ký tự)
-            ma_ck02: limitString(toString(sale.ckTheoChinhSach, ''), 32),
-            // ck02_nt: Tiền (Decimal)
-            ck02_nt: Number(ck02_nt),
-            // ma_ck03: Mua hàng ck vip (String, max 32 ký tự)
-            ma_ck03: limitString(toString(maCk03, ''), 32),
-            // ck03_nt: Tiền (Decimal)
-            ck03_nt: Number(ck03_nt),
-            // ma_ck04: Thanh toán coupon (String, max 32 ký tự)
-            ma_ck04: limitString(
-              ck04_nt > 0 || sale.thanhToanCoupon
-                ? toString(sale.maCk04 || 'COUPON', '')
-                : '',
-              32,
-            ),
-            // ck04_nt: Tiền (Decimal)
-            ck04_nt: Number(ck04_nt),
-            // ma_ck05: Thanh toán voucher (String, max 32 ký tự)
-            // Nếu là đơn "03. Đổi điểm": luôn set ma_ck05 = '' và ck05_nt = 0
-            // Nếu không phải "03. Đổi điểm": chỉ thêm ma_ck05 khi ck05_nt > 0
-            ...(isDoiDiem || isDoiDiemForCk05
-              ? { ma_ck05: '' }
-              : ck05_nt > 0
-                ? {
-                    ma_ck05: limitString(
-                      formattedMaCk05 || toString(sale.maCk05 || 'VOUCHER', ''),
-                      32,
-                    ),
-                  }
-                : {}),
-            // ck05_nt: Tiền (Decimal)
-            ck05_nt: Number(ck05_nt),
-            // ma_ck06: Dự phòng 1 (String, max 32 ký tự) - không sử dụng
-            ma_ck06: '',
-            // ck06_nt: Tiền (Decimal)
-            ck06_nt: Number(ck06_nt),
-            // ma_ck07: Dự phòng 2 (String, max 32 ký tự)
-            ma_ck07: limitString(sale.voucherDp2 ? 'VOUCHER_DP2' : '', 32),
-            // ck07_nt: Tiền (Decimal)
-            ck07_nt: Number(ck07_nt),
-            // ma_ck08: Dự phòng 3 (String, max 32 ký tự)
-            ma_ck08: limitString(sale.voucherDp3 ? 'VOUCHER_DP3' : '', 32),
-            // ck08_nt: Tiền (Decimal)
-            ck08_nt: Number(ck08_nt),
-            // ma_ck09: Chiết khấu hãng (String, max 32 ký tự)
-            ma_ck09: limitString(toString(sale.maCk09, ''), 32),
-            // ck09_nt: Tiền (Decimal)
-            ck09_nt: Number(ck09_nt),
-            // ma_ck10: Thưởng bằng hàng (String, max 32 ký tự)
-            ma_ck10: limitString(toString(sale.maCk10, ''), 32),
-            // ck10_nt: Tiền (Decimal)
-            ck10_nt: Number(ck10_nt),
-            // ma_ck11: Thanh toán TK tiền ảo (String, max 32 ký tự)
-            // Format: YYMM{brand_code}.TKDV (ví dụ: 2510MN.TKDV)
-            ma_ck11: limitString(
-              ck11_nt > 0 || sale.thanhToanTkTienAo
-                ? toString(
-                    sale.maCk11 ||
-                      SalesUtils.generateTkTienAoLabel(
-                        orderData.docDate,
-                        orderData.customer?.brand ||
-                          orderData.sales?.[0]?.customer?.brand,
-                      ),
-                    '',
-                  )
-                : '',
-              32,
-            ),
-            // ck11_nt: Tiền (Decimal)
-            ck11_nt: Number(ck11_nt),
-            // ma_ck12: CK thêm 1 (String, max 32 ký tự)
-            ma_ck12: limitString(toString(sale.maCk12, ''), 32),
-            // ck12_nt: Tiền (Decimal)
-            ck12_nt: Number(ck12_nt),
-            // ma_ck13: CK thêm 2 (String, max 32 ký tự)
-            ma_ck13: limitString(toString(sale.maCk13, ''), 32),
-            // ck13_nt: Tiền (Decimal)
-            ck13_nt: Number(ck13_nt),
-            // ma_ck14: CK thêm 3 (String, max 32 ký tự)
-            ma_ck14: limitString(toString(sale.maCk14, ''), 32),
-            // ck14_nt: Tiền (Decimal)
-            ck14_nt: Number(ck14_nt),
-            // ma_ck15: Voucher DP1 (String, max 32 ký tự)
-            // Với F3, thêm prefix "FBV TT " trước "VC CTKM SÀN"
-            ma_ck15: limitString(toString(sale.maCk15, ''), 32),
-            // ck15_nt: Tiền (Decimal)
-            ck15_nt: Number(ck15_nt),
-            // ma_ck16: Voucher DP2 (String, max 32 ký tự)
-            ma_ck16: limitString(toString(sale.maCk16, ''), 32),
-            // ck16_nt: Tiền (Decimal)
-            ck16_nt: Number(ck16_nt),
-            // ma_ck17: Voucher DP3 (String, max 32 ký tự)
-            ma_ck17: limitString(toString(sale.maCk17, ''), 32),
-            // ck17_nt: Tiền (Decimal)
-            ck17_nt: Number(ck17_nt),
-            // ma_ck18: Voucher DP4 (String, max 32 ký tự)
-            ma_ck18: limitString(toString(sale.maCk18, ''), 32),
-            // ck18_nt: Tiền (Decimal)
-            ck18_nt: Number(ck18_nt),
-            // ma_ck19: Voucher DP5 (String, max 32 ký tự)
-            ma_ck19: limitString(toString(sale.maCk19, ''), 32),
-            // ck19_nt: Tiền (Decimal)
-            ck19_nt: Number(ck19_nt),
-            // ma_ck20: Voucher DP6 (String, max 32 ký tự)
-            ma_ck20: limitString(toString(sale.maCk20, ''), 32),
-            // ck20_nt: Tiền (Decimal)
-            ck20_nt: Number(ck20_nt),
-            // ma_ck21: Voucher DP7 (String, max 32 ký tự)
-            ma_ck21: limitString(toString(sale.maCk21, ''), 32),
-            // ck21_nt: Tiền (Decimal)
-            ck21_nt: Number(ck21_nt),
-            // ma_ck22: Voucher DP8 (String, max 32 ký tự)
-            ma_ck22: limitString(toString(sale.maCk22, ''), 32),
-            // ck22_nt: Tiền (Decimal)
-            ck22_nt: Number(ck22_nt),
-            // dt_tg_nt: Tiền trợ giá (Decimal) - đã được phân bổ nếu là "01.Thường"
-            dt_tg_nt: Number(dtTgNt),
-            // ma_thue: Mã thuế (String, max 8 ký tự) - Bắt buộc
-            // Nếu không có mã thuế, set thành "00" thay vì "10"
-            ma_thue: limitString(toString(sale.maThue, '00'), 8),
-            // thue_suat: Thuế suất (Decimal) - không phân bổ (tỷ lệ %)
-            thue_suat: Number(toNumber(sale.thueSuat, 0)),
-            // tien_thue: Tiền thuế (Decimal) - đã được phân bổ nếu là "01.Thường"
-            tien_thue: Number(tienThue),
-            // tk_thue: Tài khoản thuế (String, max 16 ký tự)
-            tk_thue: limitString(toString(sale.tkThueCo, ''), 16),
-            // tk_cpbh: Tài khoản chiết khấu km (String, max 16 ký tự)
-            tk_cpbh: limitString(toString(sale.tkCpbh, ''), 16),
-            // ma_bp: Mã bộ phận (String, max 8 ký tự) - Bắt buộc
-            ma_bp: limitString(maBp, 8),
-            // ma_the: Mã thẻ (String, max 256 ký tự)
-            ma_the: limitString(maThe, 256),
-            // ma_lo: Mã lô (String, max 16 ký tự)
-            // so_serial: Số serial (String, max 64 ký tự)
-            // Chỉ thêm ma_lo hoặc so_serial vào payload (không gửi cả hai, và chỉ gửi khi có giá trị)
-            ...(soSerial && soSerial.trim() !== ''
-              ? { so_serial: limitString(soSerial, 64) }
-              : maLo && maLo.trim() !== ''
-                ? { ma_lo: limitString(maLo, 16) }
-                : {}),
-            // loai_gd: Loại giao dịch (String, max 2 ký tự) - Bắt buộc
-            loai_gd: limitString(loaiGd, 2),
-            // ma_combo: mã combo (String, max 16 ký tự)
-            ma_combo: limitString(toString(sale.maCombo, ''), 16),
-            // ma_nx_st: Mã nghiệp vụ (ST* từ stock transfer)
-            ma_nx_st: limitString(toString(sale.ma_nx_st, ''), 32),
-            // ma_nx_rt: Mã nghiệp vụ (RT* từ stock transfer)
-            ma_nx_rt: limitString(toString(sale.ma_nx_rt, ''), 32),
-            // id_goc: ID phiếu gốc (String, max 70 ký tự)
-            id_goc: limitString(toString(sale.idGoc, ''), 70),
-            // id_goc_ct: Số ct phiếu gốc (String, max 16 ký tự)
-            id_goc_ct: limitString(toString(sale.idGocCt, ''), 16),
-            // id_goc_so: Dòng phiếu gốc (Int)
-            id_goc_so: Number(toNumber(sale.idGocSo, 0)),
-            // dong: Dòng của phiếu (Int) - Bắt buộc, bắt đầu từ 1
-            dong: index + 1,
-            // id_goc_ngay: Ngày phiếu gốc (DateTime)
-            id_goc_ngay: sale.idGocNgay
-              ? formatDateISO(new Date(sale.idGocNgay))
-              : formatDateISO(new Date()),
-            // id_goc_dv: Đơn vị phiếu gốc (String, max 8 ký tự)
-            id_goc_dv: limitString(toString(sale.idGocDv, ''), 8),
-          });
-
-          return detailItem;
-        }),
+        allSales.map((sale: any, index: number) =>
+          this.mapSaleToInvoiceDetail(sale, index, orderData, {
+            isNormalOrder,
+            stockTransferMap,
+            cardSerialMap,
+          }),
+        ),
       );
 
-      // Validate sales array
-      if (!orderData.sales || orderData.sales.length === 0) {
-        throw new Error('Order has no sales items');
-      }
+      // 5. Build summary (cbdetail)
+      const cbdetail = this.buildInvoiceCbDetail(detail);
 
-      // Build cbdetail từ detail (tổng hợp thông tin sản phẩm)
-      const cbdetail = detail.map((item: any) => {
-        // Tính tổng chiết khấu từ tất cả các loại chiết khấu
-        const tongChietKhau =
-          Number(item.ck01_nt || 0) +
-          Number(item.ck02_nt || 0) +
-          Number(item.ck03_nt || 0) +
-          Number(item.ck04_nt || 0) +
-          Number(item.ck05_nt || 0) +
-          Number(item.ck06_nt || 0) +
-          Number(item.ck07_nt || 0) +
-          Number(item.ck08_nt || 0) +
-          Number(item.ck09_nt || 0) +
-          Number(item.ck10_nt || 0) +
-          Number(item.ck11_nt || 0) +
-          Number(item.ck12_nt || 0) +
-          Number(item.ck13_nt || 0) +
-          Number(item.ck14_nt || 0) +
-          Number(item.ck15_nt || 0) +
-          Number(item.ck16_nt || 0) +
-          Number(item.ck17_nt || 0) +
-          Number(item.ck18_nt || 0) +
-          Number(item.ck19_nt || 0) +
-          Number(item.ck20_nt || 0) +
-          Number(item.ck21_nt || 0) +
-          Number(item.ck22_nt || 0);
-
-        return {
-          ma_vt: item.ma_vt || '',
-          dvt: item.dvt || '',
-          so_luong: Number(item.so_luong || 0),
-          ck_nt: Number(tongChietKhau),
-          gia_nt: Number(item.gia_ban || 0),
-          tien_nt: Number(item.tien_hang || 0),
-        };
+      // 6. Assemble final payload
+      return this.assembleInvoicePayload(orderData, detail, cbdetail, {
+        ngayCt,
+        ngayLct,
+        transDate,
+        maBp: detail[0]?.ma_bp || '',
       });
-
-      const firstSale = orderData.sales[0];
-      const maKenh = 'ONLINE'; // Fix mã kênh là ONLINE
-      const soSeri = orderData.branchCode || 'DEFAULT';
-
-      // Lấy ma_dvcs từ department API (ưu tiên), nếu không có thì fallback
-      const maDvcs =
-        firstSale?.department?.ma_dvcs ||
-        firstSale?.department?.ma_dvcs_ht ||
-        orderData.customer?.brand ||
-        orderData.branchCode ||
-        '';
-
-      // Với đơn "08. Tách thẻ": Ưu tiên dùng issue_partner_code làm ma_kh
-      // Lấy từ dòng đầu tiên có issuePartnerCode, nếu không có thì dùng customer code mặc định
-      let maKhForHeader = SalesUtils.normalizeMaKh(orderData.customer?.code);
-      const ordertypeNameForMaKh =
-        firstSale?.ordertype || firstSale?.ordertypeName || '';
-      const isTachTheForMaKh =
-        ordertypeNameForMaKh.includes('08. Tách thẻ') ||
-        ordertypeNameForMaKh.includes('08.Tách thẻ') ||
-        ordertypeNameForMaKh.includes('08.  Tách thẻ');
-
-      if (
-        isTachTheForMaKh &&
-        orderData.sales &&
-        Array.isArray(orderData.sales)
-      ) {
-        // Tìm dòng có issuePartnerCode
-        // Ưu tiên: dòng qty > 0 (người nhận) trước, sau đó mới đến dòng qty < 0 (người chuyển)
-        // Vì thông thường ma_kh header sẽ là của người nhận (người sở hữu thẻ mới)
-        let saleWithIssuePartnerCode = orderData.sales.find(
-          (s: any) => Number(s.qty || 0) < 0 && s.issuePartnerCode,
-        );
-
-        // Nếu không tìm thấy dòng qty > 0, tìm dòng qty < 0
-        if (!saleWithIssuePartnerCode) {
-          saleWithIssuePartnerCode = orderData.sales.find(
-            (s: any) => Number(s.qty || 0) < 0 && s.issuePartnerCode,
-          );
-        }
-
-        // Nếu vẫn không tìm thấy, lấy dòng đầu tiên có issuePartnerCode
-        if (!saleWithIssuePartnerCode) {
-          saleWithIssuePartnerCode = orderData.sales.find(
-            (s: any) => s.issuePartnerCode,
-          );
-        }
-
-        if (
-          saleWithIssuePartnerCode &&
-          saleWithIssuePartnerCode.issuePartnerCode
-        ) {
-          maKhForHeader = SalesUtils.normalizeMaKh(
-            saleWithIssuePartnerCode.issuePartnerCode,
-          );
-        }
-      }
-
-      return {
-        action: 0,
-        ma_dvcs: maDvcs,
-        ma_kh: maKhForHeader,
-        ong_ba: orderData.customer?.name || null,
-        ma_gd: '1',
-        ma_tt: null,
-        ma_ca: firstSale?.maCa || null,
-        hinh_thuc: '0',
-        dien_giai: orderData.docCode || null,
-        ngay_lct: ngayLct,
-        ngay_ct: ngayCt,
-        so_ct: orderData.docCode || '',
-        so_seri: soSeri,
-        ma_nt: 'VND',
-        ty_gia: 1.0,
-        ma_bp: firstSale?.department?.ma_bp || firstSale?.branchCode || '',
-        tk_thue_no: '131111',
-        ma_kenh: maKenh,
-        trans_date: transDate
-          ? formatDateKeepLocalDay(new Date(transDate))
-          : null,
-        detail,
-        cbdetail,
-      };
     } catch (error: any) {
-      this.logger.error(
-        `Error building Fast API invoice data: ${error?.message || error}`,
-      );
-      this.logger.error(`Error stack: ${error?.stack || 'No stack trace'}`);
-      this.logger.error(
-        `Order data: ${JSON.stringify({
-          docCode: orderData?.docCode,
-          docDate: orderData?.docDate,
-          salesCount: orderData?.sales?.length,
-          customer: orderData?.customer
-            ? { code: orderData.customer.code, name: orderData.customer.name }
-            : null,
-        })}`,
-      );
+      this.logInvoiceError(error, orderData);
       throw new Error(
         `Failed to build invoice data: ${error?.message || error}`,
       );
@@ -6361,5 +5357,775 @@ export class SalesService {
 
   async cutCode(input: string): Promise<string> {
     return input?.split('-')[0] || '';
+  }
+
+  // ========== INVOICE REFACTOR HELPERS ==========
+
+  private toNumber(value: any, defaultValue: number = 0): number {
+    if (value === null || value === undefined || value === '')
+      return defaultValue;
+    const num = Number(value);
+    return isNaN(num) ? defaultValue : num;
+  }
+
+  private toString(value: any, defaultValue: string = ''): string {
+    return value === null || value === undefined || value === ''
+      ? defaultValue
+      : String(value);
+  }
+
+  private limitString(value: string, maxLength: number): string {
+    if (!value) return '';
+    const str = String(value);
+    return str.length > maxLength ? str.substring(0, maxLength) : str;
+  }
+
+  private formatDateISO(date: Date): string {
+    if (isNaN(date.getTime())) throw new Error('Invalid date');
+    return date.toISOString();
+  }
+
+  private formatDateKeepLocalDay(date: Date): string {
+    if (isNaN(date.getTime())) throw new Error('Invalid date');
+
+    const pad = (n: number) => String(n).padStart(2, '0');
+
+    return (
+      date.getFullYear() +
+      '-' +
+      pad(date.getMonth() + 1) +
+      '-' +
+      pad(date.getDate()) +
+      'T' +
+      pad(date.getHours()) +
+      ':' +
+      pad(date.getMinutes()) +
+      ':' +
+      pad(date.getSeconds()) +
+      '.000Z'
+    );
+  }
+
+  private parseInvoiceDate(inputDate: any): Date {
+    let docDate: Date;
+    if (inputDate instanceof Date) {
+      docDate = inputDate;
+    } else if (typeof inputDate === 'string') {
+      docDate = new Date(inputDate);
+      if (isNaN(docDate.getTime())) docDate = new Date();
+    } else {
+      docDate = new Date();
+    }
+
+    const minDate = new Date('1753-01-01T00:00:00');
+    const maxDate = new Date('9999-12-31T23:59:59');
+    if (docDate < minDate || docDate > maxDate) {
+      throw new Error(
+        `Date out of range for SQL Server: ${docDate.toISOString()}`,
+      );
+    }
+    return docDate;
+  }
+
+  private async getInvoiceStockTransferMap(
+    docCode: string,
+    isNormalOrder: boolean,
+  ) {
+    const docCodesForStockTransfer =
+      StockTransferUtils.getDocCodesForStockTransfer([docCode]);
+    const allStockTransfers = await this.stockTransferRepository.find({
+      where: { soCode: In(docCodesForStockTransfer) },
+      order: { itemCode: 'ASC', createdAt: 'ASC' },
+    });
+
+    const stockTransferMap = new Map<
+      string,
+      { st?: StockTransfer[]; rt?: StockTransfer[] }
+    >();
+    let transDate: Date | null = null;
+
+    if (isNormalOrder && allStockTransfers.length > 0) {
+      transDate = allStockTransfers[0].transDate || null;
+      const itemCodes = Array.from(
+        new Set(
+          allStockTransfers
+            .map((st) => st.itemCode)
+            .filter((c): c is string => !!c && c.trim() !== ''),
+        ),
+      );
+
+      const loyaltyMap = new Map<string, any>();
+      if (itemCodes.length > 0) {
+        const products = await this.loyaltyService.fetchProducts(itemCodes);
+        products.forEach((p, c) => loyaltyMap.set(c, p));
+      }
+
+      allStockTransfers.forEach((st) => {
+        const materialCode =
+          st.materialCode || loyaltyMap.get(st.itemCode)?.materialCode;
+        if (!materialCode) return;
+        const key = `${st.soCode || st.docCode || docCode}_${materialCode}`;
+
+        if (!stockTransferMap.has(key)) stockTransferMap.set(key, {});
+        const m = stockTransferMap.get(key)!;
+        if (st.docCode.startsWith('ST') || Number(st.qty || 0) < 0) {
+          if (!m.st) m.st = [];
+          m.st.push(st);
+        } else if (st.docCode.startsWith('RT') || Number(st.qty || 0) > 0) {
+          if (!m.rt) m.rt = [];
+          m.rt.push(st);
+        }
+      });
+    }
+    return { stockTransferMap, allStockTransfers, transDate };
+  }
+
+  private async getInvoiceCardSerialMap(
+    docCode: string,
+  ): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    const [dataCard] = await this.n8nService.fetchCardData(docCode);
+    if (Array.isArray(dataCard?.data)) {
+      for (const card of dataCard.data) {
+        if (!card?.service_item_name || !card?.serial) continue;
+        const product = await this.loyaltyService.checkProduct(
+          card.service_item_name,
+        );
+        if (product) map.set(product.materialCode, card.serial);
+      }
+    }
+    return map;
+  }
+
+  private async calculateInvoiceAmounts(
+    sale: any,
+    orderData: any,
+    allocationRatio: number,
+    isNormalOrder: boolean,
+  ) {
+    const { isDoiDiem } = InvoiceLogicUtils.getOrderTypes(
+      sale.ordertypeName || sale.ordertype,
+    );
+    const { isDoiDiem: isDoiDiemHeader } = InvoiceLogicUtils.getOrderTypes(
+      orderData.sales?.[0]?.ordertypeName ||
+        orderData.sales?.[0]?.ordertype ||
+        '',
+    );
+
+    const amounts: any = {
+      tienThue: this.toNumber(sale.tienThue, 0),
+      dtTgNt: this.toNumber(sale.dtTgNt, 0),
+      ck01_nt: this.toNumber(
+        sale.other_discamt || sale.chietKhauMuaHangGiamGia,
+        0,
+      ),
+      ck02_nt: this.toNumber(sale.chietKhauCkTheoChinhSach, 0),
+      ck03_nt: this.toNumber(
+        sale.chietKhauMuaHangCkVip || sale.grade_discamt,
+        0,
+      ),
+      ck04_nt: this.toNumber(
+        sale.chietKhauThanhToanCoupon || sale.chietKhau09,
+        0,
+      ),
+      ck05_nt:
+        this.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
+          ? this.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0)
+          : 0,
+      ck07_nt: this.toNumber(sale.chietKhauVoucherDp2, 0),
+      ck08_nt: this.toNumber(sale.chietKhauVoucherDp3, 0),
+    };
+
+    // Fill others with default 0 or from sale fields
+    for (let i = 9; i <= 22; i++) {
+      if (i === 11) continue; // ck11 handled separately
+      const key = `ck${i.toString().padStart(2, '0')}_nt`;
+      const saleKey = `chietKhau${i.toString().padStart(2, '0')}`;
+      amounts[key] = this.toNumber(sale[saleKey] || sale[key], 0);
+    }
+    amounts.ck06_nt = 0;
+
+    // ck11 (ECOIN) logic
+    let ck11_nt = this.toNumber(
+      sale.chietKhauThanhToanTkTienAo || sale.chietKhau11,
+      0,
+    );
+    if (
+      ck11_nt === 0 &&
+      this.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0 &&
+      orderData.cashioData
+    ) {
+      const ecoin = orderData.cashioData.find(
+        (c: any) => c.fop_syscode === 'ECOIN',
+      );
+      if (ecoin?.total_in) ck11_nt = this.toNumber(ecoin.total_in, 0);
+    }
+    amounts.ck11_nt = ck11_nt;
+
+    // Allocation
+    if (
+      isNormalOrder &&
+      allocationRatio !== 1 &&
+      allocationRatio > 0 &&
+      !isDoiDiem &&
+      !isDoiDiemHeader
+    ) {
+      Object.keys(amounts).forEach((k) => {
+        if (k.endsWith('_nt') || k === 'tienThue' || k === 'dtTgNt') {
+          amounts[k] *= allocationRatio;
+        }
+      });
+    }
+
+    if (isDoiDiem || isDoiDiemHeader) amounts.ck05_nt = 0;
+
+    // promCode logic
+    let promCode = sale.promCode || sale.prom_code || null;
+    promCode = await this.cutCode(promCode);
+    if (sale.productType === 'I') {
+      promCode = promCode + '.I';
+    } else if (sale.productType === 'S') {
+      promCode = promCode + '.S';
+    } else if (sale.productType === 'V') {
+      promCode = promCode + '.V';
+    }
+    amounts.promCode = promCode;
+
+    return amounts;
+  }
+
+  private async resolveInvoicePromotionCodes(
+    sale: any,
+    orderData: any,
+    giaBan: number,
+    promCode: string | null,
+  ) {
+    const { isDoiDiem, isDauTu, isThuong } = InvoiceLogicUtils.getOrderTypes(
+      sale.ordertypeName || sale.ordertype,
+    );
+    const isTangHang =
+      Math.abs(giaBan) < 0.01 &&
+      Math.abs(this.toNumber(sale.linetotal || sale.revenue, 0)) < 0.01;
+    const maDvcs = this.toString(
+      sale.department?.ma_dvcs || sale.department?.ma_dvcs_ht || '',
+      '',
+    );
+    const productTypeUpper = (sale.productType || '')?.toUpperCase().trim();
+
+    return InvoiceLogicUtils.resolvePromotionCodes({
+      sale,
+      isDoiDiem,
+      isDauTu,
+      isThuong,
+      isTangHang,
+      maDvcs,
+      productTypeUpper,
+      promCode,
+    });
+  }
+
+  private resolveInvoiceAccounts(
+    sale: any,
+    loyaltyProduct: any,
+    giaBan: number,
+    maCk01: string | null,
+    maCtkmTangHang: string | null,
+  ) {
+    const { isDoiVo, isDoiDiem, isDauTu, isSinhNhat, isThuong } =
+      InvoiceLogicUtils.getOrderTypes(sale.ordertypeName || sale.ordertype);
+    const isTangHang =
+      Math.abs(giaBan) < 0.01 &&
+      Math.abs(this.toNumber(sale.linetotal || sale.revenue, 0)) < 0.01;
+    const isGiaBanZero = Math.abs(sale.giaBanGoc || 0) < 0.01;
+
+    return InvoiceLogicUtils.resolveAccountingAccounts({
+      sale,
+      loyaltyProduct,
+      isDoiVo,
+      isDoiDiem,
+      isDauTu,
+      isSinhNhat,
+      isThuong,
+      isTangHang,
+      isGiaBanZero,
+      hasMaCtkm: !!(maCk01 || maCtkmTangHang),
+      hasMaCtkmTangHang: !!maCtkmTangHang,
+    });
+  }
+
+  private resolveInvoiceLoaiGd(sale: any): string {
+    const ordertypeName = sale.ordertype || sale.ordertypeName || '';
+    const isDoiDv = SalesUtils.isDoiDvOrder(sale.ordertype, sale.ordertypeName);
+    const isTachThe =
+      ordertypeName.includes('08. Tách thẻ') ||
+      ordertypeName.includes('08.Tách thẻ') ||
+      ordertypeName.includes('08.  Tách thẻ');
+
+    if (isDoiDv || isTachThe) {
+      return this.toNumber(sale.qty, 0) < 0 ? '11' : '12';
+    }
+
+    if (sale.ordertypeName === '02. Làm dịch vụ') {
+      return (sale.linetotal || 0) > 0 ? '01' : '06';
+    }
+
+    return '01';
+  }
+
+  private async resolveInvoiceBatchSerial(
+    sale: any,
+    saleMaterialCode: string,
+    cardSerialMap: Map<string, string>,
+    stockTransferMap: Map<string, any>,
+    docCode: string,
+    loyaltyProduct: any,
+  ) {
+    let batchSerial: string | null = null;
+    if (saleMaterialCode) {
+      const sts = stockTransferMap.get(`${docCode}_${saleMaterialCode}`)?.st;
+      if (sts?.[0]?.batchSerial) batchSerial = sts[0].batchSerial;
+    }
+
+    const serialValue = this.toString(batchSerial || '', '');
+    const useBatch = SalesUtils.shouldUseBatch(
+      loyaltyProduct?.trackBatch === true,
+      loyaltyProduct?.trackSerial === true,
+    );
+
+    return {
+      maLo: useBatch ? serialValue : null,
+      soSerial: useBatch ? null : serialValue,
+    };
+  }
+
+  private calculateInvoiceQty(
+    sale: any,
+    docCode: string,
+    saleMaterialCode: string,
+    isNormalOrder: boolean,
+    stockTransferMap: Map<string, any>,
+  ) {
+    let qty = this.toNumber(sale.qty, 0);
+    const saleQty = this.toNumber(sale.qty, 0);
+    let allocationRatio = 1;
+
+    if (isNormalOrder && saleMaterialCode) {
+      const key = `${docCode}_${saleMaterialCode}`;
+      const firstSt = stockTransferMap.get(key)?.st?.[0];
+      if (firstSt && saleQty !== 0) {
+        qty = Math.abs(Number(firstSt.qty || 0));
+        allocationRatio = qty / saleQty;
+      }
+    }
+    return { qty, saleQty, allocationRatio };
+  }
+
+  private calculateInvoicePrices(
+    sale: any,
+    qty: number,
+    allocationRatio: number,
+    isNormalOrder: boolean,
+  ) {
+    const { isDoiDiem } = InvoiceLogicUtils.getOrderTypes(
+      sale.ordertypeName || sale.ordertype,
+    );
+    const tienHang = this.toNumber(
+      sale.tienHang || sale.linetotal || sale.revenue,
+      0,
+    );
+    let giaBan = this.toNumber(sale.giaBan, 0);
+
+    if (isDoiDiem) {
+      giaBan = 0;
+    } else if (giaBan === 0 && tienHang > 0 && Number(sale.qty) !== 0) {
+      giaBan = tienHang / Number(sale.qty);
+    }
+
+    let tienHangGoc = isDoiDiem ? 0 : tienHang;
+    if (!isDoiDiem && isNormalOrder && allocationRatio !== 1) {
+      if (qty > 0 && giaBan > 0) {
+        tienHangGoc = qty * giaBan;
+      } else {
+        tienHangGoc = tienHang * allocationRatio;
+      }
+    }
+
+    return { giaBan, tienHang, tienHangGoc };
+  }
+
+  private resolveInvoiceMaKhHeader(orderData: any): string {
+    let maKh = SalesUtils.normalizeMaKh(orderData.customer?.code);
+    const firstSale = orderData.sales?.[0];
+    const { isTachThe } = InvoiceLogicUtils.getOrderTypes(
+      firstSale?.ordertype || firstSale?.ordertypeName || '',
+    );
+
+    if (isTachThe && Array.isArray(orderData.sales)) {
+      const saleWithIssue =
+        orderData.sales.find(
+          (s: any) => Number(s.qty || 0) < 0 && s.issuePartnerCode,
+        ) || orderData.sales.find((s: any) => s.issuePartnerCode);
+      if (saleWithIssue) {
+        maKh = SalesUtils.normalizeMaKh(saleWithIssue.issuePartnerCode);
+      }
+    }
+    return maKh;
+  }
+
+  private async resolveInvoiceMaKho(
+    sale: any,
+    saleMaterialCode: string,
+    stockTransferMap: Map<string, any>,
+    docCode: string,
+    maBp: string,
+    isTachThe: boolean,
+  ): Promise<string> {
+    if (isTachThe) return 'B' + maBp;
+
+    let maKho = sale.maKho || null;
+    if (saleMaterialCode) {
+      const sts = stockTransferMap.get(`${docCode}_${saleMaterialCode}`)?.st;
+      if (sts?.[0]?.stockCode) maKho = sts[0].stockCode;
+    }
+
+    const maKhoMap = await this.categoriesService.mapWarehouseCode(maKho);
+    return maKhoMap || maKho || '';
+  }
+
+  private fillInvoiceChietKhauFields(
+    detailItem: any,
+    amounts: any,
+    sale: any,
+    orderData: any,
+  ) {
+    for (let i = 1; i <= 22; i++) {
+      const idx = i.toString().padStart(2, '0');
+      const key = `ck${idx}_nt`;
+      const maKey = `ma_ck${idx}`;
+      detailItem[key] = Number(amounts[key] || 0);
+
+      // Special ma_ck logic
+      if (i === 3) {
+        const brand = orderData.customer?.brand || orderData.brand || '';
+        detailItem[maKey] = this.limitString(
+          this.toString(
+            SalesCalculationUtils.calculateMuaHangCkVip(
+              sale,
+              sale.product,
+              brand,
+            ),
+            '',
+          ),
+          32,
+        );
+      } else if (i === 4) {
+        detailItem[maKey] = this.limitString(
+          detailItem.ck04_nt > 0 || sale.thanhToanCoupon
+            ? this.toString(sale.maCk04 || 'COUPON', '')
+            : '',
+          32,
+        );
+      } else if (i === 5) {
+        const { isDoiDiem } = InvoiceLogicUtils.getOrderTypes(
+          sale.ordertype || sale.ordertypeName,
+        );
+        const { isDoiDiem: isDoiDiemHeader } = InvoiceLogicUtils.getOrderTypes(
+          orderData.sales?.[0]?.ordertype ||
+            orderData.sales?.[0]?.ordertypeName ||
+            '',
+        );
+
+        if (isDoiDiem || isDoiDiemHeader) {
+          detailItem[maKey] = '';
+        } else if (detailItem.ck05_nt > 0) {
+          const maKh = sale.partnerCode;
+          // Note: using logic from buildFastApiInvoiceData
+          detailItem[maKey] = this.limitString(
+            this.toString(
+              InvoiceLogicUtils.resolveVoucherCode({
+                sale: {
+                  ...sale,
+                  customer: sale.customer || orderData.customer,
+                },
+                customer: null, // Resolution happens inside resolveVoucherCode
+                brand: orderData.customer?.brand || orderData.brand || '',
+              }),
+              sale.maCk05 || 'VOUCHER',
+            ),
+            32,
+          );
+        }
+      } else if (i === 7) {
+        detailItem[maKey] = this.limitString(
+          sale.voucherDp2 ? 'VOUCHER_DP2' : '',
+          32,
+        );
+      } else if (i === 8) {
+        detailItem[maKey] = this.limitString(
+          sale.voucherDp3 ? 'VOUCHER_DP3' : '',
+          32,
+        );
+      } else if (i === 11) {
+        detailItem[maKey] = this.limitString(
+          detailItem.ck11_nt > 0 || sale.thanhToanTkTienAo
+            ? this.toString(
+                sale.maCk11 ||
+                  SalesUtils.generateTkTienAoLabel(
+                    orderData.docDate,
+                    orderData.customer?.brand ||
+                      orderData.sales?.[0]?.customer?.brand,
+                  ),
+                '',
+              )
+            : '',
+          32,
+        );
+      } else {
+        // Default mapping for other ma_ck fields
+        const saleMaKey = `maCk${idx}`;
+        detailItem[maKey] = this.limitString(
+          this.toString(sale[saleMaKey] || '', ''),
+          32,
+        );
+      }
+    }
+  }
+
+  private buildInvoiceCbDetail(detail: any[]) {
+    return detail.map((item: any) => {
+      let tongChietKhau = 0;
+      for (let i = 1; i <= 22; i++) {
+        tongChietKhau += Number(
+          item[`ck${i.toString().padStart(2, '0')}_nt`] || 0,
+        );
+      }
+
+      return {
+        ma_vt: item.ma_vt || '',
+        dvt: item.dvt || '',
+        so_luong: Number(item.so_luong || 0),
+        ck_nt: Number(tongChietKhau),
+        gia_nt: Number(item.gia_ban || 0),
+        tien_nt: Number(item.tien_hang || 0),
+      };
+    });
+  }
+
+  private async mapSaleToInvoiceDetail(
+    sale: any,
+    index: number,
+    orderData: any,
+    context: any,
+  ): Promise<any> {
+    const { isNormalOrder, stockTransferMap, cardSerialMap } = context;
+    const saleMaterialCode =
+      sale.product?.materialCode ||
+      sale.product?.maVatTu ||
+      sale.product?.maERP;
+
+    // 1. Qty & Allocation
+    const { qty, allocationRatio } = this.calculateInvoiceQty(
+      sale,
+      orderData.docCode,
+      saleMaterialCode,
+      isNormalOrder,
+      stockTransferMap,
+    );
+
+    // 2. Prices
+    const { giaBan, tienHang, tienHangGoc } = this.calculateInvoicePrices(
+      sale,
+      qty,
+      allocationRatio,
+      isNormalOrder,
+    );
+
+    // 3. Amounts (Discounts, Tax, Subsidy)
+    const amounts = await this.calculateInvoiceAmounts(
+      sale,
+      orderData,
+      allocationRatio,
+      isNormalOrder,
+    );
+
+    // 4. Resolve Codes & Accounts
+    const materialCode =
+      SalesUtils.getMaterialCode(sale, sale.product) || sale.itemCode;
+    const loyaltyProduct = await this.loyaltyService.checkProduct(materialCode);
+
+    const { maCk01, maCtkmTangHang } = await this.resolveInvoicePromotionCodes(
+      sale,
+      orderData,
+      giaBan,
+      amounts.promCode,
+    );
+
+    const { tkChietKhau, tkChiPhi, maPhi } = this.resolveInvoiceAccounts(
+      sale,
+      loyaltyProduct,
+      giaBan,
+      maCk01,
+      maCtkmTangHang,
+    );
+
+    // 5. Build Detail Item
+    const maBp = this.limitString(
+      this.toString(
+        sale.department?.ma_bp || sale.branchCode || orderData.branchCode,
+        '',
+      ),
+      8,
+    );
+    const loaiGd = this.resolveInvoiceLoaiGd(sale);
+    const { maLo, soSerial } = await this.resolveInvoiceBatchSerial(
+      sale,
+      saleMaterialCode,
+      cardSerialMap,
+      stockTransferMap,
+      orderData.docCode,
+      loyaltyProduct,
+    );
+
+    const detailItem: any = {
+      tk_chiet_khau: this.limitString(this.toString(tkChietKhau, ''), 16),
+      tk_chi_phi: this.limitString(this.toString(tkChiPhi, ''), 16),
+      ma_phi: this.limitString(this.toString(maPhi, ''), 16),
+      tien_hang: Number(sale.qty) * Number(sale.giaBan),
+      so_luong: Number(sale.qty),
+      ma_kh_i: this.limitString(this.toString(sale.issuePartnerCode, ''), 16),
+      ma_vt: this.limitString(
+        this.toString(
+          loyaltyProduct?.materialCode || sale.product?.maVatTu || '',
+        ),
+        16,
+      ),
+      dvt: this.limitString(
+        this.toString(
+          sale.product?.dvt || sale.product?.unit || sale.dvt,
+          'Cái',
+        ),
+        32,
+      ),
+      loai: this.limitString(this.toString(sale.loai || sale.cat1, ''), 2),
+      loai_gd: this.limitString(loaiGd, 2),
+      ma_ctkm_th: this.limitString(maCtkmTangHang, 32),
+    };
+
+    const finalMaKho = await this.resolveInvoiceMaKho(
+      sale,
+      saleMaterialCode,
+      stockTransferMap,
+      orderData.docCode,
+      maBp,
+      loaiGd === '11' || loaiGd === '12',
+    );
+    if (finalMaKho && finalMaKho.trim() !== '') {
+      detailItem.ma_kho = this.limitString(finalMaKho, 16);
+    }
+
+    Object.assign(detailItem, {
+      gia_ban: Number(giaBan),
+      is_reward_line: sale.isRewardLine ? 1 : 0,
+      is_bundle_reward_line: sale.isBundleRewardLine ? 1 : 0,
+      km_yn:
+        maCtkmTangHang === 'TT DAU TU'
+          ? 0
+          : Math.abs(giaBan) < 0.01 && Math.abs(tienHang) < 0.01
+            ? 1
+            : 0,
+      dong_thuoc_goi: this.limitString(
+        this.toString(sale.dongThuocGoi, ''),
+        32,
+      ),
+      trang_thai: this.limitString(this.toString(sale.trangThai, ''), 32),
+      barcode: this.limitString(this.toString(sale.barcode, ''), 32),
+      ma_ck01: this.limitString(maCk01, 32),
+      dt_tg_nt: Number(amounts.dtTgNt),
+      tien_thue: Number(amounts.tienThue),
+      ma_thue: this.limitString(this.toString(sale.maThue, '00'), 8),
+      thue_suat: Number(this.toNumber(sale.thueSuat, 0)),
+      tk_thue: this.limitString(this.toString(sale.tkThueCo, ''), 16),
+      tk_cpbh: this.limitString(this.toString(sale.tkCpbh, ''), 16),
+      ma_bp: maBp,
+      ma_the: this.limitString(cardSerialMap.get(saleMaterialCode) || '', 256),
+      dong: index + 1,
+      id_goc_ngay: sale.idGocNgay
+        ? this.formatDateISO(new Date(sale.idGocNgay))
+        : this.formatDateISO(new Date()),
+      id_goc: this.limitString(this.toString(sale.idGoc, ''), 70),
+      id_goc_ct: this.limitString(this.toString(sale.idGocCt, ''), 16),
+      id_goc_so: Number(this.toNumber(sale.idGocSo, 0)),
+      id_goc_dv: this.limitString(this.toString(sale.idGocDv, ''), 8),
+      ma_combo: this.limitString(this.toString(sale.maCombo, ''), 16),
+      ma_nx_st: this.limitString(this.toString(sale.ma_nx_st, ''), 32),
+      ma_nx_rt: this.limitString(this.toString(sale.ma_nx_rt, ''), 32),
+      ...(soSerial && soSerial.trim() !== ''
+        ? { so_serial: this.limitString(soSerial, 64) }
+        : maLo && maLo.trim() !== ''
+          ? { ma_lo: this.limitString(maLo, 16) }
+          : {}),
+    });
+
+    this.fillInvoiceChietKhauFields(detailItem, amounts, sale, orderData);
+
+    return detailItem;
+  }
+
+  private assembleInvoicePayload(
+    orderData: any,
+    detail: any[],
+    cbdetail: any[],
+    context: any,
+  ) {
+    const { ngayCt, ngayLct, transDate, maBp } = context;
+    const firstSale = orderData.sales?.[0];
+
+    return {
+      action: 0,
+      ma_dvcs:
+        firstSale?.department?.ma_dvcs ||
+        firstSale?.department?.ma_dvcs_ht ||
+        orderData.customer?.brand ||
+        orderData.branchCode ||
+        '',
+      ma_kh: this.resolveInvoiceMaKhHeader(orderData),
+      ong_ba: orderData.customer?.name || null,
+      ma_gd: '1',
+      ma_tt: null,
+      ma_ca: firstSale?.maCa || null,
+      hinh_thuc: '0',
+      dien_giai: orderData.docCode || null,
+      ngay_lct: ngayLct,
+      ngay_ct: ngayCt,
+      so_ct: orderData.docCode || '',
+      so_seri: orderData.branchCode || 'DEFAULT',
+      ma_nt: 'VND',
+      ty_gia: 1.0,
+      ma_bp: maBp,
+      tk_thue_no: '131111',
+      ma_kenh: 'ONLINE',
+      trans_date: transDate
+        ? this.formatDateKeepLocalDay(new Date(transDate))
+        : null,
+      detail,
+      cbdetail,
+    };
+  }
+
+  private logInvoiceError(error: any, orderData: any) {
+    this.logger.error(
+      `Error building Fast API invoice data: ${error?.message || error}`,
+    );
+    this.logger.error(`Error stack: ${error?.stack || 'No stack trace'}`);
+    this.logger.error(
+      `Order data: ${JSON.stringify({
+        docCode: orderData?.docCode,
+        docDate: orderData?.docDate,
+        salesCount: orderData?.sales?.length,
+        customer: orderData?.customer
+          ? { code: orderData.customer.code, name: orderData.customer.name }
+          : null,
+      })}`,
+    );
   }
 }
