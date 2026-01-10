@@ -224,9 +224,11 @@ export class InvoiceLogicUtils {
       if (isDauTu) {
         maCtkmTangHang = 'TT DAU TU';
       } else if (isThuong || isBanTaiKhoan || isSanTmdt) {
-        // 2. Gift Case: Assign + Strip Suffixes
-        maCtkmTangHang = code;
-        maCtkmTangHang = maCtkmTangHang.replace(/\.(I|S|V)$/, '');
+        // 2. Gift Case: Assign + Cut Code + Strip Suffixes (V10)
+        // User requirements: "Cut" like standard code (RMN.xxx-yyy -> RMN.xxx)
+        // BUT: Do NOT add .I / .S / .V suffix.
+        const cutCode = SalesUtils.getPromotionDisplayCode(code) || code;
+        maCtkmTangHang = cutCode.replace(/\.(I|S|V)$/, '');
       }
     }
 
