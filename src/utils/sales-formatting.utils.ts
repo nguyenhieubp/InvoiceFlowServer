@@ -41,9 +41,10 @@ export async function calculateDisplayFields(
 }> {
   const brand =
     order?.customer?.brand || order?.brand || sale?.customer?.brand || '';
-  const { isDoiDiem } = InvoiceLogicUtils.getOrderTypes(
+  const orderTypes = InvoiceLogicUtils.getOrderTypes(
     sale.ordertypeName || sale.ordertype,
   );
+  const { isDoiDiem } = orderTypes;
 
   const maCoupon =
     sale.maCk04 ||
@@ -179,8 +180,25 @@ export async function formatSaleForFrontend(
     sale.product?.maERP ||
     loyaltyProduct?.materialCode;
 
-  let maKho = calculatedFields.maKho;
-  let batchSerial: string | null = null;
+  const ordertypeName = sale.ordertypeName || sale.ordertype || '';
+  const orderTypes = InvoiceLogicUtils.getOrderTypes(ordertypeName);
+  const {
+    isDoiDiem,
+    isDoiVo,
+    isDauTu,
+    isSinhNhat,
+    isThuong,
+    isTachThe,
+    isDoiDv,
+    isDichVu,
+    isBanTaiKhoan,
+    isSanTmdt,
+  } = orderTypes;
+
+  // 1. Resolve Stock Transfer data
+  let maKhoFromST: string | null = null;
+  let batchSerialFromST: string | null = null;
+  let qtyFromST: number | null = null;
   const availableStockTransfers = stockTransfers || order?.stockTransfers;
 
   if (
@@ -188,46 +206,60 @@ export async function formatSaleForFrontend(
     availableStockTransfers &&
     Array.isArray(availableStockTransfers)
   ) {
-    const matchingStockTransfer = availableStockTransfers.find(
+    const matchingST = availableStockTransfers.find(
       (st: any) => st.materialCode === saleMaterialCode,
     );
-    if (matchingStockTransfer) {
-      if (matchingStockTransfer.stockCode)
-        maKho = matchingStockTransfer.stockCode;
-      batchSerial = matchingStockTransfer.batchSerial || null;
+    if (matchingST) {
+      maKhoFromST = matchingST.stockCode || null;
+      batchSerialFromST = matchingST.batchSerial || null;
+      qtyFromST = Math.abs(Number(matchingST.qty || 0));
     }
   }
 
-  const materialCode = saleMaterialCode || sale.itemCode;
-  let trackSerial: boolean | null = null;
-  let trackBatch: boolean | null = null;
+  // 2. Qty & Prices (Allocation Ratio calculation simplified for display)
+  // For frontend display, we often use ratio = 1 unless it's a "01.Thường" order with stock transfers
+  let allocationRatio = 1;
+  const saleQty = Number(sale.qty || 0);
+  if (isThuong && qtyFromST !== null && saleQty > 0) {
+    allocationRatio = qtyFromST / saleQty;
+  }
 
+  const { giaBan, tienHang, tienHangGoc } = InvoiceLogicUtils.calculatePrices({
+    sale,
+    orderTypes,
+    allocationRatio,
+    qtyFromStock: qtyFromST ?? undefined,
+  });
+
+  // 3. Serial / Batch resolution
+  const materialCode = saleMaterialCode || sale.itemCode;
   const loyaltyProductForTracking =
     await loyaltyService.checkProduct(materialCode);
-  if (loyaltyProductForTracking) {
-    trackSerial = loyaltyProductForTracking.trackSerial === true;
-    trackBatch = loyaltyProductForTracking.trackBatch === true;
+  const trackSerial = loyaltyProductForTracking?.trackSerial === true;
+  const trackBatch = loyaltyProductForTracking?.trackBatch === true;
+
+  const { maLo, soSerial } = InvoiceLogicUtils.resolveBatchSerial({
+    batchSerialFromST,
+    trackBatch,
+    trackSerial,
+  });
+
+  // 4. Warehouse resolution
+  const maBp = department?.ma_bp || '';
+  let maKho = InvoiceLogicUtils.resolveMaKho({
+    maKhoFromST,
+    maKhoFromSale: sale.maKho || calculatedFields.maKho,
+    maBp,
+    orderTypes,
+  });
+
+  // Map warehouse code if categoriesService is provided
+  if (maKho && categoriesService && !isTachThe) {
+    const mapped = await categoriesService.mapWarehouseCode(maKho);
+    if (mapped) maKho = mapped;
   }
 
-  const useBatch = SalesUtils.shouldUseBatch(trackBatch, trackSerial);
-  let maLo: string | null = useBatch ? batchSerial : null;
-  let soSerial: string | null = useBatch ? null : batchSerial;
-
-  const ordertypeName = sale.ordertypeName || sale.ordertype || '';
-  const { isDoiDiem, isDoiVo, isDauTu, isSinhNhat, isThuong, isTachThe } =
-    InvoiceLogicUtils.getOrderTypes(ordertypeName);
-
-  let tienHang = sale.tienHang || sale.linetotal || sale.revenue || 0;
-  let giaBan = sale.giaBan || 0;
-  const giaBanGoc = giaBan;
-
-  if (isDoiDiem) {
-    giaBan = 0;
-    tienHang = 0;
-  } else if (giaBan === 0 && (sale.qty || 0) > 0) {
-    giaBan = (tienHang || 0) / (sale.qty || 0);
-  }
-
+  // 5. Codes & Accounts Resolution
   const productType =
     sale.productType ||
     sale.producttype ||
@@ -239,17 +271,35 @@ export async function formatSaleForFrontend(
     : null;
 
   const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht || '';
+  const isTangHang = calculatedFields.isTangHang;
+
   const { maCk01, maCtkmTangHang } = InvoiceLogicUtils.resolvePromotionCodes({
     sale,
-    isDoiDiem,
-    isDauTu,
-    isThuong,
-    isTangHang: calculatedFields.isTangHang,
+    orderTypes,
+    isTangHang,
     maDvcs,
     productTypeUpper,
     promCode: sale.promCode,
   });
 
+  const isGiaBanZero = Math.abs(giaBan) < 0.01;
+  const { tkChietKhau, tkChiPhi, maPhi } =
+    InvoiceLogicUtils.resolveAccountingAccounts({
+      sale,
+      loyaltyProduct,
+      orderTypes,
+      isTangHang,
+      isGiaBanZero,
+      hasMaCtkm: !!(sale.promCode || maCk01 || maCtkmTangHang),
+      hasMaCtkmTangHang: !!maCtkmTangHang,
+    });
+
+  const loaiGd = InvoiceLogicUtils.resolveLoaiGd({
+    sale,
+    orderTypes,
+  });
+
+  // 6. Display Fields
   const displayFields = await calculateDisplayFields(
     sale,
     order,
@@ -257,24 +307,7 @@ export async function formatSaleForFrontend(
     department,
     categoriesService,
   );
-  const isGiaBanZero = Math.abs(giaBanGoc) < 0.01;
 
-  const { tkChietKhau, tkChiPhi, maPhi } =
-    InvoiceLogicUtils.resolveAccountingAccounts({
-      sale,
-      loyaltyProduct,
-      isDoiVo,
-      isDoiDiem,
-      isDauTu,
-      isSinhNhat,
-      isThuong,
-      isTangHang: calculatedFields.isTangHang,
-      isGiaBanZero,
-      hasMaCtkm: !!(sale.promCode || maCtkmTangHang),
-      hasMaCtkmTangHang: !!maCtkmTangHang,
-    });
-
-  if (isTachThe) maKho = 'B' + (department?.ma_bp || '');
   let finalPromCodeDisplay = calculatedFields.promCodeDisplay;
   if (isDoiDiem) finalPromCodeDisplay = '1';
 
@@ -290,7 +323,7 @@ export async function formatSaleForFrontend(
     muaHangCkVip: calculatedFields.muaHangCkVip,
     maLo: maLo,
     maSerial: soSerial,
-    isTangHang: calculatedFields.isTangHang,
+    isTangHang,
     isDichVu: calculatedFields.isDichVu,
     promCodeDisplay: finalPromCodeDisplay,
     muaHangGiamGiaDisplay: maCk01,
@@ -301,26 +334,23 @@ export async function formatSaleForFrontend(
     linetotal: isDoiDiem ? 0 : (sale.linetotal ?? tienHang),
     promotionDisplayCode: SalesUtils.getPromotionDisplayCode(sale.promCode),
     ordertypeName: ordertypeName,
+    loaiGd: loaiGd,
     issuePartnerCode: sale.issuePartnerCode || null,
     partnerCode:
       isTachThe && sale.issuePartnerCode
         ? sale.issuePartnerCode
         : sale.partnerCode || sale.partner_code || null,
     ...displayFields,
-    producttype: productType,
     productType: productType,
     product: loyaltyProduct
       ? {
           ...loyaltyProduct,
-          producttype:
-            loyaltyProduct.producttype || loyaltyProduct.productType || null,
-          productType:
-            loyaltyProduct.productType || loyaltyProduct.producttype || null,
+          productType: productType,
           dvt: loyaltyProduct.unit || null,
           maVatTu: loyaltyProduct.materialCode || sale.itemCode,
           trackInventory: loyaltyProduct.trackInventory ?? null,
-          trackSerial: loyaltyProduct.trackSerial ?? null,
-          trackBatch: loyaltyProduct.trackBatch ?? null,
+          trackSerial: trackSerial,
+          trackBatch: trackBatch,
         }
       : null,
     department: department,

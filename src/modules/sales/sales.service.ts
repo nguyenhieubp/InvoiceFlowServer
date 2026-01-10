@@ -5359,7 +5359,21 @@ export class SalesService {
     return input?.split('-')[0] || '';
   }
 
-  // ========== INVOICE REFACTOR HELPERS ==========
+  /**
+  ========== INVOICE REFACTOR HELPERS ==========
+  ========== INVOICE REFACTOR HELPERS ==========
+  ========== INVOICE REFACTOR HELPERS ==========
+  ========== INVOICE REFACTOR HELPERS ==========
+  ========== INVOICE REFACTOR HELPERS ==========
+  ========== INVOICE REFACTOR HELPERS ==========
+  ========== INVOICE REFACTOR HELPERS ==========
+  ========== INVOICE REFACTOR HELPERS ==========
+  ========== INVOICE REFACTOR HELPERS ==========
+  ========== INVOICE REFACTOR HELPERS ==========
+  ========== INVOICE REFACTOR HELPERS ==========
+  ========== INVOICE REFACTOR HELPERS ==========
+  ========== INVOICE REFACTOR HELPERS ==========
+  */
 
   private toNumber(value: any, defaultValue: number = 0): number {
     if (value === null || value === undefined || value === '')
@@ -5503,10 +5517,10 @@ export class SalesService {
     allocationRatio: number,
     isNormalOrder: boolean,
   ) {
-    const { isDoiDiem } = InvoiceLogicUtils.getOrderTypes(
+    const orderTypes = InvoiceLogicUtils.getOrderTypes(
       sale.ordertypeName || sale.ordertype,
     );
-    const { isDoiDiem: isDoiDiemHeader } = InvoiceLogicUtils.getOrderTypes(
+    const headerOrderTypes = InvoiceLogicUtils.getOrderTypes(
       orderData.sales?.[0]?.ordertypeName ||
         orderData.sales?.[0]?.ordertype ||
         '',
@@ -5567,8 +5581,8 @@ export class SalesService {
       isNormalOrder &&
       allocationRatio !== 1 &&
       allocationRatio > 0 &&
-      !isDoiDiem &&
-      !isDoiDiemHeader
+      !orderTypes.isDoiDiem &&
+      !headerOrderTypes.isDoiDiem
     ) {
       Object.keys(amounts).forEach((k) => {
         if (k.endsWith('_nt') || k === 'tienThue' || k === 'dtTgNt') {
@@ -5577,7 +5591,7 @@ export class SalesService {
       });
     }
 
-    if (isDoiDiem || isDoiDiemHeader) amounts.ck05_nt = 0;
+    if (orderTypes.isDoiDiem || headerOrderTypes.isDoiDiem) amounts.ck05_nt = 0;
 
     // promCode logic
     let promCode = sale.promCode || sale.prom_code || null;
@@ -5600,7 +5614,7 @@ export class SalesService {
     giaBan: number,
     promCode: string | null,
   ) {
-    const { isDoiDiem, isDauTu, isThuong } = InvoiceLogicUtils.getOrderTypes(
+    const orderTypes = InvoiceLogicUtils.getOrderTypes(
       sale.ordertypeName || sale.ordertype,
     );
     const isTangHang =
@@ -5614,9 +5628,7 @@ export class SalesService {
 
     return InvoiceLogicUtils.resolvePromotionCodes({
       sale,
-      isDoiDiem,
-      isDauTu,
-      isThuong,
+      orderTypes,
       isTangHang,
       maDvcs,
       productTypeUpper,
@@ -5631,8 +5643,9 @@ export class SalesService {
     maCk01: string | null,
     maCtkmTangHang: string | null,
   ) {
-    const { isDoiVo, isDoiDiem, isDauTu, isSinhNhat, isThuong } =
-      InvoiceLogicUtils.getOrderTypes(sale.ordertypeName || sale.ordertype);
+    const orderTypes = InvoiceLogicUtils.getOrderTypes(
+      sale.ordertypeName || sale.ordertype,
+    );
     const isTangHang =
       Math.abs(giaBan) < 0.01 &&
       Math.abs(this.toNumber(sale.linetotal || sale.revenue, 0)) < 0.01;
@@ -5641,11 +5654,7 @@ export class SalesService {
     return InvoiceLogicUtils.resolveAccountingAccounts({
       sale,
       loyaltyProduct,
-      isDoiVo,
-      isDoiDiem,
-      isDauTu,
-      isSinhNhat,
-      isThuong,
+      orderTypes,
       isTangHang,
       isGiaBanZero,
       hasMaCtkm: !!(maCk01 || maCtkmTangHang),
@@ -5654,22 +5663,10 @@ export class SalesService {
   }
 
   private resolveInvoiceLoaiGd(sale: any): string {
-    const ordertypeName = sale.ordertype || sale.ordertypeName || '';
-    const isDoiDv = SalesUtils.isDoiDvOrder(sale.ordertype, sale.ordertypeName);
-    const isTachThe =
-      ordertypeName.includes('08. Tách thẻ') ||
-      ordertypeName.includes('08.Tách thẻ') ||
-      ordertypeName.includes('08.  Tách thẻ');
-
-    if (isDoiDv || isTachThe) {
-      return this.toNumber(sale.qty, 0) < 0 ? '11' : '12';
-    }
-
-    if (sale.ordertypeName === '02. Làm dịch vụ') {
-      return (sale.linetotal || 0) > 0 ? '01' : '06';
-    }
-
-    return '01';
+    const orderTypes = InvoiceLogicUtils.getOrderTypes(
+      sale.ordertype || sale.ordertypeName || '',
+    );
+    return InvoiceLogicUtils.resolveLoaiGd({ sale, orderTypes });
   }
 
   private async resolveInvoiceBatchSerial(
@@ -5686,16 +5683,11 @@ export class SalesService {
       if (sts?.[0]?.batchSerial) batchSerial = sts[0].batchSerial;
     }
 
-    const serialValue = this.toString(batchSerial || '', '');
-    const useBatch = SalesUtils.shouldUseBatch(
-      loyaltyProduct?.trackBatch === true,
-      loyaltyProduct?.trackSerial === true,
-    );
-
-    return {
-      maLo: useBatch ? serialValue : null,
-      soSerial: useBatch ? null : serialValue,
-    };
+    return InvoiceLogicUtils.resolveBatchSerial({
+      batchSerialFromST: batchSerial,
+      trackBatch: loyaltyProduct?.trackBatch === true,
+      trackSerial: loyaltyProduct?.trackSerial === true,
+    });
   }
 
   private calculateInvoiceQty(
@@ -5726,31 +5718,15 @@ export class SalesService {
     allocationRatio: number,
     isNormalOrder: boolean,
   ) {
-    const { isDoiDiem } = InvoiceLogicUtils.getOrderTypes(
+    const orderTypes = InvoiceLogicUtils.getOrderTypes(
       sale.ordertypeName || sale.ordertype,
     );
-    const tienHang = this.toNumber(
-      sale.tienHang || sale.linetotal || sale.revenue,
-      0,
-    );
-    let giaBan = this.toNumber(sale.giaBan, 0);
-
-    if (isDoiDiem) {
-      giaBan = 0;
-    } else if (giaBan === 0 && tienHang > 0 && Number(sale.qty) !== 0) {
-      giaBan = tienHang / Number(sale.qty);
-    }
-
-    let tienHangGoc = isDoiDiem ? 0 : tienHang;
-    if (!isDoiDiem && isNormalOrder && allocationRatio !== 1) {
-      if (qty > 0 && giaBan > 0) {
-        tienHangGoc = qty * giaBan;
-      } else {
-        tienHangGoc = tienHang * allocationRatio;
-      }
-    }
-
-    return { giaBan, tienHang, tienHangGoc };
+    return InvoiceLogicUtils.calculatePrices({
+      sale,
+      orderTypes,
+      allocationRatio,
+      qtyFromStock: qty,
+    });
   }
 
   private resolveInvoiceMaKhHeader(orderData: any): string {
@@ -5780,13 +5756,22 @@ export class SalesService {
     maBp: string,
     isTachThe: boolean,
   ): Promise<string> {
-    if (isTachThe) return 'B' + maBp;
-
-    let maKho = sale.maKho || null;
+    let maKhoFromST: string | null = null;
     if (saleMaterialCode) {
       const sts = stockTransferMap.get(`${docCode}_${saleMaterialCode}`)?.st;
-      if (sts?.[0]?.stockCode) maKho = sts[0].stockCode;
+      if (sts?.[0]?.stockCode) maKhoFromST = sts[0].stockCode;
     }
+
+    const orderTypes = InvoiceLogicUtils.getOrderTypes(
+      sale.ordertype || sale.ordertypeName || '',
+    );
+
+    const maKho = InvoiceLogicUtils.resolveMaKho({
+      maKhoFromST,
+      maKhoFromSale: sale.maKho || null,
+      maBp,
+      orderTypes,
+    });
 
     const maKhoMap = await this.categoriesService.mapWarehouseCode(maKho);
     return maKhoMap || maKho || '';

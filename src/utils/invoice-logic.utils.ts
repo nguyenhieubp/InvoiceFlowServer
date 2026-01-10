@@ -11,6 +11,22 @@ export interface AccountingAccounts {
 }
 
 /**
+ * Interface cho các flag phân loại đơn hàng
+ */
+export interface OrderTypes {
+  isDoiDiem: boolean;
+  isDoiVo: boolean;
+  isDauTu: boolean;
+  isSinhNhat: boolean;
+  isThuong: boolean;
+  isDoiDv: boolean;
+  isTachThe: boolean;
+  isDichVu: boolean;
+  isBanTaiKhoan: boolean;
+  isSanTmdt: boolean;
+}
+
+/**
  * Centralized business logic for Invoices to ensure consistency
  * between FastAPI payloads and Frontend display.
  */
@@ -18,7 +34,7 @@ export class InvoiceLogicUtils {
   /**
    * Xác định các loại đơn hàng đặc biệt
    */
-  static getOrderTypes(ordertypeName: string = '') {
+  static getOrderTypes(ordertypeName: string = ''): OrderTypes {
     const normalized = (ordertypeName || '').trim();
 
     const isDoiDiem =
@@ -45,6 +61,11 @@ export class InvoiceLogicUtils {
       normalized.includes('04. Đổi DV') || normalized.includes('04.Đổi DV');
     const isTachThe =
       normalized.includes('08. Tách thẻ') || normalized.includes('08.Tách thẻ');
+    const isBanTaiKhoan =
+      normalized.includes('07. Bán tài khoản') ||
+      normalized.includes('07.Bán tài khoản');
+    const isSanTmdt =
+      normalized.includes('9. Sàn TMDT') || normalized.includes('9.Sàn TMDT');
     const isDichVu =
       normalized.includes('02. Làm dịch vụ') ||
       isDoiDv ||
@@ -60,6 +81,8 @@ export class InvoiceLogicUtils {
       isDoiDv,
       isTachThe,
       isDichVu,
+      isBanTaiKhoan,
+      isSanTmdt,
     };
   }
 
@@ -69,11 +92,7 @@ export class InvoiceLogicUtils {
   static resolveAccountingAccounts(params: {
     sale: any;
     loyaltyProduct: any;
-    isDoiVo: boolean;
-    isDoiDiem: boolean;
-    isDauTu: boolean;
-    isSinhNhat: boolean;
-    isThuong: boolean;
+    orderTypes: OrderTypes;
     isTangHang: boolean;
     isGiaBanZero: boolean;
     hasMaCtkm: boolean;
@@ -82,16 +101,13 @@ export class InvoiceLogicUtils {
     const {
       sale,
       loyaltyProduct,
-      isDoiVo,
-      isDoiDiem,
-      isDauTu,
-      isSinhNhat,
-      isThuong,
+      orderTypes,
       isTangHang,
       isGiaBanZero,
       hasMaCtkm,
       hasMaCtkmTangHang,
     } = params;
+    const { isDoiVo, isDoiDiem, isDauTu, isSinhNhat, isThuong } = orderTypes;
 
     let tkChietKhau: string | null = null;
     let tkChiPhi: string | null = null;
@@ -166,24 +182,16 @@ export class InvoiceLogicUtils {
    */
   static resolvePromotionCodes(params: {
     sale: any;
-    isDoiDiem: boolean;
-    isDauTu: boolean;
-    isThuong: boolean;
+    orderTypes: OrderTypes;
     isTangHang: boolean;
     maDvcs: string;
     productTypeUpper: string | null;
     promCode: string | null;
   }) {
-    const {
-      sale,
-      isDoiDiem,
-      isDauTu,
-      isThuong,
-      isTangHang,
-      maDvcs,
-      productTypeUpper,
-      promCode,
-    } = params;
+    const { sale, orderTypes, isTangHang, maDvcs, productTypeUpper, promCode } =
+      params;
+    const { isDoiDiem, isDauTu, isThuong, isBanTaiKhoan, isSanTmdt } =
+      orderTypes;
 
     let maCk01 = sale.muaHangGiamGiaDisplay || '';
     let maCtkmTangHang = sale.maCtkmTangHang || '';
@@ -203,11 +211,7 @@ export class InvoiceLogicUtils {
     } else if (isTangHang) {
       if (isDauTu) {
         maCtkmTangHang = 'TT DAU TU';
-      } else if (
-        isThuong ||
-        (sale.ordertypeName || '').includes('07. Bán tài khoản') ||
-        (sale.ordertypeName || '').includes('9. Sàn TMDT')
-      ) {
+      } else if (isThuong || isBanTaiKhoan || isSanTmdt) {
         maCtkmTangHang = promCode || '';
         if (maCtkmTangHang && productTypeUpper) {
           maCtkmTangHang = `${maCtkmTangHang}.${productTypeUpper}`;
@@ -251,5 +255,120 @@ export class InvoiceLogicUtils {
     }
 
     return VoucherUtils.calculateMaCk05FromSale(sale);
+  }
+
+  /**
+   * Tính toán đơn giá và tiền hàng (Source of Truth)
+   */
+  static calculatePrices(params: {
+    sale: any;
+    orderTypes: OrderTypes;
+    allocationRatio: number;
+    qtyFromStock?: number;
+  }) {
+    const { sale, orderTypes, allocationRatio, qtyFromStock } = params;
+    const { isDoiDiem, isThuong: isNormalOrder } = orderTypes;
+
+    const linetotal = Number(sale.linetotal || 0);
+    const revenue = Number(sale.revenue || 0);
+    const saleTienHang = Number(sale.tienHang || 0);
+    const saleQty = Number(sale.qty || 0);
+
+    let tienHang = saleTienHang || linetotal || revenue || 0;
+    let giaBan = Number(sale.giaBan || 0);
+
+    if (isDoiDiem) {
+      giaBan = 0;
+      tienHang = 0;
+    } else if (giaBan === 0 && tienHang > 0 && saleQty !== 0) {
+      giaBan = tienHang / Math.abs(saleQty);
+    }
+
+    let tienHangGoc = isDoiDiem ? 0 : tienHang;
+    if (!isDoiDiem && isNormalOrder && allocationRatio !== 1) {
+      // Nếu có qtyFromStock (đã lấy từ ST), dùng nó. Nếu không, tính dựa trên ratio
+      const qty =
+        qtyFromStock ??
+        (saleQty !== 0 ? Math.abs(saleQty * allocationRatio) : 0);
+      if (qty > 0 && giaBan > 0) {
+        tienHangGoc = qty * giaBan;
+      } else {
+        tienHangGoc = tienHang * allocationRatio;
+      }
+    }
+
+    return { giaBan, tienHang, tienHangGoc };
+  }
+
+  /**
+   * Xác định mã lô hoặc số serial (Source of Truth)
+   */
+  static resolveBatchSerial(params: {
+    batchSerialFromST: string | null;
+    trackBatch: boolean;
+    trackSerial: boolean;
+  }) {
+    const { batchSerialFromST, trackBatch, trackSerial } = params;
+    const serialValue = batchSerialFromST || '';
+
+    // Logic xác định dùng maLo hay soSerial (Priority: Batch > Serial)
+    const useBatch = trackBatch && !trackSerial;
+    // Nếu cả hai đều true hoặc cả hai đều false, check logic trong SalesUtils.shouldUseBatch
+    // (Thường là trackBatch: true, trackSerial: false => ma_lo)
+
+    // Re-use logic from SalesUtils.shouldUseBatch for consistency
+    const isActuallyBatch = trackBatch === true && trackSerial !== true;
+
+    return {
+      maLo: isActuallyBatch ? serialValue : null,
+      soSerial: isActuallyBatch ? null : serialValue,
+    };
+  }
+
+  /**
+   * Xác định loại giao dịch (loai_gd) (Source of Truth)
+   */
+  static resolveLoaiGd(params: { sale: any; orderTypes: OrderTypes }): string {
+    const { sale, orderTypes } = params;
+    const { isDoiDv, isTachThe, isDichVu, isBanTaiKhoan, isSanTmdt, isThuong, isDauTu, isDoiDiem, isDoiVo, isSinhNhat } = orderTypes;
+    const qty = Number(sale.qty || 0);
+
+    if (isDoiDv || isTachThe) {
+      return qty < 0 ? '11' : '12';
+    }
+
+    if (isThuong) {
+      if (sale.productType === 'I') {
+        return '01'
+      } else if (sale.productType === 'S' && sale.qty > 0) {
+        return '02'
+      }
+    }
+
+    if (isDichVu) {
+      if (sale.productType === 'S' && sale.qty > 0) {
+        return '01'
+      }
+    }
+
+
+    return '01';
+  }
+
+  /**
+   * Xác định mã kho (Source of Truth)
+   */
+  static resolveMaKho(params: {
+    maKhoFromST: string | null;
+    maKhoFromSale: string | null;
+    maBp: string;
+    orderTypes: OrderTypes;
+  }): string {
+    const { maKhoFromST, maKhoFromSale, maBp, orderTypes } = params;
+    const { isTachThe } = orderTypes;
+    // Với đơn Tách thẻ: luôn là B + mã bộ phận
+    if (isTachThe) return 'B' + maBp;
+    // Ưu tiên kho từ Stock Transfer, sau đó đến kho từ Sale
+    return maKhoFromST || maKhoFromSale || '';
   }
 }
