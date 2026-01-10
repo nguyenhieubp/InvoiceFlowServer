@@ -224,14 +224,40 @@ export async function formatSaleForFrontend(
     allocationRatio = qtyFromST / saleQty;
   }
 
-  const { giaBan, tienHang, tienHangGoc } = InvoiceLogicUtils.calculatePrices({
+  let { giaBan, tienHang, tienHangGoc } = InvoiceLogicUtils.calculatePrices({
     sale,
     orderTypes,
     allocationRatio,
     qtyFromStock: qtyFromST ?? undefined,
   });
 
-  // 3. Serial / Batch resolution
+  // FIX V7: Sync Pricing Logic with Backend (Source of Truth)
+  // Re-calculate tienHangGoc and giaBan for non-normal orders
+  if (!isDoiDiem && !isThuong) {
+    // tien_hang phải là giá gốc (trước chiết khấu)
+    // Ưu tiên: mn_linetotal > linetotal > tienHang > (revenue + tongChietKhau)
+    // Calculate approximate total discount for fallback
+    const tongChietKhau =
+      Number(sale.other_discamt || 0) +
+      Number(sale.chietKhauCkTheoChinhSach || 0) +
+      Number(sale.chietKhauMuaHangCkVip || 0) +
+      Number(sale.paid_by_voucher_ecode_ecoin_bp || 0);
+
+    let calcTienHangGoc = Number(
+      (sale as any).mn_linetotal || sale.linetotal || sale.tienHang || 0,
+    );
+    if (calcTienHangGoc === 0) {
+      calcTienHangGoc = tienHang + tongChietKhau;
+    }
+
+    if (giaBan === 0 && saleQty > 0 && calcTienHangGoc > 0) {
+      giaBan = calcTienHangGoc / saleQty;
+    }
+  }
+
+  // FIX V7: Re-evaluate isTangHang strict logic
+  let isTangHang = giaBan === 0 && tienHang === 0;
+  if (isDichVu) isTangHang = false;
   const materialCode = saleMaterialCode || sale.itemCode;
   const loyaltyProductForTracking =
     await loyaltyService.checkProduct(materialCode);
@@ -271,7 +297,7 @@ export async function formatSaleForFrontend(
     : null;
 
   const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht || '';
-  const isTangHang = calculatedFields.isTangHang;
+  // isTangHang is already calculated above (V7 Fix)
 
   const { maCk01, maCtkmTangHang } = InvoiceLogicUtils.resolvePromotionCodes({
     sale,

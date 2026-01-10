@@ -5637,7 +5637,13 @@ export class SalesService {
       sale.department?.ma_dvcs || sale.department?.ma_dvcs_ht || '',
       '',
     );
-    const productTypeUpper = (sale.productType || '')?.toUpperCase().trim();
+    const productType =
+      sale.productType ||
+      sale.producttype ||
+      sale.product?.productType ||
+      sale.product?.producttype ||
+      '';
+    const productTypeUpper = String(productType).toUpperCase().trim();
 
     return InvoiceLogicUtils.resolvePromotionCodes({
       sale,
@@ -5645,7 +5651,7 @@ export class SalesService {
       isTangHang,
       maDvcs,
       productTypeUpper,
-      promCode,
+      promCode: sale.promCode || sale.prom_code, // Pass RAW code to let Utils handle PRMN logic consistently
     });
   }
 

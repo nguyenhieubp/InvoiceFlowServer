@@ -183,8 +183,30 @@ export class InvoiceLogicUtils {
     const { isDoiDiem, isDauTu, isThuong, isBanTaiKhoan, isSanTmdt } =
       orderTypes;
 
+    // Safety: Re-derive productTypeUpper if missing (Robust Check V9)
+    let effectiveProductType = productTypeUpper;
+    if (!effectiveProductType) {
+      const pt =
+        sale.productType ||
+        sale.producttype ||
+        sale.product?.productType ||
+        sale.product?.producttype ||
+        '';
+      effectiveProductType = String(pt).toUpperCase().trim();
+    }
+
     let maCk01 = sale.muaHangGiamGiaDisplay || '';
     let maCtkmTangHang = sale.maCtkmTangHang || '';
+
+    // FIX V8.1: Handle PRMN vs Raw RMN consistent logic
+    // 1. Transform PRMN -> RMN (and flag it to skip suffix)
+    let code = (promCode || '').trim();
+    let isPRMNDerived = false;
+
+    if (code.toUpperCase().startsWith('PRMN')) {
+      code = code.replace(/^PRMN/i, 'RMN');
+      isPRMNDerived = true;
+    }
 
     if (isDoiDiem) {
       const mapMaDvcsToKmDiem: Record<string, string> = {
@@ -202,32 +224,30 @@ export class InvoiceLogicUtils {
       if (isDauTu) {
         maCtkmTangHang = 'TT DAU TU';
       } else if (isThuong || isBanTaiKhoan || isSanTmdt) {
-        // Logic cũ: maCtkmTangHang = promCode (đã xử lý ở service)
-        maCtkmTangHang = promCode || '';
-        if (
-          maCtkmTangHang &&
-          productTypeUpper &&
-          !maCtkmTangHang.endsWith(`.${productTypeUpper}`) &&
-          !maCtkmTangHang.startsWith('RMN')
-        ) {
-          // Giữ backup logic nếu promCode chưa có suffix (dù service đã xử lý)
-          // Nhưng với RMN thì không thêm
-          maCtkmTangHang = `${maCtkmTangHang}.${productTypeUpper}`;
-        }
+        // 2. Gift Case: Assign + Strip Suffixes
+        maCtkmTangHang = code;
+        maCtkmTangHang = maCtkmTangHang.replace(/\.(I|S|V)$/, '');
       }
     }
 
-    if (!isDoiDiem && !isTangHang && !maCk01) {
-      // Logic cũ: maCk01 = promCode
-      maCk01 = SalesUtils.getPromotionDisplayCode(promCode) || promCode || '';
-      // Double check suffix logic just in case, matching old logic structure
-      if (
-        maCk01 &&
-        productTypeUpper &&
-        !maCk01.endsWith(`.${productTypeUpper}`) &&
-        !maCk01.startsWith('RMN')
-      ) {
-        maCk01 = `${maCk01}.${productTypeUpper}`;
+    if (!isDoiDiem && !isTangHang) {
+      // 3. Standard Case: Assign + Add Suffix if missing
+      if (!maCk01) {
+        maCk01 = SalesUtils.getPromotionDisplayCode(code) || code || '';
+      }
+
+      // FIX V8.1: Add suffix if NOT PRMN-derived.
+      // E.g: Input 'RMN...' -> isPRMNDerived=false -> Adds Suffix.
+      //      Input 'PRMN...' -> isPRMNDerived=true -> Skips Suffix.
+      if (maCk01 && effectiveProductType) {
+        let suffix = '';
+        if (effectiveProductType === 'I') suffix = '.I';
+        else if (effectiveProductType === 'S') suffix = '.S';
+        else if (effectiveProductType === 'V') suffix = '.V';
+
+        if (suffix && !maCk01.endsWith(suffix)) {
+          maCk01 += suffix;
+        }
       }
     }
 
