@@ -11,6 +11,7 @@ import { FastApiClientService } from '../../services/fast-api-client.service';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { LoyaltyService } from '../../services/loyalty.service';
 import { InvoiceValidationService } from '../../services/invoice-validation.service';
+import { N8nService } from '../../services/n8n.service';
 import { Invoice } from '../../entities/invoice.entity';
 import { InvoiceItem } from '../../entities/invoice-item.entity';
 import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
@@ -30,7 +31,7 @@ import { SyncModule } from '../sync/sync.module';
     forwardRef(() => SyncModule),
   ],
   controllers: [SalesController],
-  providers: [SalesService, ZappyApiService, FastApiClientService, FastApiInvoiceFlowService, LoyaltyService, InvoiceValidationService],
+  providers: [SalesService, ZappyApiService, FastApiClientService, FastApiInvoiceFlowService, LoyaltyService, InvoiceValidationService, N8nService],
   exports: [SalesService, FastApiInvoiceFlowService],
 })
 export class SalesModule {}

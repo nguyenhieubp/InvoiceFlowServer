@@ -1,9 +1,16 @@
-import { Injectable, Logger, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { FastApiClientService } from './fast-api-client.service';
 import { CategoriesService } from '../modules/categories/categories.service';
 import { SyncService } from '../modules/sync/sync.service';
 import { LoyaltyService } from './loyalty.service';
 import { FastApiPayloadHelper } from './fast-api-payload.helper';
+import { formatDateYYYYMMDD } from '../utils/convert.utils';
 
 /**
  * Service quản lý tạo invoice trong Fast API
@@ -19,8 +26,7 @@ export class FastApiInvoiceFlowService {
     @Inject(forwardRef(() => SyncService))
     private readonly syncService: SyncService,
     private readonly loyaltyService: LoyaltyService,
-  ) { }
-
+  ) {}
 
   /**
    * Tạo/cập nhật khách hàng trong Fast API
@@ -37,31 +43,43 @@ export class FastApiInvoiceFlowService {
     dien_thoai?: string;
   }): Promise<any> {
     try {
-      const result = await this.fastApiService.createOrUpdateCustomer(customerData);
+      const result =
+        await this.fastApiService.createOrUpdateCustomer(customerData);
 
       // Validate response: status = 1 mới là success
       if (Array.isArray(result) && result.length > 0) {
         const firstItem = result[0];
         if (firstItem.status !== 1) {
-          const errorMessage = firstItem.message || 'Tạo/cập nhật customer thất bại';
-          this.logger.error(`[Flow] Customer API trả về status = ${firstItem.status}: ${errorMessage}`);
+          const errorMessage =
+            firstItem.message || 'Tạo/cập nhật customer thất bại';
+          this.logger.error(
+            `[Flow] Customer API trả về status = ${firstItem.status}: ${errorMessage}`,
+          );
           throw new BadRequestException(errorMessage);
         }
-      } else if (result && typeof result === 'object' && result.status !== undefined) {
+      } else if (
+        result &&
+        typeof result === 'object' &&
+        result.status !== undefined
+      ) {
         if (result.status !== 1) {
-          const errorMessage = result.message || 'Tạo/cập nhật customer thất bại';
-          this.logger.error(`[Flow] Customer API trả về status = ${result.status}: ${errorMessage}`);
+          const errorMessage =
+            result.message || 'Tạo/cập nhật customer thất bại';
+          this.logger.error(
+            `[Flow] Customer API trả về status = ${result.status}: ${errorMessage}`,
+          );
           throw new BadRequestException(errorMessage);
         }
       }
       return result;
     } catch (error: any) {
-      this.logger.warn(`[Flow] Customer creation failed but continuing: ${error?.message || error}`);
+      this.logger.warn(
+        `[Flow] Customer creation failed but continuing: ${error?.message || error}`,
+      );
       // Không throw error để không chặn luồng tạo invoice
       return null;
     }
   }
-
 
   /**
    * Tạo đơn hàng bán (salesOrder) trong Fast API
@@ -71,18 +89,21 @@ export class FastApiInvoiceFlowService {
    * @param action - Action: 0 (mặc định) cho đơn hàng bán, 1 cho đơn hàng trả lại
    */
   async createSalesOrder(orderData: any, action: number = 0): Promise<any> {
-    this.logger.log(`[Flow] Creating sales order ${orderData.so_ct} with action=${action}...`);
     try {
-      const cleanOrderData = FastApiPayloadHelper.buildCleanPayload(orderData, action);
-      const finalPayload = FastApiPayloadHelper.removeEmptyFields(cleanOrderData);
+      const cleanOrderData = FastApiPayloadHelper.buildCleanPayload(
+        orderData,
+        action,
+      );
+      const finalPayload =
+        FastApiPayloadHelper.removeEmptyFields(cleanOrderData);
       const dataPromotion = finalPayload.detail.filter(
-        (item) => item.ma_ck01 || item.ma_ctkm_th
+        (item) => item.ma_ck01 || item.ma_ctkm_th,
       );
       const uniquePromotions = new Map<string, any>();
 
       for (const item of dataPromotion) {
         if (!uniquePromotions.has(item.ma_ck01 || item.ma_ctkm_th)) {
-          uniquePromotions.set(item.ma_ck01 || item.ma_ctkm_th, item)
+          uniquePromotions.set(item.ma_ck01 || item.ma_ctkm_th, item);
         }
       }
 
@@ -110,25 +131,21 @@ export class FastApiInvoiceFlowService {
         const firstItem = result[0];
         if (firstItem.status !== 1) {
           const errorMessage = firstItem.message || 'Tạo sales order thất bại';
-          this.logger.error(`[Flow] Sales Order API trả về status = ${firstItem.status}: ${errorMessage}`);
           throw new BadRequestException(errorMessage);
         }
-      } else if (result && typeof result === 'object' && result.status !== undefined) {
+      } else if (
+        result &&
+        typeof result === 'object' &&
+        result.status !== undefined
+      ) {
         if (result.status !== 1) {
           const errorMessage = result.message || 'Tạo sales order thất bại';
-          this.logger.error(`[Flow] Sales Order API trả về status = ${result.status}: ${errorMessage}`);
           throw new BadRequestException(errorMessage);
         }
       }
 
-      this.logger.log(`[Flow] Sales order ${orderData.so_ct} created successfully`);
       return result;
     } catch (error: any) {
-      this.logger.error(`[Flow] Failed to create sales order ${orderData.so_ct}: ${error?.message || error}`);
-      if (error?.response) {
-        this.logger.error(`[Flow] Sales order error response status: ${error.response.status}`);
-        this.logger.error(`[Flow] Sales order error response data: ${JSON.stringify(error.response.data)}`);
-      }
       throw error;
     }
   }
@@ -137,7 +154,9 @@ export class FastApiInvoiceFlowService {
     try {
       return await this.fastApiService.callPromotion(promotionData);
     } catch (error: any) {
-      this.logger.error(`[Flow] Failed to call promotion ${JSON.stringify(promotionData)}: ${error?.message || error}`);
+      this.logger.error(
+        `[Flow] Failed to call promotion ${JSON.stringify(promotionData)}: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -152,7 +171,9 @@ export class FastApiInvoiceFlowService {
       // FIX: Validate mã CTKM với Loyalty API trước khi gửi lên Fast API
       // Helper function: cắt phần sau dấu "-" để lấy mã CTKM để check (ví dụ: "PRMN.020228-R510SOCOM" → "PRMN.020228")
       // Và chuyển đổi các mã VC label sang format có khoảng trắng (VCHB → VC HB, VCKM → VC KM, VCDV → VC DV)
-      const getPromotionCodeToCheck = (promCode: string | null | undefined): string | null => {
+      const getPromotionCodeToCheck = (
+        promCode: string | null | undefined,
+      ): string | null => {
         if (!promCode) return null;
         const trimmed = promCode.trim();
         if (trimmed === '') return null;
@@ -179,7 +200,11 @@ export class FastApiInvoiceFlowService {
       if (invoiceData.detail && Array.isArray(invoiceData.detail)) {
         for (const item of invoiceData.detail) {
           // Collect ma_ctkm_th (mã CTKM tặng hàng) - không áp dụng getPromotionCodeToCheck
-          if (item.ma_ctkm_th && item.ma_ctkm_th.trim() !== '' && item.ma_ctkm_th !== 'TT DAU TU') {
+          if (
+            item.ma_ctkm_th &&
+            item.ma_ctkm_th.trim() !== '' &&
+            item.ma_ctkm_th !== 'TT DAU TU'
+          ) {
             const codeToCheck = item.ma_ctkm_th.trim();
             if (codeToCheck) {
               promotionCodes.add(codeToCheck);
@@ -195,7 +220,8 @@ export class FastApiInvoiceFlowService {
             const maCk = item[`ma_ck${i.toString().padStart(2, '0')}`];
             if (maCk && maCk.trim() !== '') {
               // Chỉ áp dụng getPromotionCodeToCheck cho ma_ck01
-              const codeToCheck = i === 1 ? getPromotionCodeToCheck(maCk) : maCk.trim();
+              const codeToCheck =
+                i === 1 ? getPromotionCodeToCheck(maCk) : maCk.trim();
               if (codeToCheck) {
                 promotionCodes.add(codeToCheck);
               }
@@ -214,7 +240,10 @@ export class FastApiInvoiceFlowService {
           tk_ck: sale.tk_chiet_khau || '',
         };
         if (sale.ma_ck01 || sale.ma_ctkm_th) {
-          const resultPromotion = await this.categoriesService.createPromotionFromLoyaltyAPI(promotionData);
+          const resultPromotion =
+            await this.categoriesService.createPromotionFromLoyaltyAPI(
+              promotionData,
+            );
           if (resultPromotion.status !== 1) {
             throw new BadRequestException(
               `Tạo promotion thất bại: ${sale.ma_ck01 || sale.ma_ctkm_th}`,
@@ -231,8 +260,13 @@ export class FastApiInvoiceFlowService {
       }
 
       // Build clean payload (giống salesOrder nhưng action luôn = 0)
-      const cleanInvoiceData = FastApiPayloadHelper.buildCleanPayload(invoiceData, 0, 'saleInvoice');
-      const finalPayload = FastApiPayloadHelper.removeEmptyFields(cleanInvoiceData);
+      const cleanInvoiceData = FastApiPayloadHelper.buildCleanPayload(
+        invoiceData,
+        0,
+        'saleInvoice',
+      );
+      const finalPayload =
+        FastApiPayloadHelper.removeEmptyFields(cleanInvoiceData);
 
       const result = await this.fastApiService.submitSalesInvoice(finalPayload);
 
@@ -240,22 +274,35 @@ export class FastApiInvoiceFlowService {
       if (Array.isArray(result) && result.length > 0) {
         const firstItem = result[0];
         if (firstItem.status !== 1) {
-          const errorMessage = firstItem.message || 'Tạo sales invoice thất bại';
-          this.logger.error(`[Flow] Sales Invoice API trả về status = ${firstItem.status}: ${errorMessage}`);
+          const errorMessage =
+            firstItem.message || 'Tạo sales invoice thất bại';
+          this.logger.error(
+            `[Flow] Sales Invoice API trả về status = ${firstItem.status}: ${errorMessage}`,
+          );
           throw new BadRequestException(errorMessage);
         }
-      } else if (result && typeof result === 'object' && result.status !== undefined) {
+      } else if (
+        result &&
+        typeof result === 'object' &&
+        result.status !== undefined
+      ) {
         if (result.status !== 1) {
           const errorMessage = result.message || 'Tạo sales invoice thất bại';
-          this.logger.error(`[Flow] Sales Invoice API trả về status = ${result.status}: ${errorMessage}`);
+          this.logger.error(
+            `[Flow] Sales Invoice API trả về status = ${result.status}: ${errorMessage}`,
+          );
           throw new BadRequestException(errorMessage);
         }
       }
 
-      this.logger.log(`[Flow] Sales invoice ${invoiceData.so_ct} created successfully`);
+      this.logger.log(
+        `[Flow] Sales invoice ${invoiceData.so_ct} created successfully`,
+      );
       return result;
     } catch (error: any) {
-      this.logger.error(`[Flow] Failed to create sales invoice ${invoiceData.so_ct}: ${error?.message || error}`);
+      this.logger.error(
+        `[Flow] Failed to create sales invoice ${invoiceData.so_ct}: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -267,9 +314,14 @@ export class FastApiInvoiceFlowService {
    * Sử dụng cho SALE_RETURN có stock transfer
    */
   async createSalesReturn(salesReturnData: any): Promise<any> {
-    this.logger.log(`[Flow] Creating sales return ${salesReturnData.so_ct || 'N/A'}...`);
+    this.logger.log(
+      `[Flow] Creating sales return ${salesReturnData.so_ct || 'N/A'}...`,
+    );
     try {
-      const finalPayload = FastApiPayloadHelper.removeEmptyFields(salesReturnData, false);
+      const finalPayload = FastApiPayloadHelper.removeEmptyFields(
+        salesReturnData,
+        false,
+      );
 
       const result = await this.fastApiService.submitSalesReturn(finalPayload);
 
@@ -278,24 +330,40 @@ export class FastApiInvoiceFlowService {
         const firstItem = result[0];
         if (firstItem.status !== 1) {
           const errorMessage = firstItem.message || 'Tạo sales return thất bại';
-          this.logger.error(`[Flow] Sales Return API trả về status = ${firstItem.status}: ${errorMessage}`);
+          this.logger.error(
+            `[Flow] Sales Return API trả về status = ${firstItem.status}: ${errorMessage}`,
+          );
           throw new BadRequestException(errorMessage);
         }
-      } else if (result && typeof result === 'object' && result.status !== undefined) {
+      } else if (
+        result &&
+        typeof result === 'object' &&
+        result.status !== undefined
+      ) {
         if (result.status !== 1) {
           const errorMessage = result.message || 'Tạo sales return thất bại';
-          this.logger.error(`[Flow] Sales Return API trả về status = ${result.status}: ${errorMessage}`);
+          this.logger.error(
+            `[Flow] Sales Return API trả về status = ${result.status}: ${errorMessage}`,
+          );
           throw new BadRequestException(errorMessage);
         }
       }
 
-      this.logger.log(`[Flow] Sales return ${salesReturnData.so_ct || 'N/A'} created successfully`);
+      this.logger.log(
+        `[Flow] Sales return ${salesReturnData.so_ct || 'N/A'} created successfully`,
+      );
       return result;
     } catch (error: any) {
-      this.logger.error(`[Flow] Failed to create sales return ${salesReturnData.so_ct || 'N/A'}: ${error?.message || error}`);
+      this.logger.error(
+        `[Flow] Failed to create sales return ${salesReturnData.so_ct || 'N/A'}: ${error?.message || error}`,
+      );
       if (error?.response) {
-        this.logger.error(`[Flow] Sales return error response status: ${error.response.status}`);
-        this.logger.error(`[Flow] Sales return error response data: ${JSON.stringify(error.response.data)}`);
+        this.logger.error(
+          `[Flow] Sales return error response status: ${error.response.status}`,
+        );
+        this.logger.error(
+          `[Flow] Sales return error response data: ${JSON.stringify(error.response.data)}`,
+        );
       }
       throw error;
     }
@@ -307,9 +375,14 @@ export class FastApiInvoiceFlowService {
    * FAST 2.10
    */
   async createGxtInvoice(gxtInvoiceData: any): Promise<any> {
-    this.logger.log(`[Flow] Creating gxt invoice ${gxtInvoiceData.so_ct || 'N/A'}...`);
+    this.logger.log(
+      `[Flow] Creating gxt invoice ${gxtInvoiceData.so_ct || 'N/A'}...`,
+    );
     try {
-      const finalPayload = FastApiPayloadHelper.removeEmptyFields(gxtInvoiceData, false);
+      const finalPayload = FastApiPayloadHelper.removeEmptyFields(
+        gxtInvoiceData,
+        false,
+      );
 
       const result = await this.fastApiService.submitGxtInvoice(finalPayload);
 
@@ -318,24 +391,40 @@ export class FastApiInvoiceFlowService {
         const firstItem = result[0];
         if (firstItem.status !== 1) {
           const errorMessage = firstItem.message || 'Tạo gxt invoice thất bại';
-          this.logger.error(`[Flow] GxtInvoice API trả về status = ${firstItem.status}: ${errorMessage}`);
+          this.logger.error(
+            `[Flow] GxtInvoice API trả về status = ${firstItem.status}: ${errorMessage}`,
+          );
           throw new BadRequestException(errorMessage);
         }
-      } else if (result && typeof result === 'object' && result.status !== undefined) {
+      } else if (
+        result &&
+        typeof result === 'object' &&
+        result.status !== undefined
+      ) {
         if (result.status !== 1) {
           const errorMessage = result.message || 'Tạo gxt invoice thất bại';
-          this.logger.error(`[Flow] GxtInvoice API trả về status = ${result.status}: ${errorMessage}`);
+          this.logger.error(
+            `[Flow] GxtInvoice API trả về status = ${result.status}: ${errorMessage}`,
+          );
           throw new BadRequestException(errorMessage);
         }
       }
 
-      this.logger.log(`[Flow] GxtInvoice ${gxtInvoiceData.so_ct || 'N/A'} created successfully`);
+      this.logger.log(
+        `[Flow] GxtInvoice ${gxtInvoiceData.so_ct || 'N/A'} created successfully`,
+      );
       return result;
     } catch (error: any) {
-      this.logger.error(`[Flow] Failed to create gxt invoice ${gxtInvoiceData.so_ct || 'N/A'}: ${error?.message || error}`);
+      this.logger.error(
+        `[Flow] Failed to create gxt invoice ${gxtInvoiceData.so_ct || 'N/A'}: ${error?.message || error}`,
+      );
       if (error?.response) {
-        this.logger.error(`[Flow] GxtInvoice error response status: ${error.response.status}`);
-        this.logger.error(`[Flow] GxtInvoice error response data: ${JSON.stringify(error.response.data)}`);
+        this.logger.error(
+          `[Flow] GxtInvoice error response status: ${error.response.status}`,
+        );
+        this.logger.error(
+          `[Flow] GxtInvoice error response data: ${JSON.stringify(error.response.data)}`,
+        );
       }
       throw error;
     }
@@ -356,7 +445,9 @@ export class FastApiInvoiceFlowService {
     }>;
     [key: string]: any;
   }): Promise<any> {
-    this.logger.log(`[Flow] Starting invoice creation for order ${invoiceData.so_ct || 'N/A'}`);
+    this.logger.log(
+      `[Flow] Starting invoice creation for order ${invoiceData.so_ct || 'N/A'}`,
+    );
 
     try {
       // Step 1: Tạo/cập nhật Customer
@@ -365,10 +456,13 @@ export class FastApiInvoiceFlowService {
           ma_kh: invoiceData.ma_kh,
           ten_kh: invoiceData.ten_kh || invoiceData.customer?.name || '',
           dia_chi: invoiceData.customer?.address || undefined,
-          dien_thoai: invoiceData.customer?.mobile || invoiceData.customer?.phone || undefined,
+          dien_thoai:
+            invoiceData.customer?.mobile ||
+            invoiceData.customer?.phone ||
+            undefined,
           so_cccd: invoiceData.customer?.idnumber || undefined,
           ngay_sinh: invoiceData.customer?.birthday
-            ? FastApiPayloadHelper.formatDateYYYYMMDD(invoiceData.customer.birthday)
+            ? formatDateYYYYMMDD(invoiceData.customer.birthday)
             : undefined,
           gioi_tinh: invoiceData.customer?.sexual || undefined,
         });
@@ -386,14 +480,17 @@ export class FastApiInvoiceFlowService {
         throw new Error('Failed to create sales invoice');
       }
 
-      this.logger.log(`[Flow] Invoice creation completed successfully for order ${invoiceData.so_ct || 'N/A'}`);
+      this.logger.log(
+        `[Flow] Invoice creation completed successfully for order ${invoiceData.so_ct || 'N/A'}`,
+      );
       return resultSalesInvoice;
     } catch (error: any) {
-      this.logger.error(`[Flow] Invoice creation failed: ${error?.message || error}`);
+      this.logger.error(
+        `[Flow] Invoice creation failed: ${error?.message || error}`,
+      );
       throw error;
     }
   }
-
 
   /**
    * THU TIỀN - XỬ LÝ CASHIO
@@ -404,7 +501,11 @@ export class FastApiInvoiceFlowService {
    * @param orderData - Dữ liệu đơn hàng
    * @param invoiceData - Dữ liệu invoice đã build
    */
-  async processCashioPayment(docCode: string, orderData: any, invoiceData: any): Promise<{
+  async processCashioPayment(
+    docCode: string,
+    orderData: any,
+    invoiceData: any,
+  ): Promise<{
     cashReceiptResults?: any[];
     creditAdviceResults?: any[];
   }> {
@@ -416,8 +517,14 @@ export class FastApiInvoiceFlowService {
         soCode: docCode,
       });
 
-      if (!cashioResult.success || !cashioResult.data || cashioResult.data.length === 0) {
-        this.logger.debug(`[Cashio] Không tìm thấy cashio data cho đơn hàng ${docCode}`);
+      if (
+        !cashioResult.success ||
+        !cashioResult.data ||
+        cashioResult.data.length === 0
+      ) {
+        this.logger.debug(
+          `[Cashio] Không tìm thấy cashio data cho đơn hàng ${docCode}`,
+        );
         return {};
       }
 
@@ -431,23 +538,44 @@ export class FastApiInvoiceFlowService {
         // Trường hợp 1: fop_syscode = "CASH" và total_in > 0 → Gọi cashReceipt
         if (cashioData.fop_syscode === 'CASH' && totalIn > 0) {
           try {
-            this.logger.log(`[Cashio] Phát hiện CASH payment cho đơn hàng ${docCode} (${cashioData.code}), gọi cashReceipt API`);
+            this.logger.log(
+              `[Cashio] Phát hiện CASH payment cho đơn hàng ${docCode} (${cashioData.code}), gọi cashReceipt API`,
+            );
 
-            const cashReceiptPayload = FastApiPayloadHelper.buildCashReceiptPayload(cashioData, orderData, invoiceData);
-            const cashReceiptResult = await this.fastApiService.submitCashReceipt(cashReceiptPayload);
+            const cashReceiptPayload =
+              FastApiPayloadHelper.buildCashReceiptPayload(
+                cashioData,
+                orderData,
+                invoiceData,
+              );
+            const cashReceiptResult =
+              await this.fastApiService.submitCashReceipt(cashReceiptPayload);
 
             // Validate response: status = 1 mới là success
-            if (Array.isArray(cashReceiptResult) && cashReceiptResult.length > 0) {
+            if (
+              Array.isArray(cashReceiptResult) &&
+              cashReceiptResult.length > 0
+            ) {
               const firstItem = cashReceiptResult[0];
               if (firstItem.status !== 1) {
-                const errorMessage = firstItem.message || 'Tạo cash receipt thất bại';
-                this.logger.error(`[Cashio] Cash Receipt API trả về status = ${firstItem.status}: ${errorMessage}`);
+                const errorMessage =
+                  firstItem.message || 'Tạo cash receipt thất bại';
+                this.logger.error(
+                  `[Cashio] Cash Receipt API trả về status = ${firstItem.status}: ${errorMessage}`,
+                );
                 throw new BadRequestException(errorMessage);
               }
-            } else if (cashReceiptResult && typeof cashReceiptResult === 'object' && cashReceiptResult.status !== undefined) {
+            } else if (
+              cashReceiptResult &&
+              typeof cashReceiptResult === 'object' &&
+              cashReceiptResult.status !== undefined
+            ) {
               if (cashReceiptResult.status !== 1) {
-                const errorMessage = cashReceiptResult.message || 'Tạo cash receipt thất bại';
-                this.logger.error(`[Cashio] Cash Receipt API trả về status = ${cashReceiptResult.status}: ${errorMessage}`);
+                const errorMessage =
+                  cashReceiptResult.message || 'Tạo cash receipt thất bại';
+                this.logger.error(
+                  `[Cashio] Cash Receipt API trả về status = ${cashReceiptResult.status}: ${errorMessage}`,
+                );
                 throw new BadRequestException(errorMessage);
               }
             }
@@ -457,7 +585,9 @@ export class FastApiInvoiceFlowService {
               result: cashReceiptResult,
             });
           } catch (error: any) {
-            this.logger.warn(`[Cashio] Lỗi khi tạo cashReceipt cho ${cashioData.code}: ${error?.message || error}`);
+            this.logger.warn(
+              `[Cashio] Lỗi khi tạo cashReceipt cho ${cashioData.code}: ${error?.message || error}`,
+            );
           }
           continue;
         }
@@ -468,7 +598,10 @@ export class FastApiInvoiceFlowService {
             continue;
           }
           // Lấy payment method theo code
-          const paymentMethod = await this.categoriesService.findPaymentMethodByCode(cashioData.fop_syscode);
+          const paymentMethod =
+            await this.categoriesService.findPaymentMethodByCode(
+              cashioData.fop_syscode,
+            );
 
           // Kiểm tra payment method có tồn tại không
           if (!paymentMethod) {
@@ -487,37 +620,71 @@ export class FastApiInvoiceFlowService {
           // Chỉ xử lý nếu documentType = "Giấy báo có"
           if (paymentMethod.documentType === 'Giấy báo có') {
             try {
-              const creditAdvicePayload = FastApiPayloadHelper.buildCreditAdvicePayload(cashioData, orderData, invoiceData, paymentMethod);
-              const creditAdviceResult = await this.fastApiService.submitCreditAdvice(creditAdvicePayload);
+              const creditAdvicePayload =
+                FastApiPayloadHelper.buildCreditAdvicePayload(
+                  cashioData,
+                  orderData,
+                  invoiceData,
+                  paymentMethod,
+                );
+              const creditAdviceResult =
+                await this.fastApiService.submitCreditAdvice(
+                  creditAdvicePayload,
+                );
 
               // Validate response: status = 1 mới là success
-              if (Array.isArray(creditAdviceResult) && creditAdviceResult.length > 0) {
+              if (
+                Array.isArray(creditAdviceResult) &&
+                creditAdviceResult.length > 0
+              ) {
                 const firstItem = creditAdviceResult[0];
                 if (firstItem.status !== 1) {
-                  const apiMessage = firstItem.message || 'Tạo credit advice thất bại';
+                  const apiMessage =
+                    firstItem.message || 'Tạo credit advice thất bại';
                   // Format message để bao gồm tên hình thức thanh toán
                   let errorMessage = apiMessage;
-                  const paymentMethodCode = paymentMethod?.code || cashioData.fop_syscode || 'thanh toán';
-                  if (apiMessage.includes('Hình thức thanh toán chưa nhập') || apiMessage.includes('không hợp lệ')) {
+                  const paymentMethodCode =
+                    paymentMethod?.code ||
+                    cashioData.fop_syscode ||
+                    'thanh toán';
+                  if (
+                    apiMessage.includes('Hình thức thanh toán chưa nhập') ||
+                    apiMessage.includes('không hợp lệ')
+                  ) {
                     errorMessage = `Hình thức ${paymentMethodCode} không hợp lệ hoặc chưa nhập`;
                   } else if (apiMessage === 'Tạo credit advice thất bại') {
                     errorMessage = `Hình thức ${paymentMethodCode} không hợp lệ hoặc chưa nhập`;
                   }
-                  this.logger.error(`[Cashio] Credit Advice API trả về status = ${firstItem.status}: ${errorMessage}`);
+                  this.logger.error(
+                    `[Cashio] Credit Advice API trả về status = ${firstItem.status}: ${errorMessage}`,
+                  );
                   throw new BadRequestException(errorMessage);
                 }
-              } else if (creditAdviceResult && typeof creditAdviceResult === 'object' && creditAdviceResult.status !== undefined) {
+              } else if (
+                creditAdviceResult &&
+                typeof creditAdviceResult === 'object' &&
+                creditAdviceResult.status !== undefined
+              ) {
                 if (creditAdviceResult.status !== 1) {
-                  const apiMessage = creditAdviceResult.message || 'Tạo credit advice thất bại';
+                  const apiMessage =
+                    creditAdviceResult.message || 'Tạo credit advice thất bại';
                   // Format message để bao gồm tên hình thức thanh toán
                   let errorMessage = apiMessage;
-                  const paymentMethodCode = paymentMethod?.code || cashioData.fop_syscode || 'thanh toán';
-                  if (apiMessage.includes('Hình thức thanh toán chưa nhập') || apiMessage.includes('không hợp lệ')) {
+                  const paymentMethodCode =
+                    paymentMethod?.code ||
+                    cashioData.fop_syscode ||
+                    'thanh toán';
+                  if (
+                    apiMessage.includes('Hình thức thanh toán chưa nhập') ||
+                    apiMessage.includes('không hợp lệ')
+                  ) {
                     errorMessage = `Hình thức ${paymentMethodCode} không hợp lệ hoặc chưa nhập`;
                   } else if (apiMessage === 'Tạo credit advice thất bại') {
                     errorMessage = `Hình thức ${paymentMethodCode} không hợp lệ hoặc chưa nhập`;
                   }
-                  this.logger.error(`[Cashio] Credit Advice API trả về status = ${creditAdviceResult.status}: ${errorMessage}`);
+                  this.logger.error(
+                    `[Cashio] Credit Advice API trả về status = ${creditAdviceResult.status}: ${errorMessage}`,
+                  );
                   throw new BadRequestException(errorMessage);
                 }
               }
@@ -558,7 +725,9 @@ export class FastApiInvoiceFlowService {
     } catch (error: any) {
       // Nếu là BadRequestException (lỗi mapping hoặc validation), throw lại để báo lỗi
       if (error instanceof BadRequestException) {
-        this.logger.error(`[Cashio] Lỗi khi xử lý cashio payment cho đơn hàng ${docCode}: ${error?.message || error}`);
+        this.logger.error(
+          `[Cashio] Lỗi khi xử lý cashio payment cho đơn hàng ${docCode}: ${error?.message || error}`,
+        );
         throw error;
       }
       // Các lỗi khác (network, API, ...) vẫn log và throw để báo lỗi
@@ -575,21 +744,29 @@ export class FastApiInvoiceFlowService {
    * 1. 01. Thường, 02. Làm dịch vụ, 04. Đổi DV, 07. Bán tài khoản: BẮT BUỘC phải có mã kho
    * 2. SALE_RETURN: BẮT BUỘC phải có mã kho
    * 3. Đơn có đuôi _X (hủy): Cho phép không có mã kho (đơn hủy chưa xuất kho)
-   * 
+   *
    * @param docCode - Mã đơn hàng
    * @param orderData - Dữ liệu đơn hàng
    * @param invoiceData - Dữ liệu invoice đã build
    * @param stockCodes - Danh sách mã kho (stockCode) từ stock transfers (có thể rỗng cho đơn hủy _X)
    * @param allowWithoutStockCodes - Cho phép gọi payment ngay cả khi không có stockCodes (CHỈ cho đơn hủy _X, mặc định false)
    */
-  async processPayment(docCode: string, orderData: any, invoiceData: any, stockCodes: string[], allowWithoutStockCodes: boolean = false): Promise<{
+  async processPayment(
+    docCode: string,
+    orderData: any,
+    invoiceData: any,
+    stockCodes: string[],
+    allowWithoutStockCodes: boolean = false,
+  ): Promise<{
     paymentResults?: any[];
     debitAdviceResults?: any[];
   }> {
     try {
       // Kiểm tra có mã kho không (trừ khi allowWithoutStockCodes = true cho đơn hủy)
       if ((!stockCodes || stockCodes.length === 0) && !allowWithoutStockCodes) {
-        this.logger.debug(`[Payment] Đơn hàng ${docCode} không có mã kho, bỏ qua payment API`);
+        this.logger.debug(
+          `[Payment] Đơn hàng ${docCode} không có mã kho, bỏ qua payment API`,
+        );
         return {};
       }
 
@@ -600,8 +777,14 @@ export class FastApiInvoiceFlowService {
         soCode: docCode,
       });
 
-      if (!cashioResult.success || !cashioResult.data || cashioResult.data.length === 0) {
-        this.logger.debug(`[Payment] Không tìm thấy cashio data cho đơn hàng ${docCode}`);
+      if (
+        !cashioResult.success ||
+        !cashioResult.data ||
+        cashioResult.data.length === 0
+      ) {
+        this.logger.debug(
+          `[Payment] Không tìm thấy cashio data cho đơn hàng ${docCode}`,
+        );
         return {};
       }
 
@@ -617,7 +800,9 @@ export class FastApiInvoiceFlowService {
           // Trường hợp 1: fop_syscode = "CASH" và total_out > 0 → Gọi Payment (Phiếu chi tiền mặt)
           if (cashioData.fop_syscode === 'CASH') {
             try {
-              this.logger.log(`[Payment] Phát hiện CASH payment cho đơn hàng ${docCode} (${cashioData.code}), total_out: ${totalOut}, gọi payment API`);
+              this.logger.log(
+                `[Payment] Phát hiện CASH payment cho đơn hàng ${docCode} (${cashioData.code}), total_out: ${totalOut}, gọi payment API`,
+              );
 
               const paymentPayload = FastApiPayloadHelper.buildPaymentPayload(
                 cashioData,
@@ -627,20 +812,31 @@ export class FastApiInvoiceFlowService {
                 '2', // loai_ct = 2 (Chi cho khách hàng)
               );
 
-              const paymentResult = await this.fastApiService.submitPayment(paymentPayload);
+              const paymentResult =
+                await this.fastApiService.submitPayment(paymentPayload);
 
               // Validate response: status = 1 mới là success
               if (Array.isArray(paymentResult) && paymentResult.length > 0) {
                 const firstItem = paymentResult[0];
                 if (firstItem.status !== 1) {
-                  const errorMessage = firstItem.message || 'Tạo payment thất bại';
-                  this.logger.error(`[Payment] Payment API trả về status = ${firstItem.status}: ${errorMessage}`);
+                  const errorMessage =
+                    firstItem.message || 'Tạo payment thất bại';
+                  this.logger.error(
+                    `[Payment] Payment API trả về status = ${firstItem.status}: ${errorMessage}`,
+                  );
                   throw new BadRequestException(errorMessage);
                 }
-              } else if (paymentResult && typeof paymentResult === 'object' && paymentResult.status !== undefined) {
+              } else if (
+                paymentResult &&
+                typeof paymentResult === 'object' &&
+                paymentResult.status !== undefined
+              ) {
                 if (paymentResult.status !== 1) {
-                  const errorMessage = paymentResult.message || 'Tạo payment thất bại';
-                  this.logger.error(`[Payment] Payment API trả về status = ${paymentResult.status}: ${errorMessage}`);
+                  const errorMessage =
+                    paymentResult.message || 'Tạo payment thất bại';
+                  this.logger.error(
+                    `[Payment] Payment API trả về status = ${paymentResult.status}: ${errorMessage}`,
+                  );
                   throw new BadRequestException(errorMessage);
                 }
               }
@@ -665,7 +861,10 @@ export class FastApiInvoiceFlowService {
           // Trường hợp 2: fop_syscode != "CASH" → Kiểm tra payment method
           if (cashioData.fop_syscode && cashioData.fop_syscode !== 'CASH') {
             // Lấy payment method theo code
-            const paymentMethod = await this.categoriesService.findPaymentMethodByCode(cashioData.fop_syscode);
+            const paymentMethod =
+              await this.categoriesService.findPaymentMethodByCode(
+                cashioData.fop_syscode,
+              );
 
             // Kiểm tra payment method có tồn tại không
             if (!paymentMethod) {
@@ -684,30 +883,49 @@ export class FastApiInvoiceFlowService {
             // Chỉ xử lý nếu documentType = "Giấy báo nợ"
             if (paymentMethod.documentType === 'Giấy báo nợ') {
               try {
-                this.logger.log(`[Payment] Phát hiện non-CASH payment cho đơn hàng ${docCode} (${cashioData.code}), total_out: ${totalOut}, gọi debitAdvice API`);
-
-                const debitAdvicePayload = FastApiPayloadHelper.buildDebitAdvicePayload(
-                  cashioData,
-                  orderData,
-                  invoiceData,
-                  paymentMethod,
-                  '2', // loai_ct = 2 (Chi cho khách hàng)
+                this.logger.log(
+                  `[Payment] Phát hiện non-CASH payment cho đơn hàng ${docCode} (${cashioData.code}), total_out: ${totalOut}, gọi debitAdvice API`,
                 );
 
-                const debitAdviceResult = await this.fastApiService.submitDebitAdvice(debitAdvicePayload);
+                const debitAdvicePayload =
+                  FastApiPayloadHelper.buildDebitAdvicePayload(
+                    cashioData,
+                    orderData,
+                    invoiceData,
+                    paymentMethod,
+                    '2', // loai_ct = 2 (Chi cho khách hàng)
+                  );
+
+                const debitAdviceResult =
+                  await this.fastApiService.submitDebitAdvice(
+                    debitAdvicePayload,
+                  );
 
                 // Validate response: status = 1 mới là success
-                if (Array.isArray(debitAdviceResult) && debitAdviceResult.length > 0) {
+                if (
+                  Array.isArray(debitAdviceResult) &&
+                  debitAdviceResult.length > 0
+                ) {
                   const firstItem = debitAdviceResult[0];
                   if (firstItem.status !== 1) {
-                    const errorMessage = firstItem.message || 'Tạo debit advice thất bại';
-                    this.logger.error(`[Payment] Debit Advice API trả về status = ${firstItem.status}: ${errorMessage}`);
+                    const errorMessage =
+                      firstItem.message || 'Tạo debit advice thất bại';
+                    this.logger.error(
+                      `[Payment] Debit Advice API trả về status = ${firstItem.status}: ${errorMessage}`,
+                    );
                     throw new BadRequestException(errorMessage);
                   }
-                } else if (debitAdviceResult && typeof debitAdviceResult === 'object' && debitAdviceResult.status !== undefined) {
+                } else if (
+                  debitAdviceResult &&
+                  typeof debitAdviceResult === 'object' &&
+                  debitAdviceResult.status !== undefined
+                ) {
                   if (debitAdviceResult.status !== 1) {
-                    const errorMessage = debitAdviceResult.message || 'Tạo debit advice thất bại';
-                    this.logger.error(`[Payment] Debit Advice API trả về status = ${debitAdviceResult.status}: ${errorMessage}`);
+                    const errorMessage =
+                      debitAdviceResult.message || 'Tạo debit advice thất bại';
+                    this.logger.error(
+                      `[Payment] Debit Advice API trả về status = ${debitAdviceResult.status}: ${errorMessage}`,
+                    );
                     throw new BadRequestException(errorMessage);
                   }
                 }
@@ -749,7 +967,9 @@ export class FastApiInvoiceFlowService {
     } catch (error: any) {
       // Nếu là BadRequestException (lỗi mapping hoặc validation), throw lại để báo lỗi
       if (error instanceof BadRequestException) {
-        this.logger.error(`[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode}: ${error?.message || error}`);
+        this.logger.error(
+          `[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode}: ${error?.message || error}`,
+        );
         throw error;
       }
       // Các lỗi khác (network, API, ...) vẫn log và throw để báo lỗi
@@ -758,7 +978,6 @@ export class FastApiInvoiceFlowService {
       throw new BadRequestException(errorMessage);
     }
   }
-
 
   /**
    * Xử lý warehouse receipt/release từ stock transfer (I/O kho)
@@ -770,21 +989,21 @@ export class FastApiInvoiceFlowService {
     // Kiểm tra doctype phải là "STOCK_IO"
     if (stockTransfer.doctype !== 'STOCK_IO') {
       throw new BadRequestException(
-        `Không thể xử lý stock transfer có doctype = "${stockTransfer.doctype}". Chỉ chấp nhận doctype = "STOCK_IO".`
+        `Không thể xử lý stock transfer có doctype = "${stockTransfer.doctype}". Chỉ chấp nhận doctype = "STOCK_IO".`,
       );
     }
 
     // Kiểm tra soCode phải là "null" (string) hoặc null
     if (stockTransfer.soCode !== 'null' && stockTransfer.soCode !== null) {
       throw new BadRequestException(
-        `Không thể xử lý stock transfer có soCode = "${stockTransfer.soCode}". Chỉ chấp nhận soCode = "null" hoặc null.`
+        `Không thể xử lý stock transfer có soCode = "${stockTransfer.soCode}". Chỉ chấp nhận soCode = "null" hoặc null.`,
       );
     }
 
     // Kiểm tra ioType phải là "I" hoặc "O"
     if (stockTransfer.ioType !== 'I' && stockTransfer.ioType !== 'O') {
       throw new BadRequestException(
-        `Không thể xử lý stock transfer có ioType = "${stockTransfer.ioType}". Chỉ chấp nhận "I" (nhập) hoặc "O" (xuất).`
+        `Không thể xử lý stock transfer có ioType = "${stockTransfer.ioType}". Chỉ chấp nhận "I" (nhập) hoặc "O" (xuất).`,
       );
     }
 
@@ -792,9 +1011,13 @@ export class FastApiInvoiceFlowService {
     let department: any = null;
     if (stockTransfer.branchCode) {
       try {
-        department = await this.categoriesService.getDepartmentFromLoyaltyAPI(stockTransfer.branchCode);
+        department = await this.categoriesService.getDepartmentFromLoyaltyAPI(
+          stockTransfer.branchCode,
+        );
       } catch (error: any) {
-        this.logger.warn(`Không thể lấy department cho branchCode ${stockTransfer.branchCode}: ${error?.message || error}`);
+        this.logger.warn(
+          `Không thể lấy department cho branchCode ${stockTransfer.branchCode}: ${error?.message || error}`,
+        );
       }
     }
 
@@ -804,15 +1027,20 @@ export class FastApiInvoiceFlowService {
     if (stockTransfer.branchCode) {
       try {
         // Lấy tên từ department nếu có, nếu không thì dùng branchCode
-        const tenKh = department?.name || department?.ten || stockTransfer.branchCode || '';
+        const tenKh =
+          department?.name || department?.ten || stockTransfer.branchCode || '';
         await this.createOrUpdateCustomer({
           ma_kh: stockTransfer.branchCode,
           ten_kh: tenKh,
         });
-        this.logger.log(`[Warehouse] Đã tạo/cập nhật customer ${stockTransfer.branchCode} trước khi xử lý warehouse`);
+        this.logger.log(
+          `[Warehouse] Đã tạo/cập nhật customer ${stockTransfer.branchCode} trước khi xử lý warehouse`,
+        );
       } catch (error: any) {
         // Log warning nhưng không throw error để không chặn luồng xử lý warehouse
-        this.logger.warn(`[Warehouse] Không thể tạo/cập nhật customer ${stockTransfer.branchCode}: ${error?.message || error}`);
+        this.logger.warn(
+          `[Warehouse] Không thể tạo/cập nhật customer ${stockTransfer.branchCode}: ${error?.message || error}`,
+        );
       }
     }
 
@@ -821,30 +1049,43 @@ export class FastApiInvoiceFlowService {
     const itemCodeToFetch = stockTransfer.itemCode;
     if (itemCodeToFetch) {
       try {
-        materialCatalog = await this.loyaltyService.fetchProduct(itemCodeToFetch);
+        materialCatalog =
+          await this.loyaltyService.fetchProduct(itemCodeToFetch);
         if (materialCatalog) {
-          this.logger.debug(`[Warehouse] Đã lấy material catalog cho itemCode ${itemCodeToFetch}`);
+          this.logger.debug(
+            `[Warehouse] Đã lấy material catalog cho itemCode ${itemCodeToFetch}`,
+          );
         }
       } catch (error: any) {
-        this.logger.warn(`Không thể lấy material catalog cho itemCode ${itemCodeToFetch}: ${error?.message || error}`);
+        this.logger.warn(
+          `Không thể lấy material catalog cho itemCode ${itemCodeToFetch}: ${error?.message || error}`,
+        );
       }
     }
 
     // Lấy materialCode và unit từ material catalog (ưu tiên từ catalog, fallback từ stockTransfer)
-    const materialCode = materialCatalog?.materialCode || stockTransfer.materialCode || stockTransfer.itemCode || '';
+    const materialCode =
+      materialCatalog?.materialCode ||
+      stockTransfer.materialCode ||
+      stockTransfer.itemCode ||
+      '';
     const unit = materialCatalog?.unit || '';
 
     // Map mã kho qua API warehouse-code-mappings (giống bên sale)
     let mappedStockCode = stockTransfer.stockCode || '';
     if (stockTransfer.stockCode) {
       try {
-        const maMoi = await this.categoriesService.mapWarehouseCode(stockTransfer.stockCode);
+        const maMoi = await this.categoriesService.mapWarehouseCode(
+          stockTransfer.stockCode,
+        );
         // Nếu có maMoi (mapped = true) → dùng maMoi
         // Nếu không có maMoi (mapped = false) → dùng giá trị gốc từ stockTransfer
         mappedStockCode = maMoi || stockTransfer.stockCode;
       } catch (error: any) {
         // Nếu có lỗi khi gọi API mapping, fallback về giá trị gốc
-        this.logger.warn(`Không thể map warehouse code ${stockTransfer.stockCode}: ${error?.message || error}`);
+        this.logger.warn(
+          `Không thể map warehouse code ${stockTransfer.stockCode}: ${error?.message || error}`,
+        );
         mappedStockCode = stockTransfer.stockCode;
       }
     }
@@ -858,7 +1099,9 @@ export class FastApiInvoiceFlowService {
       so_ct: stockTransfer.docCode || '',
       ma_nt: 'VND',
       ty_gia: 1,
-      dien_giai: stockTransfer.docDesc || `Phiếu ${stockTransfer.ioType === 'I' ? 'nhập' : 'xuất'} kho ${stockTransfer.docCode}`,
+      dien_giai:
+        stockTransfer.docDesc ||
+        `Phiếu ${stockTransfer.ioType === 'I' ? 'nhập' : 'xuất'} kho ${stockTransfer.docCode}`,
       detail: [
         {
           ma_vt: materialCode,
@@ -875,17 +1118,19 @@ export class FastApiInvoiceFlowService {
           ma_sp: stockTransfer.itemCode || '',
           ma_hd: '',
           // Các field chỉ có trong warehouseRelease
-          ...(stockTransfer.ioType === 'O' ? {
-            px_gia_dd: 0,
-            ma_phi: '',
-            ma_ku: '',
-            ma_phi_hh: '',
-            ma_phi_ttlk: '',
-            tien_hh_nt: 0,
-            tien_ttlk_nt: 0,
-          } : {
-            pn_gia_tb: 0,
-          }),
+          ...(stockTransfer.ioType === 'O'
+            ? {
+                px_gia_dd: 0,
+                ma_phi: '',
+                ma_ku: '',
+                ma_phi_hh: '',
+                ma_phi_ttlk: '',
+                tien_hh_nt: 0,
+                tien_ttlk_nt: 0,
+              }
+            : {
+                pn_gia_tb: 0,
+              }),
         },
       ],
     };
@@ -894,11 +1139,15 @@ export class FastApiInvoiceFlowService {
     let result: any;
     if (stockTransfer.ioType === 'I') {
       // Nhập kho
-      this.logger.log(`[Warehouse] Tạo phiếu nhập kho cho ${stockTransfer.docCode}`);
+      this.logger.log(
+        `[Warehouse] Tạo phiếu nhập kho cho ${stockTransfer.docCode}`,
+      );
       result = await this.fastApiService.submitWarehouseReceipt(payload);
     } else {
       // Xuất kho (ioType = "O" - đã được validate ở trên)
-      this.logger.log(`[Warehouse] Tạo phiếu xuất kho cho ${stockTransfer.docCode}`);
+      this.logger.log(
+        `[Warehouse] Tạo phiếu xuất kho cho ${stockTransfer.docCode}`,
+      );
       result = await this.fastApiService.submitWarehouseRelease(payload);
     }
 
@@ -907,14 +1156,23 @@ export class FastApiInvoiceFlowService {
     if (Array.isArray(result) && result.length > 0) {
       const firstItem = result[0];
       if (firstItem.status !== 1) {
-        const errorMessage = firstItem.message || 'Tạo phiếu warehouse thất bại';
-        this.logger.error(`[Warehouse] Warehouse API trả về status = ${firstItem.status}: ${errorMessage}`);
+        const errorMessage =
+          firstItem.message || 'Tạo phiếu warehouse thất bại';
+        this.logger.error(
+          `[Warehouse] Warehouse API trả về status = ${firstItem.status}: ${errorMessage}`,
+        );
         // KHÔNG throw - trả về result để lưu vào database
       }
-    } else if (result && typeof result === 'object' && result.status !== undefined) {
+    } else if (
+      result &&
+      typeof result === 'object' &&
+      result.status !== undefined
+    ) {
       if (result.status !== 1) {
         const errorMessage = result.message || 'Tạo phiếu warehouse thất bại';
-        this.logger.error(`[Warehouse] Warehouse API trả về status = ${result.status}: ${errorMessage}`);
+        this.logger.error(
+          `[Warehouse] Warehouse API trả về status = ${result.status}: ${errorMessage}`,
+        );
         // KHÔNG throw - trả về result để lưu vào database
       }
     }
@@ -928,7 +1186,9 @@ export class FastApiInvoiceFlowService {
    * @param stockTransfers - Mảng các stock transfer cùng docCode
    * @returns Kết quả từ API
    */
-  async processWarehouseTransferFromStockTransfers(stockTransfers: any[]): Promise<any> {
+  async processWarehouseTransferFromStockTransfers(
+    stockTransfers: any[],
+  ): Promise<any> {
     if (!stockTransfers || stockTransfers.length === 0) {
       throw new BadRequestException('Không có stock transfer để xử lý');
     }
@@ -939,14 +1199,17 @@ export class FastApiInvoiceFlowService {
     // Kiểm tra doctype phải là "STOCK_TRANSFER"
     if (firstStockTransfer.doctype !== 'STOCK_TRANSFER') {
       throw new BadRequestException(
-        `Không thể xử lý stock transfer có doctype = "${firstStockTransfer.doctype}". Chỉ chấp nhận doctype = "STOCK_TRANSFER".`
+        `Không thể xử lý stock transfer có doctype = "${firstStockTransfer.doctype}". Chỉ chấp nhận doctype = "STOCK_TRANSFER".`,
       );
     }
 
     // Kiểm tra relatedStockCode phải có
-    if (!firstStockTransfer.relatedStockCode || firstStockTransfer.relatedStockCode.trim() === '') {
+    if (
+      !firstStockTransfer.relatedStockCode ||
+      firstStockTransfer.relatedStockCode.trim() === ''
+    ) {
       throw new BadRequestException(
-        `Không thể xử lý stock transfer điều chuyển kho. relatedStockCode không được để trống.`
+        `Không thể xử lý stock transfer điều chuyển kho. relatedStockCode không được để trống.`,
       );
     }
 
@@ -954,9 +1217,13 @@ export class FastApiInvoiceFlowService {
     let department: any = null;
     if (firstStockTransfer.branchCode) {
       try {
-        department = await this.categoriesService.getDepartmentFromLoyaltyAPI(firstStockTransfer.branchCode);
+        department = await this.categoriesService.getDepartmentFromLoyaltyAPI(
+          firstStockTransfer.branchCode,
+        );
       } catch (error: any) {
-        this.logger.warn(`Không thể lấy department cho branchCode ${firstStockTransfer.branchCode}: ${error?.message || error}`);
+        this.logger.warn(
+          `Không thể lấy department cho branchCode ${firstStockTransfer.branchCode}: ${error?.message || error}`,
+        );
       }
     }
 
@@ -970,10 +1237,14 @@ export class FastApiInvoiceFlowService {
           ma_kh: firstStockTransfer.branchCode,
           ten_kh: firstStockTransfer.branchCode,
         });
-        this.logger.log(`[Warehouse Transfer] Đã tạo/cập nhật customer ${firstStockTransfer.branchCode} trước khi xử lý warehouse transfer`);
+        this.logger.log(
+          `[Warehouse Transfer] Đã tạo/cập nhật customer ${firstStockTransfer.branchCode} trước khi xử lý warehouse transfer`,
+        );
       } catch (error: any) {
         // Log warning nhưng không throw error để không chặn luồng xử lý warehouse transfer
-        this.logger.warn(`[Warehouse Transfer] Không thể tạo/cập nhật customer ${firstStockTransfer.branchCode}: ${error?.message || error}`);
+        this.logger.warn(
+          `[Warehouse Transfer] Không thể tạo/cập nhật customer ${firstStockTransfer.branchCode}: ${error?.message || error}`,
+        );
       }
     }
 
@@ -981,10 +1252,14 @@ export class FastApiInvoiceFlowService {
     let mappedStockCodeX = firstStockTransfer.stockCode || '';
     if (firstStockTransfer.stockCode) {
       try {
-        const maMoi = await this.categoriesService.mapWarehouseCode(firstStockTransfer.stockCode);
+        const maMoi = await this.categoriesService.mapWarehouseCode(
+          firstStockTransfer.stockCode,
+        );
         mappedStockCodeX = maMoi || firstStockTransfer.stockCode;
       } catch (error: any) {
-        this.logger.warn(`Không thể map warehouse code ${firstStockTransfer.stockCode}: ${error?.message || error}`);
+        this.logger.warn(
+          `Không thể map warehouse code ${firstStockTransfer.stockCode}: ${error?.message || error}`,
+        );
         mappedStockCodeX = firstStockTransfer.stockCode;
       }
     }
@@ -993,10 +1268,14 @@ export class FastApiInvoiceFlowService {
     let mappedStockCodeN = firstStockTransfer.relatedStockCode || '';
     if (firstStockTransfer.relatedStockCode) {
       try {
-        const maMoi = await this.categoriesService.mapWarehouseCode(firstStockTransfer.relatedStockCode);
+        const maMoi = await this.categoriesService.mapWarehouseCode(
+          firstStockTransfer.relatedStockCode,
+        );
         mappedStockCodeN = maMoi || firstStockTransfer.relatedStockCode;
       } catch (error: any) {
-        this.logger.warn(`Không thể map warehouse code ${firstStockTransfer.relatedStockCode}: ${error?.message || error}`);
+        this.logger.warn(
+          `Không thể map warehouse code ${firstStockTransfer.relatedStockCode}: ${error?.message || error}`,
+        );
         mappedStockCodeN = firstStockTransfer.relatedStockCode;
       }
     }
@@ -1009,17 +1288,26 @@ export class FastApiInvoiceFlowService {
       const itemCodeToFetch = stockTransfer.itemCode;
       if (itemCodeToFetch) {
         try {
-          materialCatalog = await this.loyaltyService.fetchProduct(itemCodeToFetch);
+          materialCatalog =
+            await this.loyaltyService.fetchProduct(itemCodeToFetch);
           if (materialCatalog) {
-            this.logger.debug(`[Warehouse Transfer] Đã lấy material catalog cho itemCode ${itemCodeToFetch}`);
+            this.logger.debug(
+              `[Warehouse Transfer] Đã lấy material catalog cho itemCode ${itemCodeToFetch}`,
+            );
           }
         } catch (error: any) {
-          this.logger.warn(`Không thể lấy material catalog cho itemCode ${itemCodeToFetch}: ${error?.message || error}`);
+          this.logger.warn(
+            `Không thể lấy material catalog cho itemCode ${itemCodeToFetch}: ${error?.message || error}`,
+          );
         }
       }
 
       // Lấy materialCode và unit từ material catalog (ưu tiên từ catalog, fallback từ stockTransfer)
-      const materialCode = materialCatalog?.materialCode || stockTransfer.materialCode || stockTransfer.itemCode || '';
+      const materialCode =
+        materialCatalog?.materialCode ||
+        stockTransfer.materialCode ||
+        stockTransfer.itemCode ||
+        '';
       const unit = materialCatalog?.unit || '';
 
       detail.push({
@@ -1045,13 +1333,17 @@ export class FastApiInvoiceFlowService {
       so_ct: firstStockTransfer.docCode || '',
       ma_nt: 'VND',
       ty_gia: 1,
-      dien_giai: firstStockTransfer.docDesc || `Phiếu điều chuyển kho ${firstStockTransfer.docCode}`,
+      dien_giai:
+        firstStockTransfer.docDesc ||
+        `Phiếu điều chuyển kho ${firstStockTransfer.docCode}`,
       so_buoc: 2, // Mặc định 2
       detail,
     };
 
     // Gọi API warehouseTransfer
-    this.logger.log(`[Warehouse Transfer] Tạo phiếu điều chuyển kho cho ${firstStockTransfer.docCode}`);
+    this.logger.log(
+      `[Warehouse Transfer] Tạo phiếu điều chuyển kho cho ${firstStockTransfer.docCode}`,
+    );
     const result = await this.fastApiService.submitWarehouseTransfer(payload);
 
     // Validate response: status = 1 mới là success
@@ -1059,14 +1351,24 @@ export class FastApiInvoiceFlowService {
     if (Array.isArray(result) && result.length > 0) {
       const firstItem = result[0];
       if (firstItem.status !== 1) {
-        const errorMessage = firstItem.message || 'Tạo phiếu warehouse transfer thất bại';
-        this.logger.error(`[Warehouse Transfer] Warehouse Transfer API trả về status = ${firstItem.status}: ${errorMessage}`);
+        const errorMessage =
+          firstItem.message || 'Tạo phiếu warehouse transfer thất bại';
+        this.logger.error(
+          `[Warehouse Transfer] Warehouse Transfer API trả về status = ${firstItem.status}: ${errorMessage}`,
+        );
         // KHÔNG throw - trả về result để lưu vào database
       }
-    } else if (result && typeof result === 'object' && result.status !== undefined) {
+    } else if (
+      result &&
+      typeof result === 'object' &&
+      result.status !== undefined
+    ) {
       if (result.status !== 1) {
-        const errorMessage = result.message || 'Tạo phiếu warehouse transfer thất bại';
-        this.logger.error(`[Warehouse Transfer] Warehouse Transfer API trả về status = ${result.status}: ${errorMessage}`);
+        const errorMessage =
+          result.message || 'Tạo phiếu warehouse transfer thất bại';
+        this.logger.error(
+          `[Warehouse Transfer] Warehouse Transfer API trả về status = ${result.status}: ${errorMessage}`,
+        );
         // KHÔNG throw - trả về result để lưu vào database
       }
     }
@@ -1074,14 +1376,15 @@ export class FastApiInvoiceFlowService {
     return result;
   }
 
-
   async createPromotionFromLoyaltyAPI(promCode: string): Promise<any> {
-    const promotion = await this.categoriesService.createPromotionFromLoyaltyAPI(promCode);
+    const promotion =
+      await this.categoriesService.createPromotionFromLoyaltyAPI(promCode);
     if (!promotion || !promotion.code) {
-      throw new BadRequestException(`Mã khuyến mãi "${promCode}" không tồn tại trên Loyalty API`);
+      throw new BadRequestException(
+        `Mã khuyến mãi "${promCode}" không tồn tại trên Loyalty API`,
+      );
     }
 
     return promotion;
   }
 }
-

@@ -161,5 +161,38 @@ export class LoyaltyService {
     const product = await this.checkProduct(itemCode);
     return product !== null && (product.id || product.code);
   }
+
+  /**
+   * Fetch departments từ Loyalty API
+   * @param branchCodes - Mảng các mã chi nhánh
+   * @returns Map<string, any> với key là branchCode và value là department object
+   */
+  async fetchLoyaltyDepartments(branchCodes: string[]): Promise<Map<string, any>> {
+    const departmentMap = new Map<string, any>();
+    if (branchCodes.length === 0) return departmentMap;
+
+    const departmentPromises = branchCodes.map(async (branchCode) => {
+      try {
+        const response = await this.httpService.axiosRef.get(
+          `${this.LOYALTY_API_BASE_URL}/departments?page=1&limit=25&branchcode=${branchCode}`,
+          { headers: { accept: 'application/json' }, timeout: this.REQUEST_TIMEOUT },
+        );
+        const department = response?.data?.data?.items?.[0];
+        return { branchCode, department };
+      } catch (error) {
+        this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+        return { branchCode, department: null };
+      }
+    });
+
+    const results = await Promise.all(departmentPromises);
+    results.forEach(({ branchCode, department }) => {
+      if (department) {
+        departmentMap.set(branchCode, department);
+      }
+    });
+
+    return departmentMap;
+  }
 }
 

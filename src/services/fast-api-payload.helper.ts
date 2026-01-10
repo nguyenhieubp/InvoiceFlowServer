@@ -11,15 +11,21 @@ export class FastApiPayloadHelper {
       return obj;
     }
     if (Array.isArray(obj)) {
-      return obj.map(item => FastApiPayloadHelper.removeEmptyFields(item, keepMaLoAndSerial));
+      return obj.map((item) =>
+        FastApiPayloadHelper.removeEmptyFields(item, keepMaLoAndSerial),
+      );
     }
     if (typeof obj === 'object') {
       const cleaned: any = {};
       for (const [key, value] of Object.entries(obj)) {
-        const shouldKeep = value !== null && value !== undefined && value !== ''
-          || (keepMaLoAndSerial && (key === 'ma_lo' || key === 'so_serial'));
+        const shouldKeep =
+          (value !== null && value !== undefined && value !== '') ||
+          (keepMaLoAndSerial && (key === 'ma_lo' || key === 'so_serial'));
         if (shouldKeep) {
-          cleaned[key] = FastApiPayloadHelper.removeEmptyFields(value, keepMaLoAndSerial);
+          cleaned[key] = FastApiPayloadHelper.removeEmptyFields(
+            value,
+            keepMaLoAndSerial,
+          );
         }
       }
       return cleaned;
@@ -30,7 +36,11 @@ export class FastApiPayloadHelper {
   /**
    * Helper: Build clean payload cho salesOrder và salesInvoice
    */
-  static buildCleanPayload(orderData: any, action: number = 0, type?: string): any {
+  static buildCleanPayload(
+    orderData: any,
+    action: number = 0,
+    type?: string,
+  ): any {
     if (type === 'saleInvoice') {
       return {
         action,
@@ -48,7 +58,10 @@ export class FastApiPayloadHelper {
         so_ct: orderData.so_ct,
         so_seri: orderData.so_seri,
         ma_nt: orderData.ma_nt ?? 'VND',
-        ty_gia: typeof orderData.ty_gia === 'number' ? orderData.ty_gia : parseFloat(orderData.ty_gia) || 1.0,
+        ty_gia:
+          typeof orderData.ty_gia === 'number'
+            ? orderData.ty_gia
+            : parseFloat(orderData.ty_gia) || 1.0,
         ma_bp: orderData.ma_bp,
         tk_thue_no: orderData.tk_thue_no ?? '131111',
         ma_kenh: orderData.ma_kenh ?? 'ONLINE',
@@ -63,10 +76,9 @@ export class FastApiPayloadHelper {
           if ('ma_bp' in item) result.ma_bp = item.ma_bp;
           return result;
         }),
-        cbdetail: null
+        cbdetail: null,
       };
     }
-
 
     return {
       action,
@@ -83,7 +95,10 @@ export class FastApiPayloadHelper {
       so_ct: orderData.so_ct,
       so_seri: orderData.so_seri,
       ma_nt: orderData.ma_nt ?? 'VND',
-      ty_gia: typeof orderData.ty_gia === 'number' ? orderData.ty_gia : parseFloat(orderData.ty_gia) || 1.0,
+      ty_gia:
+        typeof orderData.ty_gia === 'number'
+          ? orderData.ty_gia
+          : parseFloat(orderData.ty_gia) || 1.0,
       ma_bp: orderData.ma_bp,
       tk_thue_no: orderData.tk_thue_no ?? '131111',
       ma_kenh: orderData.ma_kenh ?? 'ONLINE',
@@ -103,20 +118,6 @@ export class FastApiPayloadHelper {
   }
 
   /**
-   * Format date thành YYYYMMDD
-   */
-  static formatDateYYYYMMDD(date: Date | string): string {
-    const d = typeof date === 'string' ? new Date(date) : date;
-    if (isNaN(d.getTime())) {
-      return '';
-    }
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}${month}${day}`;
-  }
-
-  /**
    * Format date thành ISO string cho Fast API (YYYY-MM-DDTHH:mm:ss)
    */
   static formatDateISO(date: Date | string): string {
@@ -130,7 +131,11 @@ export class FastApiPayloadHelper {
   /**
    * Build payload cho cashReceipt API
    */
-  static buildCashReceiptPayload(cashioData: any, orderData: any, invoiceData: any): any {
+  static buildCashReceiptPayload(
+    cashioData: any,
+    orderData: any,
+    invoiceData: any,
+  ): any {
     const totalIn = parseFloat(String(cashioData.total_in || '0'));
     const docDate = cashioData.docdate || orderData.docDate || new Date();
 
@@ -138,7 +143,11 @@ export class FastApiPayloadHelper {
       action: 0,
       ma_dvcs: invoiceData.ma_dvcs || cashioData.branch_code || '',
       ma_kh: invoiceData.ma_kh || cashioData.partner_code || '',
-      ong_ba: orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba || '',
+      ong_ba:
+        orderData.customer?.name ||
+        cashioData.partner_name ||
+        invoiceData.ong_ba ||
+        '',
       loai_ct: '2', // Mặc định 2 - Thu của khách hàng
       dept_id: invoiceData.ma_bp || cashioData.branch_code || '',
       dien_giai: `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
@@ -155,7 +164,9 @@ export class FastApiPayloadHelper {
         {
           ma_kh_i: invoiceData.ma_kh || cashioData.partner_code || '',
           tien: totalIn,
-          dien_giai: cashioData.refno || `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
+          dien_giai:
+            cashioData.refno ||
+            `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
           ma_bp: invoiceData.ma_bp || cashioData.branch_code || '',
           ma_vv: '',
           ma_hd: '',
@@ -169,7 +180,12 @@ export class FastApiPayloadHelper {
   /**
    * Build payload cho creditAdvice API
    */
-  static buildCreditAdvicePayload(cashioData: any, orderData: any, invoiceData: any, paymentMethod: any): any {
+  static buildCreditAdvicePayload(
+    cashioData: any,
+    orderData: any,
+    invoiceData: any,
+    paymentMethod: any,
+  ): any {
     const totalIn = parseFloat(String(cashioData.total_in || '0'));
     const docDate = cashioData.docdate || orderData.docDate || new Date();
 
@@ -177,7 +193,11 @@ export class FastApiPayloadHelper {
       action: 0,
       ma_dvcs: invoiceData.ma_dvcs || cashioData.branch_code || '',
       ma_kh: invoiceData.ma_kh || cashioData.partner_code || '',
-      ong_ba: orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba || '',
+      ong_ba:
+        orderData.customer?.name ||
+        cashioData.partner_name ||
+        invoiceData.ong_ba ||
+        '',
       loai_ct: '2', // Mặc định 2 - Thu của khách hàng
       dept_id: invoiceData.ma_bp || cashioData.branch_code || '',
       dien_giai: `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
@@ -194,7 +214,10 @@ export class FastApiPayloadHelper {
         {
           ma_kh_i: invoiceData.ma_kh || cashioData.partner_code || '',
           tien: totalIn,
-          dien_giai: cashioData.refno || paymentMethod.description || `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
+          dien_giai:
+            cashioData.refno ||
+            paymentMethod.description ||
+            `Thu tiền cho chứng từ ${orderData.docCode || invoiceData.so_ct || ''}`,
           ma_bp: invoiceData.ma_bp || cashioData.branch_code || '',
           ma_vv: '',
           ma_hd: '',
@@ -208,7 +231,13 @@ export class FastApiPayloadHelper {
   /**
    * Build payload cho payment API (Phiếu chi tiền mặt)
    */
-  static buildPaymentPayload(cashioData: any, orderData: any, invoiceData: any, paymentMethod: any, loaiCt: string = '2'): any {
+  static buildPaymentPayload(
+    cashioData: any,
+    orderData: any,
+    invoiceData: any,
+    paymentMethod: any,
+    loaiCt: string = '2',
+  ): any {
     const totalOut = parseFloat(String(cashioData.total_out || '0'));
     const docDate = cashioData.docdate || orderData.docDate || new Date();
 
@@ -231,8 +260,16 @@ export class FastApiPayloadHelper {
     };
 
     // Optional fields - chỉ thêm nếu có giá trị
-    if (orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba) {
-      payload.ong_ba = orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba || '';
+    if (
+      orderData.customer?.name ||
+      cashioData.partner_name ||
+      invoiceData.ong_ba
+    ) {
+      payload.ong_ba =
+        orderData.customer?.name ||
+        cashioData.partner_name ||
+        invoiceData.ong_ba ||
+        '';
     }
     if (orderData.customer?.address) {
       payload.dia_chi = orderData.customer.address;
@@ -243,7 +280,8 @@ export class FastApiPayloadHelper {
 
     // Chi tiết - chỉ thêm ma_kh_i nếu loai_ct = 3 (required trong trường hợp này)
     if (loaiCt === '3') {
-      payload.detail[0].ma_kh_i = invoiceData.ma_kh || cashioData.partner_code || '';
+      payload.detail[0].ma_kh_i =
+        invoiceData.ma_kh || cashioData.partner_code || '';
     }
 
     return payload;
@@ -252,7 +290,13 @@ export class FastApiPayloadHelper {
   /**
    * Build payload cho debitAdvice API (Giấy báo nợ)
    */
-  static buildDebitAdvicePayload(cashioData: any, orderData: any, invoiceData: any, paymentMethod: any, loaiCt: string = '2'): any {
+  static buildDebitAdvicePayload(
+    cashioData: any,
+    orderData: any,
+    invoiceData: any,
+    paymentMethod: any,
+    loaiCt: string = '2',
+  ): any {
     const totalOut = parseFloat(String(cashioData.total_out || '0'));
     const docDate = cashioData.docdate || orderData.docDate || new Date();
 
@@ -275,8 +319,16 @@ export class FastApiPayloadHelper {
     };
 
     // Optional fields - chỉ thêm nếu có giá trị
-    if (orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba) {
-      payload.ong_ba = orderData.customer?.name || cashioData.partner_name || invoiceData.ong_ba || '';
+    if (
+      orderData.customer?.name ||
+      cashioData.partner_name ||
+      invoiceData.ong_ba
+    ) {
+      payload.ong_ba =
+        orderData.customer?.name ||
+        cashioData.partner_name ||
+        invoiceData.ong_ba ||
+        '';
     }
     if (orderData.customer?.address) {
       payload.dia_chi = orderData.customer.address;
@@ -287,10 +339,10 @@ export class FastApiPayloadHelper {
 
     // Chi tiết - chỉ thêm ma_kh_i nếu loai_ct = 3 (required trong trường hợp này)
     if (loaiCt === '3') {
-      payload.detail[0].ma_kh_i = invoiceData.ma_kh || cashioData.partner_code || '';
+      payload.detail[0].ma_kh_i =
+        invoiceData.ma_kh || cashioData.partner_code || '';
     }
 
     return payload;
   }
 }
-
