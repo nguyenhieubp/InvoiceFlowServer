@@ -282,14 +282,12 @@ export async function formatSaleForFrontend(
     promCode: sale.promCode,
   });
 
-  const isGiaBanZero = Math.abs(giaBan) < 0.01;
   const { tkChietKhau, tkChiPhi, maPhi } =
     InvoiceLogicUtils.resolveAccountingAccounts({
       sale,
       loyaltyProduct,
       orderTypes,
       isTangHang,
-      isGiaBanZero,
       hasMaCtkm: !!(sale.promCode || maCk01 || maCtkmTangHang),
       hasMaCtkmTangHang: !!maCtkmTangHang,
     });

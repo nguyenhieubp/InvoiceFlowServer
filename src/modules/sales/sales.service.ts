@@ -5595,14 +5595,27 @@ export class SalesService {
 
     // promCode logic
     let promCode = sale.promCode || sale.prom_code || null;
-    promCode = await this.cutCode(promCode);
-    if (sale.productType === 'I') {
-      promCode = promCode + '.I';
-    } else if (sale.productType === 'S') {
-      promCode = promCode + '.S';
-    } else if (sale.productType === 'V') {
-      promCode = promCode + '.V';
+
+    if (promCode && typeof promCode === 'string' && promCode.trim() !== '') {
+      const trimmed = promCode.trim();
+      // Special logic for PRMN: transform to RMN, no suffix, no cutCode
+      if (trimmed.toUpperCase().startsWith('PRMN')) {
+        promCode = trimmed.replace(/^PRMN/i, 'RMN');
+      } else {
+        // Old logic: cutCode + suffix
+        promCode = await this.cutCode(promCode);
+        if (sale.productType === 'I') {
+          promCode = promCode + '.I';
+        } else if (sale.productType === 'S') {
+          promCode = promCode + '.S';
+        } else if (sale.productType === 'V') {
+          promCode = promCode + '.V';
+        }
+      }
+    } else {
+      promCode = null;
     }
+
     amounts.promCode = promCode;
 
     return amounts;
@@ -5649,14 +5662,12 @@ export class SalesService {
     const isTangHang =
       Math.abs(giaBan) < 0.01 &&
       Math.abs(this.toNumber(sale.linetotal || sale.revenue, 0)) < 0.01;
-    const isGiaBanZero = Math.abs(sale.giaBanGoc || 0) < 0.01;
 
     return InvoiceLogicUtils.resolveAccountingAccounts({
       sale,
       loyaltyProduct,
       orderTypes,
       isTangHang,
-      isGiaBanZero,
       hasMaCtkm: !!(maCk01 || maCtkmTangHang),
       hasMaCtkmTangHang: !!maCtkmTangHang,
     });
@@ -5867,11 +5878,13 @@ export class SalesService {
         );
       } else {
         // Default mapping for other ma_ck fields
-        const saleMaKey = `maCk${idx}`;
-        detailItem[maKey] = this.limitString(
-          this.toString(sale[saleMaKey] || '', ''),
-          32,
-        );
+        if (i !== 1) {
+          const saleMaKey = `maCk${idx}`;
+          detailItem[maKey] = this.limitString(
+            this.toString(sale[saleMaKey] || '', ''),
+            32,
+          );
+        }
       }
     }
   }

@@ -94,7 +94,6 @@ export class InvoiceLogicUtils {
     loyaltyProduct: any;
     orderTypes: OrderTypes;
     isTangHang: boolean;
-    isGiaBanZero: boolean;
     hasMaCtkm: boolean;
     hasMaCtkmTangHang: boolean;
   }): AccountingAccounts {
@@ -103,7 +102,6 @@ export class InvoiceLogicUtils {
       loyaltyProduct,
       orderTypes,
       isTangHang,
-      isGiaBanZero,
       hasMaCtkm,
       hasMaCtkmTangHang,
     } = params;
@@ -140,7 +138,7 @@ export class InvoiceLogicUtils {
     } else if (isSinhNhat) {
       tkChiPhi = '64192';
       maPhi = '162010';
-    } else if (isThuong && hasMaCtkmTangHang && isGiaBanZero && isTangHang) {
+    } else if (hasMaCtkmTangHang && isTangHang) {
       tkChiPhi = '64191';
       maPhi = '161010';
       tkChietKhau = sale.tkChietKhau || null;
@@ -156,17 +154,9 @@ export class InvoiceLogicUtils {
       tkChietKhau = '5211621';
     } else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
       tkChietKhau = '521131';
-    } else if (
-      isThuong &&
-      hasChietKhauMuaHangGiamGia &&
-      productTypeUpper === 'I'
-    ) {
+    } else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'I') {
       tkChietKhau = '521111';
-    } else if (
-      isThuong &&
-      hasMaCtkm &&
-      !(hasMaCtkmTangHang && isGiaBanZero && isTangHang)
-    ) {
+    } else if (hasMaCtkm && !(hasMaCtkmTangHang && isTangHang)) {
       tkChietKhau = productTypeUpper === 'S' ? '521131' : '521111';
     } else {
       tkChietKhau = sale.tkChietKhau || null;
@@ -212,16 +202,31 @@ export class InvoiceLogicUtils {
       if (isDauTu) {
         maCtkmTangHang = 'TT DAU TU';
       } else if (isThuong || isBanTaiKhoan || isSanTmdt) {
+        // Logic cũ: maCtkmTangHang = promCode (đã xử lý ở service)
         maCtkmTangHang = promCode || '';
-        if (maCtkmTangHang && productTypeUpper) {
+        if (
+          maCtkmTangHang &&
+          productTypeUpper &&
+          !maCtkmTangHang.endsWith(`.${productTypeUpper}`) &&
+          !maCtkmTangHang.startsWith('RMN')
+        ) {
+          // Giữ backup logic nếu promCode chưa có suffix (dù service đã xử lý)
+          // Nhưng với RMN thì không thêm
           maCtkmTangHang = `${maCtkmTangHang}.${productTypeUpper}`;
         }
       }
     }
 
     if (!isDoiDiem && !isTangHang && !maCk01) {
+      // Logic cũ: maCk01 = promCode
       maCk01 = SalesUtils.getPromotionDisplayCode(promCode) || promCode || '';
-      if (maCk01 && productTypeUpper) {
+      // Double check suffix logic just in case, matching old logic structure
+      if (
+        maCk01 &&
+        productTypeUpper &&
+        !maCk01.endsWith(`.${productTypeUpper}`) &&
+        !maCk01.startsWith('RMN')
+      ) {
         maCk01 = `${maCk01}.${productTypeUpper}`;
       }
     }
@@ -330,7 +335,18 @@ export class InvoiceLogicUtils {
    */
   static resolveLoaiGd(params: { sale: any; orderTypes: OrderTypes }): string {
     const { sale, orderTypes } = params;
-    const { isDoiDv, isTachThe, isDichVu, isBanTaiKhoan, isSanTmdt, isThuong, isDauTu, isDoiDiem, isDoiVo, isSinhNhat } = orderTypes;
+    const {
+      isDoiDv,
+      isTachThe,
+      isDichVu,
+      isBanTaiKhoan,
+      isSanTmdt,
+      isThuong,
+      isDauTu,
+      isDoiDiem,
+      isDoiVo,
+      isSinhNhat,
+    } = orderTypes;
     const qty = Number(sale.qty || 0);
 
     if (isDoiDv || isTachThe) {
@@ -339,18 +355,17 @@ export class InvoiceLogicUtils {
 
     if (isThuong) {
       if (sale.productType === 'I') {
-        return '01'
+        return '01';
       } else if (sale.productType === 'S' && sale.qty > 0) {
-        return '02'
+        return '02';
       }
     }
 
     if (isDichVu) {
       if (sale.productType === 'S' && sale.qty > 0) {
-        return '01'
+        return '01';
       }
     }
-
 
     return '01';
   }
