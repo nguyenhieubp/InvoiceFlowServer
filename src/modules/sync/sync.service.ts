@@ -1,4 +1,10 @@
-import { Injectable, Logger, Inject, forwardRef, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Inject,
+  forwardRef,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
@@ -78,9 +84,12 @@ export class SyncService {
     @Inject(forwardRef(() => FastApiInvoiceFlowService))
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private fastApiClientService: FastApiClientService,
-  ) { }
+  ) {}
 
-  async syncBrand(brandName: string, date: string): Promise<{
+  async syncBrand(
+    brandName: string,
+    date: string,
+  ): Promise<{
     success: boolean;
     message: string;
     ordersCount: number;
@@ -92,11 +101,16 @@ export class SyncService {
     invoiceErrors?: string[];
   }> {
     // Sync từ Zappy API với brand cụ thể
-    this.logger.log(`Đang đồng bộ dữ liệu từ Zappy API cho ngày ${date} (brand: ${brandName})`);
+    this.logger.log(
+      `Đang đồng bộ dữ liệu từ Zappy API cho ngày ${date} (brand: ${brandName})`,
+    );
     return this.syncFromZappy(date, brandName);
   }
 
-  async syncFromZappy(date: string, brand?: string): Promise<{
+  async syncFromZappy(
+    date: string,
+    brand?: string,
+  ): Promise<{
     success: boolean;
     message: string;
     ordersCount: number;
@@ -115,8 +129,7 @@ export class SyncService {
       let cashData: any[] = [];
       try {
         cashData = await this.zappyApiService.getDailyCash(date, brand);
-      } catch (error) {
-      }
+      } catch (error) {}
 
       // Tạo map cash data theo so_code để dễ lookup
       const cashMapBySoCode = new Map<string, any[]>();
@@ -149,8 +162,8 @@ export class SyncService {
         new Set(
           orders
             .map((o) => o.branchCode)
-            .filter((code): code is string => !!code && code.trim() !== '')
-        )
+            .filter((code): code is string => !!code && code.trim() !== ''),
+        ),
       );
 
       // Fetch departments để lấy company và map sang brand
@@ -167,21 +180,25 @@ export class SyncService {
               departmentMap.set(branchCode, { company: department.company });
             }
           } catch (error) {
-            this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+            this.logger.warn(
+              `Failed to fetch department for branchCode ${branchCode}: ${error}`,
+            );
           }
         }
       }
       // Map company sang brand
-      const mapCompanyToBrand = (company: string | null | undefined): string => {
+      const mapCompanyToBrand = (
+        company: string | null | undefined,
+      ): string => {
         if (!company) return '';
         const companyUpper = company.toUpperCase();
         const brandMap: Record<string, string> = {
-          'F3': 'f3',
-          'FACIALBAR': 'f3',
-          'MENARD': 'menard',
-          'LABHAIR': 'labhair',
-          'YAMAN': 'yaman',
-          'CHANDO': 'chando',
+          F3: 'f3',
+          FACIALBAR: 'f3',
+          MENARD: 'menard',
+          LABHAIR: 'labhair',
+          YAMAN: 'yaman',
+          CHANDO: 'chando',
         };
         return brandMap[companyUpper] || company.toLowerCase();
       };
@@ -208,11 +225,15 @@ export class SyncService {
               mobile: order.customer.mobile,
               sexual: order.customer.sexual,
               idnumber: order.customer.idnumber,
-              enteredat: order.customer.enteredat ? new Date(order.customer.enteredat) : null,
+              enteredat: order.customer.enteredat
+                ? new Date(order.customer.enteredat)
+                : null,
               crm_lead_source: order.customer.crm_lead_source,
               address: order.customer.address,
               province_name: order.customer.province_name,
-              birthday: order.customer.birthday ? new Date(order.customer.birthday) : null,
+              birthday: order.customer.birthday
+                ? new Date(order.customer.birthday)
+                : null,
               grade_name: order.customer.grade_name,
               branch_code: order.customer.branch_code,
             } as Partial<Customer>);
@@ -222,7 +243,8 @@ export class SyncService {
             // Cập nhật thông tin customer nếu cần
             customer.name = order.customer.name || customer.name;
             customer.mobile = order.customer.mobile || customer.mobile;
-            customer.grade_name = order.customer.grade_name || customer.grade_name;
+            customer.grade_name =
+              order.customer.grade_name || customer.grade_name;
             // Cập nhật brand từ department nếu có
             if (brandFromDepartment) {
               customer.brand = brandFromDepartment;
@@ -240,7 +262,9 @@ export class SyncService {
 
           // Lấy cash/voucher data cho order này
           const orderCashData = cashMapBySoCode.get(order.docCode) || [];
-          const voucherData = orderCashData.filter((cash) => cash.fop_syscode === 'VOUCHER');
+          const voucherData = orderCashData.filter(
+            (cash) => cash.fop_syscode === 'VOUCHER',
+          );
 
           // Collect tất cả itemCodes từ order để fetch products từ Loyalty API và check 404
           // Đảm bảo trim ngay từ đầu để consistency
@@ -248,8 +272,8 @@ export class SyncService {
             new Set(
               (order.sales || [])
                 .map((s) => s.itemCode?.trim())
-                .filter((code): code is string => !!code && code !== '')
-            )
+                .filter((code): code is string => !!code && code !== ''),
+            ),
           );
 
           // Fetch products từ Loyalty API để check sản phẩm không tồn tại (404)
@@ -259,7 +283,8 @@ export class SyncService {
             // Check products từ Loyalty API sử dụng LoyaltyService
             await Promise.all(
               orderItemCodes.map(async (trimmedItemCode) => {
-                const product = await this.loyaltyService.checkProduct(trimmedItemCode);
+                const product =
+                  await this.loyaltyService.checkProduct(trimmedItemCode);
                 if (!product) {
                   notFoundItemCodes.add(trimmedItemCode);
                 }
@@ -274,7 +299,9 @@ export class SyncService {
                 // Bỏ qua các item có itemcode = "TRUTONKEEP"
                 const itemCode = saleItem.itemCode?.trim();
                 if (itemCode && itemCode.toUpperCase() === 'TRUTONKEEP') {
-                  this.logger.log(`[SalesService] Bỏ qua sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - itemcode = TRUTONKEEP`);
+                  this.logger.log(
+                    `[SalesService] Bỏ qua sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - itemcode = TRUTONKEEP`,
+                  );
                   continue;
                 }
 
@@ -284,36 +311,47 @@ export class SyncService {
                 const statusAsys = !isNotFound;
 
                 if (isNotFound) {
-                  this.logger.warn(`[SalesService] Sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - Sản phẩm không tồn tại trong Loyalty API (404), sẽ lưu với statusAsys = false`);
+                  this.logger.warn(
+                    `[SalesService] Sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - Sản phẩm không tồn tại trong Loyalty API (404), sẽ lưu với statusAsys = false`,
+                  );
                 }
 
                 // Lấy productType: Ưu tiên từ Zappy API (producttype), nếu không có thì lấy từ Loyalty API
                 // Kiểm tra cả producttype (chữ thường) và productType (camelCase) từ Zappy API
-                const productTypeFromZappy = saleItem.producttype || saleItem.productType || null;
+                const productTypeFromZappy =
+                  saleItem.producttype || saleItem.productType || null;
                 // Fetch productType từ Loyalty API nếu chưa có từ Zappy (đã có sẵn trong notFoundItemCodes check)
                 let productTypeFromLoyalty: string | null = null;
-                if (!productTypeFromZappy && itemCode && !notFoundItemCodes.has(itemCode)) {
+                if (
+                  !productTypeFromZappy &&
+                  itemCode &&
+                  !notFoundItemCodes.has(itemCode)
+                ) {
                   try {
-                    const loyaltyProduct = await this.loyaltyService.checkProduct(itemCode);
+                    const loyaltyProduct =
+                      await this.loyaltyService.checkProduct(itemCode);
                     if (loyaltyProduct) {
-                      productTypeFromLoyalty = loyaltyProduct.productType || loyaltyProduct.producttype || null;
+                      productTypeFromLoyalty =
+                        loyaltyProduct.productType ||
+                        loyaltyProduct.producttype ||
+                        null;
                     }
                   } catch (error) {
                     // Ignore error, sẽ dùng null
                   }
                 }
-                const productType = productTypeFromZappy || productTypeFromLoyalty || null;
-
+                const productType =
+                  productTypeFromZappy || productTypeFromLoyalty || null;
 
                 // Kiểm tra xem sale đã tồn tại chưa
                 // Với đơn "08. Tách thẻ": cần thêm qty vào điều kiện vì có thể có 2 dòng cùng itemCode nhưng qty khác nhau (-1 và 1)
                 // Với các đơn khác: chỉ cần docCode + itemCode + customer
-                const ordertypeName = saleItem.ordertype_name || saleItem.ordertype || '';
-                const isTachThe = ordertypeName.includes('08. Tách thẻ') ||
+                const ordertypeName =
+                  saleItem.ordertype_name || saleItem.ordertype || '';
+                const isTachThe =
+                  ordertypeName.includes('08. Tách thẻ') ||
                   ordertypeName.includes('08.Tách thẻ') ||
                   ordertypeName.includes('08.  Tách thẻ');
-
-
 
                 // Enrich voucher data từ get_daily_cash
                 let voucherRefno: string | undefined;
@@ -328,18 +366,23 @@ export class SyncService {
                 // Tạo sale mới
                 // Tính toán ordertypeName trước
                 let finalOrderTypeNameForNew: string | undefined = undefined;
-                if (saleItem.ordertype_name !== undefined && saleItem.ordertype_name !== null) {
+                if (
+                  saleItem.ordertype_name !== undefined &&
+                  saleItem.ordertype_name !== null
+                ) {
                   if (typeof saleItem.ordertype_name === 'string') {
                     const trimmed = saleItem.ordertype_name.trim();
-                    finalOrderTypeNameForNew = trimmed !== '' ? trimmed : undefined;
+                    finalOrderTypeNameForNew =
+                      trimmed !== '' ? trimmed : undefined;
                   } else {
-                    finalOrderTypeNameForNew = String(saleItem.ordertype_name).trim() || undefined;
+                    finalOrderTypeNameForNew =
+                      String(saleItem.ordertype_name).trim() || undefined;
                   }
                 }
                 // Log để debug
                 this.logger.log(
                   `[SalesService] Tạo mới sale ${order.docCode}/${saleItem.itemCode}: ` +
-                  `ordertype_name raw="${saleItem.ordertype_name}" (type: ${typeof saleItem.ordertype_name}), final="${finalOrderTypeNameForNew}"`
+                    `ordertype_name raw="${saleItem.ordertype_name}" (type: ${typeof saleItem.ordertype_name}), final="${finalOrderTypeNameForNew}"`,
                 );
                 const newSale = this.saleRepository.create({
                   docCode: order.docCode,
@@ -357,7 +400,11 @@ export class SyncService {
                   qty: saleItem.qty || 0,
                   revenue: saleItem.revenue || 0,
                   linetotal: saleItem.linetotal || saleItem.revenue || 0,
-                  tienHang: saleItem.tienHang || saleItem.linetotal || saleItem.revenue || 0,
+                  tienHang:
+                    saleItem.tienHang ||
+                    saleItem.linetotal ||
+                    saleItem.revenue ||
+                    0,
                   giaBan: saleItem.giaBan || 0,
                   promCode: saleItem.promCode,
                   serial: saleItem.serial,
@@ -366,7 +413,8 @@ export class SyncService {
                   grade_discamt: saleItem.grade_discamt,
                   other_discamt: saleItem.other_discamt,
                   chietKhauMuaHangGiamGia: saleItem.chietKhauMuaHangGiamGia,
-                  paid_by_voucher_ecode_ecoin_bp: saleItem.paid_by_voucher_ecode_ecoin_bp,
+                  paid_by_voucher_ecode_ecoin_bp:
+                    saleItem.paid_by_voucher_ecode_ecoin_bp,
                   maCa: saleItem.shift_code,
                   // Validate saleperson_id để tránh NaN
                   saleperson_id: this.validateInteger(saleItem.saleperson_id),
@@ -383,10 +431,16 @@ export class SyncService {
                   catcode3: saleItem.catcode3,
                   // Luôn lưu productType, kể cả khi là null (để lưu từ Zappy API)
                   // Nếu productType là empty string, set thành null
-                  productType: productType && productType.trim() !== '' ? productType.trim() : null,
+                  productType:
+                    productType && productType.trim() !== ''
+                      ? productType.trim()
+                      : null,
                   // Enrich voucher data từ get_daily_cash
                   voucherDp1: voucherRefno,
-                  thanhToanVoucher: voucherAmount && voucherAmount > 0 ? voucherAmount : undefined,
+                  thanhToanVoucher:
+                    voucherAmount && voucherAmount > 0
+                      ? voucherAmount
+                      : undefined,
                   customer: customer,
                   brand: brand,
                   isProcessed: false,
@@ -395,7 +449,6 @@ export class SyncService {
                 } as Partial<Sale>);
                 await this.saleRepository.save(newSale);
                 salesCount++;
-
               } catch (saleError: any) {
                 const errorMsg = `Lỗi khi lưu sale ${order.docCode}/${saleItem.itemCode}: ${saleError?.message || saleError}`;
                 this.logger.error(errorMsg);
@@ -410,7 +463,6 @@ export class SyncService {
         }
       }
 
-
       return {
         success: errors.length === 0,
         message: `Đồng bộ thành công ${orders.length} đơn hàng cho ngày ${date}${brand ? ` (brand: ${brand})` : ''}`,
@@ -420,7 +472,9 @@ export class SyncService {
         errors: errors.length > 0 ? errors : undefined,
       };
     } catch (error: any) {
-      this.logger.error(`Lỗi khi đồng bộ từ Zappy API: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ từ Zappy API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -428,7 +482,10 @@ export class SyncService {
   /**
    * Tạo hóa đơn ở background (không block response)
    */
-  private async createInvoicesInBackground(docCodes: string[], date: string): Promise<void> {
+  private async createInvoicesInBackground(
+    docCodes: string[],
+    date: string,
+  ): Promise<void> {
     let invoiceSuccessCount = 0;
     let invoiceFailureCount = 0;
     const invoiceErrors: string[] = [];
@@ -441,12 +498,15 @@ export class SyncService {
     for (let i = 0; i < docCodes.length; i += batchSize) {
       const batch = docCodes.slice(i, i + batchSize);
       const batchNumber = Math.floor(i / batchSize) + 1;
-      this.logger.log(`[Background] Đang tạo hóa đơn batch ${batchNumber}/${totalBatches} (${batch.length} đơn hàng)...`);
+      this.logger.log(
+        `[Background] Đang tạo hóa đơn batch ${batchNumber}/${totalBatches} (${batch.length} đơn hàng)...`,
+      );
 
       await Promise.all(
         batch.map(async (docCode) => {
           try {
-            const result = await this.salesService.createInvoiceViaFastApi(docCode);
+            const result =
+              await this.salesService.createInvoiceViaFastApi(docCode);
             if (result.success) {
               invoiceSuccessCount++;
             } else {
@@ -464,23 +524,31 @@ export class SyncService {
         }),
       );
 
-      this.logger.log(`[Background] Hoàn thành batch ${batchNumber}/${totalBatches}`);
+      this.logger.log(
+        `[Background] Hoàn thành batch ${batchNumber}/${totalBatches}`,
+      );
     }
 
-    this.logger.log(`[Background] Hoàn thành tạo hóa đơn: ${invoiceSuccessCount} thành công, ${invoiceFailureCount} thất bại cho ngày ${date}`);
+    this.logger.log(
+      `[Background] Hoàn thành tạo hóa đơn: ${invoiceSuccessCount} thành công, ${invoiceFailureCount} thất bại cho ngày ${date}`,
+    );
     if (invoiceErrors.length > 0) {
-      this.logger.warn(`[Background] Danh sách lỗi tạo hóa đơn:`, invoiceErrors);
+      this.logger.warn(
+        `[Background] Danh sách lỗi tạo hóa đơn:`,
+        invoiceErrors,
+      );
     }
   }
-
-
 
   /**
    * Đồng bộ dữ liệu xuất kho từ Zappy API
    * @param date - Date format: DDMMMYYYY (ví dụ: 01NOV2025)
    * @param brand - Brand name (f3, labhair, yaman, menard)
    */
-  async syncStockTransfer(date: string, brand: string): Promise<{
+  async syncStockTransfer(
+    date: string,
+    brand: string,
+  ): Promise<{
     success: boolean;
     message: string;
     recordsCount: number;
@@ -489,7 +557,9 @@ export class SyncService {
     errors?: string[];
   }> {
     try {
-      this.logger.log(`[Stock Transfer] Bắt đầu đồng bộ dữ liệu xuất kho cho brand ${brand} ngày ${date}`);
+      this.logger.log(
+        `[Stock Transfer] Bắt đầu đồng bộ dữ liệu xuất kho cho brand ${brand} ngày ${date}`,
+      );
 
       // Gọi API với P_PART=1,2,3 tuần tự để tránh quá tải
       const parts = [1, 2, 3];
@@ -497,22 +567,36 @@ export class SyncService {
 
       for (const part of parts) {
         try {
-          this.logger.log(`[Stock Transfer] Đang lấy dữ liệu part ${part} cho brand ${brand} ngày ${date}`);
-          const partData = await this.zappyApiService.getDailyStockTrans(date, brand, part);
+          this.logger.log(
+            `[Stock Transfer] Đang lấy dữ liệu part ${part} cho brand ${brand} ngày ${date}`,
+          );
+          const partData = await this.zappyApiService.getDailyStockTrans(
+            date,
+            brand,
+            part,
+          );
           if (partData && partData.length > 0) {
             allStockTransData.push(...partData);
-            this.logger.log(`[Stock Transfer] Nhận được ${partData.length} records từ part ${part} cho brand ${brand} ngày ${date}`);
+            this.logger.log(
+              `[Stock Transfer] Nhận được ${partData.length} records từ part ${part} cho brand ${brand} ngày ${date}`,
+            );
           } else {
-            this.logger.log(`[Stock Transfer] Không có dữ liệu từ part ${part} cho brand ${brand} ngày ${date}`);
+            this.logger.log(
+              `[Stock Transfer] Không có dữ liệu từ part ${part} cho brand ${brand} ngày ${date}`,
+            );
           }
         } catch (error: any) {
-          this.logger.error(`[Stock Transfer] Lỗi khi lấy dữ liệu part ${part} cho brand ${brand} ngày ${date}: ${error?.message || error}`);
+          this.logger.error(
+            `[Stock Transfer] Lỗi khi lấy dữ liệu part ${part} cho brand ${brand} ngày ${date}: ${error?.message || error}`,
+          );
           // Tiếp tục với part tiếp theo, không throw error
         }
       }
 
       if (!allStockTransData || allStockTransData.length === 0) {
-        this.logger.log(`[Stock Transfer] Không có dữ liệu xuất kho cho brand ${brand} ngày ${date}`);
+        this.logger.log(
+          `[Stock Transfer] Không có dữ liệu xuất kho cho brand ${brand} ngày ${date}`,
+        );
         return {
           success: true,
           message: `Không có dữ liệu xuất kho cho brand ${brand} ngày ${date}`,
@@ -522,13 +606,17 @@ export class SyncService {
         };
       }
 
-      this.logger.log(`[Stock Transfer] Tổng cộng nhận được ${allStockTransData.length} records xuất kho cho brand ${brand} ngày ${date}`);
+      this.logger.log(
+        `[Stock Transfer] Tổng cộng nhận được ${allStockTransData.length} records xuất kho cho brand ${brand} ngày ${date}`,
+      );
 
       // KHÔNG deduplicate - giữ lại tất cả records để lưu vào database
       // Mỗi record sẽ có compositeKey unique với timestamp khi lưu
       const stockTransData = allStockTransData;
 
-      this.logger.log(`[Stock Transfer] Giữ lại tất cả ${stockTransData.length} records (không deduplicate)`);
+      this.logger.log(
+        `[Stock Transfer] Giữ lại tất cả ${stockTransData.length} records (không deduplicate)`,
+      );
 
       // Parse date từ format "01/11/2025 19:00" sang Date object
       const parseTransDate = (dateStr: string): Date => {
@@ -548,14 +636,12 @@ export class SyncService {
               parseInt(minutes),
             );
           } else {
-            return new Date(
-              parseInt(year),
-              parseInt(month) - 1,
-              parseInt(day),
-            );
+            return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
           }
         } catch (error) {
-          this.logger.warn(`Failed to parse transDate: ${dateStr}, using current date`);
+          this.logger.warn(
+            `Failed to parse transDate: ${dateStr}, using current date`,
+          );
           return new Date();
         }
       };
@@ -565,22 +651,25 @@ export class SyncService {
         new Set(
           stockTransData
             .map((item) => item.item_code)
-            .filter((code): code is string => !!code && code.trim() !== '')
-        )
+            .filter((code): code is string => !!code && code.trim() !== ''),
+        ),
       );
 
       const materialCodeMap = new Map<string, string>();
       if (uniqueItemCodes.length > 0) {
         try {
           // fetchProducts sẽ tự động thử cả /code/ và /old-code/ cho mỗi itemCode
-          const loyaltyProducts = await this.loyaltyService.fetchProducts(uniqueItemCodes);
+          const loyaltyProducts =
+            await this.loyaltyService.fetchProducts(uniqueItemCodes);
           loyaltyProducts.forEach((product, itemCode) => {
             if (product?.materialCode) {
               materialCodeMap.set(itemCode, product.materialCode);
             }
           });
         } catch (error: any) {
-          this.logger.warn(`[Stock Transfer] Lỗi khi fetch materialCode từ Loyalty API: ${error?.message || error}`);
+          this.logger.warn(
+            `[Stock Transfer] Lỗi khi fetch materialCode từ Loyalty API: ${error?.message || error}`,
+          );
         }
       }
 
@@ -606,7 +695,9 @@ export class SyncService {
           ].join('|');
 
           // Lấy materialCode từ Loyalty API
-          const materialCode = item.item_code ? materialCodeMap.get(item.item_code) : undefined;
+          const materialCode = item.item_code
+            ? materialCodeMap.get(item.item_code)
+            : undefined;
 
           const stockTransferData: Partial<StockTransfer> = {
             doctype: item.doctype || '',
@@ -632,7 +723,8 @@ export class SyncService {
           };
 
           // Chỉ insert mới, không check duplicate
-          const newStockTransfer = this.stockTransferRepository.create(stockTransferData);
+          const newStockTransfer =
+            this.stockTransferRepository.create(stockTransferData);
           await this.stockTransferRepository.save(newStockTransfer);
           savedCount++;
         } catch (itemError: any) {
@@ -642,13 +734,17 @@ export class SyncService {
         }
       }
 
-      this.logger.log(`[Stock Transfer] Đã lưu ${savedCount} records mới cho brand ${brand} ngày ${date}`);
+      this.logger.log(
+        `[Stock Transfer] Đã lưu ${savedCount} records mới cho brand ${brand} ngày ${date}`,
+      );
 
       // Tự động xử lý warehouse cho các stock transfers mới (chỉ cho các docCode chưa được xử lý)
       try {
         await this.processWarehouseForStockTransfers(date, brand);
       } catch (warehouseError: any) {
-        this.logger.warn(`[Stock Transfer] Lỗi khi xử lý warehouse tự động cho brand ${brand} ngày ${date}: ${warehouseError?.message || warehouseError}`);
+        this.logger.warn(
+          `[Stock Transfer] Lỗi khi xử lý warehouse tự động cho brand ${brand} ngày ${date}: ${warehouseError?.message || warehouseError}`,
+        );
         // Không throw error để không chặn flow sync chính
       }
 
@@ -716,7 +812,6 @@ export class SyncService {
     }
   }
 
-
   async getDailyWsale(date: string, brand?: string): Promise<any> {
     try {
       const orders = await this.zappyApiService.getDailyWsale(date, brand);
@@ -725,8 +820,7 @@ export class SyncService {
       let cashData: any[] = [];
       try {
         cashData = await this.zappyApiService.getDailyCash(date, brand);
-      } catch (error) {
-      }
+      } catch (error) {}
 
       // Tạo map cash data theo so_code để dễ lookup
       const cashMapBySoCode = new Map<string, any[]>();
@@ -759,8 +853,8 @@ export class SyncService {
         new Set(
           orders
             .map((o) => o.branchCode)
-            .filter((code): code is string => !!code && code.trim() !== '')
-        )
+            .filter((code): code is string => !!code && code.trim() !== ''),
+        ),
       );
 
       // Fetch departments để lấy company và map sang brand
@@ -777,21 +871,25 @@ export class SyncService {
               departmentMap.set(branchCode, { company: department.company });
             }
           } catch (error) {
-            this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+            this.logger.warn(
+              `Failed to fetch department for branchCode ${branchCode}: ${error}`,
+            );
           }
         }
       }
       // Map company sang brand
-      const mapCompanyToBrand = (company: string | null | undefined): string => {
+      const mapCompanyToBrand = (
+        company: string | null | undefined,
+      ): string => {
         if (!company) return '';
         const companyUpper = company.toUpperCase();
         const brandMap: Record<string, string> = {
-          'F3': 'f3',
-          'FACIALBAR': 'f3',
-          'MENARD': 'menard',
-          'LABHAIR': 'labhair',
-          'YAMAN': 'yaman',
-          'CHANDO': 'chando',
+          F3: 'f3',
+          FACIALBAR: 'f3',
+          MENARD: 'menard',
+          LABHAIR: 'labhair',
+          YAMAN: 'yaman',
+          CHANDO: 'chando',
         };
         return brandMap[companyUpper] || company.toLowerCase();
       };
@@ -818,11 +916,15 @@ export class SyncService {
               mobile: order.customer.mobile,
               sexual: order.customer.sexual,
               idnumber: order.customer.idnumber,
-              enteredat: order.customer.enteredat ? new Date(order.customer.enteredat) : null,
+              enteredat: order.customer.enteredat
+                ? new Date(order.customer.enteredat)
+                : null,
               crm_lead_source: order.customer.crm_lead_source,
               address: order.customer.address,
               province_name: order.customer.province_name,
-              birthday: order.customer.birthday ? new Date(order.customer.birthday) : null,
+              birthday: order.customer.birthday
+                ? new Date(order.customer.birthday)
+                : null,
               grade_name: order.customer.grade_name,
               branch_code: order.customer.branch_code,
             } as Partial<Customer>);
@@ -832,7 +934,8 @@ export class SyncService {
             // Cập nhật thông tin customer nếu cần
             customer.name = order.customer.name || customer.name;
             customer.mobile = order.customer.mobile || customer.mobile;
-            customer.grade_name = order.customer.grade_name || customer.grade_name;
+            customer.grade_name =
+              order.customer.grade_name || customer.grade_name;
             // Cập nhật brand từ department nếu có
             if (brandFromDepartment) {
               customer.brand = brandFromDepartment;
@@ -850,7 +953,9 @@ export class SyncService {
 
           // Lấy cash/voucher data cho order này
           const orderCashData = cashMapBySoCode.get(order.docCode) || [];
-          const voucherData = orderCashData.filter((cash) => cash.fop_syscode === 'VOUCHER');
+          const voucherData = orderCashData.filter(
+            (cash) => cash.fop_syscode === 'VOUCHER',
+          );
 
           // Collect tất cả itemCodes từ order để fetch products từ Loyalty API và check 404
           // Đảm bảo trim ngay từ đầu để consistency
@@ -858,8 +963,8 @@ export class SyncService {
             new Set(
               (order.sales || [])
                 .map((s) => s.itemCode?.trim())
-                .filter((code): code is string => !!code && code !== '')
-            )
+                .filter((code): code is string => !!code && code !== ''),
+            ),
           );
 
           // Fetch products từ Loyalty API để check sản phẩm không tồn tại (404)
@@ -869,7 +974,8 @@ export class SyncService {
             // Check products từ Loyalty API sử dụng LoyaltyService
             await Promise.all(
               orderItemCodes.map(async (trimmedItemCode) => {
-                const product = await this.loyaltyService.checkProduct(trimmedItemCode);
+                const product =
+                  await this.loyaltyService.checkProduct(trimmedItemCode);
                 if (!product) {
                   notFoundItemCodes.add(trimmedItemCode);
                 }
@@ -884,7 +990,9 @@ export class SyncService {
                 // Bỏ qua các item có itemcode = "TRUTONKEEP"
                 const itemCode = saleItem.itemCode?.trim();
                 if (itemCode && itemCode.toUpperCase() === 'TRUTONKEEP') {
-                  this.logger.log(`[SalesService] Bỏ qua sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - itemcode = TRUTONKEEP`);
+                  this.logger.log(
+                    `[SalesService] Bỏ qua sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - itemcode = TRUTONKEEP`,
+                  );
                   continue;
                 }
 
@@ -894,36 +1002,47 @@ export class SyncService {
                 const statusAsys = !isNotFound;
 
                 if (isNotFound) {
-                  this.logger.warn(`[SalesService] Sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - Sản phẩm không tồn tại trong Loyalty API (404), sẽ lưu với statusAsys = false`);
+                  this.logger.warn(
+                    `[SalesService] Sale item ${itemCode} (${saleItem.itemName || 'N/A'}) trong order ${order.docCode} - Sản phẩm không tồn tại trong Loyalty API (404), sẽ lưu với statusAsys = false`,
+                  );
                 }
 
                 // Lấy productType: Ưu tiên từ Zappy API (producttype), nếu không có thì lấy từ Loyalty API
                 // Kiểm tra cả producttype (chữ thường) và productType (camelCase) từ Zappy API
-                const productTypeFromZappy = saleItem.producttype || saleItem.productType || null;
+                const productTypeFromZappy =
+                  saleItem.producttype || saleItem.productType || null;
                 // Fetch productType từ Loyalty API nếu chưa có từ Zappy (đã có sẵn trong notFoundItemCodes check)
                 let productTypeFromLoyalty: string | null = null;
-                if (!productTypeFromZappy && itemCode && !notFoundItemCodes.has(itemCode)) {
+                if (
+                  !productTypeFromZappy &&
+                  itemCode &&
+                  !notFoundItemCodes.has(itemCode)
+                ) {
                   try {
-                    const loyaltyProduct = await this.loyaltyService.checkProduct(itemCode);
+                    const loyaltyProduct =
+                      await this.loyaltyService.checkProduct(itemCode);
                     if (loyaltyProduct) {
-                      productTypeFromLoyalty = loyaltyProduct.productType || loyaltyProduct.producttype || null;
+                      productTypeFromLoyalty =
+                        loyaltyProduct.productType ||
+                        loyaltyProduct.producttype ||
+                        null;
                     }
                   } catch (error) {
                     // Ignore error, sẽ dùng null
                   }
                 }
-                const productType = productTypeFromZappy || productTypeFromLoyalty || null;
-
+                const productType =
+                  productTypeFromZappy || productTypeFromLoyalty || null;
 
                 // Kiểm tra xem sale đã tồn tại chưa
                 // Với đơn "08. Tách thẻ": cần thêm qty vào điều kiện vì có thể có 2 dòng cùng itemCode nhưng qty khác nhau (-1 và 1)
                 // Với các đơn khác: chỉ cần docCode + itemCode + customer
-                const ordertypeName = saleItem.ordertype_name || saleItem.ordertype || '';
-                const isTachThe = ordertypeName.includes('08. Tách thẻ') ||
+                const ordertypeName =
+                  saleItem.ordertype_name || saleItem.ordertype || '';
+                const isTachThe =
+                  ordertypeName.includes('08. Tách thẻ') ||
                   ordertypeName.includes('08.Tách thẻ') ||
                   ordertypeName.includes('08.  Tách thẻ');
-
-
 
                 // Enrich voucher data từ get_daily_cash
                 let voucherRefno: string | undefined;
@@ -938,18 +1057,23 @@ export class SyncService {
                 // Tạo sale mới
                 // Tính toán ordertypeName trước
                 let finalOrderTypeNameForNew: string | undefined = undefined;
-                if (saleItem.ordertype_name !== undefined && saleItem.ordertype_name !== null) {
+                if (
+                  saleItem.ordertype_name !== undefined &&
+                  saleItem.ordertype_name !== null
+                ) {
                   if (typeof saleItem.ordertype_name === 'string') {
                     const trimmed = saleItem.ordertype_name.trim();
-                    finalOrderTypeNameForNew = trimmed !== '' ? trimmed : undefined;
+                    finalOrderTypeNameForNew =
+                      trimmed !== '' ? trimmed : undefined;
                   } else {
-                    finalOrderTypeNameForNew = String(saleItem.ordertype_name).trim() || undefined;
+                    finalOrderTypeNameForNew =
+                      String(saleItem.ordertype_name).trim() || undefined;
                   }
                 }
                 // Log để debug
                 this.logger.log(
                   `[SalesService] Tạo mới sale ${order.docCode}/${saleItem.itemCode}: ` +
-                  `ordertype_name raw="${saleItem.ordertype_name}" (type: ${typeof saleItem.ordertype_name}), final="${finalOrderTypeNameForNew}"`
+                    `ordertype_name raw="${saleItem.ordertype_name}" (type: ${typeof saleItem.ordertype_name}), final="${finalOrderTypeNameForNew}"`,
                 );
                 const newSale = this.saleRepository.create({
                   docCode: order.docCode,
@@ -967,7 +1091,11 @@ export class SyncService {
                   qty: saleItem.qty || 0,
                   revenue: saleItem.revenue || 0,
                   linetotal: saleItem.linetotal || saleItem.revenue || 0,
-                  tienHang: saleItem.tienHang || saleItem.linetotal || saleItem.revenue || 0,
+                  tienHang:
+                    saleItem.tienHang ||
+                    saleItem.linetotal ||
+                    saleItem.revenue ||
+                    0,
                   giaBan: saleItem.giaBan || 0,
                   promCode: saleItem.promCode,
                   serial: saleItem.serial,
@@ -976,7 +1104,8 @@ export class SyncService {
                   grade_discamt: saleItem.grade_discamt,
                   other_discamt: saleItem.other_discamt,
                   chietKhauMuaHangGiamGia: saleItem.chietKhauMuaHangGiamGia,
-                  paid_by_voucher_ecode_ecoin_bp: saleItem.paid_by_voucher_ecode_ecoin_bp,
+                  paid_by_voucher_ecode_ecoin_bp:
+                    saleItem.paid_by_voucher_ecode_ecoin_bp,
                   maCa: saleItem.shift_code,
                   // Validate saleperson_id để tránh NaN
                   saleperson_id: this.validateInteger(saleItem.saleperson_id),
@@ -993,10 +1122,16 @@ export class SyncService {
                   catcode3: saleItem.catcode3,
                   // Luôn lưu productType, kể cả khi là null (để lưu từ Zappy API)
                   // Nếu productType là empty string, set thành null
-                  productType: productType && productType.trim() !== '' ? productType.trim() : null,
+                  productType:
+                    productType && productType.trim() !== ''
+                      ? productType.trim()
+                      : null,
                   // Enrich voucher data từ get_daily_cash
                   voucherDp1: voucherRefno,
-                  thanhToanVoucher: voucherAmount && voucherAmount > 0 ? voucherAmount : undefined,
+                  thanhToanVoucher:
+                    voucherAmount && voucherAmount > 0
+                      ? voucherAmount
+                      : undefined,
                   customer: customer,
                   brand: brand,
                   isProcessed: false,
@@ -1005,7 +1140,6 @@ export class SyncService {
                 } as Partial<Sale>);
                 await this.saleRepository.save(newSale);
                 salesCount++;
-
               } catch (saleError: any) {
                 const errorMsg = `Lỗi khi lưu sale ${order.docCode}/${saleItem.itemCode}: ${saleError?.message || saleError}`;
                 this.logger.error(errorMsg);
@@ -1020,7 +1154,6 @@ export class SyncService {
         }
       }
 
-
       return {
         success: errors.length === 0,
         message: `Đồng bộ thành công ${orders.length} đơn hàng cho ngày ${date}${brand ? ` (brand: ${brand})` : ''}`,
@@ -1029,11 +1162,11 @@ export class SyncService {
         customersCount,
         errors: errors.length > 0 ? errors : undefined,
       };
-
     } catch (error: any) {
-      this.logger.error(`Error getting daily Wsale: ${error?.message || error}`);
+      this.logger.error(
+        `Error getting daily Wsale: ${error?.message || error}`,
+      );
       throw error;
-
     }
   }
 
@@ -1063,7 +1196,9 @@ export class SyncService {
     }>;
   }> {
     try {
-      this.logger.log(`[Stock Transfer Range] Bắt đầu đồng bộ dữ liệu xuất kho từ ${dateFrom} đến ${dateTo}${brand ? ` cho brand ${brand}` : ' cho tất cả brands'}`);
+      this.logger.log(
+        `[Stock Transfer Range] Bắt đầu đồng bộ dữ liệu xuất kho từ ${dateFrom} đến ${dateTo}${brand ? ` cho brand ${brand}` : ' cho tất cả brands'}`,
+      );
 
       // Parse dates từ DDMMMYYYY sang Date object
       const parseDate = (dateStr: string): Date => {
@@ -1072,9 +1207,18 @@ export class SyncService {
         const year = parseInt(dateStr.substring(5, 9));
 
         const monthMap: Record<string, number> = {
-          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          JAN: 0,
+          FEB: 1,
+          MAR: 2,
+          APR: 3,
+          MAY: 4,
+          JUN: 5,
+          JUL: 6,
+          AUG: 7,
+          SEP: 8,
+          OCT: 9,
+          NOV: 10,
+          DEC: 11,
         };
 
         const month = monthMap[monthStr] || 0;
@@ -1085,7 +1229,20 @@ export class SyncService {
         const day = d.getDate().toString().padStart(2, '0');
         const monthIdx = d.getMonth();
         const year = d.getFullYear();
-        const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const months = [
+          'JAN',
+          'FEB',
+          'MAR',
+          'APR',
+          'MAY',
+          'JUN',
+          'JUL',
+          'AUG',
+          'SEP',
+          'OCT',
+          'NOV',
+          'DEC',
+        ];
         const monthStr = months[monthIdx];
         return `${day}${monthStr}${year}`;
       };
@@ -1118,7 +1275,9 @@ export class SyncService {
         // Đồng bộ cho từng brand
         for (const brandItem of brands) {
           try {
-            this.logger.log(`[Stock Transfer Range] Đang đồng bộ brand ${brandItem} cho ngày ${dateStr}`);
+            this.logger.log(
+              `[Stock Transfer Range] Đang đồng bộ brand ${brandItem} cho ngày ${dateStr}`,
+            );
             const result = await this.syncStockTransfer(dateStr, brandItem);
 
             totalRecordsCount += result.recordsCount;
@@ -1137,7 +1296,9 @@ export class SyncService {
               errors.push(...result.errors);
             }
 
-            this.logger.log(`[Stock Transfer Range] Hoàn thành đồng bộ brand ${brandItem} cho ngày ${dateStr}`);
+            this.logger.log(
+              `[Stock Transfer Range] Hoàn thành đồng bộ brand ${brandItem} cho ngày ${dateStr}`,
+            );
           } catch (error: any) {
             const errorMsg = `Lỗi khi đồng bộ stock transfer cho brand ${brandItem} ngày ${dateStr}: ${error?.message || error}`;
             this.logger.error(`[Stock Transfer Range] ${errorMsg}`);
@@ -1149,7 +1310,9 @@ export class SyncService {
         currentDate.setDate(currentDate.getDate() + 1);
       }
 
-      this.logger.log(`[Stock Transfer Range] Hoàn thành đồng bộ dữ liệu xuất kho từ ${dateFrom} đến ${dateTo}. Tổng: ${totalRecordsCount} records, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`);
+      this.logger.log(
+        `[Stock Transfer Range] Hoàn thành đồng bộ dữ liệu xuất kho từ ${dateFrom} đến ${dateTo}. Tổng: ${totalRecordsCount} records, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
+      );
 
       return {
         success: errors.length === 0,
@@ -1195,17 +1358,22 @@ export class SyncService {
       const limit = params.limit || 10;
       const skip = (page - 1) * limit;
 
-      const queryBuilder = this.stockTransferRepository.createQueryBuilder('st');
+      const queryBuilder =
+        this.stockTransferRepository.createQueryBuilder('st');
 
       // Apply filters
       if (params.brand) {
         queryBuilder.andWhere('st.brand = :brand', { brand: params.brand });
       }
       if (params.branchCode) {
-        queryBuilder.andWhere('st.branchCode = :branchCode', { branchCode: params.branchCode });
+        queryBuilder.andWhere('st.branchCode = :branchCode', {
+          branchCode: params.branchCode,
+        });
       }
       if (params.itemCode) {
-        queryBuilder.andWhere('st.itemCode LIKE :itemCode', { itemCode: `%${params.itemCode}%` });
+        queryBuilder.andWhere('st.itemCode LIKE :itemCode', {
+          itemCode: `%${params.itemCode}%`,
+        });
       }
       if (params.soCode) {
         queryBuilder.andWhere('st.soCode = :soCode', { soCode: params.soCode });
@@ -1213,7 +1381,9 @@ export class SyncService {
       if (params.docCode) {
         // Use POSITION function instead of LIKE to avoid escaping issues with _ and %
         // POSITION returns > 0 if substring is found
-        queryBuilder.andWhere('POSITION(:docCode IN st.docCode) > 0', { docCode: params.docCode });
+        queryBuilder.andWhere('POSITION(:docCode IN st.docCode) > 0', {
+          docCode: params.docCode,
+        });
       }
       if (params.dateFrom) {
         // Parse DDMMMYYYY to Date
@@ -1222,15 +1392,26 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day);
         };
         const fromDate = parseDate(params.dateFrom);
-        queryBuilder.andWhere('st.transDate >= :dateFrom', { dateFrom: fromDate });
+        queryBuilder.andWhere('st.transDate >= :dateFrom', {
+          dateFrom: fromDate,
+        });
       }
       if (params.dateTo) {
         const parseDate = (dateStr: string): Date => {
@@ -1238,9 +1419,18 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day, 23, 59, 59);
@@ -1274,7 +1464,9 @@ export class SyncService {
         },
       };
     } catch (error: any) {
-      this.logger.error(`Error getting stock transfers: ${error?.message || error}`);
+      this.logger.error(
+        `Error getting stock transfers: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -1285,7 +1477,10 @@ export class SyncService {
    * @param brand - Brand name (f3, labhair, yaman, menard). Nếu không có thì đồng bộ tất cả brands
    * @returns Kết quả đồng bộ
    */
-  async syncShiftEndCash(date: string, brand?: string): Promise<{
+  async syncShiftEndCash(
+    date: string,
+    brand?: string,
+  ): Promise<{
     success: boolean;
     message: string;
     recordsCount: number;
@@ -1304,13 +1499,20 @@ export class SyncService {
 
       for (const brandName of brands) {
         try {
-          this.logger.log(`[ShiftEndCash] Đang đồng bộ ${brandName} cho ngày ${date}`);
+          this.logger.log(
+            `[ShiftEndCash] Đang đồng bộ ${brandName} cho ngày ${date}`,
+          );
 
           // Lấy dữ liệu từ API
-          const shiftEndCashData = await this.zappyApiService.getShiftEndCash(date, brandName);
+          const shiftEndCashData = await this.zappyApiService.getShiftEndCash(
+            date,
+            brandName,
+          );
 
           if (!shiftEndCashData || shiftEndCashData.length === 0) {
-            this.logger.log(`[ShiftEndCash] Không có dữ liệu cho ${brandName} - ngày ${date}`);
+            this.logger.log(
+              `[ShiftEndCash] Không có dữ liệu cho ${brandName} - ngày ${date}`,
+            );
             continue;
           }
 
@@ -1320,7 +1522,9 @@ export class SyncService {
           const brandNewRecordIds: string[] = []; // Track các record mới được tạo trong brand này
 
           // Parse date string sang Date object
-          const parseDateString = (dateStr: string | null | undefined): Date | null => {
+          const parseDateString = (
+            dateStr: string | null | undefined,
+          ): Date | null => {
             if (!dateStr) return null;
             try {
               // Format: "01/11/2025 10:16" hoặc ISO string
@@ -1355,50 +1559,134 @@ export class SyncService {
               });
 
               // Parse dates - đảm bảo lưu đúng giá trị, kể cả null
-              const openat = record.openat !== undefined && record.openat !== null && record.openat !== ''
-                ? new Date(record.openat)
-                : null;
-              const closedat = record.closedat !== undefined && record.closedat !== null && record.closedat !== ''
-                ? new Date(record.closedat)
-                : null;
+              const openat =
+                record.openat !== undefined &&
+                record.openat !== null &&
+                record.openat !== ''
+                  ? new Date(record.openat)
+                  : null;
+              const closedat =
+                record.closedat !== undefined &&
+                record.closedat !== null &&
+                record.closedat !== ''
+                  ? new Date(record.closedat)
+                  : null;
               const docdate = parseDateString(record.docdate);
               const gl_date = parseDateString(record.gl_date);
               const enteredat = parseDateString(record.enteredat);
 
               if (existingRecord) {
                 // Update existing record - lưu TẤT CẢ giá trị từ API, kể cả null, empty string, 0
-                existingRecord.draw_code = record.draw_code !== undefined && record.draw_code !== null ? record.draw_code : existingRecord.draw_code;
-                existingRecord.branch_code = record.branch_code !== undefined && record.branch_code !== null ? record.branch_code : existingRecord.branch_code;
-                existingRecord.status = record.status !== undefined && record.status !== null ? record.status : existingRecord.status;
-                existingRecord.teller_code = record.teller_code !== undefined && record.teller_code !== null ? record.teller_code : existingRecord.teller_code;
-                existingRecord.openat = openat !== undefined && openat !== null ? openat : existingRecord.openat;
-                existingRecord.closedat = closedat !== undefined && closedat !== null ? closedat : existingRecord.closedat;
-                existingRecord.shift_status = record.shift_status !== undefined && record.shift_status !== null ? record.shift_status : existingRecord.shift_status;
-                existingRecord.docdate = docdate !== undefined && docdate !== null ? docdate : existingRecord.docdate;
-                existingRecord.gl_date = gl_date !== undefined && gl_date !== null ? gl_date : existingRecord.gl_date;
-                existingRecord.description = record.description !== undefined && record.description !== null ? record.description : existingRecord.description;
-                existingRecord.total = record.total !== undefined && record.total !== null ? Number(record.total) : existingRecord.total;
-                existingRecord.enteredat = enteredat !== undefined && enteredat !== null ? enteredat : existingRecord.enteredat;
-                existingRecord.enteredby = record.enteredby !== undefined && record.enteredby !== null ? record.enteredby : existingRecord.enteredby;
+                existingRecord.draw_code =
+                  record.draw_code !== undefined && record.draw_code !== null
+                    ? record.draw_code
+                    : existingRecord.draw_code;
+                existingRecord.branch_code =
+                  record.branch_code !== undefined &&
+                  record.branch_code !== null
+                    ? record.branch_code
+                    : existingRecord.branch_code;
+                existingRecord.status =
+                  record.status !== undefined && record.status !== null
+                    ? record.status
+                    : existingRecord.status;
+                existingRecord.teller_code =
+                  record.teller_code !== undefined &&
+                  record.teller_code !== null
+                    ? record.teller_code
+                    : existingRecord.teller_code;
+                existingRecord.openat =
+                  openat !== undefined && openat !== null
+                    ? openat
+                    : existingRecord.openat;
+                existingRecord.closedat =
+                  closedat !== undefined && closedat !== null
+                    ? closedat
+                    : existingRecord.closedat;
+                existingRecord.shift_status =
+                  record.shift_status !== undefined &&
+                  record.shift_status !== null
+                    ? record.shift_status
+                    : existingRecord.shift_status;
+                existingRecord.docdate =
+                  docdate !== undefined && docdate !== null
+                    ? docdate
+                    : existingRecord.docdate;
+                existingRecord.gl_date =
+                  gl_date !== undefined && gl_date !== null
+                    ? gl_date
+                    : existingRecord.gl_date;
+                existingRecord.description =
+                  record.description !== undefined &&
+                  record.description !== null
+                    ? record.description
+                    : existingRecord.description;
+                existingRecord.total =
+                  record.total !== undefined && record.total !== null
+                    ? Number(record.total)
+                    : existingRecord.total;
+                existingRecord.enteredat =
+                  enteredat !== undefined && enteredat !== null
+                    ? enteredat
+                    : existingRecord.enteredat;
+                existingRecord.enteredby =
+                  record.enteredby !== undefined && record.enteredby !== null
+                    ? record.enteredby
+                    : existingRecord.enteredby;
                 existingRecord.sync_date = date;
 
                 // Xóa các lines cũ và tạo mới
                 if (record.lines && Array.isArray(record.lines)) {
-                  await this.shiftEndCashLineRepository.delete({ shiftEndCashId: existingRecord.id });
+                  await this.shiftEndCashLineRepository.delete({
+                    shiftEndCashId: existingRecord.id,
+                  });
 
                   const linesToCreate = record.lines.map((line: any) => ({
                     shiftEndCashId: existingRecord.id,
-                    fop_code: line.fop_code !== undefined && line.fop_code !== null ? line.fop_code : null,
-                    fop_name: line.fop_name !== undefined && line.fop_name !== null ? line.fop_name : null,
-                    system_amt: line.system_amt !== undefined && line.system_amt !== null ? Number(line.system_amt) : 0,
-                    sys_acct_code: line.sys_acct_code !== undefined && line.sys_acct_code !== null ? line.sys_acct_code : null,
-                    actual_amt: line.actual_amt !== undefined && line.actual_amt !== null ? Number(line.actual_amt) : 0,
-                    actual_acct_code: line.actual_acct_code !== undefined && line.actual_acct_code !== null ? line.actual_acct_code : null,
-                    diff_amount: line.diff_amount !== undefined && line.diff_amount !== null ? Number(line.diff_amount) : 0,
-                    diff_acct_code: line.diff_acct_code !== undefined && line.diff_acct_code !== null ? line.diff_acct_code : null,
-                    template_id: line.template_id !== undefined && line.template_id !== null ? Number(line.template_id) : null,
+                    fop_code:
+                      line.fop_code !== undefined && line.fop_code !== null
+                        ? line.fop_code
+                        : null,
+                    fop_name:
+                      line.fop_name !== undefined && line.fop_name !== null
+                        ? line.fop_name
+                        : null,
+                    system_amt:
+                      line.system_amt !== undefined && line.system_amt !== null
+                        ? Number(line.system_amt)
+                        : 0,
+                    sys_acct_code:
+                      line.sys_acct_code !== undefined &&
+                      line.sys_acct_code !== null
+                        ? line.sys_acct_code
+                        : null,
+                    actual_amt:
+                      line.actual_amt !== undefined && line.actual_amt !== null
+                        ? Number(line.actual_amt)
+                        : 0,
+                    actual_acct_code:
+                      line.actual_acct_code !== undefined &&
+                      line.actual_acct_code !== null
+                        ? line.actual_acct_code
+                        : null,
+                    diff_amount:
+                      line.diff_amount !== undefined &&
+                      line.diff_amount !== null
+                        ? Number(line.diff_amount)
+                        : 0,
+                    diff_acct_code:
+                      line.diff_acct_code !== undefined &&
+                      line.diff_acct_code !== null
+                        ? line.diff_acct_code
+                        : null,
+                    template_id:
+                      line.template_id !== undefined &&
+                      line.template_id !== null
+                        ? Number(line.template_id)
+                        : null,
                   }));
-                  const lines = this.shiftEndCashLineRepository.create(linesToCreate);
+                  const lines =
+                    this.shiftEndCashLineRepository.create(linesToCreate);
                   await this.shiftEndCashLineRepository.save(lines);
                 }
 
@@ -1408,40 +1696,113 @@ export class SyncService {
                 // Tạo record mới - lưu TẤT CẢ giá trị từ API
                 const newRecord = this.shiftEndCashRepository.create({
                   api_id: record.id,
-                  draw_code: record.draw_code !== undefined && record.draw_code !== null ? record.draw_code : '',
-                  branch_code: record.branch_code !== undefined && record.branch_code !== null ? record.branch_code : null,
-                  status: record.status !== undefined && record.status !== null ? record.status : null,
-                  teller_code: record.teller_code !== undefined && record.teller_code !== null ? record.teller_code : null,
-                  openat: openat !== undefined && openat !== null ? openat : null,
-                  closedat: closedat !== undefined && closedat !== null ? closedat : null,
-                  shift_status: record.shift_status !== undefined && record.shift_status !== null ? record.shift_status : null,
-                  docdate: docdate !== undefined && docdate !== null ? docdate : null,
-                  gl_date: gl_date !== undefined && gl_date !== null ? gl_date : null,
-                  description: record.description !== undefined && record.description !== null ? record.description : null,
-                  total: record.total !== undefined && record.total !== null ? Number(record.total) : 0,
-                  enteredat: enteredat !== undefined && enteredat !== null ? enteredat : null,
-                  enteredby: record.enteredby !== undefined && record.enteredby !== null ? record.enteredby : null,
+                  draw_code:
+                    record.draw_code !== undefined && record.draw_code !== null
+                      ? record.draw_code
+                      : '',
+                  branch_code:
+                    record.branch_code !== undefined &&
+                    record.branch_code !== null
+                      ? record.branch_code
+                      : null,
+                  status:
+                    record.status !== undefined && record.status !== null
+                      ? record.status
+                      : null,
+                  teller_code:
+                    record.teller_code !== undefined &&
+                    record.teller_code !== null
+                      ? record.teller_code
+                      : null,
+                  openat:
+                    openat !== undefined && openat !== null ? openat : null,
+                  closedat:
+                    closedat !== undefined && closedat !== null
+                      ? closedat
+                      : null,
+                  shift_status:
+                    record.shift_status !== undefined &&
+                    record.shift_status !== null
+                      ? record.shift_status
+                      : null,
+                  docdate:
+                    docdate !== undefined && docdate !== null ? docdate : null,
+                  gl_date:
+                    gl_date !== undefined && gl_date !== null ? gl_date : null,
+                  description:
+                    record.description !== undefined &&
+                    record.description !== null
+                      ? record.description
+                      : null,
+                  total:
+                    record.total !== undefined && record.total !== null
+                      ? Number(record.total)
+                      : 0,
+                  enteredat:
+                    enteredat !== undefined && enteredat !== null
+                      ? enteredat
+                      : null,
+                  enteredby:
+                    record.enteredby !== undefined && record.enteredby !== null
+                      ? record.enteredby
+                      : null,
                   sync_date: date,
                   brand: brandName,
                 } as any);
 
-                const savedRecord = (await this.shiftEndCashRepository.save(newRecord)) as unknown as ShiftEndCash;
+                const savedRecord = (await this.shiftEndCashRepository.save(
+                  newRecord,
+                )) as unknown as ShiftEndCash;
 
                 // Tạo lines
                 if (record.lines && Array.isArray(record.lines)) {
                   const linesToCreate = record.lines.map((line: any) => ({
                     shiftEndCashId: savedRecord.id,
-                    fop_code: line.fop_code !== undefined && line.fop_code !== null ? line.fop_code : null,
-                    fop_name: line.fop_name !== undefined && line.fop_name !== null ? line.fop_name : null,
-                    system_amt: line.system_amt !== undefined && line.system_amt !== null ? Number(line.system_amt) : 0,
-                    sys_acct_code: line.sys_acct_code !== undefined && line.sys_acct_code !== null ? line.sys_acct_code : null,
-                    actual_amt: line.actual_amt !== undefined && line.actual_amt !== null ? Number(line.actual_amt) : 0,
-                    actual_acct_code: line.actual_acct_code !== undefined && line.actual_acct_code !== null ? line.actual_acct_code : null,
-                    diff_amount: line.diff_amount !== undefined && line.diff_amount !== null ? Number(line.diff_amount) : 0,
-                    diff_acct_code: line.diff_acct_code !== undefined && line.diff_acct_code !== null ? line.diff_acct_code : null,
-                    template_id: line.template_id !== undefined && line.template_id !== null ? Number(line.template_id) : null,
+                    fop_code:
+                      line.fop_code !== undefined && line.fop_code !== null
+                        ? line.fop_code
+                        : null,
+                    fop_name:
+                      line.fop_name !== undefined && line.fop_name !== null
+                        ? line.fop_name
+                        : null,
+                    system_amt:
+                      line.system_amt !== undefined && line.system_amt !== null
+                        ? Number(line.system_amt)
+                        : 0,
+                    sys_acct_code:
+                      line.sys_acct_code !== undefined &&
+                      line.sys_acct_code !== null
+                        ? line.sys_acct_code
+                        : null,
+                    actual_amt:
+                      line.actual_amt !== undefined && line.actual_amt !== null
+                        ? Number(line.actual_amt)
+                        : 0,
+                    actual_acct_code:
+                      line.actual_acct_code !== undefined &&
+                      line.actual_acct_code !== null
+                        ? line.actual_acct_code
+                        : null,
+                    diff_amount:
+                      line.diff_amount !== undefined &&
+                      line.diff_amount !== null
+                        ? Number(line.diff_amount)
+                        : 0,
+                    diff_acct_code:
+                      line.diff_acct_code !== undefined &&
+                      line.diff_acct_code !== null
+                        ? line.diff_acct_code
+                        : null,
+                    template_id:
+                      line.template_id !== undefined &&
+                      line.template_id !== null
+                        ? Number(line.template_id)
+                        : null,
                   }));
-                  const lines = this.shiftEndCashLineRepository.create(linesToCreate as any);
+                  const lines = this.shiftEndCashLineRepository.create(
+                    linesToCreate as any,
+                  );
                   await this.shiftEndCashLineRepository.save(lines);
                 }
 
@@ -1461,7 +1822,9 @@ export class SyncService {
           allErrors.push(...brandErrors);
           allNewRecordIds.push(...brandNewRecordIds); // Collect các record mới từ brand này
 
-          this.logger.log(`[ShiftEndCash] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`);
+          this.logger.log(
+            `[ShiftEndCash] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`,
+          );
         } catch (brandError: any) {
           const errorMsg = `[${brandName}] Lỗi khi đồng bộ shift end cash: ${brandError?.message || brandError}`;
           this.logger.error(errorMsg);
@@ -1479,7 +1842,9 @@ export class SyncService {
         newRecordIds: allNewRecordIds.length > 0 ? allNewRecordIds : undefined, // Trả về danh sách ID các records mới được tạo
       };
     } catch (error: any) {
-      this.logger.error(`Lỗi khi đồng bộ shift end cash: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ shift end cash: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -1524,12 +1889,16 @@ export class SyncService {
 
       // Filter by branchCode (sử dụng trường branch_code từ database)
       if (params.branchCode) {
-        queryBuilder.andWhere('sec.branch_code = :branchCode', { branchCode: params.branchCode });
+        queryBuilder.andWhere('sec.branch_code = :branchCode', {
+          branchCode: params.branchCode,
+        });
       }
 
       // Filter by drawCode
       if (params.drawCode) {
-        queryBuilder.andWhere('sec.draw_code = :drawCode', { drawCode: params.drawCode });
+        queryBuilder.andWhere('sec.draw_code = :drawCode', {
+          drawCode: params.drawCode,
+        });
       }
 
       // Filter by apiId
@@ -1540,14 +1909,26 @@ export class SyncService {
       // Filter by dateFrom và dateTo - filter theo openat và closedat
       // Filter các record có openat hoặc closedat nằm trong khoảng dateFrom-dateTo
       if (params.dateFrom || params.dateTo) {
-        const parseDate = (dateStr: string, isEndOfDay: boolean = false): Date => {
+        const parseDate = (
+          dateStr: string,
+          isEndOfDay: boolean = false,
+        ): Date => {
           const day = parseInt(dateStr.substring(0, 2));
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           if (isEndOfDay) {
@@ -1562,16 +1943,22 @@ export class SyncService {
           const toDate = parseDate(params.dateTo, true);
           queryBuilder.andWhere(
             '(sec.openat BETWEEN :dateFrom AND :dateTo OR sec.closedat BETWEEN :dateFrom AND :dateTo)',
-            { dateFrom: fromDate, dateTo: toDate }
+            { dateFrom: fromDate, dateTo: toDate },
           );
         } else if (params.dateFrom) {
           // Chỉ có dateFrom: Filter record có openat >= dateFrom HOẶC closedat >= dateFrom
           const fromDate = parseDate(params.dateFrom);
-          queryBuilder.andWhere('(sec.openat >= :dateFrom OR sec.closedat >= :dateFrom)', { dateFrom: fromDate });
+          queryBuilder.andWhere(
+            '(sec.openat >= :dateFrom OR sec.closedat >= :dateFrom)',
+            { dateFrom: fromDate },
+          );
         } else if (params.dateTo) {
           // Chỉ có dateTo: Filter record có openat <= dateTo HOẶC closedat <= dateTo
           const toDate = parseDate(params.dateTo, true);
-          queryBuilder.andWhere('(sec.openat <= :dateTo OR sec.closedat <= :dateTo)', { dateTo: toDate });
+          queryBuilder.andWhere(
+            '(sec.openat <= :dateTo OR sec.closedat <= :dateTo)',
+            { dateTo: toDate },
+          );
         }
       }
 
@@ -1597,7 +1984,9 @@ export class SyncService {
         },
       };
     } catch (error: any) {
-      this.logger.error(`Error getting shift end cash: ${error?.message || error}`);
+      this.logger.error(
+        `Error getting shift end cash: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -1608,7 +1997,10 @@ export class SyncService {
       const response = await this.httpService.axiosRef.get(
         'https://ecs.vmt.vn/api/sale-orders',
         {
-          headers: { accept: 'application/json', 'Content-Type': 'application/json' },
+          headers: {
+            accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
           params: {
             token: 'chHIqq7u8bhm5rFD68be',
             date_from: dateFrom,
@@ -1648,7 +2040,9 @@ export class SyncService {
       });
 
       if (!shiftEndCash) {
-        throw new Error(`Không tìm thấy báo cáo nộp quỹ cuối ca với ID: ${shiftEndCashId}`);
+        throw new Error(
+          `Không tìm thấy báo cáo nộp quỹ cuối ca với ID: ${shiftEndCashId}`,
+        );
       }
 
       // Ưu tiên dùng branch_code từ database, nếu không có thì extract từ draw_code
@@ -1676,13 +2070,16 @@ export class SyncService {
           maBp = branchCode;
         }
       } catch (error) {
-        this.logger.warn(`Không thể lấy department cho branchCode ${branchCode}, dùng giá trị mặc định`);
+        this.logger.warn(
+          `Không thể lấy department cho branchCode ${branchCode}, dùng giá trị mặc định`,
+        );
         maDvcs = branchCode;
         maBp = branchCode;
       }
 
       // Build payment payload
-      const docDate = shiftEndCash.docdate || shiftEndCash.gl_date || new Date();
+      const docDate =
+        shiftEndCash.docdate || shiftEndCash.gl_date || new Date();
       const totalAmount = Number(shiftEndCash.total || 0);
 
       // Format date to ISO string
@@ -1695,9 +2092,10 @@ export class SyncService {
       };
 
       // Tìm dòng tiền mặt (CASH) từ lines để lấy số tiền
-      const cashLine = shiftEndCash.lines?.find((line: any) =>
-        line.fop_code?.toUpperCase() === 'CASH' ||
-        line.fop_name?.toLowerCase().includes('tiền mặt')
+      const cashLine = shiftEndCash.lines?.find(
+        (line: any) =>
+          line.fop_code?.toUpperCase() === 'CASH' ||
+          line.fop_name?.toLowerCase().includes('tiền mặt'),
       );
 
       // Ưu tiên dùng actual_amt từ cashLine, nếu không có thì dùng system_amt, cuối cùng là total
@@ -1715,7 +2113,8 @@ export class SyncService {
         so_ct: shiftEndCash.draw_code || '', // Mã chứng từ = draw_code
         httt: 'CASH', // Hình thức thanh toán = CASH
         status: '0',
-        dien_giai: shiftEndCash.description || `Chi tiền cho ${shiftEndCash.draw_code}`,
+        dien_giai:
+          shiftEndCash.description || `Chi tiền cho ${shiftEndCash.draw_code}`,
         detail: [
           {
             tien: paymentAmount,
@@ -1725,25 +2124,36 @@ export class SyncService {
       };
 
       // Gọi payment API
-      const result = await this.fastApiClientService.submitPayment(paymentPayload);
+      const result =
+        await this.fastApiClientService.submitPayment(paymentPayload);
 
       // Validate response
       if (Array.isArray(result) && result.length > 0) {
         const firstItem = result[0];
         if (firstItem.status !== 1) {
           const errorMessage = firstItem.message || 'Tạo payment thất bại';
-          this.logger.error(`[ShiftEndCash Payment] Payment API trả về status = ${firstItem.status}: ${errorMessage}`);
+          this.logger.error(
+            `[ShiftEndCash Payment] Payment API trả về status = ${firstItem.status}: ${errorMessage}`,
+          );
           throw new Error(errorMessage);
         }
-      } else if (result && typeof result === 'object' && result.status !== undefined) {
+      } else if (
+        result &&
+        typeof result === 'object' &&
+        result.status !== undefined
+      ) {
         if (result.status !== 1) {
           const errorMessage = result.message || 'Tạo payment thất bại';
-          this.logger.error(`[ShiftEndCash Payment] Payment API trả về status = ${result.status}: ${errorMessage}`);
+          this.logger.error(
+            `[ShiftEndCash Payment] Payment API trả về status = ${result.status}: ${errorMessage}`,
+          );
           throw new Error(errorMessage);
         }
       }
 
-      this.logger.log(`[ShiftEndCash Payment] Tạo payment thành công cho shift end cash ${shiftEndCashId}`);
+      this.logger.log(
+        `[ShiftEndCash Payment] Tạo payment thành công cho shift end cash ${shiftEndCashId}`,
+      );
 
       return {
         success: true,
@@ -1751,7 +2161,9 @@ export class SyncService {
         data: result,
       };
     } catch (error: any) {
-      this.logger.error(`[ShiftEndCash Payment] Lỗi khi tạo payment: ${error?.message || error}`);
+      this.logger.error(
+        `[ShiftEndCash Payment] Lỗi khi tạo payment: ${error?.message || error}`,
+      );
       return {
         success: false,
         message: 'Lỗi khi tạo phiếu chi tiền mặt',
@@ -1793,9 +2205,18 @@ export class SyncService {
         const monthStr = dateStr.substring(2, 5).toUpperCase();
         const year = parseInt(dateStr.substring(5, 9));
         const monthMap: Record<string, number> = {
-          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          JAN: 0,
+          FEB: 1,
+          MAR: 2,
+          APR: 3,
+          MAY: 4,
+          JUN: 5,
+          JUL: 6,
+          AUG: 7,
+          SEP: 8,
+          OCT: 9,
+          NOV: 10,
+          DEC: 11,
         };
         const month = monthMap[monthStr] || 0;
         return new Date(year, month, day);
@@ -1803,7 +2224,20 @@ export class SyncService {
 
       const formatDate = (date: Date): string => {
         const day = date.getDate().toString().padStart(2, '0');
-        const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const months = [
+          'JAN',
+          'FEB',
+          'MAR',
+          'APR',
+          'MAY',
+          'JUN',
+          'JUL',
+          'AUG',
+          'SEP',
+          'OCT',
+          'NOV',
+          'DEC',
+        ];
         const month = months[date.getMonth()];
         const year = date.getFullYear();
         return `${day}${month}${year}`;
@@ -1831,7 +2265,9 @@ export class SyncService {
 
       for (const brandName of brands) {
         try {
-          this.logger.log(`[syncShiftEndCashByDateRange] Bắt đầu đồng bộ brand: ${brandName}`);
+          this.logger.log(
+            `[syncShiftEndCashByDateRange] Bắt đầu đồng bộ brand: ${brandName}`,
+          );
           let brandRecordsCount = 0;
           let brandSavedCount = 0;
           let brandUpdatedCount = 0;
@@ -1842,7 +2278,9 @@ export class SyncService {
           while (currentDate <= end) {
             const dateStr = formatDate(currentDate);
             try {
-              this.logger.log(`[syncShiftEndCashByDateRange] Đồng bộ ${brandName} - ngày ${dateStr}`);
+              this.logger.log(
+                `[syncShiftEndCashByDateRange] Đồng bộ ${brandName} - ngày ${dateStr}`,
+              );
               const result = await this.syncShiftEndCash(dateStr, brandName);
 
               brandRecordsCount += result.recordsCount;
@@ -1850,7 +2288,9 @@ export class SyncService {
               brandUpdatedCount += result.updatedCount;
 
               if (result.errors && result.errors.length > 0) {
-                brandErrors.push(...result.errors.map(err => `[${dateStr}] ${err}`));
+                brandErrors.push(
+                  ...result.errors.map((err) => `[${dateStr}] ${err}`),
+                );
               }
             } catch (error: any) {
               const errorMsg = `[${brandName}] Lỗi khi đồng bộ ngày ${dateStr}: ${error?.message || error}`;
@@ -1875,7 +2315,9 @@ export class SyncService {
             errors: brandErrors.length > 0 ? brandErrors : undefined,
           });
 
-          this.logger.log(`[syncShiftEndCashByDateRange] Hoàn thành đồng bộ brand: ${brandName} - ${brandRecordsCount} báo cáo`);
+          this.logger.log(
+            `[syncShiftEndCashByDateRange] Hoàn thành đồng bộ brand: ${brandName} - ${brandRecordsCount} báo cáo`,
+          );
         } catch (error: any) {
           const errorMsg = `[${brandName}] Lỗi khi đồng bộ shift end cash: ${error?.message || error}`;
           this.logger.error(errorMsg);
@@ -1893,7 +2335,9 @@ export class SyncService {
         errors: allErrors.length > 0 ? allErrors : undefined,
       };
     } catch (error: any) {
-      this.logger.error(`Lỗi khi đồng bộ shift end cash theo khoảng thời gian: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ shift end cash theo khoảng thời gian: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -1926,13 +2370,21 @@ export class SyncService {
 
       for (const brandName of brands) {
         try {
-          this.logger.log(`[RepackFormula] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`);
+          this.logger.log(
+            `[RepackFormula] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`,
+          );
 
           // Lấy dữ liệu từ API
-          const repackFormulaData = await this.zappyApiService.getRepackFormula(dateFrom, dateTo, brandName);
+          const repackFormulaData = await this.zappyApiService.getRepackFormula(
+            dateFrom,
+            dateTo,
+            brandName,
+          );
 
           if (!repackFormulaData || repackFormulaData.length === 0) {
-            this.logger.log(`[RepackFormula] Không có dữ liệu cho ${brandName} - khoảng ${dateFrom} - ${dateTo}`);
+            this.logger.log(
+              `[RepackFormula] Không có dữ liệu cho ${brandName} - khoảng ${dateFrom} - ${dateTo}`,
+            );
             continue;
           }
 
@@ -1941,7 +2393,9 @@ export class SyncService {
           const brandErrors: string[] = [];
 
           // Parse date string sang Date object
-          const parseDateString = (dateStr: string | null | undefined): Date | null => {
+          const parseDateString = (
+            dateStr: string | null | undefined,
+          ): Date | null => {
             if (!dateStr) return null;
             try {
               // Format: "05/11/2025 00:00" hoặc ISO string
@@ -1970,12 +2424,14 @@ export class SyncService {
           for (const formulaData of repackFormulaData) {
             try {
               // Kiểm tra xem đã tồn tại chưa (dựa trên api_id và brand)
-              const existingRecord = await this.repackFormulaRepository.findOne({
-                where: {
-                  api_id: formulaData.id,
-                  brand: brandName,
+              const existingRecord = await this.repackFormulaRepository.findOne(
+                {
+                  where: {
+                    api_id: formulaData.id,
+                    brand: brandName,
+                  },
                 },
-              });
+              );
 
               const validFromdate = parseDateString(formulaData.valid_fromdate);
               const validTodate = parseDateString(formulaData.valid_todate);
@@ -1984,24 +2440,45 @@ export class SyncService {
               if (existingRecord) {
                 // Cập nhật record đã tồn tại
                 existingRecord.name = formulaData.name || existingRecord.name;
-                existingRecord.check_qty_constraint = formulaData.check_qty_constraint || existingRecord.check_qty_constraint;
-                existingRecord.depr_pct = formulaData.depr_pct !== undefined ? formulaData.depr_pct : existingRecord.depr_pct;
-                existingRecord.branch_codes = formulaData.branch_codes !== undefined ? formulaData.branch_codes : existingRecord.branch_codes;
-                existingRecord.repack_cat_name = formulaData.repack_cat_name || existingRecord.repack_cat_name;
-                existingRecord.valid_fromdate = validFromdate || existingRecord.valid_fromdate;
-                existingRecord.valid_todate = validTodate !== null ? validTodate : existingRecord.valid_todate;
-                existingRecord.enteredby = formulaData.enteredby || existingRecord.enteredby;
-                existingRecord.enteredat = enteredat || existingRecord.enteredat;
-                existingRecord.locked = formulaData.locked || existingRecord.locked;
+                existingRecord.check_qty_constraint =
+                  formulaData.check_qty_constraint ||
+                  existingRecord.check_qty_constraint;
+                existingRecord.depr_pct =
+                  formulaData.depr_pct !== undefined
+                    ? formulaData.depr_pct
+                    : existingRecord.depr_pct;
+                existingRecord.branch_codes =
+                  formulaData.branch_codes !== undefined
+                    ? formulaData.branch_codes
+                    : existingRecord.branch_codes;
+                existingRecord.repack_cat_name =
+                  formulaData.repack_cat_name || existingRecord.repack_cat_name;
+                existingRecord.valid_fromdate =
+                  validFromdate || existingRecord.valid_fromdate;
+                existingRecord.valid_todate =
+                  validTodate !== null
+                    ? validTodate
+                    : existingRecord.valid_todate;
+                existingRecord.enteredby =
+                  formulaData.enteredby || existingRecord.enteredby;
+                existingRecord.enteredat =
+                  enteredat || existingRecord.enteredat;
+                existingRecord.locked =
+                  formulaData.locked || existingRecord.locked;
                 existingRecord.sync_date_from = dateFrom;
                 existingRecord.sync_date_to = dateTo;
 
                 // Xóa các items cũ
-                await this.repackFormulaItemRepository.delete({ repackFormulaId: existingRecord.id });
+                await this.repackFormulaItemRepository.delete({
+                  repackFormulaId: existingRecord.id,
+                });
 
                 // Tạo lại items từ from_items và to_items
                 const items: RepackFormulaItem[] = [];
-                if (formulaData.from_items && Array.isArray(formulaData.from_items)) {
+                if (
+                  formulaData.from_items &&
+                  Array.isArray(formulaData.from_items)
+                ) {
                   for (const fromItem of formulaData.from_items) {
                     const item = this.repackFormulaItemRepository.create({
                       repackFormula: existingRecord,
@@ -2012,7 +2489,10 @@ export class SyncService {
                     items.push(item);
                   }
                 }
-                if (formulaData.to_items && Array.isArray(formulaData.to_items)) {
+                if (
+                  formulaData.to_items &&
+                  Array.isArray(formulaData.to_items)
+                ) {
                   for (const toItem of formulaData.to_items) {
                     const item = this.repackFormulaItemRepository.create({
                       repackFormula: existingRecord,
@@ -2032,9 +2512,16 @@ export class SyncService {
                 const newRecord = this.repackFormulaRepository.create({
                   api_id: formulaData.id,
                   name: formulaData.name || undefined,
-                  check_qty_constraint: formulaData.check_qty_constraint || undefined,
-                  depr_pct: formulaData.depr_pct !== undefined ? formulaData.depr_pct : 0,
-                  branch_codes: formulaData.branch_codes !== undefined ? formulaData.branch_codes : undefined,
+                  check_qty_constraint:
+                    formulaData.check_qty_constraint || undefined,
+                  depr_pct:
+                    formulaData.depr_pct !== undefined
+                      ? formulaData.depr_pct
+                      : 0,
+                  branch_codes:
+                    formulaData.branch_codes !== undefined
+                      ? formulaData.branch_codes
+                      : undefined,
                   repack_cat_name: formulaData.repack_cat_name || undefined,
                   valid_fromdate: validFromdate || undefined,
                   valid_todate: validTodate || undefined,
@@ -2046,11 +2533,16 @@ export class SyncService {
                   brand: brandName,
                 });
 
-                const savedRecord = (await this.repackFormulaRepository.save(newRecord)) as unknown as RepackFormula;
+                const savedRecord = (await this.repackFormulaRepository.save(
+                  newRecord,
+                )) as unknown as RepackFormula;
 
                 // Tạo items từ from_items và to_items
                 const items: RepackFormulaItem[] = [];
-                if (formulaData.from_items && Array.isArray(formulaData.from_items)) {
+                if (
+                  formulaData.from_items &&
+                  Array.isArray(formulaData.from_items)
+                ) {
                   for (const fromItem of formulaData.from_items) {
                     const item = this.repackFormulaItemRepository.create({
                       repackFormula: savedRecord,
@@ -2061,7 +2553,10 @@ export class SyncService {
                     items.push(item);
                   }
                 }
-                if (formulaData.to_items && Array.isArray(formulaData.to_items)) {
+                if (
+                  formulaData.to_items &&
+                  Array.isArray(formulaData.to_items)
+                ) {
                   for (const toItem of formulaData.to_items) {
                     const item = this.repackFormulaItemRepository.create({
                       repackFormula: savedRecord,
@@ -2091,7 +2586,9 @@ export class SyncService {
           totalUpdatedCount += brandUpdatedCount;
           allErrors.push(...brandErrors);
 
-          this.logger.log(`[RepackFormula] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`);
+          this.logger.log(
+            `[RepackFormula] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`,
+          );
         } catch (error: any) {
           const errorMsg = `[${brandName}] Lỗi khi đồng bộ repack formula: ${error?.message || error}`;
           this.logger.error(errorMsg);
@@ -2108,7 +2605,9 @@ export class SyncService {
         errors: allErrors.length > 0 ? allErrors : undefined,
       };
     } catch (error: any) {
-      this.logger.error(`Lỗi khi đồng bộ repack formula: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ repack formula: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -2146,9 +2645,18 @@ export class SyncService {
         const monthStr = dateStr.substring(2, 5).toUpperCase();
         const year = parseInt(dateStr.substring(5, 9));
         const monthMap: Record<string, number> = {
-          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          JAN: 0,
+          FEB: 1,
+          MAR: 2,
+          APR: 3,
+          MAY: 4,
+          JUN: 5,
+          JUL: 6,
+          AUG: 7,
+          SEP: 8,
+          OCT: 9,
+          NOV: 10,
+          DEC: 11,
         };
         const month = monthMap[monthStr] || 0;
         return new Date(year, month, day);
@@ -2178,15 +2686,23 @@ export class SyncService {
       // Gọi trực tiếp với startDate và endDate
       for (const brandName of brands) {
         try {
-          this.logger.log(`[syncRepackFormulaByDateRange] Bắt đầu đồng bộ brand: ${brandName}`);
+          this.logger.log(
+            `[syncRepackFormulaByDateRange] Bắt đầu đồng bộ brand: ${brandName}`,
+          );
           let brandRecordsCount = 0;
           let brandSavedCount = 0;
           let brandUpdatedCount = 0;
           const brandErrors: string[] = [];
 
           try {
-            this.logger.log(`[syncRepackFormulaByDateRange] Đồng bộ ${brandName} - khoảng ${startDate} - ${endDate}`);
-            const result = await this.syncRepackFormula(startDate, endDate, brandName);
+            this.logger.log(
+              `[syncRepackFormulaByDateRange] Đồng bộ ${brandName} - khoảng ${startDate} - ${endDate}`,
+            );
+            const result = await this.syncRepackFormula(
+              startDate,
+              endDate,
+              brandName,
+            );
 
             brandRecordsCount = result.recordsCount;
             brandSavedCount = result.savedCount;
@@ -2214,7 +2730,9 @@ export class SyncService {
             errors: brandErrors.length > 0 ? brandErrors : undefined,
           });
 
-          this.logger.log(`[syncRepackFormulaByDateRange] Hoàn thành đồng bộ brand: ${brandName} - ${brandRecordsCount} công thức`);
+          this.logger.log(
+            `[syncRepackFormulaByDateRange] Hoàn thành đồng bộ brand: ${brandName} - ${brandRecordsCount} công thức`,
+          );
         } catch (error: any) {
           const errorMsg = `[${brandName}] Lỗi khi đồng bộ repack formula: ${error?.message || error}`;
           this.logger.error(errorMsg);
@@ -2232,7 +2750,9 @@ export class SyncService {
         errors: allErrors.length > 0 ? allErrors : undefined,
       };
     } catch (error: any) {
-      this.logger.error(`Lỗi khi đồng bộ repack formula theo khoảng thời gian: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ repack formula theo khoảng thời gian: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -2276,12 +2796,16 @@ export class SyncService {
 
       // Filter by repack_cat_name
       if (params.repackCatName) {
-        queryBuilder.andWhere('rf.repack_cat_name = :repackCatName', { repackCatName: params.repackCatName });
+        queryBuilder.andWhere('rf.repack_cat_name = :repackCatName', {
+          repackCatName: params.repackCatName,
+        });
       }
 
       // Filter by itemcode (trong items)
       if (params.itemcode) {
-        queryBuilder.andWhere('items.itemcode = :itemcode', { itemcode: params.itemcode });
+        queryBuilder.andWhere('items.itemcode = :itemcode', {
+          itemcode: params.itemcode,
+        });
       }
 
       // Filter by dateFrom
@@ -2291,15 +2815,26 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day);
         };
         const fromDate = parseDate(params.dateFrom);
-        queryBuilder.andWhere('rf.valid_fromdate >= :dateFrom', { dateFrom: fromDate });
+        queryBuilder.andWhere('rf.valid_fromdate >= :dateFrom', {
+          dateFrom: fromDate,
+        });
       }
 
       // Filter by dateTo
@@ -2309,15 +2844,26 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day, 23, 59, 59);
         };
         const toDate = parseDate(params.dateTo);
-        queryBuilder.andWhere('rf.valid_fromdate <= :dateTo', { dateTo: toDate });
+        queryBuilder.andWhere('rf.valid_fromdate <= :dateTo', {
+          dateTo: toDate,
+        });
       }
 
       // Get total count
@@ -2342,7 +2888,9 @@ export class SyncService {
         },
       };
     } catch (error: any) {
-      this.logger.error(`Error getting repack formula: ${error?.message || error}`);
+      this.logger.error(
+        `Error getting repack formula: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -2375,13 +2923,21 @@ export class SyncService {
 
       for (const brandName of brands) {
         try {
-          this.logger.log(`[Promotion] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`);
+          this.logger.log(
+            `[Promotion] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`,
+          );
 
           // Lấy danh sách promotion từ API
-          const promotionData = await this.zappyApiService.getPromotion(dateFrom, dateTo, brandName);
+          const promotionData = await this.zappyApiService.getPromotion(
+            dateFrom,
+            dateTo,
+            brandName,
+          );
 
           if (!promotionData || promotionData.length === 0) {
-            this.logger.log(`[Promotion] Không có dữ liệu cho ${brandName} - khoảng ${dateFrom} - ${dateTo}`);
+            this.logger.log(
+              `[Promotion] Không có dữ liệu cho ${brandName} - khoảng ${dateFrom} - ${dateTo}`,
+            );
             continue;
           }
 
@@ -2390,7 +2946,9 @@ export class SyncService {
           const brandErrors: string[] = [];
 
           // Parse date string sang Date object
-          const parseDateString = (dateStr: string | null | undefined): Date | null => {
+          const parseDateString = (
+            dateStr: string | null | undefined,
+          ): Date | null => {
             if (!dateStr || typeof dateStr !== 'string') return null;
             try {
               const trimmed = dateStr.trim();
@@ -2427,7 +2985,9 @@ export class SyncService {
               const minutesNum = parseInt(minutes || '0', 10);
 
               if (isNaN(yearNum) || isNaN(monthNum) || isNaN(dayNum)) {
-                this.logger.warn(`Invalid date values: ${dateStr} (year: ${year}, month: ${month}, day: ${day})`);
+                this.logger.warn(
+                  `Invalid date values: ${dateStr} (year: ${year}, month: ${month}, day: ${day})`,
+                );
                 return null;
               }
 
@@ -2451,7 +3011,9 @@ export class SyncService {
 
               // Kiểm tra Date có hợp lệ không
               if (isNaN(date.getTime())) {
-                this.logger.warn(`Invalid Date object created from: ${dateStr}`);
+                this.logger.warn(
+                  `Invalid Date object created from: ${dateStr}`,
+                );
                 return null;
               }
 
@@ -2464,7 +3026,10 @@ export class SyncService {
 
           for (const promoData of promotionData) {
             // Đảm bảo api_id là number
-            const apiId = typeof promoData.id === 'number' ? promoData.id : parseInt(String(promoData.id), 10);
+            const apiId =
+              typeof promoData.id === 'number'
+                ? promoData.id
+                : parseInt(String(promoData.id), 10);
 
             if (isNaN(apiId)) {
               this.logger.warn(`Invalid api_id for promotion: ${promoData.id}`);
@@ -2472,7 +3037,6 @@ export class SyncService {
             }
 
             try {
-
               // Kiểm tra xem đã tồn tại chưa (dựa trên api_id và brand)
               const existingRecord = await this.promotionRepository.findOne({
                 where: {
@@ -2486,30 +3050,47 @@ export class SyncService {
               const enteredat = parseDateString(promoData.enteredat);
 
               if (existingRecord) {
-                this.logger.log(`[Promotion] Cập nhật promotion ${apiId} (${promoData.code || 'N/A'}) cho brand ${brandName}`);
+                this.logger.log(
+                  `[Promotion] Cập nhật promotion ${apiId} (${promoData.code || 'N/A'}) cho brand ${brandName}`,
+                );
                 // Cập nhật record đã tồn tại
                 existingRecord.code = promoData.code || existingRecord.code;
-                existingRecord.seq = promoData.seq !== undefined ? promoData.seq : existingRecord.seq;
+                existingRecord.seq =
+                  promoData.seq !== undefined
+                    ? promoData.seq
+                    : existingRecord.seq;
                 existingRecord.name = promoData.name || existingRecord.name;
                 existingRecord.fromdate = fromdate || existingRecord.fromdate;
-                existingRecord.todate = todate !== null ? todate : existingRecord.todate;
+                existingRecord.todate =
+                  todate !== null ? todate : existingRecord.todate;
                 existingRecord.ptype = promoData.ptype || existingRecord.ptype;
-                existingRecord.pricetype = promoData.pricetype || existingRecord.pricetype;
-                existingRecord.brand_code = promoData.brand_code || existingRecord.brand_code;
-                existingRecord.locked = promoData.locked || existingRecord.locked;
-                existingRecord.status = promoData.status || existingRecord.status;
-                existingRecord.enteredby = promoData.enteredby || existingRecord.enteredby;
-                existingRecord.enteredat = enteredat || existingRecord.enteredat;
+                existingRecord.pricetype =
+                  promoData.pricetype || existingRecord.pricetype;
+                existingRecord.brand_code =
+                  promoData.brand_code || existingRecord.brand_code;
+                existingRecord.locked =
+                  promoData.locked || existingRecord.locked;
+                existingRecord.status =
+                  promoData.status || existingRecord.status;
+                existingRecord.enteredby =
+                  promoData.enteredby || existingRecord.enteredby;
+                existingRecord.enteredat =
+                  enteredat || existingRecord.enteredat;
                 existingRecord.sync_date_from = dateFrom;
                 existingRecord.sync_date_to = dateTo;
 
                 // Xóa các lines cũ
-                await this.promotionLineRepository.delete({ promotionId: existingRecord.id });
+                await this.promotionLineRepository.delete({
+                  promotionId: existingRecord.id,
+                });
 
                 // Lấy chi tiết lines từ API
                 let lines: PromotionLine[] = [];
                 try {
-                  const lineData = await this.zappyApiService.getPromotionLine(promoData.id, brandName);
+                  const lineData = await this.zappyApiService.getPromotionLine(
+                    promoData.id,
+                    brandName,
+                  );
 
                   // Tạo lại lines từ i_lines và v_lines
                   lines = [];
@@ -2520,23 +3101,52 @@ export class SyncService {
                         line_type: 'i_lines',
                         seq: iLine.seq !== undefined ? iLine.seq : undefined,
                         buy_items: iLine.buy_items || undefined,
-                        buy_qty: iLine.buy_qty !== undefined ? iLine.buy_qty : 0,
+                        buy_qty:
+                          iLine.buy_qty !== undefined ? iLine.buy_qty : 0,
                         buy_type: iLine.buy_type || undefined,
-                        buy_combined_qty: iLine.buy_combined_qty !== undefined ? iLine.buy_combined_qty : undefined,
-                        buy_fromtotal: iLine.buy_fromtotal !== undefined ? iLine.buy_fromtotal : undefined,
-                        buy_tototal: iLine.buy_tototal !== undefined ? iLine.buy_tototal : undefined,
+                        buy_combined_qty:
+                          iLine.buy_combined_qty !== undefined
+                            ? iLine.buy_combined_qty
+                            : undefined,
+                        buy_fromtotal:
+                          iLine.buy_fromtotal !== undefined
+                            ? iLine.buy_fromtotal
+                            : undefined,
+                        buy_tototal:
+                          iLine.buy_tototal !== undefined
+                            ? iLine.buy_tototal
+                            : undefined,
                         prom_group: iLine.prom_group || undefined,
                         card_pattern: iLine.card_pattern || undefined,
                         get_items: iLine.get_items || undefined,
-                        get_item_price: iLine.get_item_price !== undefined ? iLine.get_item_price : undefined,
-                        get_qty: iLine.get_qty !== undefined ? iLine.get_qty : 0,
-                        get_discamt: iLine.get_discamt !== undefined ? iLine.get_discamt : undefined,
-                        get_max_discamt: iLine.get_max_discamt !== undefined ? iLine.get_max_discamt : 0,
-                        get_discpct: iLine.get_discpct !== undefined ? iLine.get_discpct : undefined,
-                        get_value_range: iLine.get_value_range !== undefined ? iLine.get_value_range : undefined,
+                        get_item_price:
+                          iLine.get_item_price !== undefined
+                            ? iLine.get_item_price
+                            : undefined,
+                        get_qty:
+                          iLine.get_qty !== undefined ? iLine.get_qty : 0,
+                        get_discamt:
+                          iLine.get_discamt !== undefined
+                            ? iLine.get_discamt
+                            : undefined,
+                        get_max_discamt:
+                          iLine.get_max_discamt !== undefined
+                            ? iLine.get_max_discamt
+                            : 0,
+                        get_discpct:
+                          iLine.get_discpct !== undefined
+                            ? iLine.get_discpct
+                            : undefined,
+                        get_value_range:
+                          iLine.get_value_range !== undefined
+                            ? iLine.get_value_range
+                            : undefined,
                         get_vouchertype: iLine.get_vouchertype || undefined,
                         get_item_option: iLine.get_item_option || undefined,
-                        svc_card_months: iLine.svc_card_months !== undefined ? iLine.svc_card_months : undefined,
+                        svc_card_months:
+                          iLine.svc_card_months !== undefined
+                            ? iLine.svc_card_months
+                            : undefined,
                         guideline: iLine.guideline || undefined,
                       });
                       lines.push(line);
@@ -2549,23 +3159,52 @@ export class SyncService {
                         line_type: 'v_lines',
                         seq: vLine.seq !== undefined ? vLine.seq : undefined,
                         buy_items: vLine.buy_items || undefined,
-                        buy_qty: vLine.buy_qty !== undefined ? vLine.buy_qty : 0,
+                        buy_qty:
+                          vLine.buy_qty !== undefined ? vLine.buy_qty : 0,
                         buy_type: vLine.buy_type || undefined,
-                        buy_combined_qty: vLine.buy_combined_qty !== undefined ? vLine.buy_combined_qty : undefined,
-                        buy_fromtotal: vLine.buy_fromtotal !== undefined ? vLine.buy_fromtotal : undefined,
-                        buy_tototal: vLine.buy_tototal !== undefined ? vLine.buy_tototal : undefined,
+                        buy_combined_qty:
+                          vLine.buy_combined_qty !== undefined
+                            ? vLine.buy_combined_qty
+                            : undefined,
+                        buy_fromtotal:
+                          vLine.buy_fromtotal !== undefined
+                            ? vLine.buy_fromtotal
+                            : undefined,
+                        buy_tototal:
+                          vLine.buy_tototal !== undefined
+                            ? vLine.buy_tototal
+                            : undefined,
                         prom_group: vLine.prom_group || undefined,
                         card_pattern: vLine.card_pattern || undefined,
                         get_items: vLine.get_items || undefined,
-                        get_item_price: vLine.get_item_price !== undefined ? vLine.get_item_price : undefined,
-                        get_qty: vLine.get_qty !== undefined ? vLine.get_qty : 0,
-                        get_discamt: vLine.get_discamt !== undefined ? vLine.get_discamt : undefined,
-                        get_max_discamt: vLine.get_max_discamt !== undefined ? vLine.get_max_discamt : 0,
-                        get_discpct: vLine.get_discpct !== undefined ? vLine.get_discpct : undefined,
-                        get_value_range: vLine.get_value_range !== undefined ? vLine.get_value_range : undefined,
+                        get_item_price:
+                          vLine.get_item_price !== undefined
+                            ? vLine.get_item_price
+                            : undefined,
+                        get_qty:
+                          vLine.get_qty !== undefined ? vLine.get_qty : 0,
+                        get_discamt:
+                          vLine.get_discamt !== undefined
+                            ? vLine.get_discamt
+                            : undefined,
+                        get_max_discamt:
+                          vLine.get_max_discamt !== undefined
+                            ? vLine.get_max_discamt
+                            : 0,
+                        get_discpct:
+                          vLine.get_discpct !== undefined
+                            ? vLine.get_discpct
+                            : undefined,
+                        get_value_range:
+                          vLine.get_value_range !== undefined
+                            ? vLine.get_value_range
+                            : undefined,
                         get_vouchertype: vLine.get_vouchertype || undefined,
                         get_item_option: vLine.get_item_option || undefined,
-                        svc_card_months: vLine.svc_card_months !== undefined ? vLine.svc_card_months : undefined,
+                        svc_card_months:
+                          vLine.svc_card_months !== undefined
+                            ? vLine.svc_card_months
+                            : undefined,
                         guideline: vLine.guideline || undefined,
                       });
                       lines.push(line);
@@ -2576,7 +3215,9 @@ export class SyncService {
                     await this.promotionLineRepository.save(lines);
                   }
                 } catch (lineError: any) {
-                  this.logger.warn(`Không thể lấy lines cho promotion ${apiId}: ${lineError?.message || lineError}`);
+                  this.logger.warn(
+                    `Không thể lấy lines cho promotion ${apiId}: ${lineError?.message || lineError}`,
+                  );
                   // Vẫn tiếp tục, không throw error
                 }
 
@@ -2585,7 +3226,9 @@ export class SyncService {
                 brandUpdatedCount++;
               } else {
                 // Tạo record mới
-                this.logger.log(`[Promotion] Tạo mới promotion ${apiId} (${promoData.code || 'N/A'}) cho brand ${brandName}`);
+                this.logger.log(
+                  `[Promotion] Tạo mới promotion ${apiId} (${promoData.code || 'N/A'}) cho brand ${brandName}`,
+                );
                 const newRecord = this.promotionRepository.create({
                   api_id: apiId,
                   code: promoData.code || undefined,
@@ -2605,11 +3248,16 @@ export class SyncService {
                   brand: brandName,
                 });
 
-                const savedRecord = (await this.promotionRepository.save(newRecord)) as unknown as Promotion;
+                const savedRecord = (await this.promotionRepository.save(
+                  newRecord,
+                )) as unknown as Promotion;
 
                 // Lấy chi tiết lines từ API
                 try {
-                  const lineData = await this.zappyApiService.getPromotionLine(apiId, brandName);
+                  const lineData = await this.zappyApiService.getPromotionLine(
+                    apiId,
+                    brandName,
+                  );
 
                   // Tạo lines từ i_lines và v_lines
                   const lines: PromotionLine[] = [];
@@ -2620,23 +3268,52 @@ export class SyncService {
                         line_type: 'i_lines',
                         seq: iLine.seq !== undefined ? iLine.seq : undefined,
                         buy_items: iLine.buy_items || undefined,
-                        buy_qty: iLine.buy_qty !== undefined ? iLine.buy_qty : 0,
+                        buy_qty:
+                          iLine.buy_qty !== undefined ? iLine.buy_qty : 0,
                         buy_type: iLine.buy_type || undefined,
-                        buy_combined_qty: iLine.buy_combined_qty !== undefined ? iLine.buy_combined_qty : undefined,
-                        buy_fromtotal: iLine.buy_fromtotal !== undefined ? iLine.buy_fromtotal : undefined,
-                        buy_tototal: iLine.buy_tototal !== undefined ? iLine.buy_tototal : undefined,
+                        buy_combined_qty:
+                          iLine.buy_combined_qty !== undefined
+                            ? iLine.buy_combined_qty
+                            : undefined,
+                        buy_fromtotal:
+                          iLine.buy_fromtotal !== undefined
+                            ? iLine.buy_fromtotal
+                            : undefined,
+                        buy_tototal:
+                          iLine.buy_tototal !== undefined
+                            ? iLine.buy_tototal
+                            : undefined,
                         prom_group: iLine.prom_group || undefined,
                         card_pattern: iLine.card_pattern || undefined,
                         get_items: iLine.get_items || undefined,
-                        get_item_price: iLine.get_item_price !== undefined ? iLine.get_item_price : undefined,
-                        get_qty: iLine.get_qty !== undefined ? iLine.get_qty : 0,
-                        get_discamt: iLine.get_discamt !== undefined ? iLine.get_discamt : undefined,
-                        get_max_discamt: iLine.get_max_discamt !== undefined ? iLine.get_max_discamt : 0,
-                        get_discpct: iLine.get_discpct !== undefined ? iLine.get_discpct : undefined,
-                        get_value_range: iLine.get_value_range !== undefined ? iLine.get_value_range : undefined,
+                        get_item_price:
+                          iLine.get_item_price !== undefined
+                            ? iLine.get_item_price
+                            : undefined,
+                        get_qty:
+                          iLine.get_qty !== undefined ? iLine.get_qty : 0,
+                        get_discamt:
+                          iLine.get_discamt !== undefined
+                            ? iLine.get_discamt
+                            : undefined,
+                        get_max_discamt:
+                          iLine.get_max_discamt !== undefined
+                            ? iLine.get_max_discamt
+                            : 0,
+                        get_discpct:
+                          iLine.get_discpct !== undefined
+                            ? iLine.get_discpct
+                            : undefined,
+                        get_value_range:
+                          iLine.get_value_range !== undefined
+                            ? iLine.get_value_range
+                            : undefined,
                         get_vouchertype: iLine.get_vouchertype || undefined,
                         get_item_option: iLine.get_item_option || undefined,
-                        svc_card_months: iLine.svc_card_months !== undefined ? iLine.svc_card_months : undefined,
+                        svc_card_months:
+                          iLine.svc_card_months !== undefined
+                            ? iLine.svc_card_months
+                            : undefined,
                         guideline: iLine.guideline || undefined,
                       });
                       lines.push(line);
@@ -2649,23 +3326,52 @@ export class SyncService {
                         line_type: 'v_lines',
                         seq: vLine.seq !== undefined ? vLine.seq : undefined,
                         buy_items: vLine.buy_items || undefined,
-                        buy_qty: vLine.buy_qty !== undefined ? vLine.buy_qty : 0,
+                        buy_qty:
+                          vLine.buy_qty !== undefined ? vLine.buy_qty : 0,
                         buy_type: vLine.buy_type || undefined,
-                        buy_combined_qty: vLine.buy_combined_qty !== undefined ? vLine.buy_combined_qty : undefined,
-                        buy_fromtotal: vLine.buy_fromtotal !== undefined ? vLine.buy_fromtotal : undefined,
-                        buy_tototal: vLine.buy_tototal !== undefined ? vLine.buy_tototal : undefined,
+                        buy_combined_qty:
+                          vLine.buy_combined_qty !== undefined
+                            ? vLine.buy_combined_qty
+                            : undefined,
+                        buy_fromtotal:
+                          vLine.buy_fromtotal !== undefined
+                            ? vLine.buy_fromtotal
+                            : undefined,
+                        buy_tototal:
+                          vLine.buy_tototal !== undefined
+                            ? vLine.buy_tototal
+                            : undefined,
                         prom_group: vLine.prom_group || undefined,
                         card_pattern: vLine.card_pattern || undefined,
                         get_items: vLine.get_items || undefined,
-                        get_item_price: vLine.get_item_price !== undefined ? vLine.get_item_price : undefined,
-                        get_qty: vLine.get_qty !== undefined ? vLine.get_qty : 0,
-                        get_discamt: vLine.get_discamt !== undefined ? vLine.get_discamt : undefined,
-                        get_max_discamt: vLine.get_max_discamt !== undefined ? vLine.get_max_discamt : 0,
-                        get_discpct: vLine.get_discpct !== undefined ? vLine.get_discpct : undefined,
-                        get_value_range: vLine.get_value_range !== undefined ? vLine.get_value_range : undefined,
+                        get_item_price:
+                          vLine.get_item_price !== undefined
+                            ? vLine.get_item_price
+                            : undefined,
+                        get_qty:
+                          vLine.get_qty !== undefined ? vLine.get_qty : 0,
+                        get_discamt:
+                          vLine.get_discamt !== undefined
+                            ? vLine.get_discamt
+                            : undefined,
+                        get_max_discamt:
+                          vLine.get_max_discamt !== undefined
+                            ? vLine.get_max_discamt
+                            : 0,
+                        get_discpct:
+                          vLine.get_discpct !== undefined
+                            ? vLine.get_discpct
+                            : undefined,
+                        get_value_range:
+                          vLine.get_value_range !== undefined
+                            ? vLine.get_value_range
+                            : undefined,
                         get_vouchertype: vLine.get_vouchertype || undefined,
                         get_item_option: vLine.get_item_option || undefined,
-                        svc_card_months: vLine.svc_card_months !== undefined ? vLine.svc_card_months : undefined,
+                        svc_card_months:
+                          vLine.svc_card_months !== undefined
+                            ? vLine.svc_card_months
+                            : undefined,
                         guideline: vLine.guideline || undefined,
                       });
                       lines.push(line);
@@ -2676,7 +3382,9 @@ export class SyncService {
                     await this.promotionLineRepository.save(lines);
                   }
                 } catch (lineError: any) {
-                  this.logger.warn(`Không thể lấy lines cho promotion ${apiId}: ${lineError?.message || lineError}`);
+                  this.logger.warn(
+                    `Không thể lấy lines cho promotion ${apiId}: ${lineError?.message || lineError}`,
+                  );
                   // Vẫn tiếp tục, không throw error
                 }
 
@@ -2694,7 +3402,9 @@ export class SyncService {
           totalUpdatedCount += brandUpdatedCount;
           allErrors.push(...brandErrors);
 
-          this.logger.log(`[Promotion] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`);
+          this.logger.log(
+            `[Promotion] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`,
+          );
         } catch (error: any) {
           const errorMsg = `[${brandName}] Lỗi khi đồng bộ promotion: ${error?.message || error}`;
           this.logger.error(errorMsg);
@@ -2711,7 +3421,9 @@ export class SyncService {
         errors: allErrors.length > 0 ? allErrors : undefined,
       };
     } catch (error: any) {
-      this.logger.error(`Lỗi khi đồng bộ promotion: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ promotion: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -2760,15 +3472,23 @@ export class SyncService {
       // Gọi trực tiếp với startDate và endDate
       for (const brandName of brands) {
         try {
-          this.logger.log(`[syncPromotionByDateRange] Bắt đầu đồng bộ brand: ${brandName}`);
+          this.logger.log(
+            `[syncPromotionByDateRange] Bắt đầu đồng bộ brand: ${brandName}`,
+          );
           let brandRecordsCount = 0;
           let brandSavedCount = 0;
           let brandUpdatedCount = 0;
           const brandErrors: string[] = [];
 
           try {
-            this.logger.log(`[syncPromotionByDateRange] Đồng bộ ${brandName} - khoảng ${startDate} - ${endDate}`);
-            const result = await this.syncPromotion(startDate, endDate, brandName);
+            this.logger.log(
+              `[syncPromotionByDateRange] Đồng bộ ${brandName} - khoảng ${startDate} - ${endDate}`,
+            );
+            const result = await this.syncPromotion(
+              startDate,
+              endDate,
+              brandName,
+            );
 
             brandRecordsCount = result.recordsCount;
             brandSavedCount = result.savedCount;
@@ -2796,7 +3516,9 @@ export class SyncService {
             errors: brandErrors.length > 0 ? brandErrors : undefined,
           });
 
-          this.logger.log(`[syncPromotionByDateRange] Hoàn thành đồng bộ brand: ${brandName} - ${brandRecordsCount} chương trình`);
+          this.logger.log(
+            `[syncPromotionByDateRange] Hoàn thành đồng bộ brand: ${brandName} - ${brandRecordsCount} chương trình`,
+          );
         } catch (error: any) {
           const errorMsg = `[${brandName}] Lỗi khi đồng bộ promotion: ${error?.message || error}`;
           this.logger.error(errorMsg);
@@ -2814,7 +3536,9 @@ export class SyncService {
         errors: allErrors.length > 0 ? allErrors : undefined,
       };
     } catch (error: any) {
-      this.logger.error(`Lỗi khi đồng bộ promotion theo khoảng thời gian: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ promotion theo khoảng thời gian: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -2869,7 +3593,9 @@ export class SyncService {
 
       // Filter by code
       if (params.code) {
-        queryBuilder.andWhere('p.code LIKE :code', { code: `%${params.code}%` });
+        queryBuilder.andWhere('p.code LIKE :code', {
+          code: `%${params.code}%`,
+        });
       }
 
       // Filter by dateFrom
@@ -2879,15 +3605,26 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day);
         };
         const fromDate = parseDate(params.dateFrom);
-        queryBuilder.andWhere('p.fromdate >= :dateFrom', { dateFrom: fromDate });
+        queryBuilder.andWhere('p.fromdate >= :dateFrom', {
+          dateFrom: fromDate,
+        });
       }
 
       // Filter by dateTo
@@ -2897,9 +3634,18 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day, 23, 59, 59);
@@ -2971,7 +3717,9 @@ export class SyncService {
 
       // Filter by code
       if (params.code) {
-        queryBuilder.andWhere('p.code LIKE :code', { code: `%${params.code}%` });
+        queryBuilder.andWhere('p.code LIKE :code', {
+          code: `%${params.code}%`,
+        });
       }
 
       // Filter by dateFrom
@@ -2981,15 +3729,26 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day);
         };
         const fromDate = parseDate(params.dateFrom);
-        queryBuilder.andWhere('p.fromdate >= :dateFrom', { dateFrom: fromDate });
+        queryBuilder.andWhere('p.fromdate >= :dateFrom', {
+          dateFrom: fromDate,
+        });
       }
 
       // Filter by dateTo
@@ -2999,9 +3758,18 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day, 23, 59, 59);
@@ -3026,17 +3794,18 @@ export class SyncService {
 
         if (promotion.lines && promotion.lines.length > 0) {
           for (const line of promotion.lines) {
-            const detailCode = line.seq !== null
-              ? `${detailCodeBase}.${String(line.seq).padStart(2, '0')}`
-              : detailCodeBase;
+            const detailCode =
+              line.seq !== null
+                ? `${detailCodeBase}.${String(line.seq).padStart(2, '0')}`
+                : detailCodeBase;
 
             excelData.push({
               'Mã gốc': promotion.code || promotion.api_id,
               'Mã chi tiết': detailCode,
               'API ID': promotion.api_id,
-              'Tên': promotion.name || '-',
-              'Loại': promotion.ptype || '-',
-              'Brand': promotion.brand || '-',
+              Tên: promotion.name || '-',
+              Loại: promotion.ptype || '-',
+              Brand: promotion.brand || '-',
               'Từ ngày': formatDate(promotion.fromdate),
               'Đến ngày': formatDate(promotion.todate),
               'Trạng thái': promotion.status || '-',
@@ -3044,26 +3813,58 @@ export class SyncService {
               'Ngày tạo': formatDate(promotion.enteredat),
               'Brand Code': promotion.brand_code || '-',
               'Line Type': line.line_type === 'i_lines' ? 'I Lines' : 'V Lines',
-              'Seq': line.seq !== null ? line.seq : '-',
+              Seq: line.seq !== null ? line.seq : '-',
               'Buy Items': line.buy_items || '-',
               'Buy Qty': line.buy_qty || 0,
-              'Buy From Total': line.buy_fromtotal !== null && line.buy_fromtotal !== undefined ? line.buy_fromtotal : '-',
-              'Buy To Total': line.buy_tototal !== null && line.buy_tototal !== undefined ? line.buy_tototal : '-',
+              'Buy From Total':
+                line.buy_fromtotal !== null && line.buy_fromtotal !== undefined
+                  ? line.buy_fromtotal
+                  : '-',
+              'Buy To Total':
+                line.buy_tototal !== null && line.buy_tototal !== undefined
+                  ? line.buy_tototal
+                  : '-',
               'Buy Type': line.buy_type || '-',
-              'Buy Combined Qty': line.buy_combined_qty !== null && line.buy_combined_qty !== undefined ? line.buy_combined_qty : '-',
+              'Buy Combined Qty':
+                line.buy_combined_qty !== null &&
+                line.buy_combined_qty !== undefined
+                  ? line.buy_combined_qty
+                  : '-',
               'Prom Group': line.prom_group || '-',
               'Card Pattern': line.card_pattern || '-',
               'Get Items': line.get_items || '-',
-              'Get Item Price': line.get_item_price !== null && line.get_item_price !== undefined ? line.get_item_price : '-',
+              'Get Item Price':
+                line.get_item_price !== null &&
+                line.get_item_price !== undefined
+                  ? line.get_item_price
+                  : '-',
               'Get Qty': line.get_qty || 0,
-              'Get Disc Amt': line.get_discamt !== null && line.get_discamt !== undefined ? line.get_discamt : '-',
-              'Get Max Disc Amt': line.get_max_discamt !== null && line.get_max_discamt !== undefined ? line.get_max_discamt : '-',
-              'Get Disc Pct': line.get_discpct !== null && line.get_discpct !== undefined ? `${line.get_discpct}%` : '-',
-              'Get Value Range': line.get_value_range !== null && line.get_value_range !== undefined ? line.get_value_range : '-',
+              'Get Disc Amt':
+                line.get_discamt !== null && line.get_discamt !== undefined
+                  ? line.get_discamt
+                  : '-',
+              'Get Max Disc Amt':
+                line.get_max_discamt !== null &&
+                line.get_max_discamt !== undefined
+                  ? line.get_max_discamt
+                  : '-',
+              'Get Disc Pct':
+                line.get_discpct !== null && line.get_discpct !== undefined
+                  ? `${line.get_discpct}%`
+                  : '-',
+              'Get Value Range':
+                line.get_value_range !== null &&
+                line.get_value_range !== undefined
+                  ? line.get_value_range
+                  : '-',
               'Get Voucher Type': line.get_vouchertype || '-',
               'Get Item Option': line.get_item_option || '-',
-              'Svc Card Months': line.svc_card_months !== null && line.svc_card_months !== undefined ? line.svc_card_months : '-',
-              'Guideline': line.guideline || '-',
+              'Svc Card Months':
+                line.svc_card_months !== null &&
+                line.svc_card_months !== undefined
+                  ? line.svc_card_months
+                  : '-',
+              Guideline: line.guideline || '-',
             });
           }
         } else {
@@ -3072,9 +3873,9 @@ export class SyncService {
             'Mã gốc': promotion.code || promotion.api_id,
             'Mã chi tiết': detailCodeBase,
             'API ID': promotion.api_id,
-            'Tên': promotion.name || '-',
-            'Loại': promotion.ptype || '-',
-            'Brand': promotion.brand || '-',
+            Tên: promotion.name || '-',
+            Loại: promotion.ptype || '-',
+            Brand: promotion.brand || '-',
             'Từ ngày': formatDate(promotion.fromdate),
             'Đến ngày': formatDate(promotion.todate),
             'Trạng thái': promotion.status || '-',
@@ -3082,7 +3883,7 @@ export class SyncService {
             'Ngày tạo': formatDate(promotion.enteredat),
             'Brand Code': promotion.brand_code || '-',
             'Line Type': '-',
-            'Seq': '-',
+            Seq: '-',
             'Buy Items': '-',
             'Buy Qty': '-',
             'Buy From Total': '-',
@@ -3101,7 +3902,7 @@ export class SyncService {
             'Get Voucher Type': '-',
             'Get Item Option': '-',
             'Svc Card Months': '-',
-            'Guideline': '-',
+            Guideline: '-',
           });
         }
       }
@@ -3180,8 +3981,12 @@ export class SyncService {
       return buffer;
     } catch (error: any) {
       this.logger.error(`[exportPromotions] Error: ${error?.message || error}`);
-      this.logger.error(`[exportPromotions] Stack: ${error?.stack || 'No stack trace'}`);
-      throw new InternalServerErrorException(`Error exporting promotions to Excel: ${error?.message || 'Unknown error'}`);
+      this.logger.error(
+        `[exportPromotions] Stack: ${error?.stack || 'No stack trace'}`,
+      );
+      throw new InternalServerErrorException(
+        `Error exporting promotions to Excel: ${error?.message || 'Unknown error'}`,
+      );
     }
   }
 
@@ -3213,13 +4018,21 @@ export class SyncService {
 
       for (const brandName of brands) {
         try {
-          this.logger.log(`[VoucherIssue] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`);
+          this.logger.log(
+            `[VoucherIssue] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`,
+          );
 
           // Lấy danh sách voucher issue từ API
-          const voucherIssueData = await this.zappyApiService.getVoucherIssue(dateFrom, dateTo, brandName);
+          const voucherIssueData = await this.zappyApiService.getVoucherIssue(
+            dateFrom,
+            dateTo,
+            brandName,
+          );
 
           if (!voucherIssueData || voucherIssueData.length === 0) {
-            this.logger.log(`[VoucherIssue] Không có dữ liệu cho ${brandName} - khoảng ${dateFrom} - ${dateTo}`);
+            this.logger.log(
+              `[VoucherIssue] Không có dữ liệu cho ${brandName} - khoảng ${dateFrom} - ${dateTo}`,
+            );
             continue;
           }
 
@@ -3228,7 +4041,9 @@ export class SyncService {
           const brandErrors: string[] = [];
 
           // Parse date string sang Date object (sử dụng hàm parseDateString từ syncPromotion)
-          const parseDateString = (dateStr: string | null | undefined): Date | null => {
+          const parseDateString = (
+            dateStr: string | null | undefined,
+          ): Date | null => {
             if (!dateStr || typeof dateStr !== 'string') return null;
             try {
               const trimmed = dateStr.trim();
@@ -3280,7 +4095,9 @@ export class SyncService {
               );
 
               if (isNaN(date.getTime())) {
-                this.logger.warn(`Invalid Date object created from: ${dateStr}`);
+                this.logger.warn(
+                  `Invalid Date object created from: ${dateStr}`,
+                );
                 return null;
               }
 
@@ -3293,10 +4110,15 @@ export class SyncService {
 
           for (const voucherData of voucherIssueData) {
             // Đảm bảo api_id là number
-            const apiId = typeof voucherData.id === 'number' ? voucherData.id : parseInt(String(voucherData.id), 10);
+            const apiId =
+              typeof voucherData.id === 'number'
+                ? voucherData.id
+                : parseInt(String(voucherData.id), 10);
 
             if (isNaN(apiId)) {
-              this.logger.warn(`Invalid api_id for voucher issue: ${voucherData.id}`);
+              this.logger.warn(
+                `Invalid api_id for voucher issue: ${voucherData.id}`,
+              );
               continue;
             }
 
@@ -3315,58 +4137,143 @@ export class SyncService {
               const enteredat = parseDateString(voucherData.enteredat);
 
               if (existingRecord) {
-                this.logger.log(`[VoucherIssue] Cập nhật voucher issue ${apiId} (${voucherData.code || 'N/A'}) cho brand ${brandName}`);
+                this.logger.log(
+                  `[VoucherIssue] Cập nhật voucher issue ${apiId} (${voucherData.code || 'N/A'}) cho brand ${brandName}`,
+                );
 
                 // Cập nhật record đã tồn tại
                 existingRecord.code = voucherData.code || existingRecord.code;
-                existingRecord.status_lov = voucherData.status_lov || existingRecord.status_lov;
+                existingRecord.status_lov =
+                  voucherData.status_lov || existingRecord.status_lov;
                 existingRecord.docdate = docdate || existingRecord.docdate;
-                existingRecord.description = voucherData.description || existingRecord.description;
-                existingRecord.brand_code = voucherData.brand_code || existingRecord.brand_code;
-                existingRecord.apply_for_branch_types = voucherData.apply_for_branch_types || existingRecord.apply_for_branch_types;
-                existingRecord.val = voucherData.val !== undefined && voucherData.val !== null ? voucherData.val : existingRecord.val;
-                existingRecord.percent = voucherData.percent !== undefined && voucherData.percent !== null ? voucherData.percent : (existingRecord.percent ?? 0);
-                existingRecord.max_value = voucherData.max_value !== undefined && voucherData.max_value !== null ? voucherData.max_value : existingRecord.max_value;
-                existingRecord.saletype = voucherData.saletype || existingRecord.saletype;
-                existingRecord.enable_precost = voucherData.enable_precost || existingRecord.enable_precost;
-                existingRecord.supplier_support_fee = voucherData.supplier_support_fee !== undefined && voucherData.supplier_support_fee !== null ? voucherData.supplier_support_fee : existingRecord.supplier_support_fee;
-                existingRecord.valid_fromdate = validFromdate || existingRecord.valid_fromdate;
-                existingRecord.valid_todate = validTodate !== null ? validTodate : existingRecord.valid_todate;
-                existingRecord.valid_days_from_so = voucherData.valid_days_from_so !== undefined && voucherData.valid_days_from_so !== null ? voucherData.valid_days_from_so : existingRecord.valid_days_from_so;
-                existingRecord.check_ownership = voucherData.check_ownership || existingRecord.check_ownership;
-                existingRecord.allow_cashback = voucherData.allow_cashback || existingRecord.allow_cashback;
-                existingRecord.prom_for_employee = voucherData.prom_for_employee || existingRecord.prom_for_employee;
-                existingRecord.bonus_for_sale_employee = voucherData.bonus_for_sale_employee || existingRecord.bonus_for_sale_employee;
-                existingRecord.so_percent = voucherData.so_percent !== undefined && voucherData.so_percent !== null ? voucherData.so_percent : existingRecord.so_percent;
-                existingRecord.r_total_scope = voucherData.r_total_scope || existingRecord.r_total_scope;
-                existingRecord.ecode_item_code = voucherData.ecode_item_code !== undefined ? voucherData.ecode_item_code : existingRecord.ecode_item_code;
-                existingRecord.voucher_item_code = voucherData.voucher_item_code || existingRecord.voucher_item_code;
-                existingRecord.voucher_item_name = voucherData.voucher_item_name || existingRecord.voucher_item_name;
-                existingRecord.cost_for_gl = voucherData.cost_for_gl !== undefined && voucherData.cost_for_gl !== null ? voucherData.cost_for_gl : existingRecord.cost_for_gl;
-                existingRecord.buy_items_by_date_range = voucherData.buy_items_by_date_range || existingRecord.buy_items_by_date_range;
-                existingRecord.buy_items_option_name = voucherData.buy_items_option_name || existingRecord.buy_items_option_name;
-                existingRecord.disable_bonus_point_for_sale = voucherData.disable_bonus_point_for_sale || existingRecord.disable_bonus_point_for_sale;
-                existingRecord.disable_bonus_point = voucherData.disable_bonus_point || existingRecord.disable_bonus_point;
-                existingRecord.for_mkt_kol = voucherData.for_mkt_kol || existingRecord.for_mkt_kol;
-                existingRecord.for_mkt_prom = voucherData.for_mkt_prom || existingRecord.for_mkt_prom;
-                existingRecord.allow_apply_for_promoted_so = voucherData.allow_apply_for_promoted_so || existingRecord.allow_apply_for_promoted_so;
-                existingRecord.campaign_code = voucherData.campaign_code !== undefined ? voucherData.campaign_code : existingRecord.campaign_code;
-                existingRecord.sl_max_sudung_cho_1_kh = voucherData.sl_max_sudung_cho_1_kh !== undefined ? voucherData.sl_max_sudung_cho_1_kh : existingRecord.sl_max_sudung_cho_1_kh;
-                existingRecord.is_locked = voucherData.is_locked || existingRecord.is_locked;
-                existingRecord.enteredat = enteredat || existingRecord.enteredat;
-                existingRecord.enteredby = voucherData.enteredby || existingRecord.enteredby;
-                existingRecord.material_type = voucherData.material_type || existingRecord.material_type;
-                existingRecord.applyfor_wso = voucherData.applyfor_wso !== undefined ? voucherData.applyfor_wso : existingRecord.applyfor_wso;
+                existingRecord.description =
+                  voucherData.description || existingRecord.description;
+                existingRecord.brand_code =
+                  voucherData.brand_code || existingRecord.brand_code;
+                existingRecord.apply_for_branch_types =
+                  voucherData.apply_for_branch_types ||
+                  existingRecord.apply_for_branch_types;
+                existingRecord.val =
+                  voucherData.val !== undefined && voucherData.val !== null
+                    ? voucherData.val
+                    : existingRecord.val;
+                existingRecord.percent =
+                  voucherData.percent !== undefined &&
+                  voucherData.percent !== null
+                    ? voucherData.percent
+                    : (existingRecord.percent ?? 0);
+                existingRecord.max_value =
+                  voucherData.max_value !== undefined &&
+                  voucherData.max_value !== null
+                    ? voucherData.max_value
+                    : existingRecord.max_value;
+                existingRecord.saletype =
+                  voucherData.saletype || existingRecord.saletype;
+                existingRecord.enable_precost =
+                  voucherData.enable_precost || existingRecord.enable_precost;
+                existingRecord.supplier_support_fee =
+                  voucherData.supplier_support_fee !== undefined &&
+                  voucherData.supplier_support_fee !== null
+                    ? voucherData.supplier_support_fee
+                    : existingRecord.supplier_support_fee;
+                existingRecord.valid_fromdate =
+                  validFromdate || existingRecord.valid_fromdate;
+                existingRecord.valid_todate =
+                  validTodate !== null
+                    ? validTodate
+                    : existingRecord.valid_todate;
+                existingRecord.valid_days_from_so =
+                  voucherData.valid_days_from_so !== undefined &&
+                  voucherData.valid_days_from_so !== null
+                    ? voucherData.valid_days_from_so
+                    : existingRecord.valid_days_from_so;
+                existingRecord.check_ownership =
+                  voucherData.check_ownership || existingRecord.check_ownership;
+                existingRecord.allow_cashback =
+                  voucherData.allow_cashback || existingRecord.allow_cashback;
+                existingRecord.prom_for_employee =
+                  voucherData.prom_for_employee ||
+                  existingRecord.prom_for_employee;
+                existingRecord.bonus_for_sale_employee =
+                  voucherData.bonus_for_sale_employee ||
+                  existingRecord.bonus_for_sale_employee;
+                existingRecord.so_percent =
+                  voucherData.so_percent !== undefined &&
+                  voucherData.so_percent !== null
+                    ? voucherData.so_percent
+                    : existingRecord.so_percent;
+                existingRecord.r_total_scope =
+                  voucherData.r_total_scope || existingRecord.r_total_scope;
+                existingRecord.ecode_item_code =
+                  voucherData.ecode_item_code !== undefined
+                    ? voucherData.ecode_item_code
+                    : existingRecord.ecode_item_code;
+                existingRecord.voucher_item_code =
+                  voucherData.voucher_item_code ||
+                  existingRecord.voucher_item_code;
+                existingRecord.voucher_item_name =
+                  voucherData.voucher_item_name ||
+                  existingRecord.voucher_item_name;
+                existingRecord.cost_for_gl =
+                  voucherData.cost_for_gl !== undefined &&
+                  voucherData.cost_for_gl !== null
+                    ? voucherData.cost_for_gl
+                    : existingRecord.cost_for_gl;
+                existingRecord.buy_items_by_date_range =
+                  voucherData.buy_items_by_date_range ||
+                  existingRecord.buy_items_by_date_range;
+                existingRecord.buy_items_option_name =
+                  voucherData.buy_items_option_name ||
+                  existingRecord.buy_items_option_name;
+                existingRecord.disable_bonus_point_for_sale =
+                  voucherData.disable_bonus_point_for_sale ||
+                  existingRecord.disable_bonus_point_for_sale;
+                existingRecord.disable_bonus_point =
+                  voucherData.disable_bonus_point ||
+                  existingRecord.disable_bonus_point;
+                existingRecord.for_mkt_kol =
+                  voucherData.for_mkt_kol || existingRecord.for_mkt_kol;
+                existingRecord.for_mkt_prom =
+                  voucherData.for_mkt_prom || existingRecord.for_mkt_prom;
+                existingRecord.allow_apply_for_promoted_so =
+                  voucherData.allow_apply_for_promoted_so ||
+                  existingRecord.allow_apply_for_promoted_so;
+                existingRecord.campaign_code =
+                  voucherData.campaign_code !== undefined
+                    ? voucherData.campaign_code
+                    : existingRecord.campaign_code;
+                existingRecord.sl_max_sudung_cho_1_kh =
+                  voucherData.sl_max_sudung_cho_1_kh !== undefined
+                    ? voucherData.sl_max_sudung_cho_1_kh
+                    : existingRecord.sl_max_sudung_cho_1_kh;
+                existingRecord.is_locked =
+                  voucherData.is_locked || existingRecord.is_locked;
+                existingRecord.enteredat =
+                  enteredat || existingRecord.enteredat;
+                existingRecord.enteredby =
+                  voucherData.enteredby || existingRecord.enteredby;
+                existingRecord.material_type =
+                  voucherData.material_type || existingRecord.material_type;
+                existingRecord.applyfor_wso =
+                  voucherData.applyfor_wso !== undefined
+                    ? voucherData.applyfor_wso
+                    : existingRecord.applyfor_wso;
                 existingRecord.sync_date_from = dateFrom;
                 existingRecord.sync_date_to = dateTo;
 
                 // Xóa các details cũ
-                await this.voucherIssueDetailRepository.delete({ voucherIssueId: existingRecord.id });
+                await this.voucherIssueDetailRepository.delete({
+                  voucherIssueId: existingRecord.id,
+                });
 
                 // Lấy chi tiết từ API
                 let details: VoucherIssueDetail[] = [];
                 try {
-                  const detailData = await this.zappyApiService.getVoucherIssueDetail(apiId, brandName);
+                  const detailData =
+                    await this.zappyApiService.getVoucherIssueDetail(
+                      apiId,
+                      brandName,
+                    );
 
                   // Lưu toàn bộ detail_data dạng JSON
                   if (detailData) {
@@ -3381,7 +4288,9 @@ export class SyncService {
                     await this.voucherIssueDetailRepository.save(details);
                   }
                 } catch (detailError: any) {
-                  this.logger.warn(`Không thể lấy details cho voucher issue ${apiId}: ${detailError?.message || detailError}`);
+                  this.logger.warn(
+                    `Không thể lấy details cho voucher issue ${apiId}: ${detailError?.message || detailError}`,
+                  );
                   // Vẫn tiếp tục, không throw error
                 }
 
@@ -3390,7 +4299,9 @@ export class SyncService {
                 brandUpdatedCount++;
               } else {
                 // Tạo record mới
-                this.logger.log(`[VoucherIssue] Tạo mới voucher issue ${apiId} (${voucherData.code || 'N/A'}) cho brand ${brandName}`);
+                this.logger.log(
+                  `[VoucherIssue] Tạo mới voucher issue ${apiId} (${voucherData.code || 'N/A'}) cho brand ${brandName}`,
+                );
                 const newRecord = this.voucherIssueRepository.create({
                   api_id: apiId,
                   code: voucherData.code || undefined,
@@ -3398,50 +4309,103 @@ export class SyncService {
                   docdate: docdate || undefined,
                   description: voucherData.description || undefined,
                   brand_code: voucherData.brand_code || undefined,
-                  apply_for_branch_types: voucherData.apply_for_branch_types || undefined,
-                  val: voucherData.val !== undefined && voucherData.val !== null ? voucherData.val : 0,
-                  percent: voucherData.percent !== undefined && voucherData.percent !== null ? voucherData.percent : 0,
-                  max_value: voucherData.max_value !== undefined && voucherData.max_value !== null ? voucherData.max_value : 0,
+                  apply_for_branch_types:
+                    voucherData.apply_for_branch_types || undefined,
+                  val:
+                    voucherData.val !== undefined && voucherData.val !== null
+                      ? voucherData.val
+                      : 0,
+                  percent:
+                    voucherData.percent !== undefined &&
+                    voucherData.percent !== null
+                      ? voucherData.percent
+                      : 0,
+                  max_value:
+                    voucherData.max_value !== undefined &&
+                    voucherData.max_value !== null
+                      ? voucherData.max_value
+                      : 0,
                   saletype: voucherData.saletype || undefined,
                   enable_precost: voucherData.enable_precost || undefined,
-                  supplier_support_fee: voucherData.supplier_support_fee !== undefined && voucherData.supplier_support_fee !== null ? voucherData.supplier_support_fee : 0,
+                  supplier_support_fee:
+                    voucherData.supplier_support_fee !== undefined &&
+                    voucherData.supplier_support_fee !== null
+                      ? voucherData.supplier_support_fee
+                      : 0,
                   valid_fromdate: validFromdate || undefined,
                   valid_todate: validTodate || undefined,
-                  valid_days_from_so: voucherData.valid_days_from_so !== undefined && voucherData.valid_days_from_so !== null ? voucherData.valid_days_from_so : 0,
+                  valid_days_from_so:
+                    voucherData.valid_days_from_so !== undefined &&
+                    voucherData.valid_days_from_so !== null
+                      ? voucherData.valid_days_from_so
+                      : 0,
                   check_ownership: voucherData.check_ownership || undefined,
                   allow_cashback: voucherData.allow_cashback || undefined,
                   prom_for_employee: voucherData.prom_for_employee || undefined,
-                  bonus_for_sale_employee: voucherData.bonus_for_sale_employee || undefined,
-                  so_percent: voucherData.so_percent !== undefined && voucherData.so_percent !== null ? voucherData.so_percent : undefined,
+                  bonus_for_sale_employee:
+                    voucherData.bonus_for_sale_employee || undefined,
+                  so_percent:
+                    voucherData.so_percent !== undefined &&
+                    voucherData.so_percent !== null
+                      ? voucherData.so_percent
+                      : undefined,
                   r_total_scope: voucherData.r_total_scope || undefined,
-                  ecode_item_code: voucherData.ecode_item_code !== undefined ? voucherData.ecode_item_code : undefined,
+                  ecode_item_code:
+                    voucherData.ecode_item_code !== undefined
+                      ? voucherData.ecode_item_code
+                      : undefined,
                   voucher_item_code: voucherData.voucher_item_code || undefined,
                   voucher_item_name: voucherData.voucher_item_name || undefined,
-                  cost_for_gl: voucherData.cost_for_gl !== undefined && voucherData.cost_for_gl !== null ? voucherData.cost_for_gl : 0,
-                  buy_items_by_date_range: voucherData.buy_items_by_date_range || undefined,
-                  buy_items_option_name: voucherData.buy_items_option_name || undefined,
-                  disable_bonus_point_for_sale: voucherData.disable_bonus_point_for_sale || undefined,
-                  disable_bonus_point: voucherData.disable_bonus_point || undefined,
+                  cost_for_gl:
+                    voucherData.cost_for_gl !== undefined &&
+                    voucherData.cost_for_gl !== null
+                      ? voucherData.cost_for_gl
+                      : 0,
+                  buy_items_by_date_range:
+                    voucherData.buy_items_by_date_range || undefined,
+                  buy_items_option_name:
+                    voucherData.buy_items_option_name || undefined,
+                  disable_bonus_point_for_sale:
+                    voucherData.disable_bonus_point_for_sale || undefined,
+                  disable_bonus_point:
+                    voucherData.disable_bonus_point || undefined,
                   for_mkt_kol: voucherData.for_mkt_kol || undefined,
                   for_mkt_prom: voucherData.for_mkt_prom || undefined,
-                  allow_apply_for_promoted_so: voucherData.allow_apply_for_promoted_so || undefined,
-                  campaign_code: voucherData.campaign_code !== undefined ? voucherData.campaign_code : undefined,
-                  sl_max_sudung_cho_1_kh: voucherData.sl_max_sudung_cho_1_kh !== undefined && voucherData.sl_max_sudung_cho_1_kh !== null ? voucherData.sl_max_sudung_cho_1_kh : 0,
+                  allow_apply_for_promoted_so:
+                    voucherData.allow_apply_for_promoted_so || undefined,
+                  campaign_code:
+                    voucherData.campaign_code !== undefined
+                      ? voucherData.campaign_code
+                      : undefined,
+                  sl_max_sudung_cho_1_kh:
+                    voucherData.sl_max_sudung_cho_1_kh !== undefined &&
+                    voucherData.sl_max_sudung_cho_1_kh !== null
+                      ? voucherData.sl_max_sudung_cho_1_kh
+                      : 0,
                   is_locked: voucherData.is_locked || undefined,
                   enteredat: enteredat || undefined,
                   enteredby: voucherData.enteredby || undefined,
                   material_type: voucherData.material_type || undefined,
-                  applyfor_wso: voucherData.applyfor_wso !== undefined ? voucherData.applyfor_wso : undefined,
+                  applyfor_wso:
+                    voucherData.applyfor_wso !== undefined
+                      ? voucherData.applyfor_wso
+                      : undefined,
                   sync_date_from: dateFrom,
                   sync_date_to: dateTo,
                   brand: brandName,
                 });
 
-                const savedRecord = (await this.voucherIssueRepository.save(newRecord)) as unknown as VoucherIssue;
+                const savedRecord = (await this.voucherIssueRepository.save(
+                  newRecord,
+                )) as unknown as VoucherIssue;
 
                 // Lấy chi tiết từ API
                 try {
-                  const detailData = await this.zappyApiService.getVoucherIssueDetail(apiId, brandName);
+                  const detailData =
+                    await this.zappyApiService.getVoucherIssueDetail(
+                      apiId,
+                      brandName,
+                    );
 
                   // Lưu toàn bộ detail_data dạng JSON
                   if (detailData) {
@@ -3452,7 +4416,9 @@ export class SyncService {
                     await this.voucherIssueDetailRepository.save(detail);
                   }
                 } catch (detailError: any) {
-                  this.logger.warn(`Không thể lấy details cho voucher issue ${apiId}: ${detailError?.message || detailError}`);
+                  this.logger.warn(
+                    `Không thể lấy details cho voucher issue ${apiId}: ${detailError?.message || detailError}`,
+                  );
                   // Vẫn tiếp tục, không throw error
                 }
 
@@ -3470,7 +4436,9 @@ export class SyncService {
           totalUpdatedCount += brandUpdatedCount;
           allErrors.push(...brandErrors);
 
-          this.logger.log(`[VoucherIssue] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`);
+          this.logger.log(
+            `[VoucherIssue] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật`,
+          );
         } catch (error: any) {
           const errorMsg = `[${brandName}] Lỗi khi đồng bộ voucher issue: ${error?.message || error}`;
           this.logger.error(errorMsg);
@@ -3487,7 +4455,9 @@ export class SyncService {
         errors: allErrors.length > 0 ? allErrors : undefined,
       };
     } catch (error: any) {
-      this.logger.error(`Lỗi khi đồng bộ voucher issue: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ voucher issue: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -3535,15 +4505,23 @@ export class SyncService {
       // API này nhận date range, không cần lặp từng ngày
       for (const brandName of brands) {
         try {
-          this.logger.log(`[syncVoucherIssueByDateRange] Bắt đầu đồng bộ brand: ${brandName}`);
+          this.logger.log(
+            `[syncVoucherIssueByDateRange] Bắt đầu đồng bộ brand: ${brandName}`,
+          );
           let brandRecordsCount = 0;
           let brandSavedCount = 0;
           let brandUpdatedCount = 0;
           const brandErrors: string[] = [];
 
           try {
-            this.logger.log(`[syncVoucherIssueByDateRange] Đồng bộ ${brandName} - khoảng ${startDate} - ${endDate}`);
-            const result = await this.syncVoucherIssue(startDate, endDate, brandName);
+            this.logger.log(
+              `[syncVoucherIssueByDateRange] Đồng bộ ${brandName} - khoảng ${startDate} - ${endDate}`,
+            );
+            const result = await this.syncVoucherIssue(
+              startDate,
+              endDate,
+              brandName,
+            );
 
             brandRecordsCount = result.recordsCount;
             brandSavedCount = result.savedCount;
@@ -3571,7 +4549,9 @@ export class SyncService {
             errors: brandErrors.length > 0 ? brandErrors : undefined,
           });
 
-          this.logger.log(`[syncVoucherIssueByDateRange] Hoàn thành đồng bộ brand: ${brandName} - ${brandRecordsCount} voucher`);
+          this.logger.log(
+            `[syncVoucherIssueByDateRange] Hoàn thành đồng bộ brand: ${brandName} - ${brandRecordsCount} voucher`,
+          );
         } catch (error: any) {
           const errorMsg = `[${brandName}] Lỗi khi đồng bộ voucher issue: ${error?.message || error}`;
           this.logger.error(errorMsg);
@@ -3589,7 +4569,9 @@ export class SyncService {
         errors: allErrors.length > 0 ? allErrors : undefined,
       };
     } catch (error: any) {
-      this.logger.error(`Lỗi khi đồng bộ voucher issue theo khoảng thời gian: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ voucher issue theo khoảng thời gian: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -3634,17 +4616,23 @@ export class SyncService {
 
       // Filter by status
       if (params.status) {
-        queryBuilder.andWhere('vi.status_lov = :status', { status: params.status });
+        queryBuilder.andWhere('vi.status_lov = :status', {
+          status: params.status,
+        });
       }
 
       // Filter by code
       if (params.code) {
-        queryBuilder.andWhere('vi.code LIKE :code', { code: `%${params.code}%` });
+        queryBuilder.andWhere('vi.code LIKE :code', {
+          code: `%${params.code}%`,
+        });
       }
 
       // Filter by material_type
       if (params.materialType) {
-        queryBuilder.andWhere('vi.material_type = :materialType', { materialType: params.materialType });
+        queryBuilder.andWhere('vi.material_type = :materialType', {
+          materialType: params.materialType,
+        });
       }
 
       // Filter by dateFrom
@@ -3654,15 +4642,26 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day);
         };
         const fromDate = parseDate(params.dateFrom);
-        queryBuilder.andWhere('vi.docdate >= :dateFrom', { dateFrom: fromDate });
+        queryBuilder.andWhere('vi.docdate >= :dateFrom', {
+          dateFrom: fromDate,
+        });
       }
 
       // Filter by dateTo
@@ -3672,9 +4671,18 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day, 23, 59, 59);
@@ -3705,7 +4713,9 @@ export class SyncService {
         },
       };
     } catch (error: any) {
-      this.logger.error(`Error getting voucher issue: ${error?.message || error}`);
+      this.logger.error(
+        `Error getting voucher issue: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -3717,7 +4727,11 @@ export class SyncService {
    * @param brand - Brand name
    * @returns Object chứa savedCount và skippedCount
    */
-  private async saveCashioData(cashData: any[], date: string, brand?: string): Promise<{ savedCount: number; skippedCount: number; errors: string[] }> {
+  private async saveCashioData(
+    cashData: any[],
+    date: string,
+    brand?: string,
+  ): Promise<{ savedCount: number; skippedCount: number; errors: string[] }> {
     const errors: string[] = [];
     let savedCount = 0;
     let skippedCount = 0;
@@ -3735,11 +4749,21 @@ export class SyncService {
         const timePart = parts[1] || '00:00'; // "10:30"
         const [day, month, year] = datePart.split('-');
         const [hour, minute] = timePart.split(':');
-        return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+        return new Date(
+          parseInt(year),
+          parseInt(month) - 1,
+          parseInt(day),
+          parseInt(hour),
+          parseInt(minute),
+        );
       };
 
       const parseRefnoIdate = (refnoIdateStr: string): Date | null => {
-        if (!refnoIdateStr || refnoIdateStr === '00:00' || refnoIdateStr.includes('00:00')) {
+        if (
+          !refnoIdateStr ||
+          refnoIdateStr === '00:00' ||
+          refnoIdateStr.includes('00:00')
+        ) {
           return null;
         }
         // Format: "03-10-2025 00:00"
@@ -3763,7 +4787,9 @@ export class SyncService {
             continue;
           }
 
-          const parsedRefnoIdate = cash.refno_idate ? parseRefnoIdate(cash.refno_idate) : undefined;
+          const parsedRefnoIdate = cash.refno_idate
+            ? parseRefnoIdate(cash.refno_idate)
+            : undefined;
 
           const cashioData: Partial<DailyCashio> = {
             api_id: cash.id,
@@ -3795,7 +4821,9 @@ export class SyncService {
         }
       }
 
-      this.logger.log(`[Cashio] Đã lưu ${savedCount} cashio records mới, bỏ qua ${skippedCount} records đã tồn tại (tổng ${cashData.length} records từ API)`);
+      this.logger.log(
+        `[Cashio] Đã lưu ${savedCount} cashio records mới, bỏ qua ${skippedCount} records đã tồn tại (tổng ${cashData.length} records từ API)`,
+      );
     } catch (error: any) {
       const errorMsg = `Failed to save cashio data to database: ${error?.message || error}`;
       this.logger.error(errorMsg);
@@ -3811,7 +4839,10 @@ export class SyncService {
    * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
    * @returns Kết quả đồng bộ
    */
-  async syncCashioByDate(date: string, brand?: string): Promise<{
+  async syncCashioByDate(
+    date: string,
+    brand?: string,
+  ): Promise<{
     success: boolean;
     totalRecordsCount: number;
     totalSavedCount: number;
@@ -3826,7 +4857,9 @@ export class SyncService {
     errors?: string[];
   }> {
     try {
-      this.logger.log(`[Cashio] Bắt đầu đồng bộ cashio cho ngày ${date}${brand ? ` cho brand ${brand}` : ' cho tất cả brands'}`);
+      this.logger.log(
+        `[Cashio] Bắt đầu đồng bộ cashio cho ngày ${date}${brand ? ` cho brand ${brand}` : ' cho tất cả brands'}`,
+      );
 
       const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
       let totalRecordsCount = 0;
@@ -3843,15 +4876,24 @@ export class SyncService {
 
       for (const brandName of brands) {
         try {
-          this.logger.log(`[Cashio] Đang đồng bộ ${brandName} cho ngày ${date}`);
+          this.logger.log(
+            `[Cashio] Đang đồng bộ ${brandName} cho ngày ${date}`,
+          );
 
           // Gọi API để lấy cashio data
-          const cashData = await this.zappyApiService.getDailyCash(date, brandName);
+          const cashData = await this.zappyApiService.getDailyCash(
+            date,
+            brandName,
+          );
           const recordsCount = cashData.length;
           totalRecordsCount += recordsCount;
 
           // Lưu vào database
-          const saveResult = await this.saveCashioData(cashData, date, brandName);
+          const saveResult = await this.saveCashioData(
+            cashData,
+            date,
+            brandName,
+          );
           totalSavedCount += saveResult.savedCount;
           totalSkippedCount += saveResult.skippedCount;
 
@@ -3864,10 +4906,13 @@ export class SyncService {
             recordsCount,
             savedCount: saveResult.savedCount,
             skippedCount: saveResult.skippedCount,
-            errors: saveResult.errors.length > 0 ? saveResult.errors : undefined,
+            errors:
+              saveResult.errors.length > 0 ? saveResult.errors : undefined,
           });
 
-          this.logger.log(`[Cashio] Hoàn thành đồng bộ ${brandName}: ${saveResult.savedCount} mới, ${saveResult.skippedCount} đã tồn tại (tổng ${recordsCount} records)`);
+          this.logger.log(
+            `[Cashio] Hoàn thành đồng bộ ${brandName}: ${saveResult.savedCount} mới, ${saveResult.skippedCount} đã tồn tại (tổng ${recordsCount} records)`,
+          );
         } catch (brandError: any) {
           const errorMsg = `[${brandName}] Lỗi khi đồng bộ cashio: ${brandError?.message || brandError}`;
           this.logger.error(errorMsg);
@@ -3883,7 +4928,9 @@ export class SyncService {
         }
       }
 
-      this.logger.log(`[Cashio] Hoàn thành đồng bộ cashio cho ngày ${date}: ${totalSavedCount} mới, ${totalSkippedCount} đã tồn tại (tổng ${totalRecordsCount} records từ tất cả brands)`);
+      this.logger.log(
+        `[Cashio] Hoàn thành đồng bộ cashio cho ngày ${date}: ${totalSavedCount} mới, ${totalSkippedCount} đã tồn tại (tổng ${totalRecordsCount} records từ tất cả brands)`,
+      );
 
       return {
         success: true,
@@ -3894,7 +4941,9 @@ export class SyncService {
         errors: allErrors.length > 0 ? allErrors : undefined,
       };
     } catch (error: any) {
-      this.logger.error(`Error syncing cashio by date: ${error?.message || error}`);
+      this.logger.error(
+        `Error syncing cashio by date: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -3906,7 +4955,11 @@ export class SyncService {
    * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
    * @returns Kết quả đồng bộ
    */
-  async syncCashioByDateRange(startDate: string, endDate: string, brand?: string): Promise<{
+  async syncCashioByDateRange(
+    startDate: string,
+    endDate: string,
+    brand?: string,
+  ): Promise<{
     success: boolean;
     totalRecordsCount: number;
     totalSavedCount: number;
@@ -3921,7 +4974,9 @@ export class SyncService {
     errors?: string[];
   }> {
     try {
-      this.logger.log(`[Cashio Range] Bắt đầu đồng bộ cashio từ ${startDate} đến ${endDate}${brand ? ` cho brand ${brand}` : ' cho tất cả brands'}`);
+      this.logger.log(
+        `[Cashio Range] Bắt đầu đồng bộ cashio từ ${startDate} đến ${endDate}${brand ? ` cho brand ${brand}` : ' cho tất cả brands'}`,
+      );
 
       // Parse dates từ DDMMMYYYY sang Date object
       const parseDate = (dateStr: string): Date => {
@@ -3929,9 +4984,18 @@ export class SyncService {
         const monthStr = dateStr.substring(2, 5).toUpperCase();
         const year = parseInt(dateStr.substring(5, 9));
         const monthMap: Record<string, number> = {
-          'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-          'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-          'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+          JAN: 0,
+          FEB: 1,
+          MAR: 2,
+          APR: 3,
+          MAY: 4,
+          JUN: 5,
+          JUL: 6,
+          AUG: 7,
+          SEP: 8,
+          OCT: 9,
+          NOV: 10,
+          DEC: 11,
         };
         const month = monthMap[monthStr] || 0;
         return new Date(year, month, day);
@@ -3949,7 +5013,20 @@ export class SyncService {
       const currentDate = new Date(fromDate);
       while (currentDate <= toDate) {
         const day = String(currentDate.getDate()).padStart(2, '0');
-        const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const monthNames = [
+          'JAN',
+          'FEB',
+          'MAR',
+          'APR',
+          'MAY',
+          'JUN',
+          'JUL',
+          'AUG',
+          'SEP',
+          'OCT',
+          'NOV',
+          'DEC',
+        ];
         const month = monthNames[currentDate.getMonth()];
         const year = currentDate.getFullYear();
         const dateStr = `${day}${month}${year}`;
@@ -3957,7 +5034,9 @@ export class SyncService {
         currentDate.setDate(currentDate.getDate() + 1);
       }
 
-      this.logger.log(`[Cashio Range] Sẽ đồng bộ ${datesToSync.length} ngày từ ${startDate} đến ${endDate}`);
+      this.logger.log(
+        `[Cashio Range] Sẽ đồng bộ ${datesToSync.length} ngày từ ${startDate} đến ${endDate}`,
+      );
 
       const brands = brand ? [brand] : ['f3', 'labhair', 'yaman', 'menard'];
       let totalRecordsCount = 0;
@@ -3985,14 +5064,23 @@ export class SyncService {
           // Đồng bộ từng ngày
           for (const dateStr of datesToSync) {
             try {
-              this.logger.log(`[Cashio Range] Đang đồng bộ ${brandName} cho ngày ${dateStr}`);
+              this.logger.log(
+                `[Cashio Range] Đang đồng bộ ${brandName} cho ngày ${dateStr}`,
+              );
 
               // Gọi API để lấy cashio data
-              const cashData = await this.zappyApiService.getDailyCash(dateStr, brandName);
+              const cashData = await this.zappyApiService.getDailyCash(
+                dateStr,
+                brandName,
+              );
               brandRecordsCount += cashData.length;
 
               // Lưu vào database
-              const saveResult = await this.saveCashioData(cashData, dateStr, brandName);
+              const saveResult = await this.saveCashioData(
+                cashData,
+                dateStr,
+                brandName,
+              );
               brandSavedCount += saveResult.savedCount;
               brandSkippedCount += saveResult.skippedCount;
 
@@ -4001,7 +5089,7 @@ export class SyncService {
               }
 
               // Thêm delay nhỏ giữa các request để tránh quá tải API
-              await new Promise(resolve => setTimeout(resolve, 100));
+              await new Promise((resolve) => setTimeout(resolve, 100));
             } catch (dateError: any) {
               const errorMsg = `[${brandName}] Lỗi khi đồng bộ ngày ${dateStr}: ${dateError?.message || dateError}`;
               this.logger.error(errorMsg);
@@ -4025,7 +5113,9 @@ export class SyncService {
             errors: brandErrors.length > 0 ? brandErrors : undefined,
           });
 
-          this.logger.log(`[Cashio Range] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandSkippedCount} đã tồn tại (tổng ${brandRecordsCount} records)`);
+          this.logger.log(
+            `[Cashio Range] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandSkippedCount} đã tồn tại (tổng ${brandRecordsCount} records)`,
+          );
         } catch (brandError: any) {
           const errorMsg = `[${brandName}] Lỗi khi đồng bộ cashio range: ${brandError?.message || brandError}`;
           this.logger.error(errorMsg);
@@ -4041,7 +5131,9 @@ export class SyncService {
         }
       }
 
-      this.logger.log(`[Cashio Range] Hoàn thành đồng bộ cashio từ ${startDate} đến ${endDate}: ${totalSavedCount} mới, ${totalSkippedCount} đã tồn tại (tổng ${totalRecordsCount} records từ tất cả brands)`);
+      this.logger.log(
+        `[Cashio Range] Hoàn thành đồng bộ cashio từ ${startDate} đến ${endDate}: ${totalSavedCount} mới, ${totalSkippedCount} đã tồn tại (tổng ${totalRecordsCount} records từ tất cả brands)`,
+      );
 
       return {
         success: true,
@@ -4052,7 +5144,9 @@ export class SyncService {
         errors: allErrors.length > 0 ? allErrors : undefined,
       };
     } catch (error: any) {
-      this.logger.error(`Error syncing cashio by date range: ${error?.message || error}`);
+      this.logger.error(
+        `Error syncing cashio by date range: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -4096,17 +5190,24 @@ export class SyncService {
 
       // Filter by branchCode
       if (params.branchCode) {
-        queryBuilder.andWhere('cashio.branch_code = :branchCode', { branchCode: params.branchCode });
+        queryBuilder.andWhere('cashio.branch_code = :branchCode', {
+          branchCode: params.branchCode,
+        });
       }
 
       // Filter by soCode
       if (params.soCode) {
-        queryBuilder.andWhere('(cashio.so_code = :soCode OR cashio.master_code = :soCode)', { soCode: params.soCode });
+        queryBuilder.andWhere(
+          '(cashio.so_code = :soCode OR cashio.master_code = :soCode)',
+          { soCode: params.soCode },
+        );
       }
 
       // Filter by partnerCode
       if (params.partnerCode) {
-        queryBuilder.andWhere('cashio.partner_code = :partnerCode', { partnerCode: params.partnerCode });
+        queryBuilder.andWhere('cashio.partner_code = :partnerCode', {
+          partnerCode: params.partnerCode,
+        });
       }
 
       // Filter by dateFrom
@@ -4116,15 +5217,26 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day);
         };
         const fromDate = parseDate(params.dateFrom);
-        queryBuilder.andWhere('cashio.docdate >= :dateFrom', { dateFrom: fromDate });
+        queryBuilder.andWhere('cashio.docdate >= :dateFrom', {
+          dateFrom: fromDate,
+        });
       }
 
       // Filter by dateTo
@@ -4134,9 +5246,18 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day, 23, 59, 59);
@@ -4216,12 +5337,16 @@ export class SyncService {
 
       // Filter by success
       if (params.success !== undefined) {
-        queryBuilder.andWhere('wp.success = :success', { success: params.success });
+        queryBuilder.andWhere('wp.success = :success', {
+          success: params.success,
+        });
       }
 
       // Filter by docCode
       if (params.docCode) {
-        queryBuilder.andWhere('wp.docCode LIKE :docCode', { docCode: `%${params.docCode}%` });
+        queryBuilder.andWhere('wp.docCode LIKE :docCode', {
+          docCode: `%${params.docCode}%`,
+        });
       }
 
       // Filter by dateFrom
@@ -4231,15 +5356,26 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day);
         };
         const fromDate = parseDate(params.dateFrom);
-        queryBuilder.andWhere('wp.processedDate >= :dateFrom', { dateFrom: fromDate });
+        queryBuilder.andWhere('wp.processedDate >= :dateFrom', {
+          dateFrom: fromDate,
+        });
       }
 
       // Filter by dateTo
@@ -4249,15 +5385,26 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day, 23, 59, 59);
         };
         const toDate = parseDate(params.dateTo);
-        queryBuilder.andWhere('wp.processedDate <= :dateTo', { dateTo: toDate });
+        queryBuilder.andWhere('wp.processedDate <= :dateTo', {
+          dateTo: toDate,
+        });
       }
 
       // Get total count
@@ -4270,17 +5417,24 @@ export class SyncService {
       const data = await queryBuilder.getMany();
 
       // Calculate statistics
-      const statsQueryBuilder = this.warehouseProcessedRepository.createQueryBuilder('wp');
+      const statsQueryBuilder =
+        this.warehouseProcessedRepository.createQueryBuilder('wp');
 
       // Apply same filters to stats query
       if (params.ioType) {
-        statsQueryBuilder.andWhere('wp.ioType = :ioType', { ioType: params.ioType });
+        statsQueryBuilder.andWhere('wp.ioType = :ioType', {
+          ioType: params.ioType,
+        });
       }
       if (params.success !== undefined) {
-        statsQueryBuilder.andWhere('wp.success = :success', { success: params.success });
+        statsQueryBuilder.andWhere('wp.success = :success', {
+          success: params.success,
+        });
       }
       if (params.docCode) {
-        statsQueryBuilder.andWhere('wp.docCode LIKE :docCode', { docCode: `%${params.docCode}%` });
+        statsQueryBuilder.andWhere('wp.docCode LIKE :docCode', {
+          docCode: `%${params.docCode}%`,
+        });
       }
 
       // Filter by dateFrom
@@ -4290,15 +5444,26 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day);
         };
         const fromDate = parseDate(params.dateFrom);
-        statsQueryBuilder.andWhere('wp.processedDate >= :dateFrom', { dateFrom: fromDate });
+        statsQueryBuilder.andWhere('wp.processedDate >= :dateFrom', {
+          dateFrom: fromDate,
+        });
       }
 
       if (params.dateTo) {
@@ -4307,25 +5472,36 @@ export class SyncService {
           const monthStr = dateStr.substring(2, 5).toUpperCase();
           const year = parseInt(dateStr.substring(5, 9));
           const monthMap: Record<string, number> = {
-            'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3,
-            'MAY': 4, 'JUN': 5, 'JUL': 6, 'AUG': 7,
-            'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11,
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
           };
           const month = monthMap[monthStr] || 0;
           return new Date(year, month, day, 23, 59, 59);
         };
         const toDate = parseDate(params.dateTo);
-        statsQueryBuilder.andWhere('wp.processedDate <= :dateTo', { dateTo: toDate });
+        statsQueryBuilder.andWhere('wp.processedDate <= :dateTo', {
+          dateTo: toDate,
+        });
       }
 
       const allRecords = await statsQueryBuilder.getMany();
       const statistics = {
         total: allRecords.length,
-        success: allRecords.filter(r => r.success).length,
-        failed: allRecords.filter(r => !r.success).length,
+        success: allRecords.filter((r) => r.success).length,
+        failed: allRecords.filter((r) => !r.success).length,
         byIoType: {
-          I: allRecords.filter(r => r.ioType === 'I').length,
-          O: allRecords.filter(r => r.ioType === 'O').length,
+          I: allRecords.filter((r) => r.ioType === 'I').length,
+          O: allRecords.filter((r) => r.ioType === 'O').length,
         },
       };
 
@@ -4343,7 +5519,9 @@ export class SyncService {
         },
       };
     } catch (error: any) {
-      this.logger.error(`Lỗi khi lấy danh sách warehouse processed: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi lấy danh sách warehouse processed: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -4354,9 +5532,14 @@ export class SyncService {
    * @param date - Ngày sync (format: DDMMMYYYY)
    * @param brand - Brand name
    */
-  async processWarehouseForStockTransfers(date: string, brand: string): Promise<void> {
+  async processWarehouseForStockTransfers(
+    date: string,
+    brand: string,
+  ): Promise<void> {
     try {
-      this.logger.log(`[Warehouse Auto] Bắt đầu xử lý warehouse tự động cho brand ${brand} ngày ${date}`);
+      this.logger.log(
+        `[Warehouse Auto] Bắt đầu xử lý warehouse tự động cho brand ${brand} ngày ${date}`,
+      );
 
       // Lấy tất cả stock transfers của ngày đó
       const stockTransfers = await this.stockTransferRepository.find({
@@ -4371,7 +5554,9 @@ export class SyncService {
       });
 
       if (!stockTransfers || stockTransfers.length === 0) {
-        this.logger.log(`[Warehouse Auto] Không có stock transfers để xử lý cho brand ${brand} ngày ${date}`);
+        this.logger.log(
+          `[Warehouse Auto] Không có stock transfers để xử lý cho brand ${brand} ngày ${date}`,
+        );
         return;
       }
 
@@ -4395,22 +5580,36 @@ export class SyncService {
           const firstStockTransfer = stockTransferList[0];
 
           // Xử lý STOCK_TRANSFER với relatedStockCode
-          if (firstStockTransfer.doctype === 'STOCK_TRANSFER' && firstStockTransfer.relatedStockCode) {
+          if (
+            firstStockTransfer.doctype === 'STOCK_TRANSFER' &&
+            firstStockTransfer.relatedStockCode
+          ) {
             // Kiểm tra relatedStockCode phải có
-            if (!firstStockTransfer.relatedStockCode || firstStockTransfer.relatedStockCode.trim() === '') {
-              this.logger.debug(`[Warehouse Auto] DocCode ${docCode} có doctype = "STOCK_TRANSFER" nhưng không có relatedStockCode, bỏ qua`);
+            if (
+              !firstStockTransfer.relatedStockCode ||
+              firstStockTransfer.relatedStockCode.trim() === ''
+            ) {
+              this.logger.debug(
+                `[Warehouse Auto] DocCode ${docCode} có doctype = "STOCK_TRANSFER" nhưng không có relatedStockCode, bỏ qua`,
+              );
               skippedCount++;
               continue;
             }
 
             // Gọi API warehouse transfer (group tất cả items cùng docCode)
-            this.logger.log(`[Warehouse Auto] Đang xử lý warehouse transfer cho docCode ${docCode}`);
-            const result = await this.fastApiInvoiceFlowService.processWarehouseTransferFromStockTransfers(stockTransferList);
+            this.logger.log(
+              `[Warehouse Auto] Đang xử lý warehouse transfer cho docCode ${docCode}`,
+            );
+            const result =
+              await this.fastApiInvoiceFlowService.processWarehouseTransferFromStockTransfers(
+                stockTransferList,
+              );
 
             // Lưu vào bảng tracking (upsert - update nếu đã tồn tại)
-            const existingRecord = await this.warehouseProcessedRepository.findOne({
-              where: { docCode },
-            });
+            const existingRecord =
+              await this.warehouseProcessedRepository.findOne({
+                where: { docCode },
+              });
             if (existingRecord) {
               // Dùng update để set errorMessage = null khi thành công
               await this.warehouseProcessedRepository.update(
@@ -4421,21 +5620,24 @@ export class SyncService {
                   result: JSON.stringify(result),
                   success: true,
                   errorMessage: null as any, // Set null để xóa errorMessage trong database
-                }
+                },
               );
             } else {
-              const warehouseProcessed = this.warehouseProcessedRepository.create({
-                docCode,
-                ioType: 'T', // T = Transfer
-                processedDate: new Date(),
-                result: JSON.stringify(result),
-                success: true,
-              });
+              const warehouseProcessed =
+                this.warehouseProcessedRepository.create({
+                  docCode,
+                  ioType: 'T', // T = Transfer
+                  processedDate: new Date(),
+                  result: JSON.stringify(result),
+                  success: true,
+                });
               await this.warehouseProcessedRepository.save(warehouseProcessed);
             }
 
             processedCount++;
-            this.logger.log(`[Warehouse Auto] Đã xử lý warehouse transfer thành công cho docCode ${docCode}`);
+            this.logger.log(
+              `[Warehouse Auto] Đã xử lý warehouse transfer thành công cho docCode ${docCode}`,
+            );
             continue;
           }
 
@@ -4445,33 +5647,48 @@ export class SyncService {
 
           // Kiểm tra doctype phải là "STOCK_IO" mới gọi API warehouse (kiểm tra đầu tiên để tránh check các điều kiện khác)
           if (stockTransfer.doctype !== 'STOCK_IO') {
-            this.logger.debug(`[Warehouse Auto] DocCode ${docCode} có doctype = "${stockTransfer.doctype}", bỏ qua (chỉ xử lý doctype = "STOCK_IO" hoặc "STOCK_TRANSFER")`);
+            this.logger.debug(
+              `[Warehouse Auto] DocCode ${docCode} có doctype = "${stockTransfer.doctype}", bỏ qua (chỉ xử lý doctype = "STOCK_IO" hoặc "STOCK_TRANSFER")`,
+            );
             skippedCount++;
             continue;
           }
 
           // Kiểm tra điều kiện: soCode phải là "null" hoặc null
-          if (stockTransfer.soCode !== 'null' && stockTransfer.soCode !== null) {
-            this.logger.debug(`[Warehouse Auto] DocCode ${docCode} có soCode = "${stockTransfer.soCode}", bỏ qua (chỉ xử lý soCode = "null" hoặc null)`);
+          if (
+            stockTransfer.soCode !== 'null' &&
+            stockTransfer.soCode !== null
+          ) {
+            this.logger.debug(
+              `[Warehouse Auto] DocCode ${docCode} có soCode = "${stockTransfer.soCode}", bỏ qua (chỉ xử lý soCode = "null" hoặc null)`,
+            );
             skippedCount++;
             continue;
           }
 
           // Kiểm tra ioType phải là "I" hoặc "O"
           if (stockTransfer.ioType !== 'I' && stockTransfer.ioType !== 'O') {
-            this.logger.debug(`[Warehouse Auto] DocCode ${docCode} có ioType = "${stockTransfer.ioType}", bỏ qua (chỉ xử lý "I" hoặc "O")`);
+            this.logger.debug(
+              `[Warehouse Auto] DocCode ${docCode} có ioType = "${stockTransfer.ioType}", bỏ qua (chỉ xử lý "I" hoặc "O")`,
+            );
             skippedCount++;
             continue;
           }
 
           // Gọi API warehouse
-          this.logger.log(`[Warehouse Auto] Đang xử lý warehouse cho docCode ${docCode} (doctype: ${stockTransfer.doctype}, ioType: ${stockTransfer.ioType})`);
-          const result = await this.fastApiInvoiceFlowService.processWarehouseFromStockTransfer(stockTransfer);
+          this.logger.log(
+            `[Warehouse Auto] Đang xử lý warehouse cho docCode ${docCode} (doctype: ${stockTransfer.doctype}, ioType: ${stockTransfer.ioType})`,
+          );
+          const result =
+            await this.fastApiInvoiceFlowService.processWarehouseFromStockTransfer(
+              stockTransfer,
+            );
 
           // Lưu vào bảng tracking (upsert - update nếu đã tồn tại)
-          const existingRecord = await this.warehouseProcessedRepository.findOne({
-            where: { docCode },
-          });
+          const existingRecord =
+            await this.warehouseProcessedRepository.findOne({
+              where: { docCode },
+            });
           if (existingRecord) {
             // Dùng update để set errorMessage = null khi thành công
             await this.warehouseProcessedRepository.update(
@@ -4482,21 +5699,25 @@ export class SyncService {
                 result: JSON.stringify(result),
                 success: true,
                 errorMessage: null as any, // Set null để xóa errorMessage trong database
-              }
+              },
             );
           } else {
-            const warehouseProcessed = this.warehouseProcessedRepository.create({
-              docCode,
-              ioType: stockTransfer.ioType,
-              processedDate: new Date(),
-              result: JSON.stringify(result),
-              success: true,
-            });
+            const warehouseProcessed = this.warehouseProcessedRepository.create(
+              {
+                docCode,
+                ioType: stockTransfer.ioType,
+                processedDate: new Date(),
+                result: JSON.stringify(result),
+                success: true,
+              },
+            );
             await this.warehouseProcessedRepository.save(warehouseProcessed);
           }
 
           processedCount++;
-          this.logger.log(`[Warehouse Auto] Đã xử lý warehouse thành công cho docCode ${docCode}`);
+          this.logger.log(
+            `[Warehouse Auto] Đã xử lý warehouse thành công cho docCode ${docCode}`,
+          );
         } catch (error: any) {
           errorCount++;
           const errorMessage = error?.message || String(error);
@@ -4504,9 +5725,10 @@ export class SyncService {
           // Lưu vào bảng tracking với success = false (upsert - update nếu đã tồn tại)
           try {
             const firstStockTransfer = stockTransferList[0];
-            const existingRecord = await this.warehouseProcessedRepository.findOne({
-              where: { docCode },
-            });
+            const existingRecord =
+              await this.warehouseProcessedRepository.findOne({
+                where: { docCode },
+              });
             if (existingRecord) {
               existingRecord.ioType = firstStockTransfer.ioType || 'T'; // T = Transfer nếu không có ioType
               existingRecord.processedDate = new Date();
@@ -4514,31 +5736,37 @@ export class SyncService {
               existingRecord.success = false;
               await this.warehouseProcessedRepository.save(existingRecord);
             } else {
-              const warehouseProcessed = this.warehouseProcessedRepository.create({
-                docCode,
-                ioType: firstStockTransfer.ioType || 'T', // T = Transfer nếu không có ioType
-                processedDate: new Date(),
-                errorMessage,
-                success: false,
-              });
+              const warehouseProcessed =
+                this.warehouseProcessedRepository.create({
+                  docCode,
+                  ioType: firstStockTransfer.ioType || 'T', // T = Transfer nếu không có ioType
+                  processedDate: new Date(),
+                  errorMessage,
+                  success: false,
+                });
               await this.warehouseProcessedRepository.save(warehouseProcessed);
             }
           } catch (saveError: any) {
-            this.logger.error(`[Warehouse Auto] Lỗi khi lưu tracking cho docCode ${docCode}: ${saveError?.message || saveError}`);
+            this.logger.error(
+              `[Warehouse Auto] Lỗi khi lưu tracking cho docCode ${docCode}: ${saveError?.message || saveError}`,
+            );
           }
 
-          this.logger.warn(`[Warehouse Auto] Lỗi khi xử lý warehouse cho docCode ${docCode}: ${errorMessage}`);
+          this.logger.warn(
+            `[Warehouse Auto] Lỗi khi xử lý warehouse cho docCode ${docCode}: ${errorMessage}`,
+          );
         }
       }
 
       this.logger.log(
         `[Warehouse Auto] Hoàn thành xử lý warehouse cho brand ${brand} ngày ${date}: ` +
-        `${processedCount} thành công, ${skippedCount} bỏ qua, ${errorCount} lỗi`
+          `${processedCount} thành công, ${skippedCount} bỏ qua, ${errorCount} lỗi`,
       );
     } catch (error: any) {
-      this.logger.error(`[Warehouse Auto] Lỗi khi xử lý warehouse tự động cho brand ${brand} ngày ${date}: ${error?.message || error}`);
+      this.logger.error(
+        `[Warehouse Auto] Lỗi khi xử lý warehouse tự động cho brand ${brand} ngày ${date}: ${error?.message || error}`,
+      );
       throw error;
     }
   }
 }
-

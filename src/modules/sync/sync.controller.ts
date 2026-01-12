@@ -1,18 +1,32 @@
-import { Controller, Post, Param, Get, Body, Query, HttpException, HttpStatus, Res } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Param,
+  Get,
+  Body,
+  Query,
+  HttpException,
+  HttpStatus,
+  Res,
+} from '@nestjs/common';
 import { SyncService } from './sync.service';
 import type { Response } from 'express';
 
 @Controller('sync')
 export class SyncController {
-  constructor(private readonly syncService: SyncService) { }
+  constructor(private readonly syncService: SyncService) {}
 
   @Post('brand/:brandName')
-  async syncBrand(@Param('brandName') brandName: string, @Body('date') date: string) {
+  async syncBrand(
+    @Param('brandName') brandName: string,
+    @Body('date') date: string,
+  ) {
     if (!date) {
       throw new HttpException(
         {
           success: false,
-          message: 'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 04DEC2025)',
+          message:
+            'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 04DEC2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
@@ -58,25 +72,33 @@ export class SyncController {
    * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
    */
   @Post('stock-transfer/range')
-  async syncStockTransferRange(
-    @Body() body: any,
-  ) {
+  async syncStockTransferRange(@Body() body: any) {
     const dateFrom = body?.dateFrom || body?.DateFrom;
     const dateTo = body?.dateTo || body?.DateTo;
     const brand = body?.brand || body?.Brand;
 
-    if (!dateFrom || !dateTo || (typeof dateFrom === 'string' && dateFrom.trim() === '') || (typeof dateTo === 'string' && dateTo.trim() === '')) {
+    if (
+      !dateFrom ||
+      !dateTo ||
+      (typeof dateFrom === 'string' && dateFrom.trim() === '') ||
+      (typeof dateTo === 'string' && dateTo.trim() === '')
+    ) {
       throw new HttpException(
         {
           success: false,
-          message: 'Tham số dateFrom và dateTo là bắt buộc (format: DDMMMYYYY, ví dụ: 01NOV2025)',
+          message:
+            'Tham số dateFrom và dateTo là bắt buộc (format: DDMMMYYYY, ví dụ: 01NOV2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
     }
 
     try {
-      const result = await this.syncService.syncStockTransferRange(dateFrom, dateTo, brand);
+      const result = await this.syncService.syncStockTransferRange(
+        dateFrom,
+        dateTo,
+        brand,
+      );
       return {
         ...result,
         timestamp: new Date().toISOString(),
@@ -109,7 +131,8 @@ export class SyncController {
       throw new HttpException(
         {
           success: false,
-          message: 'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 01NOV2025)',
+          message:
+            'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 01NOV2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
@@ -134,7 +157,6 @@ export class SyncController {
     }
   }
 
-
   /**
    * Đồng bộ báo cáo nộp quỹ cuối ca theo khoảng thời gian
    * @param startDate - Date format: DDMMMYYYY (ví dụ: 01OCT2025)
@@ -151,14 +173,19 @@ export class SyncController {
       throw new HttpException(
         {
           success: false,
-          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+          message:
+            'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
     }
 
     try {
-      const result = await this.syncService.syncShiftEndCashByDateRange(startDate, endDate, brand);
+      const result = await this.syncService.syncShiftEndCashByDateRange(
+        startDate,
+        endDate,
+        brand,
+      );
       return {
         ...result,
         timestamp: new Date().toISOString(),
@@ -167,7 +194,8 @@ export class SyncController {
       throw new HttpException(
         {
           success: false,
-          message: 'Lỗi khi đồng bộ báo cáo nộp quỹ cuối ca theo khoảng thời gian',
+          message:
+            'Lỗi khi đồng bộ báo cáo nộp quỹ cuối ca theo khoảng thời gian',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -181,12 +209,16 @@ export class SyncController {
    * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
    */
   @Post('shift-end-cash')
-  async syncShiftEndCash(@Body('date') date: string, @Body('brand') brand?: string) {
+  async syncShiftEndCash(
+    @Body('date') date: string,
+    @Body('brand') brand?: string,
+  ) {
     if (!date) {
       throw new HttpException(
         {
           success: false,
-          message: 'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 01NOV2025)',
+          message:
+            'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 01NOV2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
@@ -226,14 +258,19 @@ export class SyncController {
       throw new HttpException(
         {
           success: false,
-          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+          message:
+            'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
     }
 
     try {
-      const result = await this.syncService.syncRepackFormulaByDateRange(startDate, endDate, brand);
+      const result = await this.syncService.syncRepackFormulaByDateRange(
+        startDate,
+        endDate,
+        brand,
+      );
       return {
         ...result,
         timestamp: new Date().toISOString(),
@@ -266,14 +303,19 @@ export class SyncController {
       throw new HttpException(
         {
           success: false,
-          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+          message:
+            'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
     }
 
     try {
-      const result = await this.syncService.syncPromotionByDateRange(startDate, endDate, brand);
+      const result = await this.syncService.syncPromotionByDateRange(
+        startDate,
+        endDate,
+        brand,
+      );
       return {
         ...result,
         timestamp: new Date().toISOString(),
@@ -306,14 +348,19 @@ export class SyncController {
       throw new HttpException(
         {
           success: false,
-          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+          message:
+            'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
     }
 
     try {
-      const result = await this.syncService.syncVoucherIssueByDateRange(startDate, endDate, brand);
+      const result = await this.syncService.syncVoucherIssueByDateRange(
+        startDate,
+        endDate,
+        brand,
+      );
       return {
         ...result,
         timestamp: new Date().toISOString(),
@@ -322,7 +369,8 @@ export class SyncController {
       throw new HttpException(
         {
           success: false,
-          message: 'Lỗi khi đồng bộ danh sách Voucher Issue theo khoảng thời gian',
+          message:
+            'Lỗi khi đồng bộ danh sách Voucher Issue theo khoảng thời gian',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -436,8 +484,14 @@ export class SyncController {
       const fileName = `CTKM_ChiTiet_${dateStr}${brandSuffix}.xlsx`;
 
       // Set headers
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${encodeURIComponent(fileName)}"`,
+      );
       res.setHeader('Content-Length', buffer.length);
 
       // Send buffer
@@ -613,7 +667,8 @@ export class SyncController {
       throw new HttpException(
         {
           success: false,
-          message: 'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 02NOV2025)',
+          message:
+            'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 02NOV2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
@@ -649,18 +704,28 @@ export class SyncController {
     @Body('endDate') endDate: string,
     @Body('brand') brand?: string,
   ) {
-    if (!startDate || !endDate || (typeof startDate === 'string' && startDate.trim() === '') || (typeof endDate === 'string' && endDate.trim() === '')) {
+    if (
+      !startDate ||
+      !endDate ||
+      (typeof startDate === 'string' && startDate.trim() === '') ||
+      (typeof endDate === 'string' && endDate.trim() === '')
+    ) {
       throw new HttpException(
         {
           success: false,
-          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01NOV2025)',
+          message:
+            'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01NOV2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
     }
 
     try {
-      const result = await this.syncService.syncCashioByDateRange(startDate, endDate, brand);
+      const result = await this.syncService.syncCashioByDateRange(
+        startDate,
+        endDate,
+        brand,
+      );
       return {
         ...result,
         timestamp: new Date().toISOString(),
@@ -754,18 +819,28 @@ export class SyncController {
     @Body('endDate') endDate: string,
     @Body('brand') brand?: string,
   ) {
-    if (!startDate || !endDate || (typeof startDate === 'string' && startDate.trim() === '') || (typeof endDate === 'string' && endDate.trim() === '')) {
+    if (
+      !startDate ||
+      !endDate ||
+      (typeof startDate === 'string' && startDate.trim() === '') ||
+      (typeof endDate === 'string' && endDate.trim() === '')
+    ) {
       throw new HttpException(
         {
           success: false,
-          message: 'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 04DEC2025)',
+          message:
+            'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 04DEC2025)',
         },
         HttpStatus.BAD_REQUEST,
       );
     }
 
     try {
-      const result = await this.syncService.getDailyWsaleByDateRange(startDate, endDate, brand);
+      const result = await this.syncService.getDailyWsaleByDateRange(
+        startDate,
+        endDate,
+        brand,
+      );
       return {
         ...result,
         timestamp: new Date().toISOString(),

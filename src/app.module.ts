@@ -4,12 +4,17 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { getDatabaseConfig } from './config/database.config';
+import {
+  getDatabaseConfig,
+  getSecondaryDatabaseConfig,
+  getThirdDatabaseConfig,
+} from './config/database.config';
 import { SyncModule } from './modules/sync/sync.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { FastApiInvoicesModule } from './modules/fast-api-invoices/fast-api-invoices.module';
+import { MultiDbModule } from './modules/multi-db/multi-db.module';
 import { SyncTask } from './tasks/sync.task';
 import { Sale } from './entities/sale.entity';
 
@@ -19,9 +24,24 @@ import { Sale } from './entities/sale.entity';
       isGlobal: true,
     }),
     ScheduleModule.forRoot(),
+    // Primary Database Connection (103.145.79.165)
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: getDatabaseConfig,
+      inject: [ConfigService],
+    }),
+    // Secondary Database Connection (103.145.79.165)
+    TypeOrmModule.forRootAsync({
+      name: 'secondary',
+      imports: [ConfigModule],
+      useFactory: getSecondaryDatabaseConfig,
+      inject: [ConfigService],
+    }),
+    // Third Database Connection (103.145.79.37)
+    TypeOrmModule.forRootAsync({
+      name: 'third',
+      imports: [ConfigModule],
+      useFactory: getThirdDatabaseConfig,
       inject: [ConfigService],
     }),
     SyncModule,
@@ -29,6 +49,7 @@ import { Sale } from './entities/sale.entity';
     SalesModule,
     CategoriesModule,
     FastApiInvoicesModule,
+    MultiDbModule,
     TypeOrmModule.forFeature([Sale]),
   ],
   controllers: [AppController],
