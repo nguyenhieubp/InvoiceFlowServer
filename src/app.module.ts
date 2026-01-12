@@ -15,6 +15,7 @@ import { SalesModule } from './modules/sales/sales.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { FastApiInvoicesModule } from './modules/fast-api-invoices/fast-api-invoices.module';
 import { MultiDbModule } from './modules/multi-db/multi-db.module';
+import { PlatformFeeModule } from './modules/platform-fee/platform-fee.module';
 import { SyncTask } from './tasks/sync.task';
 import { Sale } from './entities/sale.entity';
 
@@ -50,6 +51,7 @@ import { Sale } from './entities/sale.entity';
     CategoriesModule,
     FastApiInvoicesModule,
     MultiDbModule,
+    PlatformFeeModule,
     TypeOrmModule.forFeature([Sale]),
   ],
   controllers: [AppController],
