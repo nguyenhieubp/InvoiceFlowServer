@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { OrderFee } from '../../entities/order-fee.entity';
+import { PlatformFee } from '../../entities/platform-fee.entity';
 
 /**
  * Multi-Database Service
@@ -19,6 +20,9 @@ export class MultiDbService {
 
     @InjectRepository(OrderFee)
     private orderFeeRepository: Repository<OrderFee>,
+
+    @InjectRepository(PlatformFee)
+    private platformFeeRepository: Repository<PlatformFee>,
 
     // Secondary Database (103.145.79.165)
     @InjectDataSource('secondary')
@@ -166,7 +170,7 @@ export class MultiDbService {
             const fees = await this.getOrderFees(erpLog.erpOrderCode);
 
             for (const fee of fees) {
-              // Upsert order fee
+              // 1. Save Raw Order Fee
               await this.orderFeeRepository.upsert(
                 {
                   feeId: fee.rawData?.id,
@@ -179,6 +183,31 @@ export class MultiDbService {
                 },
                 ['feeId'],
               );
+
+              // 2. Calculate and Save Platform Fee (if applicable)
+              if (
+                fee.rawData?.fee_type === 'order_income' &&
+                fee.rawData?.raw_data
+              ) {
+                const raw = fee.rawData.raw_data;
+                const orderSellingPrice = Number(raw.order_selling_price || 0);
+                const voucherFromSeller = Number(raw.voucher_from_seller || 0);
+                const escrowAmount = Number(raw.escrow_amount || 0);
+
+                const platformFeeAmount =
+                  orderSellingPrice - voucherFromSeller - escrowAmount;
+
+                await this.platformFeeRepository.upsert(
+                  {
+                    erpOrderCode: fee.erpOrderCode,
+                    pancakeOrderId: fee.pancakeOrderId,
+                    amount: platformFeeAmount,
+                    formulaDescription: `(${orderSellingPrice} - ${voucherFromSeller}) - ${escrowAmount}`,
+                    syncedAt: new Date(),
+                  },
+                  ['erpOrderCode', 'pancakeOrderId'],
+                );
+              }
 
               synced++;
             }
@@ -217,7 +246,7 @@ export class MultiDbService {
       }
 
       for (const fee of fees) {
-        // Upsert order fee
+        // 1. Save Raw Order Fee
         await this.orderFeeRepository.upsert(
           {
             feeId: fee.rawData?.id,
@@ -230,6 +259,28 @@ export class MultiDbService {
           },
           ['feeId'],
         );
+
+        // 2. Calculate and Save Platform Fee (if applicable)
+        if (fee.rawData?.fee_type === 'order_income' && fee.rawData?.raw_data) {
+          const raw = fee.rawData.raw_data;
+          const orderSellingPrice = Number(raw.order_selling_price || 0);
+          const voucherFromSeller = Number(raw.voucher_from_seller || 0);
+          const escrowAmount = Number(raw.escrow_amount || 0);
+
+          const platformFeeAmount =
+            orderSellingPrice - voucherFromSeller - escrowAmount;
+
+          await this.platformFeeRepository.upsert(
+            {
+              erpOrderCode: fee.erpOrderCode,
+              pancakeOrderId: fee.pancakeOrderId,
+              amount: platformFeeAmount,
+              formulaDescription: `(${orderSellingPrice} - ${voucherFromSeller}) - ${escrowAmount}`,
+              syncedAt: new Date(),
+            },
+            ['erpOrderCode', 'pancakeOrderId'],
+          );
+        }
       }
 
       return {

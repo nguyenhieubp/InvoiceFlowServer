@@ -5,11 +5,12 @@ import { MultiDbService } from './multi-db.service';
 import { MultiDbController } from './multi-db.controller';
 import { MultiDbSyncService } from './multi-db-sync.service';
 import { OrderFee } from '../../entities/order-fee.entity';
+import { PlatformFee } from '../../entities/platform-fee.entity';
 
 @Module({
   imports: [
     // Primary database entities
-    TypeOrmModule.forFeature([OrderFee]),
+    TypeOrmModule.forFeature([OrderFee, PlatformFee]),
 
     // Secondary database entities
     TypeOrmModule.forFeature([], 'secondary'),
