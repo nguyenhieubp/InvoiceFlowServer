@@ -9,15 +9,18 @@ Tài liệu mô tả các trường hợp xử lý khi tạo hóa đơn sang Fas
 ## 1. SALE_ORDER (Đơn Hàng Bán)
 
 ### Điều kiện
+
 - `docSourceType != 'SALE_RETURN'`
 - `docCode` không có đuôi `_X`
 
 ### Các Dạng Đơn Hàng
 
 #### Dạng 1: Thường (01.Thường)
+
 **Điều kiện:** `ordertypeName` = "01.Thường" hoặc "01. Thường"
 
 **APIs được gọi:**
+
 1. `POST /Fast/Customer` - Tạo/cập nhật khách hàng
 2. `POST /Fast/salesOrder` - Tạo đơn hàng bán (`action = 0`)
 3. `POST /Fast/salesInvoice` - Tạo hóa đơn bán hàng (`action = 0`)
@@ -33,9 +36,11 @@ Tài liệu mô tả các trường hợp xử lý khi tạo hóa đơn sang Fas
 ---
 
 #### Dạng 2: Dịch Vụ (02. Làm dịch vụ)
+
 **Điều kiện:** `ordertypeName` = "02. Làm dịch vụ" hoặc "02.Làm dịch vụ"
 
 **APIs được gọi:**
+
 1. `POST /Fast/Customer` - Tạo/cập nhật khách hàng
 2. `POST /Fast/salesOrder` - Tạo đơn hàng bán (`action = 0`) - Gọi cho TẤT CẢ các dòng (I, S, V, ...)
 3. `POST /Fast/salesInvoice` - Tạo hóa đơn bán hàng (`action = 0`) - Chỉ tạo cho các dòng có `productType = 'S'` (dịch vụ)
@@ -53,9 +58,11 @@ Tài liệu mô tả các trường hợp xử lý khi tạo hóa đơn sang Fas
 ---
 
 #### Dạng 3: Đổi Điểm (03. Đổi điểm)
+
 **Điều kiện:** `ordertypeName` = "03. Đổi điểm" hoặc các biến thể
 
 **APIs được gọi:**
+
 1. `POST /Fast/Customer` - Tạo/cập nhật khách hàng
 2. `POST /Fast/salesOrder` - Tạo đơn hàng bán (`action = 0`)
 3. `POST /Fast/salesInvoice` - Tạo hóa đơn bán hàng (`action = 0`)
@@ -68,9 +75,11 @@ Tài liệu mô tả các trường hợp xử lý khi tạo hóa đơn sang Fas
 ---
 
 #### Dạng 4: Đổi DV (04. Đổi DV)
+
 **Điều kiện:** `ordertypeName` = "04. Đổi DV" hoặc các biến thể
 
 **APIs được gọi:**
+
 1. `POST /Fast/Customer` - Tạo/cập nhật khách hàng
 2. `POST /Fast/salesOrder` - Tạo đơn hàng bán (`action = 0`)
 3. `POST /Fast/salesInvoice` - Tạo hóa đơn bán hàng (`action = 0`)
@@ -86,9 +95,11 @@ Tài liệu mô tả các trường hợp xử lý khi tạo hóa đơn sang Fas
 ---
 
 #### Dạng 5: Tặng Sinh Nhật (05. Tặng sinh nhật)
+
 **Điều kiện:** `ordertypeName` = "05. Tặng sinh nhật" hoặc các biến thể
 
 **APIs được gọi:**
+
 1. `POST /Fast/Customer` - Tạo/cập nhật khách hàng
 2. `POST /Fast/salesOrder` - Tạo đơn hàng bán (`action = 0`)
 3. `POST /Fast/salesInvoice` - Tạo hóa đơn bán hàng (`action = 0`)
@@ -98,9 +109,11 @@ Tài liệu mô tả các trường hợp xử lý khi tạo hóa đơn sang Fas
 ---
 
 #### Dạng 6: Đầu Tư (06. Đầu tư)
+
 **Điều kiện:** `ordertypeName` = "06. Đầu tư" hoặc các biến thể
 
 **APIs được gọi:**
+
 1. `POST /Fast/Customer` - Tạo/cập nhật khách hàng
 2. `POST /Fast/salesOrder` - Tạo đơn hàng bán (`action = 0`)
 3. `POST /Fast/salesInvoice` - Tạo hóa đơn bán hàng (`action = 0`)
@@ -112,9 +125,11 @@ Tài liệu mô tả các trường hợp xử lý khi tạo hóa đơn sang Fas
 ---
 
 #### Dạng 7: Bán Tài Khoản (07. Bán tài khoản)
+
 **Điều kiện:** `ordertypeName` = "07. Bán tài khoản" hoặc các biến thể
 
 **APIs được gọi:**
+
 1. `POST /Fast/Customer` - Tạo/cập nhật khách hàng
 2. `POST /Fast/salesOrder` - Tạo đơn hàng bán (`action = 0`)
 3. `POST /Fast/salesInvoice` - Tạo hóa đơn bán hàng (`action = 0`)
@@ -130,9 +145,11 @@ Tài liệu mô tả các trường hợp xử lý khi tạo hóa đơn sang Fas
 ---
 
 #### Dạng 8: Tách Thẻ (08. Tách thẻ)
+
 **Điều kiện:** `ordertypeName` = "08. Tách thẻ" hoặc các biến thể
 
 **APIs được gọi:**
+
 1. `POST /Fast/Customer` - Tạo/cập nhật khách hàng
 2. `POST /Fast/salesOrder` - Tạo đơn hàng bán (`action = 0`)
 3. `POST /Fast/salesInvoice` - Tạo hóa đơn bán hàng (`action = 0`)
@@ -145,9 +162,11 @@ Tài liệu mô tả các trường hợp xử lý khi tạo hóa đơn sang Fas
 ---
 
 #### Dạng 9: Sàn TMDT (9. Sàn TMDT)
+
 **Điều kiện:** `ordertypeName` = "9. Sàn TMDT" hoặc các biến thể
 
 **APIs được gọi:**
+
 1. `POST /Fast/Customer` - Tạo/cập nhật khách hàng
 2. `POST /Fast/salesOrder` - Tạo đơn hàng bán (`action = 0`)
 3. `POST /Fast/salesInvoice` - Tạo hóa đơn bán hàng (`action = 0`)
@@ -158,9 +177,11 @@ Tài liệu mô tả các trường hợp xử lý khi tạo hóa đơn sang Fas
 ---
 
 #### Dạng 10: Đổi Vỏ
+
 **Điều kiện:** `ordertypeName` = "Đổi vỏ" hoặc các biến thể
 
 **APIs được gọi:**
+
 1. `POST /Fast/Customer` - Tạo/cập nhật khách hàng
 2. `POST /Fast/salesOrder` - Tạo đơn hàng bán (`action = 0`)
 3. `POST /Fast/salesInvoice` - Tạo hóa đơn bán hàng (`action = 0`)
@@ -173,12 +194,15 @@ Tài liệu mô tả các trường hợp xử lý khi tạo hóa đơn sang Fas
 ## 2. SALE_RETURN (Đơn Hàng Trả Lại)
 
 ### Điều kiện
+
 - `docSourceType = 'SALE_RETURN'`
 
 ### Trường Hợp 1: Có Stock Transfer
+
 **Điều kiện:** `docSourceType = 'SALE_RETURN'` + có stock transfer
 
 **APIs được gọi:**
+
 1. `POST /Fast/salesReturn` - Tạo phiếu nhập hàng bán trả lại
    - `so_ct0`: Số hóa đơn gốc
    - `ngay_ct0`: Ngày hóa đơn gốc
@@ -194,22 +218,26 @@ Tài liệu mô tả các trường hợp xử lý khi tạo hóa đơn sang Fas
 ---
 
 ### Trường Hợp 2: Không Có Stock Transfer
+
 **Điều kiện:** `docSourceType = 'SALE_RETURN'` + không có stock transfer
 
 **Xử lý:** **BỎ QUA, KHÔNG XỬ LÝ**
+
 - Lưu vào bảng kê hóa đơn với `status: 0` và message: "SALE_RETURN không có stock transfer - không cần xử lý"
 
 **Code xử lý:** `processSingleOrder()` → Kiểm tra `docSourceType = 'SALE_RETURN'` → Kiểm tra stock transfer → Nếu không có → Bỏ qua
 
 ---
 
-## 3. ĐƠN HỦY (Đơn Có Đuôi _X)
+## 3. ĐƠN HỦY (Đơn Có Đuôi \_X)
 
 ### Điều kiện
+
 - `docCode` có đuôi `_X` (ví dụ: `SO45.01574458_X`)
 - **Lưu ý:** Đơn hủy không có khái niệm xuất kho. Nếu hủy mà đã xuất kho thì sẽ là SALE_RETURN
 
 ### APIs được gọi:
+
 1. `POST /Fast/salesOrder` - Cập nhật đơn hàng với trạng thái [Đóng] (`action = 1`)
    - **KHÔNG** cần tạo/cập nhật Customer trước
 2. `POST /Fast/cashReceipt` - Nếu `fop_syscode = "CASH"` và `total_in > 0`
@@ -283,4 +311,3 @@ Double-click Order
 - **File xử lý chính:** `backend/src/modules/sales/sales.service.ts`
 - **Service gọi API:** `backend/src/services/fast-api-invoice-flow.service.ts`
 - **Method chính:** `createInvoiceViaFastApi(docCode: string, forceRetry?: boolean)`
-

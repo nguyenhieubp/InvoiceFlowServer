@@ -1861,6 +1861,8 @@ export class SyncService {
     branchCode?: string;
     drawCode?: string;
     apiId?: number;
+    onlyProcessed?: boolean;
+    paymentSuccess?: boolean;
   }): Promise<{
     success: boolean;
     data: any[];
@@ -1869,6 +1871,11 @@ export class SyncService {
       limit: number;
       total: number;
       totalPages: number;
+    };
+    stats?: {
+      success: number;
+      failure: number;
+      total: number;
     };
   }> {
     try {
@@ -1904,6 +1911,18 @@ export class SyncService {
       // Filter by apiId
       if (params.apiId !== undefined && params.apiId !== null) {
         queryBuilder.andWhere('sec.api_id = :apiId', { apiId: params.apiId });
+      }
+
+      // Filter only processed (payment_success IS NOT NULL)
+      if (params.onlyProcessed) {
+        queryBuilder.andWhere('sec.payment_success IS NOT NULL');
+      }
+
+      // Filter by payment success status
+      if (params.paymentSuccess !== undefined) {
+        queryBuilder.andWhere('sec.payment_success = :paymentSuccess', {
+          paymentSuccess: params.paymentSuccess,
+        });
       }
 
       // Filter by dateFrom và dateTo - filter theo openat và closedat
@@ -1962,6 +1981,9 @@ export class SyncService {
         }
       }
 
+      // Clone query builder for stats (without pagination)
+      const statsQueryBuilder = queryBuilder.clone();
+
       // Get total count
       const total = await queryBuilder.getCount();
 
@@ -1970,6 +1992,37 @@ export class SyncService {
 
       // Get data
       const data = await queryBuilder.getMany();
+
+      // Calculate stats
+      const successCount = await statsQueryBuilder
+        .clone()
+        .andWhere('sec.payment_success = :successStatus', {
+          successStatus: true,
+        })
+        .getCount();
+
+      const failureCount = await statsQueryBuilder
+        .clone()
+        .andWhere('sec.payment_success = :failureStatus', {
+          failureStatus: false,
+        })
+        .getCount();
+
+      return {
+        success: true,
+        data,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+        stats: {
+          success: successCount,
+          failure: failureCount,
+          total,
+        },
+      };
 
       const totalPages = Math.ceil(total / limit);
 
@@ -2128,27 +2181,42 @@ export class SyncService {
         await this.fastApiClientService.submitPayment(paymentPayload);
 
       // Validate response
+      let isSuccess = false;
+      let resultMessage = 'Tạo payment thất bại';
+
       if (Array.isArray(result) && result.length > 0) {
         const firstItem = result[0];
-        if (firstItem.status !== 1) {
-          const errorMessage = firstItem.message || 'Tạo payment thất bại';
-          this.logger.error(
-            `[ShiftEndCash Payment] Payment API trả về status = ${firstItem.status}: ${errorMessage}`,
-          );
-          throw new Error(errorMessage);
+        if (firstItem.status === 1) {
+          isSuccess = true;
+          resultMessage = 'Tạo phiếu chi tiền mặt thành công';
+        } else {
+          resultMessage = firstItem.message || 'Tạo payment thất bại';
         }
       } else if (
         result &&
         typeof result === 'object' &&
         result.status !== undefined
       ) {
-        if (result.status !== 1) {
-          const errorMessage = result.message || 'Tạo payment thất bại';
-          this.logger.error(
-            `[ShiftEndCash Payment] Payment API trả về status = ${result.status}: ${errorMessage}`,
-          );
-          throw new Error(errorMessage);
+        if (result.status === 1) {
+          isSuccess = true;
+          resultMessage = 'Tạo phiếu chi tiền mặt thành công';
+        } else {
+          resultMessage = result.message || 'Tạo payment thất bại';
         }
+      }
+
+      // Update shift end cash status
+      shiftEndCash.payment_success = isSuccess;
+      shiftEndCash.payment_message = resultMessage;
+      shiftEndCash.payment_date = new Date();
+      shiftEndCash.payment_response = JSON.stringify(result);
+      await this.shiftEndCashRepository.save(shiftEndCash);
+
+      if (!isSuccess) {
+        this.logger.error(
+          `[ShiftEndCash Payment] Payment API trả về lỗi: ${resultMessage}`,
+        );
+        throw new Error(resultMessage);
       }
 
       this.logger.log(
@@ -2157,17 +2225,34 @@ export class SyncService {
 
       return {
         success: true,
-        message: 'Tạo phiếu chi tiền mặt thành công',
+        message: resultMessage,
         data: result,
       };
     } catch (error: any) {
+      const errorMessage = error?.message || String(error);
       this.logger.error(
-        `[ShiftEndCash Payment] Lỗi khi tạo payment: ${error?.message || error}`,
+        `[ShiftEndCash Payment] Lỗi khi tạo payment: ${errorMessage}`,
       );
+
+      // Update fail status if possible (and not already saved)
+      try {
+        const shiftEndCash = await this.shiftEndCashRepository.findOne({
+          where: { id: shiftEndCashId },
+        });
+        if (shiftEndCash) {
+          shiftEndCash.payment_success = false;
+          shiftEndCash.payment_message = errorMessage;
+          shiftEndCash.payment_date = new Date();
+          await this.shiftEndCashRepository.save(shiftEndCash);
+        }
+      } catch (saveError) {
+        this.logger.error(`Failed to save payment error status: ${saveError}`);
+      }
+
       return {
         success: false,
         message: 'Lỗi khi tạo phiếu chi tiền mặt',
-        error: error?.message || String(error),
+        error: errorMessage,
       };
     }
   }

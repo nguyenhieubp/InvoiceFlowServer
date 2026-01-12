@@ -64,7 +64,10 @@ export class ShiftEndCash {
   enteredby: string; // NGOC.NGUYENANH@MENARD.COM.VN
 
   // Relationship với lines
-  @OneToMany(() => ShiftEndCashLine, (line) => line.shiftEndCash, { cascade: true, eager: false })
+  @OneToMany(() => ShiftEndCashLine, (line) => line.shiftEndCash, {
+    cascade: true,
+    eager: false,
+  })
   lines: ShiftEndCashLine[];
 
   // Metadata
@@ -75,10 +78,22 @@ export class ShiftEndCash {
   @Index()
   brand: string; // Brand name (menard, f3, labhair, yaman)
 
+  // Payment status fields
+  @Column({ nullable: true })
+  payment_success: boolean;
+
+  @Column({ type: 'text', nullable: true })
+  payment_message: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  payment_date: Date;
+
+  @Column({ type: 'text', nullable: true })
+  payment_response: string;
+
   @CreateDateColumn()
   createdAt: Date;
 
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

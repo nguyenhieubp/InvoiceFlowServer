@@ -557,6 +557,8 @@ export class SyncController {
     @Query('branchCode') branchCode?: string,
     @Query('drawCode') drawCode?: string,
     @Query('apiId') apiId?: string,
+    @Query('onlyProcessed') onlyProcessed?: string,
+    @Query('paymentSuccess') paymentSuccess?: string,
   ) {
     try {
       const result = await this.syncService.getShiftEndCash({
@@ -568,6 +570,9 @@ export class SyncController {
         branchCode,
         drawCode,
         apiId: apiId ? parseInt(apiId, 10) : undefined,
+        onlyProcessed: onlyProcessed === 'true',
+        paymentSuccess:
+          paymentSuccess !== undefined ? paymentSuccess === 'true' : undefined,
       });
       return result;
     } catch (error: any) {
