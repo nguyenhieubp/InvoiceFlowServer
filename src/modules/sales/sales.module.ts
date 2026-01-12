@@ -3,6 +3,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { HttpModule } from '@nestjs/axios';
 import { SalesController } from './sales.controller';
 import { SalesService } from './sales.service';
+import { SalesQueryService } from './sales-query.service';
+import { SalesExportService } from './sales-export.service';
+import { SalesSyncService } from './sales-sync.service';
+import { SalesInvoiceService } from './sales-invoice.service';
+import { SalesWarehouseService } from './sales-warehouse.service';
 import { Sale } from '../../entities/sale.entity';
 import { Customer } from '../../entities/customer.entity';
 import { ProductItem } from '../../entities/product-item.entity';
@@ -24,15 +29,40 @@ import { SyncModule } from '../sync/sync.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Sale, Customer, ProductItem, Invoice, InvoiceItem, FastApiInvoice, DailyCashio, StockTransfer, WarehouseProcessed]),
+    TypeOrmModule.forFeature([
+      Sale,
+      Customer,
+      ProductItem,
+      Invoice,
+      InvoiceItem,
+      FastApiInvoice,
+      DailyCashio,
+      StockTransfer,
+      WarehouseProcessed,
+    ]),
     HttpModule,
     forwardRef(() => InvoicesModule),
     CategoriesModule,
     forwardRef(() => SyncModule),
   ],
   controllers: [SalesController],
-  providers: [SalesService, ZappyApiService, FastApiClientService, FastApiInvoiceFlowService, LoyaltyService, InvoiceValidationService, N8nService],
+  providers: [
+    // Main service (orchestrator)
+    SalesService,
+    // New specialized services
+    SalesQueryService,
+    SalesExportService,
+    SalesSyncService,
+    SalesInvoiceService,
+    SalesWarehouseService,
+    // Existing services
+    ZappyApiService,
+    FastApiClientService,
+    FastApiInvoiceFlowService,
+    LoyaltyService,
+    InvoiceValidationService,
+    N8nService,
+  ],
   exports: [SalesService, FastApiInvoiceFlowService],
 })
 export class SalesModule {}
-

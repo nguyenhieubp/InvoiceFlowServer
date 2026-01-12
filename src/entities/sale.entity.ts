@@ -15,6 +15,9 @@ import { Customer } from './customer.entity';
 @Index(['docDate', 'docCode']) // Composite index cho order by
 @Index(['customerId']) // Index cho join với customer
 @Index(['isProcessed']) // Index cho filter isProcessed
+@Index(['branchCode', 'docDate']) // OPTIMIZATION: Index cho filter by branch + date
+@Index(['itemCode']) // OPTIMIZATION: Index cho join với products
+@Index(['docCode', 'customerId']) // OPTIMIZATION: Index cho group by customer
 export class Sale {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -64,7 +67,9 @@ export class Sale {
   @Column({ nullable: true })
   promCode: string;
 
-  @ManyToOne(() => Customer, (customer) => customer.sales, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Customer, (customer) => customer.sales, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'customerId' })
   customer: Customer;
 
@@ -419,31 +424,31 @@ export class Sale {
   @Column({ nullable: true })
   compositeKey?: string; // Composite key tổng hợp: docCode + itemCode + qty + giaBan + disc_amt + grade_discamt + other_discamt + revenue + promCode + serial + customerId + api_id
 
-  @Column({ nullable: true})
+  @Column({ nullable: true })
   brand?: string;
 
   @Column({ nullable: true, name: 'type_sale' })
   type_sale?: string; // Type sale (WS, WS_WH, WS_RETAIL, WS_RETAIL_WH)
 
-  @Column({ nullable: true })  // POS
+  @Column({ nullable: true }) // POS
   session?: string; // Session
 
-  @Column({ nullable: true })  // POS
+  @Column({ nullable: true }) // POS
   promotion_code?: boolean;
 
-  @Column({ nullable: true })  // POS
+  @Column({ nullable: true }) // POS
   x_is_price_promotion?: string;
 
-  @Column({ nullable: true })  // POS
+  @Column({ nullable: true }) // POS
   amount_promotion_loyalty?: string;
 
-  @Column({ nullable: true })  // POS
+  @Column({ nullable: true }) // POS
   amount_promotion_total?: string;
 
-  @Column({ nullable: true })  // POS
+  @Column({ nullable: true }) // POS
   x_product_promotion?: string;
 
-  @Column({ nullable: true })  // POS
+  @Column({ nullable: true }) // POS
   tax?: string;
 
   @CreateDateColumn()
@@ -452,4 +457,3 @@ export class Sale {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-
