@@ -13,6 +13,9 @@ export class PlatformFee {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ name: 'brand', length: 50, nullable: true })
+  brand: string;
+
   @Column({ name: 'erp_order_code', length: 100 })
   @Index()
   erpOrderCode: string;

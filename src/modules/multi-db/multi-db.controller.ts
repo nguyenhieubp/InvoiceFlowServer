@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post } from '@nestjs/common';
+import { Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { MultiDbService } from './multi-db.service';
 import { MultiDbSyncService } from './multi-db-sync.service';
 
@@ -44,9 +44,13 @@ export class MultiDbController {
   /**
    * POST /multi-db/sync-order-fees/:erpCode
    * Manually sync a specific order (for testing)
+   * Query: ?brand=menard or ?brand=yaman (optional)
    */
   @Post('sync-order-fees/:erpCode')
-  async syncOrderFeeByCode(@Param('erpCode') erpCode: string) {
-    return this.multiDbService.syncOrderFeeByCode(erpCode);
+  async syncOrderFeeByCode(
+    @Param('erpCode') erpCode: string,
+    @Query('brand') brand?: string,
+  ) {
+    return this.multiDbService.syncOrderFeeByCode(erpCode, brand);
   }
 }

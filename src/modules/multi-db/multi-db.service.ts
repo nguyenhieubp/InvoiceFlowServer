@@ -96,11 +96,49 @@ export class MultiDbService {
     return results;
   }
 
+  /**
+   * Brand Configuration
+   * Maps brand names to their specific table structures
+   */
+  private readonly brands = [
+    {
+      name: 'menard',
+      tableLogs: '"menard_erp_order_logs"',
+      tableDetail: 'public.menard_ecommer_detail_order',
+      tableFee: 'public.menard_ecommer_detail_order_fee',
+      detailIdColumn: 'menard_ecommer_detail_order_id',
+    },
+    {
+      name: 'yaman',
+      tableLogs: '"erp_order_logs"',
+      tableDetail: 'public.yaman_ecommer_detail_order',
+      tableFee: 'public.yaman_ecommer_detail_order_fee',
+      detailIdColumn: 'yaman_ecommer_detail_order_id',
+    },
+  ];
+
+  /**
+   * Get order fees for a specific ERP code
+   * Tries to find order in all configured brands
+   */
   async getOrderFees(erpCode: string) {
+    for (const brand of this.brands) {
+      const results = await this.getOrderFeesByBrandConfig(erpCode, brand);
+      if (results.length > 0) {
+        return results;
+      }
+    }
+    return [];
+  }
+
+  /**
+   * Generic method to get fees by brand configuration
+   */
+  private async getOrderFeesByBrandConfig(erpCode: string, brandConfig: any) {
     const erpLogs = await this.secondaryDataSource.query(
       `
     SELECT *
-    FROM "menard_erp_order_logs"
+    FROM ${brandConfig.tableLogs}
     WHERE "erpOrderCode" = $1
     `,
       [erpCode],
@@ -115,9 +153,9 @@ export class MultiDbService {
     SELECT 
       o."order_sn",
       f.*
-    FROM public.menard_ecommer_detail_order o
-    JOIN public.menard_ecommer_detail_order_fee f
-      ON f.menard_ecommer_detail_order_id = o.id
+    FROM ${brandConfig.tableDetail} o
+    JOIN ${brandConfig.tableFee} f
+      ON f.${brandConfig.detailIdColumn} = o.id
     WHERE o."order_sn" = ANY($1)
     `,
       [pancakeOrderIds],
@@ -135,6 +173,7 @@ export class MultiDbService {
           erpOrderCode: erp.erpOrderCode,
           pancakeOrderId: erp.pancakeOrderId,
           rawData: fee,
+          brand: brandConfig.name,
         });
       }
     }
@@ -149,16 +188,44 @@ export class MultiDbService {
   async syncAllOrderFees() {
     this.logger.log('Starting order fee sync...');
 
+    let totalSynced = 0;
+    let totalFailed = 0;
+    let totalRecords = 0;
+
+    try {
+      for (const brand of this.brands) {
+        this.logger.log(`Syncing brand: ${brand.name.toUpperCase()}...`);
+        const result = await this.syncBrandOrders(brand);
+        totalSynced += result.synced;
+        totalFailed += result.failed;
+        totalRecords += result.total;
+      }
+
+      this.logger.log(
+        `✅ All brands sync completed: ${totalSynced} synced, ${totalFailed} failed`,
+      );
+
+      return { synced: totalSynced, failed: totalFailed, total: totalRecords };
+    } catch (error) {
+      this.logger.error('❌ Sync failed', error);
+      throw error;
+    }
+  }
+
+  private async syncBrandOrders(brandConfig: any) {
+    this.logger.log(`Starting sync for brand ${brandConfig.name}...`);
     let synced = 0;
     let failed = 0;
 
     try {
       // Get all ERP order codes from secondary database
       const erpLogs = await this.secondaryDataSource.query(
-        'SELECT "erpOrderCode", "pancakeOrderId" FROM "menard_erp_order_logs"',
+        `SELECT "erpOrderCode", "pancakeOrderId" FROM ${brandConfig.tableLogs}`,
       );
 
-      this.logger.log(`Found ${erpLogs.length} ERP orders to sync`);
+      this.logger.log(
+        `Found ${erpLogs.length} ERP orders to sync for ${brandConfig.name}`,
+      );
 
       // Process in batches to avoid memory issues
       const batchSize = 100;
@@ -167,13 +234,18 @@ export class MultiDbService {
 
         for (const erpLog of batch) {
           try {
-            const fees = await this.getOrderFees(erpLog.erpOrderCode);
+            // Use specific brand config method
+            const fees = await this.getOrderFeesByBrandConfig(
+              erpLog.erpOrderCode,
+              brandConfig,
+            );
 
             for (const fee of fees) {
               // 1. Save Raw Order Fee
               await this.orderFeeRepository.upsert(
                 {
                   feeId: fee.rawData?.id,
+                  brand: fee.brand,
                   erpOrderCode: fee.erpOrderCode,
                   pancakeOrderId: fee.pancakeOrderId,
                   feeType: fee.rawData?.fee_type || null,
@@ -199,6 +271,7 @@ export class MultiDbService {
 
                 await this.platformFeeRepository.upsert(
                   {
+                    brand: fee.brand,
                     erpOrderCode: fee.erpOrderCode,
                     pancakeOrderId: fee.pancakeOrderId,
                     amount: platformFeeAmount,
@@ -213,7 +286,7 @@ export class MultiDbService {
             }
           } catch (error) {
             this.logger.error(
-              `Failed to sync order ${erpLog.erpOrderCode}`,
+              `Failed to sync order ${erpLog.erpOrderCode} for brand ${brandConfig.name}`,
               error,
             );
             failed++;
@@ -221,15 +294,13 @@ export class MultiDbService {
         }
 
         this.logger.log(
-          `Processed batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(erpLogs.length / batchSize)}`,
+          `Processed batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(erpLogs.length / batchSize)} for ${brandConfig.name}`,
         );
       }
 
-      this.logger.log(`✅ Sync completed: ${synced} synced, ${failed} failed`);
-
       return { synced, failed, total: erpLogs.length };
     } catch (error) {
-      this.logger.error('❌ Sync failed', error);
+      this.logger.error(`❌ Sync failed for brand ${brandConfig.name}`, error);
       throw error;
     }
   }
@@ -237,9 +308,21 @@ export class MultiDbService {
   /**
    * Sync a single order fee by ERP code
    */
-  async syncOrderFeeByCode(erpCode: string) {
+  async syncOrderFeeByCode(erpCode: string, brandName?: string) {
     try {
-      const fees = await this.getOrderFees(erpCode);
+      let fees: any[] = [];
+
+      if (brandName) {
+        const brandConfig = this.brands.find(
+          (b) => b.name.toLowerCase() === brandName.toLowerCase(),
+        );
+        if (!brandConfig) {
+          throw new Error(`Brand ${brandName} not found configuration`);
+        }
+        fees = await this.getOrderFeesByBrandConfig(erpCode, brandConfig);
+      } else {
+        fees = await this.getOrderFees(erpCode);
+      }
 
       if (fees.length === 0) {
         return { success: false, message: 'No fees found for this order' };
@@ -250,6 +333,7 @@ export class MultiDbService {
         await this.orderFeeRepository.upsert(
           {
             feeId: fee.rawData?.id,
+            brand: fee.brand,
             erpOrderCode: fee.erpOrderCode,
             pancakeOrderId: fee.pancakeOrderId,
             feeType: fee.rawData?.fee_type || null,
@@ -272,6 +356,7 @@ export class MultiDbService {
 
           await this.platformFeeRepository.upsert(
             {
+              brand: fee.brand,
               erpOrderCode: fee.erpOrderCode,
               pancakeOrderId: fee.pancakeOrderId,
               amount: platformFeeAmount,
