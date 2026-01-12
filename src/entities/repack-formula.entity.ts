@@ -54,7 +54,10 @@ export class RepackFormula {
   locked: string; // "N" hoặc "Y"
 
   // Relationship với items
-  @OneToMany(() => RepackFormulaItem, (item) => item.repackFormula, { cascade: true, eager: false })
+  @OneToMany(() => RepackFormulaItem, (item) => item.repackFormula, {
+    cascade: true,
+    eager: false,
+  })
   items: RepackFormulaItem[];
 
   // Metadata
@@ -74,4 +77,3 @@ export class RepackFormula {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-
