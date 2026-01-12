@@ -503,7 +503,11 @@ export class SalesService {
       // Lấy result từ error response nếu có (để lưu vào database cho người dùng xem)
       let errorResult: any = null;
       if (error?.response?.data) {
+        // Axios error
         errorResult = error.response.data;
+      } else if (error?.response) {
+        // NestJS exception or other error with response body
+        errorResult = error.response;
       } else if (error?.data) {
         errorResult = error.data;
       }

@@ -1021,7 +1021,12 @@ export class FastApiInvoiceFlowService {
       }
     }
 
-    const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht || '';
+    const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht;
+    if (!maDvcs) {
+      throw new BadRequestException(
+        `Không tìm thấy mã ĐVCS (ma_dvcs) cho chi nhánh ${stockTransfer.branchCode}. Vui lòng kiểm tra lại cấu hình Department/Loyalty API.`,
+      );
+    }
 
     // Gọi Customer API trước (Fast/Customer)
     if (stockTransfer.branchCode) {
@@ -1152,7 +1157,6 @@ export class FastApiInvoiceFlowService {
     }
 
     // Validate response: status = 1 mới là success
-    // KHÔNG throw exception ở đây, trả về result để service layer xử lý và lưu vào database
     if (Array.isArray(result) && result.length > 0) {
       const firstItem = result[0];
       if (firstItem.status !== 1) {
@@ -1161,7 +1165,7 @@ export class FastApiInvoiceFlowService {
         this.logger.error(
           `[Warehouse] Warehouse API trả về status = ${firstItem.status}: ${errorMessage}`,
         );
-        // KHÔNG throw - trả về result để lưu vào database
+        throw new BadRequestException(errorMessage);
       }
     } else if (
       result &&
@@ -1173,7 +1177,7 @@ export class FastApiInvoiceFlowService {
         this.logger.error(
           `[Warehouse] Warehouse API trả về status = ${result.status}: ${errorMessage}`,
         );
-        // KHÔNG throw - trả về result để lưu vào database
+        throw new BadRequestException(errorMessage);
       }
     }
 
@@ -1227,7 +1231,12 @@ export class FastApiInvoiceFlowService {
       }
     }
 
-    const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht || '';
+    const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht;
+    if (!maDvcs) {
+      throw new BadRequestException(
+        `Không tìm thấy mã ĐVCS (ma_dvcs) cho chi nhánh ${firstStockTransfer.branchCode}. Vui lòng kiểm tra lại cấu hình Department/Loyalty API.`,
+      );
+    }
     const maBp = department?.ma_bp || '';
 
     // Gọi Customer API trước (Fast/Customer)
@@ -1347,7 +1356,6 @@ export class FastApiInvoiceFlowService {
     const result = await this.fastApiService.submitWarehouseTransfer(payload);
 
     // Validate response: status = 1 mới là success
-    // KHÔNG throw exception ở đây, trả về result để service layer xử lý và lưu vào database
     if (Array.isArray(result) && result.length > 0) {
       const firstItem = result[0];
       if (firstItem.status !== 1) {
@@ -1356,7 +1364,7 @@ export class FastApiInvoiceFlowService {
         this.logger.error(
           `[Warehouse Transfer] Warehouse Transfer API trả về status = ${firstItem.status}: ${errorMessage}`,
         );
-        // KHÔNG throw - trả về result để lưu vào database
+        throw new BadRequestException(errorMessage);
       }
     } else if (
       result &&
@@ -1369,7 +1377,7 @@ export class FastApiInvoiceFlowService {
         this.logger.error(
           `[Warehouse Transfer] Warehouse Transfer API trả về status = ${result.status}: ${errorMessage}`,
         );
-        // KHÔNG throw - trả về result để lưu vào database
+        throw new BadRequestException(errorMessage);
       }
     }
 
