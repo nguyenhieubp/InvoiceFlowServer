@@ -458,7 +458,7 @@ export class SalesSyncService {
     try {
       // 1. Fetch data from Zappy
       const orders = await this.zappyApiService.getDailySales(date, brand);
-      
+
       let cashData: any[] = [];
       try {
         cashData = await this.zappyApiService.getDailyCash(date, brand);
@@ -529,9 +529,8 @@ export class SalesSyncService {
           }
 
           // Check Loyalty Products
-          const notFoundItemCodes = await this.getNotFoundItemCodesForOrder(
-            order,
-          );
+          const notFoundItemCodes =
+            await this.getNotFoundItemCodesForOrder(order);
 
           // Process Sales
           const orderSalesCount = await this.processOrderSales(
@@ -710,7 +709,11 @@ export class SalesSyncService {
             );
           }
 
-          const productType = await this.resolveProductType(saleItem, itemCode, notFoundItemCodes);
+          const productType = await this.resolveProductType(
+            saleItem,
+            itemCode,
+            notFoundItemCodes,
+          );
 
           // Enrich voucher data
           let voucherRefno: string | undefined;
@@ -738,10 +741,7 @@ export class SalesSyncService {
             revenue: saleItem.revenue || 0,
             linetotal: saleItem.linetotal || saleItem.revenue || 0,
             tienHang:
-              saleItem.tienHang ||
-              saleItem.linetotal ||
-              saleItem.revenue ||
-              0,
+              saleItem.tienHang || saleItem.linetotal || saleItem.revenue || 0,
             giaBan: saleItem.giaBan || 0,
             promCode: saleItem.promCode,
             serial: saleItem.serial,
@@ -753,9 +753,7 @@ export class SalesSyncService {
             paid_by_voucher_ecode_ecoin_bp:
               saleItem.paid_by_voucher_ecode_ecoin_bp,
             maCa: saleItem.shift_code,
-            saleperson_id: SalesUtils.validateInteger(
-              saleItem.saleperson_id,
-            ),
+            saleperson_id: SalesUtils.validateInteger(saleItem.saleperson_id),
             partner_name: saleItem.partner_name,
             order_source: saleItem.order_source,
             maThe: saleItem.mvc_serial,
@@ -768,9 +766,7 @@ export class SalesSyncService {
             productType: productType,
             voucherDp1: voucherRefno,
             thanhToanVoucher:
-              voucherAmount && voucherAmount > 0
-                ? voucherAmount
-                : undefined,
+              voucherAmount && voucherAmount > 0 ? voucherAmount : undefined,
             customer: customer,
             brand: brand,
             isProcessed: false,
@@ -788,31 +784,40 @@ export class SalesSyncService {
     return salesCount;
   }
 
-  private async resolveProductType(saleItem: any, itemCode: string, notFoundItemCodes: Set<string>): Promise<string | null> {
-      const productTypeFromZappy = saleItem.producttype || saleItem.productType || null;
-      let productTypeFromLoyalty: string | null = null;
-      if (!productTypeFromZappy && itemCode && !notFoundItemCodes.has(itemCode)) {
-        try {
-          const loyaltyProduct = await this.loyaltyService.checkProduct(itemCode);
-          if (loyaltyProduct) {
-            productTypeFromLoyalty = loyaltyProduct.productType || loyaltyProduct.producttype || null;
-          }
-        } catch (error) {
-           // Ignore
+  private async resolveProductType(
+    saleItem: any,
+    itemCode: string,
+    notFoundItemCodes: Set<string>,
+  ): Promise<string | null> {
+    const productTypeFromZappy =
+      saleItem.producttype || saleItem.productType || null;
+    let productTypeFromLoyalty: string | null = null;
+    if (!productTypeFromZappy && itemCode && !notFoundItemCodes.has(itemCode)) {
+      try {
+        const loyaltyProduct = await this.loyaltyService.checkProduct(itemCode);
+        if (loyaltyProduct) {
+          productTypeFromLoyalty =
+            loyaltyProduct.productType || loyaltyProduct.producttype || null;
         }
+      } catch (error) {
+        // Ignore
       }
-      return productTypeFromZappy || productTypeFromLoyalty || null;
+    }
+    return productTypeFromZappy || productTypeFromLoyalty || null;
   }
 
   private resolveOrderTypeName(saleItem: any): string | undefined {
-      if (saleItem.ordertype_name !== undefined && saleItem.ordertype_name !== null) {
-          if (typeof saleItem.ordertype_name === 'string') {
-            const trimmed = saleItem.ordertype_name.trim();
-            return trimmed !== '' ? trimmed : undefined;
-          } else {
-            return String(saleItem.ordertype_name).trim() || undefined;
-          }
-        }
-      return undefined;
+    if (
+      saleItem.ordertype_name !== undefined &&
+      saleItem.ordertype_name !== null
+    ) {
+      if (typeof saleItem.ordertype_name === 'string') {
+        const trimmed = saleItem.ordertype_name.trim();
+        return trimmed !== '' ? trimmed : undefined;
+      } else {
+        return String(saleItem.ordertype_name).trim() || undefined;
+      }
+    }
+    return undefined;
   }
 }

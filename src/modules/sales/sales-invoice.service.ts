@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, Between } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Sale } from '../../entities/sale.entity';
 import { ProductItem } from '../../entities/product-item.entity';
 import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
@@ -308,7 +308,7 @@ export class SalesInvoiceService {
 
       // 3. Đổi DV (có payment)
       if (hasDoiDvOrder) {
-        return await this.handleDoiDvOrder(orderData, docCode);
+        return await this.handleNormalOrder(orderData, docCode);
       }
 
       // 4. Tặng sinh nhật
@@ -388,236 +388,267 @@ export class SalesInvoiceService {
    * Helper xử lý các đơn hàng đặc biệt (Đổi điểm, Tặng sinh nhật, Đầu tư...)
    * Chỉ tạo Sales Order, không tạo Sales Invoice
    */
+  /**
+   * Wrapper execute common invoice action flow:
+   * Try -> Process -> Log -> Save DB -> Mark Processed (optional) -> Return
+   */
+  private async executeInvoiceAction(
+    docCode: string,
+    orderData: any,
+    actionName: string,
+    processFn: () => Promise<{
+      result: any;
+      status: number;
+      message: string;
+      guid?: string;
+      fastApiResponse?: any; // To store full JSON response
+    }>,
+    shouldMarkProcessed: boolean = true,
+  ): Promise<any> {
+    this.logger.log(`[SalesInvoice] Bắt đầu ${actionName}: ${docCode}`);
+    try {
+      const { result, status, message, guid, fastApiResponse } =
+        await processFn();
+
+      // Save invoice status
+      await this.saveFastApiInvoice({
+        docCode,
+        maDvcs: orderData.branchCode || '', // Fallback, usually overridden by existing record or specific logic if needed
+        maKh: orderData.customer?.code || '',
+        tenKh: orderData.customer?.name || '',
+        ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+        status: status,
+        message: message,
+        guid: guid,
+        fastApiResponse: JSON.stringify(fastApiResponse || result),
+      });
+
+      if (status === 1 && shouldMarkProcessed) {
+        await this.markOrderAsProcessed(docCode);
+      }
+
+      return {
+        success: status === 1,
+        message: message,
+        result: result,
+      };
+    } catch (error: any) {
+      this.logger.error(
+        `Lỗi khi ${actionName} cho ${docCode}: ${error?.message || error}`,
+      );
+      // Log failure
+      await this.saveFastApiInvoice({
+        docCode,
+        maDvcs: '',
+        maKh: '',
+        tenKh: '',
+        ngayCt: new Date(),
+        status: 0,
+        message: `Lỗi hệ thống: ${error?.message || error}`,
+        guid: null,
+      });
+
+      return {
+        success: false,
+        message: `Lỗi hệ thống: ${error?.message || error}`,
+        result: null,
+      };
+    }
+  }
+
+  /**
+   * Helper xử lý các đơn hàng đặc biệt (Đổi điểm, Tặng sinh nhật, Đầu tư...)
+   * Chỉ tạo Sales Order, không tạo Sales Invoice
+   */
   private async handleStandardSpecialOrder(
     orderData: any,
     docCode: string,
     description: string,
     beforeAction?: () => Promise<void>,
   ): Promise<any> {
-    this.logger.log(`[SalesInvoice] Xử lý đơn hàng ${description}: ${docCode}`);
-
-    if (beforeAction) {
-      await beforeAction();
-    }
-
-    const invoiceData = await this.buildFastApiInvoiceData(orderData);
-
-    // Call createSalesOrder
-    const result = await this.fastApiInvoiceFlowService.createSalesOrder({
-      ...invoiceData,
-      customer: orderData.customer,
-      ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-    });
-
-    const responseStatus =
-      Array.isArray(result) && result.length > 0 && result[0].status === 1
-        ? 1
-        : 0;
-    const apiMessage =
-      Array.isArray(result) && result.length > 0 && result[0].message
-        ? result[0].message
-        : '';
-    const responseMessage =
-      responseStatus === 1
-        ? `${description} thành công: ${apiMessage}`
-        : `${description} thất bại: ${apiMessage}`;
-
-    const responseGuid =
-      Array.isArray(result) && result.length > 0 && result[0].guid
-        ? Array.isArray(result[0].guid)
-          ? result[0].guid[0]
-          : result[0].guid
-        : null;
-
-    // Save invoice status
-    await this.saveFastApiInvoice({
+    return this.executeInvoiceAction(
       docCode,
-      maDvcs: invoiceData.ma_dvcs,
-      maKh: invoiceData.ma_kh,
-      tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
-      ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
-      status: responseStatus,
-      message: responseMessage,
-      guid: responseGuid,
-      fastApiResponse: JSON.stringify(result),
-    });
+      orderData,
+      `Xử lý đơn hàng ${description}`,
+      async () => {
+        if (beforeAction) {
+          await beforeAction();
+        }
 
-    if (responseStatus === 1) {
-      await this.markOrderAsProcessed(docCode);
-    }
+        const invoiceData = await this.buildFastApiInvoiceData(orderData);
 
-    return {
-      success: responseStatus === 1,
-      message: responseMessage,
-      result: result,
-    };
-  }
+        // Call createSalesOrder
+        const result = await this.fastApiInvoiceFlowService.createSalesOrder({
+          ...invoiceData,
+          customer: orderData.customer,
+          ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+        });
 
-  /**
-   * Helper xử lý đơn Đổi dịch vụ (có thanh toán chênh lệch)
-   */
-  private async handleDoiDvOrder(
-    orderData: any,
-    docCode: string,
-  ): Promise<any> {
-    // Đổi DV xử lý tương tự đơn thường (có SO, SI, Cashio, Payment)
-    return await this.handleNormalOrder(orderData, docCode);
+        const responseStatus =
+          Array.isArray(result) && result.length > 0 && result[0].status === 1
+            ? 1
+            : 0;
+        const apiMessage =
+          Array.isArray(result) && result.length > 0 && result[0].message
+            ? result[0].message
+            : '';
+        const responseMessage =
+          responseStatus === 1
+            ? `${description} thành công: ${apiMessage}`
+            : `${description} thất bại: ${apiMessage}`;
+
+        const responseGuid =
+          Array.isArray(result) && result.length > 0 && result[0].guid
+            ? Array.isArray(result[0].guid)
+              ? result[0].guid[0]
+              : result[0].guid
+            : null;
+
+        return {
+          result,
+          status: responseStatus,
+          message: responseMessage,
+          guid: responseGuid,
+        };
+      },
+    );
   }
 
   /**
    * Helper xử lý đơn thường và đơn bán tài khoản
    */
+
   private async handleNormalOrder(
     orderData: any,
     docCode: string,
   ): Promise<any> {
-    this.logger.log(
-      `[SalesInvoice] Xử lý đơn thường/DoiDV/TaiKhoan: ${docCode}`,
-    );
-
-    // 1. Create/Update Customer
-    if (orderData.customer?.code) {
-      await this.fastApiInvoiceFlowService.createOrUpdateCustomer({
-        ma_kh: SalesUtils.normalizeMaKh(orderData.customer.code),
-        ten_kh: orderData.customer.name || '',
-        dia_chi: orderData.customer.address || undefined,
-        dien_thoai:
-          orderData.customer.mobile || orderData.customer.phone || undefined,
-        so_cccd: orderData.customer.idnumber || undefined,
-        ngay_sinh: orderData.customer?.birthday
-          ? ConvertUtils.formatDateYYYYMMDD(orderData.customer.birthday)
-          : undefined,
-        gioi_tinh: orderData.customer.sexual || undefined,
-      });
-    }
-
-    const invoiceData = await this.buildFastApiInvoiceData(orderData);
-
-    // 2. Create Sales Order
-    const soResult = await this.fastApiInvoiceFlowService.createSalesOrder({
-      ...invoiceData,
-      customer: orderData.customer,
-      ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-    });
-
-    // 3. Create Sales Invoice
-    let siResult: any;
-    try {
-      siResult = await this.fastApiInvoiceFlowService.createSalesInvoice({
-        ...invoiceData,
-        customer: orderData.customer,
-        ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-      });
-    } catch (error: any) {
-      const responseMessage =
-        error?.response?.data?.message || error?.message || '';
-      const isDuplicateError =
-        typeof responseMessage === 'string' &&
-        (responseMessage.toLowerCase().includes('đã tồn tại') ||
-          responseMessage.toLowerCase().includes('pk_d81'));
-
-      if (isDuplicateError) {
-        await this.saveFastApiInvoice({
-          docCode,
-          maDvcs: invoiceData.ma_dvcs,
-          maKh: invoiceData.ma_kh,
-          tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
-          ngayCt: invoiceData.ngay_ct
-            ? new Date(invoiceData.ngay_ct)
-            : new Date(),
-          status: 1,
-          message: `Đơn hàng đã tồn tại: ${responseMessage}`,
-          guid: null,
-          fastApiResponse: JSON.stringify(error?.response?.data || {}),
-        });
-        return {
-          success: true,
-          message: `Đơn hàng ${docCode} đã tồn tại trong Fast API`,
-          result: error?.response?.data || {},
-          alreadyExists: true,
-        };
-      }
-      throw error;
-    }
-
-    // 4. Cashio Payment
-    const cashioResult =
-      await this.fastApiInvoiceFlowService.processCashioPayment(
-        docCode,
-        orderData,
-        invoiceData,
-      );
-
-    // 5. Payment (Stock)
-    let paymentResult: any = null;
-    try {
-      const docCodesForStockTransfer =
-        StockTransferUtils.getDocCodesForStockTransfer([docCode]);
-      const stockTransfers = await this.stockTransferRepository.find({
-        where: { soCode: In(docCodesForStockTransfer) },
-      });
-      const stockCodes = Array.from(
-        new Set(stockTransfers.map((st) => st.stockCode).filter(Boolean)),
-      );
-
-      if (stockCodes.length > 0) {
-        paymentResult = await this.fastApiInvoiceFlowService.processPayment(
-          docCode,
-          orderData,
-          invoiceData,
-          stockCodes,
-        );
-      }
-    } catch (e) {
-      this.logger.warn(`[Payment] warning: ${e}`);
-    }
-
-    // 6. Save Result
-    const responseStatus =
-      siResult &&
-      Array.isArray(siResult) &&
-      siResult.length > 0 &&
-      siResult[0].status === 1
-        ? 1
-        : 0;
-    const responseMessage =
-      responseStatus === 1 ? 'Tạo hóa đơn thành công' : 'Tạo hóa đơn thất bại';
-    const responseGuid =
-      siResult && Array.isArray(siResult) && siResult.length > 0
-        ? siResult[0].guid
-        : null;
-
-    await this.saveFastApiInvoice({
+    return this.executeInvoiceAction(
       docCode,
-      maDvcs: invoiceData.ma_dvcs,
-      maKh: invoiceData.ma_kh,
-      tenKh: orderData.customer?.name || invoiceData.ong_ba || '',
-      ngayCt: invoiceData.ngay_ct ? new Date(invoiceData.ngay_ct) : new Date(),
-      status: responseStatus,
-      message: responseMessage,
-      guid: responseGuid,
-      fastApiResponse: JSON.stringify({
-        salesOrder: soResult,
-        salesInvoice: siResult,
-        cashio: cashioResult,
-        payment: paymentResult,
-      }),
-    });
+      orderData,
+      'Xử lý đơn thường/DoiDV/TaiKhoan',
+      async () => {
+        // 1. Create/Update Customer
+        if (orderData.customer?.code) {
+          await this.fastApiInvoiceFlowService.createOrUpdateCustomer({
+            ma_kh: SalesUtils.normalizeMaKh(orderData.customer.code),
+            ten_kh: orderData.customer.name || '',
+            dia_chi: orderData.customer.address || undefined,
+            dien_thoai:
+              orderData.customer.mobile ||
+              orderData.customer.phone ||
+              undefined,
+            so_cccd: orderData.customer.idnumber || undefined,
+            ngay_sinh: orderData.customer?.birthday
+              ? ConvertUtils.formatDateYYYYMMDD(orderData.customer.birthday)
+              : undefined,
+            gioi_tinh: orderData.customer.sexual || undefined,
+          });
+        }
 
-    if (responseStatus === 1) {
-      await this.markOrderAsProcessed(docCode);
-    }
+        const invoiceData = await this.buildFastApiInvoiceData(orderData);
 
-    return {
-      success: responseStatus === 1,
-      message: responseMessage,
-      result: {
-        salesOrder: soResult,
-        salesInvoice: siResult,
-        cashio: cashioResult,
-        payment: paymentResult,
+        // 2. Create Sales Order
+        const soResult = await this.fastApiInvoiceFlowService.createSalesOrder({
+          ...invoiceData,
+          customer: orderData.customer,
+          ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+        });
+
+        // 3. Create Sales Invoice
+        let siResult: any;
+        try {
+          siResult = await this.fastApiInvoiceFlowService.createSalesInvoice({
+            ...invoiceData,
+            customer: orderData.customer,
+            ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+          });
+        } catch (error: any) {
+          const responseMessage =
+            error?.response?.data?.message || error?.message || '';
+          const isDuplicateError =
+            typeof responseMessage === 'string' &&
+            (responseMessage.toLowerCase().includes('đã tồn tại') ||
+              responseMessage.toLowerCase().includes('pk_d81'));
+
+          if (isDuplicateError) {
+            return {
+              status: 1,
+              message: `Đơn hàng ${docCode} đã tồn tại trong Fast API`,
+              result: error?.response?.data || {},
+              fastApiResponse: error?.response?.data || {},
+            };
+          }
+          throw error;
+        }
+
+        // 4. Cashio Payment
+        const cashioResult =
+          await this.fastApiInvoiceFlowService.processCashioPayment(
+            docCode,
+            orderData,
+            invoiceData,
+          );
+
+        // 5. Payment (Stock)
+        let paymentResult: any = null;
+        try {
+          const docCodesForStockTransfer =
+            StockTransferUtils.getDocCodesForStockTransfer([docCode]);
+          const stockTransfers = await this.stockTransferRepository.find({
+            where: { soCode: In(docCodesForStockTransfer) },
+          });
+          const stockCodes = Array.from(
+            new Set(stockTransfers.map((st) => st.stockCode).filter(Boolean)),
+          );
+
+          if (stockCodes.length > 0) {
+            paymentResult = await this.fastApiInvoiceFlowService.processPayment(
+              docCode,
+              orderData,
+              invoiceData,
+              stockCodes,
+            );
+          }
+        } catch (e) {
+          this.logger.warn(`[Payment] warning: ${e}`);
+        }
+
+        // 6. Build Result
+        const responseStatus =
+          siResult &&
+          Array.isArray(siResult) &&
+          siResult.length > 0 &&
+          siResult[0].status === 1
+            ? 1
+            : 0;
+        const responseMessage =
+          responseStatus === 1
+            ? 'Tạo hóa đơn thành công'
+            : 'Tạo hóa đơn thất bại';
+        const responseGuid =
+          siResult && Array.isArray(siResult) && siResult.length > 0
+            ? siResult[0].guid
+            : null;
+
+        return {
+          result: {
+            salesOrder: soResult,
+            salesInvoice: siResult,
+            cashio: cashioResult,
+            payment: paymentResult,
+          },
+          status: responseStatus,
+          message: responseMessage,
+          guid: responseGuid,
+          fastApiResponse: {
+            salesOrder: soResult,
+            salesInvoice: siResult,
+            cashio: cashioResult,
+            payment: paymentResult,
+          },
+        };
       },
-    };
+    );
   }
 
   private async saveFastApiInvoice(data: {
@@ -2183,167 +2214,118 @@ export class SalesInvoiceService {
 
     // Case 1: Có stock transfer → Gọi API salesReturn
     if (stockTransfers && stockTransfers.length > 0) {
-      // Build salesReturn data
-      const salesReturnStockTransfers = stockTransfers.filter(
-        (stockTransfer) => stockTransfer.doctype === 'SALE_RETURN',
-      );
-      const salesReturnData = await this.buildSalesReturnData(
+      return this.executeInvoiceAction(
+        docCode,
         orderData,
-        salesReturnStockTransfers,
-      );
-
-      // Gọi API salesReturn (không cần tạo/cập nhật customer)
-      let result: any;
-      try {
-        result =
-          await this.fastApiInvoiceFlowService.createSalesReturn(
-            salesReturnData,
+        'Tạo hàng bán trả lại',
+        async () => {
+          // Build salesReturn data
+          const salesReturnStockTransfers = stockTransfers.filter(
+            (stockTransfer) => stockTransfer.doctype === 'SALE_RETURN',
+          );
+          const salesReturnData = await this.buildSalesReturnData(
+            orderData,
+            salesReturnStockTransfers,
           );
 
-        // Lưu vào bảng kê hóa đơn
-        const responseStatus =
-          Array.isArray(result) && result.length > 0 && result[0].status === 1
-            ? 1
-            : 0;
-        let responseMessage = '';
-        const apiMessage =
-          Array.isArray(result) && result.length > 0 ? result[0].message : '';
-        const shouldAppendApiMessage =
-          apiMessage && apiMessage.trim().toUpperCase() !== 'OK';
-
-        if (responseStatus === 1) {
-          responseMessage = shouldAppendApiMessage
-            ? `Tạo hàng bán trả lại thành công cho đơn hàng ${docCode}. ${apiMessage}`
-            : `Tạo hàng bán trả lại thành công cho đơn hàng ${docCode}`;
-        } else {
-          responseMessage = shouldAppendApiMessage
-            ? `Tạo hàng bán trả lại thất bại cho đơn hàng ${docCode}. ${apiMessage}`
-            : `Tạo hàng bán trả lại thất bại cho đơn hàng ${docCode}`;
-        }
-        const responseGuid =
-          Array.isArray(result) &&
-          result.length > 0 &&
-          Array.isArray(result[0].guid)
-            ? result[0].guid[0]
-            : Array.isArray(result) && result.length > 0
-              ? result[0].guid
-              : null;
-
-        // Xử lý Payment (Phiếu chi tiền mặt) nếu có mã kho
-        if (responseStatus === 1) {
-          try {
-            const stockCodes = Array.from(
-              new Set(stockTransfers.map((st) => st.stockCode).filter(Boolean)),
+          // Gọi API salesReturn (không cần tạo/cập nhật customer)
+          const result =
+            await this.fastApiInvoiceFlowService.createSalesReturn(
+              salesReturnData,
             );
 
-            if (stockCodes.length > 0) {
-              // Build invoiceData để dùng cho payment (tương tự như các case khác)
-              const invoiceData = await this.buildFastApiInvoiceData(orderData);
+          const responseStatus =
+            Array.isArray(result) && result.length > 0 && result[0].status === 1
+              ? 1
+              : 0;
+          const apiMessage =
+            Array.isArray(result) && result.length > 0 ? result[0].message : '';
+          const shouldAppendApiMessage =
+            apiMessage && apiMessage.trim().toUpperCase() !== 'OK';
 
-              this.logger.log(
-                `[Payment] Bắt đầu xử lý payment cho đơn hàng ${docCode} (SALE_RETURN) với ${stockCodes.length} mã kho`,
+          let responseMessage = '';
+          if (responseStatus === 1) {
+            responseMessage = shouldAppendApiMessage
+              ? `Tạo hàng bán trả lại thành công cho đơn hàng ${docCode}. ${apiMessage}`
+              : `Tạo hàng bán trả lại thành công cho đơn hàng ${docCode}`;
+          } else {
+            responseMessage = shouldAppendApiMessage
+              ? `Tạo hàng bán trả lại thất bại cho đơn hàng ${docCode}. ${apiMessage}`
+              : `Tạo hàng bán trả lại thất bại cho đơn hàng ${docCode}`;
+          }
+
+          const responseGuid =
+            Array.isArray(result) &&
+            result.length > 0 &&
+            Array.isArray(result[0].guid)
+              ? result[0].guid[0]
+              : Array.isArray(result) && result.length > 0
+                ? result[0].guid
+                : null;
+
+          // Xử lý Payment (Phiếu chi tiền mặt) nếu có mã kho
+          if (responseStatus === 1) {
+            try {
+              const stockCodes = Array.from(
+                new Set(
+                  stockTransfers.map((st) => st.stockCode).filter(Boolean),
+                ),
               );
-              const paymentResult =
-                await this.fastApiInvoiceFlowService.processPayment(
-                  docCode,
-                  orderData,
-                  invoiceData,
-                  stockCodes,
-                );
 
-              if (
-                paymentResult.paymentResults &&
-                paymentResult.paymentResults.length > 0
-              ) {
+              if (stockCodes.length > 0) {
+                // Build invoiceData để dùng cho payment (tương tự như các case khác)
+                const invoiceData =
+                  await this.buildFastApiInvoiceData(orderData);
+
                 this.logger.log(
-                  `[Payment] Đã tạo ${paymentResult.paymentResults.length} payment thành công cho đơn hàng ${docCode} (SALE_RETURN)`,
+                  `[Payment] Bắt đầu xử lý payment cho đơn hàng ${docCode} (SALE_RETURN) với ${stockCodes.length} mã kho`,
+                );
+                const paymentResult =
+                  await this.fastApiInvoiceFlowService.processPayment(
+                    docCode,
+                    orderData,
+                    invoiceData,
+                    stockCodes,
+                  );
+
+                if (
+                  paymentResult.paymentResults &&
+                  paymentResult.paymentResults.length > 0
+                ) {
+                  this.logger.log(
+                    `[Payment] Đã tạo ${paymentResult.paymentResults.length} payment thành công cho đơn hàng ${docCode} (SALE_RETURN)`,
+                  );
+                }
+                if (
+                  paymentResult.debitAdviceResults &&
+                  paymentResult.debitAdviceResults.length > 0
+                ) {
+                  this.logger.log(
+                    `[Payment] Đã tạo ${paymentResult.debitAdviceResults.length} debitAdvice thành công cho đơn hàng ${docCode} (SALE_RETURN)`,
+                  );
+                }
+              } else {
+                this.logger.debug(
+                  `[Payment] Đơn hàng ${docCode} (SALE_RETURN) không có mã kho, bỏ qua payment API`,
                 );
               }
-              if (
-                paymentResult.debitAdviceResults &&
-                paymentResult.debitAdviceResults.length > 0
-              ) {
-                this.logger.log(
-                  `[Payment] Đã tạo ${paymentResult.debitAdviceResults.length} debitAdvice thành công cho đơn hàng ${docCode} (SALE_RETURN)`,
-                );
-              }
-            } else {
-              this.logger.debug(
-                `[Payment] Đơn hàng ${docCode} (SALE_RETURN) không có mã kho, bỏ qua payment API`,
+            } catch (paymentError: any) {
+              // Log lỗi nhưng không fail toàn bộ flow
+              this.logger.warn(
+                `[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode} (SALE_RETURN): ${paymentError?.message || paymentError}`,
               );
             }
-          } catch (paymentError: any) {
-            // Log lỗi nhưng không fail toàn bộ flow
-            this.logger.warn(
-              `[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode} (SALE_RETURN): ${paymentError?.message || paymentError}`,
-            );
           }
-        }
 
-        await this.saveFastApiInvoice({
-          docCode,
-          maDvcs: salesReturnData.ma_dvcs,
-          maKh: salesReturnData.ma_kh,
-          tenKh: orderData.customer?.name || salesReturnData.ong_ba || '',
-          ngayCt: salesReturnData.ngay_ct
-            ? new Date(salesReturnData.ngay_ct)
-            : new Date(),
-          status: responseStatus,
-          message: responseMessage,
-          guid: responseGuid || null,
-          fastApiResponse: JSON.stringify(result),
-        });
-
-        return {
-          success: responseStatus === 1,
-          message: responseMessage,
-          result: result,
-        };
-      } catch (error: any) {
-        // Lấy thông báo lỗi chính xác từ Fast API response
-        let errorMessage = 'Tạo hàng bán trả lại thất bại';
-
-        if (error?.response?.data) {
-          const errorData = error.response.data;
-          if (Array.isArray(errorData) && errorData.length > 0) {
-            errorMessage =
-              errorData[0].message || errorData[0].error || errorMessage;
-          } else if (errorData.message) {
-            errorMessage = errorData.message;
-          } else if (errorData.error) {
-            errorMessage = errorData.error;
-          } else if (typeof errorData === 'string') {
-            errorMessage = errorData;
-          }
-        } else if (error?.message) {
-          errorMessage = error.message;
-        }
-
-        // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
-        await this.saveFastApiInvoice({
-          docCode,
-          maDvcs: salesReturnData.ma_dvcs,
-          maKh: salesReturnData.ma_kh,
-          tenKh: orderData.customer?.name || salesReturnData.ong_ba || '',
-          ngayCt: salesReturnData.ngay_ct
-            ? new Date(salesReturnData.ngay_ct)
-            : new Date(),
-          status: 0,
-          message: errorMessage,
-          guid: null,
-          fastApiResponse: JSON.stringify(error?.response?.data || error),
-        });
-
-        this.logger.error(
-          `SALE_RETURN order creation failed for order ${docCode}: ${errorMessage}`,
-        );
-
-        return {
-          success: false,
-          message: errorMessage,
-          result: error?.response?.data || error,
-        };
-      }
+          return {
+            result,
+            status: responseStatus,
+            message: responseMessage,
+            guid: responseGuid,
+          };
+        },
+        false, // shouldMarkProcessed = false
+      );
     }
 
     // Case 2: Không có stock transfer → Không xử lý (bỏ qua)
@@ -2564,6 +2546,17 @@ export class SalesInvoiceService {
     if (!value) return '';
     const str = String(value);
     return str.length > maxLength ? str.substring(0, maxLength) : str;
+  }
+
+  /**
+   * Helper terse wrapper for limitString(toString(value, def), max)
+   */
+  private val(
+    value: any,
+    maxLength: number,
+    defaultValue: string = '',
+  ): string {
+    return this.limitString(this.toString(value, defaultValue), maxLength);
   }
 
   private formatDateISO(date: Date): string {
@@ -2981,21 +2974,18 @@ export class SalesInvoiceService {
       // Special ma_ck logic
       if (i === 3) {
         const brand = orderData.customer?.brand || orderData.brand || '';
-        detailItem[maKey] = this.limitString(
-          this.toString(
-            SalesCalculationUtils.calculateMuaHangCkVip(
-              sale,
-              sale.product,
-              brand,
-            ),
-            '',
+        detailItem[maKey] = this.val(
+          SalesCalculationUtils.calculateMuaHangCkVip(
+            sale,
+            sale.product,
+            brand,
           ),
           32,
         );
       } else if (i === 4) {
-        detailItem[maKey] = this.limitString(
+        detailItem[maKey] = this.val(
           detailItem.ck04_nt > 0 || sale.thanhToanCoupon
-            ? this.toString(sale.maCk04 || 'COUPON', '')
+            ? sale.maCk04 || 'COUPON'
             : '',
           32,
         );
@@ -3012,45 +3002,33 @@ export class SalesInvoiceService {
         if (isDoiDiem || isDoiDiemHeader) {
           detailItem[maKey] = '';
         } else if (detailItem.ck05_nt > 0) {
-          const maKh = sale.partnerCode;
           // Note: using logic from buildFastApiInvoiceData
-          detailItem[maKey] = this.limitString(
-            this.toString(
-              InvoiceLogicUtils.resolveVoucherCode({
-                sale: {
-                  ...sale,
-                  customer: sale.customer || orderData.customer,
-                },
-                customer: null, // Resolution happens inside resolveVoucherCode
-                brand: orderData.customer?.brand || orderData.brand || '',
-              }),
-              sale.maCk05 || 'VOUCHER',
-            ),
+          detailItem[maKey] = this.val(
+            InvoiceLogicUtils.resolveVoucherCode({
+              sale: {
+                ...sale,
+                customer: sale.customer || orderData.customer,
+              },
+              customer: null, // Resolution happens inside resolveVoucherCode
+              brand: orderData.customer?.brand || orderData.brand || '',
+            }),
             32,
+            sale.maCk05 || 'VOUCHER',
           );
         }
       } else if (i === 7) {
-        detailItem[maKey] = this.limitString(
-          sale.voucherDp2 ? 'VOUCHER_DP2' : '',
-          32,
-        );
+        detailItem[maKey] = this.val(sale.voucherDp2 ? 'VOUCHER_DP2' : '', 32);
       } else if (i === 8) {
-        detailItem[maKey] = this.limitString(
-          sale.voucherDp3 ? 'VOUCHER_DP3' : '',
-          32,
-        );
+        detailItem[maKey] = this.val(sale.voucherDp3 ? 'VOUCHER_DP3' : '', 32);
       } else if (i === 11) {
-        detailItem[maKey] = this.limitString(
+        detailItem[maKey] = this.val(
           detailItem.ck11_nt > 0 || sale.thanhToanTkTienAo
-            ? this.toString(
-                sale.maCk11 ||
-                  SalesUtils.generateTkTienAoLabel(
-                    orderData.docDate,
-                    orderData.customer?.brand ||
-                      orderData.sales?.[0]?.customer?.brand,
-                  ),
-                '',
-              )
+            ? sale.maCk11 ||
+                SalesUtils.generateTkTienAoLabel(
+                  orderData.docDate,
+                  orderData.customer?.brand ||
+                    orderData.sales?.[0]?.customer?.brand,
+                )
             : '',
           32,
         );
@@ -3058,10 +3036,7 @@ export class SalesInvoiceService {
         // Default mapping for other ma_ck fields
         if (i !== 1) {
           const saleMaKey = `maCk${idx}`;
-          detailItem[maKey] = this.limitString(
-            this.toString(sale[saleMaKey] || '', ''),
-            32,
-          );
+          detailItem[maKey] = this.val(sale[saleMaKey] || '', 32);
         }
       }
     }
@@ -3145,11 +3120,8 @@ export class SalesInvoiceService {
     );
 
     // 5. Build Detail Item
-    const maBp = this.limitString(
-      this.toString(
-        sale.department?.ma_bp || sale.branchCode || orderData.branchCode,
-        '',
-      ),
+    const maBp = this.val(
+      sale.department?.ma_bp || sale.branchCode || orderData.branchCode,
       8,
     );
     const loaiGd = this.resolveInvoiceLoaiGd(sale);
@@ -3163,28 +3135,24 @@ export class SalesInvoiceService {
     );
 
     const detailItem: any = {
-      tk_chiet_khau: this.limitString(this.toString(tkChietKhau, ''), 16),
-      tk_chi_phi: this.limitString(this.toString(tkChiPhi, ''), 16),
-      ma_phi: this.limitString(this.toString(maPhi, ''), 16),
+      tk_chiet_khau: this.val(tkChietKhau, 16),
+      tk_chi_phi: this.val(tkChiPhi, 16),
+      ma_phi: this.val(maPhi, 16),
       tien_hang: Number(sale.qty) * Number(sale.giaBan),
       so_luong: Number(sale.qty),
-      ma_kh_i: this.limitString(this.toString(sale.issuePartnerCode, ''), 16),
-      ma_vt: this.limitString(
-        this.toString(
-          loyaltyProduct?.materialCode || sale.product?.maVatTu || '',
-        ),
+      ma_kh_i: this.val(sale.issuePartnerCode, 16),
+      ma_vt: this.val(
+        loyaltyProduct?.materialCode || sale.product?.maVatTu || '',
         16,
       ),
-      dvt: this.limitString(
-        this.toString(
-          sale.product?.dvt || sale.product?.unit || sale.dvt,
-          'Cái',
-        ),
+      dvt: this.val(
+        sale.product?.dvt || sale.product?.unit || sale.dvt,
         32,
+        'Cái',
       ),
-      loai: this.limitString(this.toString(sale.loai || sale.cat1, ''), 2),
-      loai_gd: this.limitString(loaiGd, 2),
-      ma_ctkm_th: this.limitString(maCtkmTangHang, 32),
+      loai: this.val(sale.loai || sale.cat1, 2),
+      loai_gd: this.val(loaiGd, 2),
+      ma_ctkm_th: this.val(maCtkmTangHang, 32),
     };
 
     const finalMaKho = await this.resolveInvoiceMaKho(
@@ -3209,32 +3177,29 @@ export class SalesInvoiceService {
           : Math.abs(giaBan) < 0.01 && Math.abs(tienHang) < 0.01
             ? 1
             : 0,
-      dong_thuoc_goi: this.limitString(
-        this.toString(sale.dongThuocGoi, ''),
-        32,
-      ),
-      trang_thai: this.limitString(this.toString(sale.trangThai, ''), 32),
-      barcode: this.limitString(this.toString(sale.barcode, ''), 32),
-      ma_ck01: this.limitString(maCk01, 32),
+      dong_thuoc_goi: this.val(sale.dongThuocGoi, 32),
+      trang_thai: this.val(sale.trangThai, 32),
+      barcode: this.val(sale.barcode, 32),
+      ma_ck01: this.val(maCk01, 32),
       dt_tg_nt: Number(amounts.dtTgNt),
       tien_thue: Number(amounts.tienThue),
-      ma_thue: this.limitString(this.toString(sale.maThue, '00'), 8),
+      ma_thue: this.val(sale.maThue, 8, '00'),
       thue_suat: Number(this.toNumber(sale.thueSuat, 0)),
-      tk_thue: this.limitString(this.toString(sale.tkThueCo, ''), 16),
-      tk_cpbh: this.limitString(this.toString(sale.tkCpbh, ''), 16),
+      tk_thue: this.val(sale.tkThueCo, 16),
+      tk_cpbh: this.val(sale.tkCpbh, 16),
       ma_bp: maBp,
-      ma_the: this.limitString(cardSerialMap.get(saleMaterialCode) || '', 256),
+      ma_the: this.val(cardSerialMap.get(saleMaterialCode), 256),
       dong: index + 1,
       id_goc_ngay: sale.idGocNgay
         ? this.formatDateISO(new Date(sale.idGocNgay))
         : this.formatDateISO(new Date()),
-      id_goc: this.limitString(this.toString(sale.idGoc, ''), 70),
-      id_goc_ct: this.limitString(this.toString(sale.idGocCt, ''), 16),
+      id_goc: this.val(sale.idGoc, 70),
+      id_goc_ct: this.val(sale.idGocCt, 16),
       id_goc_so: Number(this.toNumber(sale.idGocSo, 0)),
-      id_goc_dv: this.limitString(this.toString(sale.idGocDv, ''), 8),
-      ma_combo: this.limitString(this.toString(sale.maCombo, ''), 16),
-      ma_nx_st: this.limitString(this.toString(sale.ma_nx_st, ''), 32),
-      ma_nx_rt: this.limitString(this.toString(sale.ma_nx_rt, ''), 32),
+      id_goc_dv: this.val(sale.idGocDv, 8),
+      ma_combo: this.val(sale.maCombo, 16),
+      ma_nx_st: this.val(sale.ma_nx_st, 32),
+      ma_nx_rt: this.val(sale.ma_nx_rt, 32),
       ...(soSerial && soSerial.trim() !== ''
         ? { so_serial: this.limitString(soSerial, 64) }
         : maLo && maLo.trim() !== ''

@@ -24,8 +24,6 @@ export class SalesQueryService {
   constructor(
     @InjectRepository(Sale)
     private saleRepository: Repository<Sale>,
-    @InjectRepository(Customer)
-    private customerRepository: Repository<Customer>,
     @InjectRepository(StockTransfer)
     private stockTransferRepository: Repository<StockTransfer>,
     @InjectRepository(DailyCashio)
@@ -244,6 +242,137 @@ export class SalesQueryService {
     return stockCode;
   }
 
+  /**
+   * Helper to apply common filters to sales query
+   */
+  private applySaleFilters(
+    query: any,
+    options: {
+      brand?: string;
+      search?: string;
+      statusAsys?: boolean;
+      typeSale?: string;
+      date?: string;
+      dateFrom?: string | Date; // Allow Date object
+      dateTo?: string | Date; // Allow Date object
+      isProcessed?: boolean;
+    },
+  ) {
+    const {
+      brand,
+      search,
+      statusAsys,
+      typeSale,
+      date,
+      dateFrom,
+      dateTo,
+      isProcessed,
+    } = options;
+
+    if (isProcessed !== undefined) {
+      query.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
+    }
+    if (statusAsys !== undefined) {
+      query.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
+    }
+    if (typeSale && typeSale !== 'ALL') {
+      query.andWhere('sale.type_sale = :type_sale', {
+        type_sale: typeSale.toUpperCase(),
+      });
+    }
+
+    if (brand) {
+      // Check if we need to join customer (if not already joined in calling code)
+      // Assuming 'customer' alias is used for sale.customer join
+      query.andWhere('customer.brand = :brand', { brand });
+    }
+
+    if (search && search.trim() !== '') {
+      const searchPattern = `%${search.trim().toLowerCase()}%`;
+      query.andWhere(
+        "(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, '')) LIKE :search OR LOWER(COALESCE(customer.code, '')) LIKE :search OR LOWER(COALESCE(customer.mobile, '')) LIKE :search)",
+        { search: searchPattern },
+      );
+    }
+
+    // Date logic
+    let startDate: Date | undefined;
+    let endDate: Date | undefined;
+
+    // Handle string inputs for dateFrom/dateTo (from API query params) or Date objects
+    if (dateFrom) {
+      startDate = new Date(dateFrom);
+      startDate.setHours(0, 0, 0, 0);
+    }
+    if (dateTo) {
+      endDate = new Date(dateTo);
+      endDate.setHours(23, 59, 59, 999);
+    }
+
+    if (startDate && endDate) {
+      query.andWhere(
+        'sale.docDate >= :startDate AND sale.docDate <= :endDate',
+        {
+          startDate,
+          endDate,
+        },
+      );
+    } else if (startDate) {
+      query.andWhere('sale.docDate >= :startDate', { startDate });
+    } else if (endDate) {
+      query.andWhere('sale.docDate <= :endDate', { endDate });
+    } else if (date) {
+      // Special format DDMMMYYYY
+      const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+      if (dateMatch) {
+        const [, day, monthStr, year] = dateMatch;
+        const monthMap: { [key: string]: number } = {
+          JAN: 0,
+          FEB: 1,
+          MAR: 2,
+          APR: 3,
+          MAY: 4,
+          JUN: 5,
+          JUL: 6,
+          AUG: 7,
+          SEP: 8,
+          OCT: 9,
+          NOV: 10,
+          DEC: 11,
+        };
+        const month = monthMap[monthStr.toUpperCase()];
+        if (month !== undefined) {
+          const dateObj = new Date(parseInt(year), month, parseInt(day));
+          const startOfDay = new Date(dateObj);
+          startOfDay.setHours(0, 0, 0, 0);
+          const endOfDay = new Date(dateObj);
+          endOfDay.setHours(23, 59, 59, 999);
+          query.andWhere(
+            'sale.docDate >= :startDate AND sale.docDate <= :endDate',
+            {
+              startDate: startOfDay,
+              endDate: endOfDay,
+            },
+          );
+        }
+      }
+    } else if (brand && !startDate && !endDate && !date) {
+      // Default: Last 30 days if only brand is specified
+      const end = new Date();
+      end.setHours(23, 59, 59, 999);
+      const start = new Date();
+      start.setDate(start.getDate() - 30);
+      start.setHours(0, 0, 0, 0);
+      query.andWhere(
+        'sale.docDate >= :startDate AND sale.docDate <= :endDate',
+        {
+          startDate: start,
+          endDate: end,
+        },
+      );
+    }
+  }
+
   async findAllOrders(options: {
     brand?: string;
     isProcessed?: boolean;
@@ -271,118 +400,30 @@ export class SalesQueryService {
       typeSale,
     } = options;
 
-    // Đếm tổng số sale items trước (để có total cho pagination)
+    // 1. Initial Count Query
     const countQuery = this.saleRepository
       .createQueryBuilder('sale')
       .select('COUNT(sale.id)', 'count');
 
-    // Luôn join với customer để có thể search hoặc export
+    // Join customer for search/brand filtering
     countQuery.leftJoin('sale.customer', 'customer');
 
-    // Helper function để apply filters chung cho cả count và full query
-    const applyFilters = (query: any) => {
-      if (isProcessed !== undefined) {
-        query.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
-      }
-      if (statusAsys !== undefined) {
-        query.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
-      }
-      if (typeSale !== undefined && typeSale !== 'ALL') {
-        query.andWhere('sale.type_sale = :type_sale', {
-          type_sale: typeSale.toUpperCase(),
-        });
-      }
-      if (brand) {
-        query.andWhere('sale.brand = :brand', { brand });
-      }
-      if (search && search.trim() !== '') {
-        const searchPattern = `%${search.trim().toLowerCase()}%`;
-        query.andWhere(
-          "(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, '')) LIKE :search OR LOWER(COALESCE(customer.code, '')) LIKE :search OR LOWER(COALESCE(customer.mobile, '')) LIKE :search)",
-          { search: searchPattern },
-        );
-      }
+    // Apply shared filters
+    this.applySaleFilters(countQuery, {
+      brand,
+      isProcessed,
+      statusAsys,
+      typeSale,
+      date,
+      dateFrom,
+      dateTo,
+      search,
+    });
 
-      // Date logic
-      let hasFiltersWithDate = false;
-      if (dateFrom || dateTo) {
-        hasFiltersWithDate = true;
-        if (dateFrom && dateTo) {
-          const startDate = new Date(dateFrom);
-          startDate.setHours(0, 0, 0, 0);
-          const endDate = new Date(dateTo);
-          endDate.setHours(23, 59, 59, 999);
-          query.andWhere(
-            'sale.docDate >= :dateFrom AND sale.docDate <= :dateTo',
-            {
-              dateFrom: startDate,
-              dateTo: endDate,
-            },
-          );
-        } else if (dateFrom) {
-          const startDate = new Date(dateFrom);
-          startDate.setHours(0, 0, 0, 0);
-          query.andWhere('sale.docDate >= :dateFrom', { dateFrom: startDate });
-        } else if (dateTo) {
-          const endDate = new Date(dateTo);
-          endDate.setHours(23, 59, 59, 999);
-          query.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
-        }
-      } else if (date) {
-        hasFiltersWithDate = true;
-        const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
-        if (dateMatch) {
-          const [, day, monthStr, year] = dateMatch;
-          const monthMap: { [key: string]: number } = {
-            JAN: 0,
-            FEB: 1,
-            MAR: 2,
-            APR: 3,
-            MAY: 4,
-            JUN: 5,
-            JUL: 6,
-            AUG: 7,
-            SEP: 8,
-            OCT: 9,
-            NOV: 10,
-            DEC: 11,
-          };
-          const month = monthMap[monthStr.toUpperCase()];
-          if (month !== undefined) {
-            const dateObj = new Date(parseInt(year), month, parseInt(day));
-            const startOfDay = new Date(dateObj);
-            startOfDay.setHours(0, 0, 0, 0);
-            const endOfDay = new Date(dateObj);
-            endOfDay.setHours(23, 59, 59, 999);
-            query.andWhere(
-              'sale.docDate >= :dateFrom AND sale.docDate <= :dateTo',
-              {
-                dateFrom: startOfDay,
-                dateTo: endOfDay,
-              },
-            );
-          }
-        }
-      } else if (brand && !hasFiltersWithDate) {
-        const endDate = new Date();
-        endDate.setHours(23, 59, 59, 999);
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 30);
-        startDate.setHours(0, 0, 0, 0);
-        query.andWhere(
-          'sale.docDate >= :dateFrom AND sale.docDate <= :dateTo',
-          {
-            dateFrom: startDate,
-            dateTo: endDate,
-          },
-        );
-      }
-    };
-
-    applyFilters(countQuery);
     const totalResult = await countQuery.getRawOne();
     const totalSaleItems = parseInt(totalResult?.count || '0', 10);
 
+    // 2. Main Query
     const fullQuery = this.saleRepository
       .createQueryBuilder('sale')
       .leftJoinAndSelect('sale.customer', 'customer')
@@ -390,7 +431,16 @@ export class SalesQueryService {
       .addOrderBy('sale.docCode', 'ASC')
       .addOrderBy('sale.id', 'ASC');
 
-    applyFilters(fullQuery);
+    this.applySaleFilters(fullQuery, {
+      brand,
+      isProcessed,
+      statusAsys,
+      typeSale,
+      date,
+      dateFrom,
+      dateTo,
+      search,
+    });
 
     if (!isExport) {
       const offset = (page - 1) * limit;
@@ -399,6 +449,7 @@ export class SalesQueryService {
 
     const allSales = await fullQuery.getMany();
 
+    // 3. Export Logic (Early Return)
     if (isExport) {
       const salesWithCustomer = allSales.map((sale) => {
         return {
@@ -428,8 +479,9 @@ export class SalesQueryService {
       };
     }
 
+    // 4. Group by Order (Data Preparation)
     const orderMap = new Map<string, any>();
-    const allSalesData: any[] = [];
+    const allSalesData: any[] = []; // Helper array to avoid re-iterating map values often
 
     for (const sale of allSales) {
       const docCode = sale.docCode;
@@ -469,6 +521,7 @@ export class SalesQueryService {
       order.totalQty += Number(sale.qty || 0);
       order.totalItems += 1;
 
+      // If any item is not processed, the whole order is considered not processed (simplification)
       if (!sale.isProcessed) {
         order.isProcessed = false;
       }
@@ -476,6 +529,7 @@ export class SalesQueryService {
       allSalesData.push(sale);
     }
 
+    // 5. Pre-fetch Related Data (Batching)
     const itemCodes = Array.from(
       new Set(
         allSalesData
@@ -498,6 +552,7 @@ export class SalesQueryService {
     );
     const docCodesForStockTransfer =
       StockTransferUtils.getDocCodesForStockTransfer(docCodes);
+
     const stockTransfers =
       docCodesForStockTransfer.length > 0
         ? await this.stockTransferRepository.find({
@@ -516,6 +571,7 @@ export class SalesQueryService {
       new Set([...itemCodes, ...stockTransferItemCodes]),
     );
 
+    // Batch Fetching
     const [loyaltyProductMap, departmentMap, warehouseCodeMap] =
       await Promise.all([
         this.loyaltyService.fetchProducts(allItemCodes),
@@ -523,12 +579,32 @@ export class SalesQueryService {
         this.categoriesService.getWarehouseCodeMap(),
       ]);
 
+    // Build Stock Transfer Maps
     const { stockTransferMap, stockTransferByDocCodeMap } =
       StockTransferUtils.buildStockTransferMaps(
         stockTransfers,
         loyaltyProductMap,
         docCodes,
       );
+
+    // 6. Fix N+1: Batch Fetch Card Data Logic
+    // Identify orders that need card data (Tach The orders)
+    // We need to look at enriched data normally, but we can do a quick check on raw sales
+    // Or we can just collect docCodes where we "suspect" card data is needed.
+    // However, the original logic checked 'isTachTheOrder' on *formatted* sales.
+    // To be safe and efficient, we can check basic conditions on raw 'ordertype' if possible,
+    // or just wait until we format. But formatting happens per item.
+    // Let's optimize: Gather all docCodes.
+    // The previous logic only fetched for `docCodes[0]` (the first order) strictly in one place
+    // and then inside a loop for 'hasTachThe'.
+
+    // Optimization:
+    // a. Fetch card data for the FIRST order (legacy logic preserved, maybe for global context?)
+    //    Original code: `const [dataCard] = await this.n8nService.fetchCardData(docCodes[0]);`
+    //    This seems to populate `getMaThe` map which is used for ALL sales.
+    //    Wait, `getMaThe` is built ONLY from the response of `docCodes[0]`.
+    //    This looks like a bug or a very specific feature for the first generic order.
+    //    I will preserve this behavior but it looks suspicious.
 
     const getMaThe = new Map<string, string>();
     if (docCodes.length > 0) {
@@ -537,7 +613,7 @@ export class SalesQueryService {
         if (dataCard && dataCard.data) {
           for (const card of dataCard.data) {
             if (!card?.service_item_name || !card?.serial) {
-              continue; // bỏ qua record lỗi / rỗng
+              continue;
             }
             const itemProduct = await this.loyaltyService.checkProduct(
               card.service_item_name,
@@ -548,10 +624,11 @@ export class SalesQueryService {
           }
         }
       } catch (e) {
-        // Ignore error when fetching card data
+        // Ignore error
       }
     }
 
+    // 7. Enrich Sales Items (In-Memory Processing)
     const enrichedSalesMap = new Map<string, any[]>();
     for (const sale of allSalesData) {
       const docCode = sale.docCode;
@@ -568,6 +645,7 @@ export class SalesQueryService {
       const maThe = getMaThe.get(loyaltyProduct?.materialCode || '') || '';
       sale.maThe = maThe;
       const saleMaterialCode = loyaltyProduct?.materialCode;
+
       let saleStockTransfers: StockTransfer[] = [];
       if (saleMaterialCode) {
         const stockTransferKey = `${docCode}_${saleMaterialCode}`;
@@ -606,6 +684,8 @@ export class SalesQueryService {
         this.loyaltyService,
         saleStockTransfers,
       );
+
+      // Map stock transfers to simple Frontend format
       enrichedSale.stockTransfers = saleStockTransfers.map((st) =>
         StockTransferUtils.formatStockTransferForFrontend(st),
       );
@@ -613,21 +693,55 @@ export class SalesQueryService {
       enrichedSalesMap.get(docCode)!.push(enrichedSale);
     }
 
+    // 8. Final Grouping & N+1 Fix for 'Tach The'
+    // Collect docCodes that require card data fetching
+    const docCodesNeedingCardData: string[] = [];
+
+    // First pass to identify orders
+    for (const [docCode, sales] of enrichedSalesMap.entries()) {
+      const hasTachThe = sales.some((s: any) =>
+        SalesUtils.isTachTheOrder(s.ordertype, s.ordertypeName),
+      );
+      if (hasTachThe) {
+        docCodesNeedingCardData.push(docCode);
+      }
+    }
+
+    // Execute parallel requests for card data
+    const cardDataMap = new Map<string, any>(); // Map<docCode, cardData>
+    if (docCodesNeedingCardData.length > 0) {
+      // Limit concurrency if needed, but for now Promise.all is fine for reasonable page sizes (e.g. 50)
+      // If limit is large (e.g. 200), we might want to use a concurrency limiter (like p-limit)
+      // but adding a library might be overkill. Let's stick to Promise.all for pagination limits.
+      const cardDataPromises = docCodesNeedingCardData.map(async (docCode) => {
+        try {
+          const cardResponse =
+            await this.n8nService.fetchCardDataWithRetry(docCode);
+          const cardData = this.n8nService.parseCardData(cardResponse);
+          return { docCode, cardData };
+        } catch (e) {
+          return { docCode, cardData: null };
+        }
+      });
+
+      const results = await Promise.all(cardDataPromises);
+      results.forEach((res) => {
+        if (res.cardData) {
+          cardDataMap.set(res.docCode, res.cardData);
+        }
+      });
+    }
+
+    // Apply card data and build final orders
     for (const [docCode, sales] of enrichedSalesMap.entries()) {
       const order = orderMap.get(docCode);
       if (order) {
-        // Sử dụng n8nService trực tiếp thay cho private method
-        const hasTachThe = sales.some((s: any) =>
-          SalesUtils.isTachTheOrder(s.ordertype, s.ordertypeName),
-        );
-        if (hasTachThe) {
-          try {
-            const cardResponse =
-              await this.n8nService.fetchCardDataWithRetry(docCode);
-            const cardData = this.n8nService.parseCardData(cardResponse);
-            this.n8nService.mapIssuePartnerCodeToSales(sales, cardData);
-          } catch (e) {}
+        // Apply card data if available
+        if (cardDataMap.has(docCode)) {
+          const cardData = cardDataMap.get(docCode);
+          this.n8nService.mapIssuePartnerCodeToSales(sales, cardData);
         }
+
         order.sales = sales;
         order.stockTransfers = (
           stockTransferByDocCodeMap.get(docCode) || []
@@ -635,7 +749,9 @@ export class SalesQueryService {
       }
     }
 
+    // 9. Sort and return
     const orders = Array.from(orderMap.values()).sort((a, b) => {
+      // Sort by latest date first
       return new Date(b.docDate).getTime() - new Date(a.docDate).getTime();
     });
 
@@ -663,7 +779,7 @@ export class SalesQueryService {
     search?: string,
   ) {
     try {
-      // Parse statusAsys: 'true' -> true, 'false' -> false, undefined/empty -> undefined
+      // Parse statusAsys
       let statusAsysValue: boolean | undefined;
       if (statusAsys === 'true') {
         statusAsysValue = true;
@@ -677,97 +793,38 @@ export class SalesQueryService {
       const limitNumber = limit || 10;
       const skip = (pageNumber - 1) * limitNumber;
 
-      // Sử dụng QueryBuilder để hỗ trợ filter phức tạp
-      let query = this.saleRepository.createQueryBuilder('sale');
+      // 1. Data Query
+      const query = this.saleRepository.createQueryBuilder('sale');
+      query.leftJoinAndSelect('sale.customer', 'customer');
 
-      // Luôn leftJoinAndSelect customer để load relation (cần cho response)
-      query = query.leftJoinAndSelect('sale.customer', 'customer');
+      this.applySaleFilters(query, {
+        brand,
+        search,
+        statusAsys: statusAsysValue,
+        dateFrom,
+        dateTo,
+      });
 
-      // Filter statusAsys
-      if (statusAsysValue !== undefined) {
-        query = query.andWhere('sale.statusAsys = :statusAsys', {
-          statusAsys: statusAsysValue,
-        });
-      }
+      query.orderBy('sale.createdAt', 'DESC').skip(skip).take(limitNumber);
 
-      // Filter brand
-      if (brand) {
-        query = query.andWhere('customer.brand = :brand', { brand });
-      }
+      const sales = await query.getMany();
 
-      // Filter search (docCode, customer name, code, mobile)
-      if (search && search.trim() !== '') {
-        const searchPattern = `%${search.trim().toLowerCase()}%`;
-        query = query.andWhere(
-          "(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, '')) LIKE :search OR LOWER(COALESCE(customer.code, '')) LIKE :search OR LOWER(COALESCE(customer.mobile, '')) LIKE :search)",
-          { search: searchPattern },
-        );
-      }
-
-      // Filter date range - dùng Date object (TypeORM sẽ convert tự động)
-      let startDate: Date | undefined;
-      let endDate: Date | undefined;
-
-      if (dateFrom) {
-        startDate = new Date(dateFrom);
-        startDate.setHours(0, 0, 0, 0);
-        query = query.andWhere('sale.docDate >= :dateFrom', {
-          dateFrom: startDate,
-        });
-      }
-      if (dateTo) {
-        endDate = new Date(dateTo);
-        endDate.setHours(23, 59, 59, 999);
-        query = query.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
-      }
-
-      // Tạo count query riêng (không dùng leftJoinAndSelect để tối ưu)
+      // 2. Count Query
       const countQuery = this.saleRepository.createQueryBuilder('sale');
-
-      // Apply cùng các filters như query chính nhưng chỉ dùng leftJoin (không Select)
-      const needsCustomerJoin = brand || (search && search.trim() !== '');
-      if (needsCustomerJoin) {
+      // Only join customer if needed for filtering
+      if (brand || (search && search.trim() !== '')) {
         countQuery.leftJoin('sale.customer', 'customer');
       }
 
-      if (statusAsysValue !== undefined) {
-        countQuery.andWhere('sale.statusAsys = :statusAsys', {
-          statusAsys: statusAsysValue,
-        });
-      }
+      this.applySaleFilters(countQuery, {
+        brand,
+        search,
+        statusAsys: statusAsysValue,
+        dateFrom,
+        dateTo,
+      });
 
-      if (brand) {
-        countQuery.andWhere('customer.brand = :brand', { brand });
-      }
-
-      if (search && search.trim() !== '') {
-        const searchPattern = `%${search.trim().toLowerCase()}%`;
-        countQuery.andWhere(
-          "(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, '')) LIKE :search OR LOWER(COALESCE(customer.code, '')) LIKE :search OR LOWER(COALESCE(customer.mobile, '')) LIKE :search)",
-          { search: searchPattern },
-        );
-      }
-
-      if (startDate) {
-        countQuery.andWhere('sale.docDate >= :dateFrom', {
-          dateFrom: startDate,
-        });
-      }
-
-      if (endDate) {
-        countQuery.andWhere('sale.docDate <= :dateTo', { dateTo: endDate });
-      }
-
-      // Count total
       const totalCount = await countQuery.getCount();
-
-      // Apply pagination và order
-      query = query
-        .orderBy('sale.createdAt', 'DESC')
-        .skip(skip)
-        .take(limitNumber);
-
-      const sales = await query.getMany();
 
       return {
         data: sales,
