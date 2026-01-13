@@ -6,6 +6,7 @@ import { Sale } from '../../entities/sale.entity';
 import { LoyaltyService } from 'src/services/loyalty.service';
 import { CategoriesService } from '../categories/categories.service';
 import { getSupplierCode } from '../../utils/payment-supplier.util';
+import { Cron } from '@nestjs/schedule';
 
 export interface PaymentData {
   // From daily_cashio (ds)
@@ -267,5 +268,28 @@ export class PaymentService {
       totalAmount: parseFloat(r.totalAmount || 0),
       count: parseInt(r.count || 0),
     }));
+  }
+
+  @Cron('0 4 * * *')
+  async autoLogPaymentData() {
+    this.logger.log('Started auto-logging payment data at 4:00 AM...');
+    try {
+      // Fetch a summary (limit 1 just to get the total count)
+      const result = await this.findAll({ page: 1, limit: 1 });
+      await this.processFastPayment({
+        source: 'CRON_JOB',
+        totalRecords: result.total,
+        timestamp: new Date(),
+      });
+    } catch (error) {
+      this.logger.error('Error in auto-logging payment data', error);
+    }
+  }
+
+  async processFastPayment(data: any) {
+    this.logger.log('Processing Fast Payment Data:', JSON.stringify(data));
+    // Placeholder for future API integration
+    // e.g. await this.httpService.post('https://external-api.com/sync', data).toPromise();
+    return { success: true, receivedData: data };
   }
 }

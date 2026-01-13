@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, Post, Body } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 
 @Controller('payments')
@@ -22,6 +22,11 @@ export class PaymentController {
       dateTo,
       brand,
     });
+  }
+
+  @Post('fast')
+  async fastPaymentLog(@Body() body: any) {
+    return this.paymentService.processFastPayment(body);
   }
 
   @Get('statistics')
