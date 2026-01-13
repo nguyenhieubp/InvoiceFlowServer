@@ -479,7 +479,7 @@ export class SalesSyncService {
       if (orders.length === 0) {
         return {
           success: true,
-          message: `KhÃ´ng cÃ³ dá»¯ liá»‡u Ä‘á»ƒ Ä‘á»“ng bá»™ cho ngÃ y ${date}`,
+          message: `Sync sales from Zappy API for ${date}`,
           ordersCount: 0,
           salesCount: 0,
           customersCount: 0,
@@ -522,7 +522,7 @@ export class SalesSyncService {
           );
 
           if (!customer) {
-            const errorMsg = `KhÃ´ng thá»ƒ táº¡o hoáº·c tÃ¬m customer vá»›i code ${order.customer.code}`;
+            const errorMsg = `Customer not found or customer code ${order.customer.code}`;
             this.logger.error(errorMsg);
             errors.push(errorMsg);
             continue;
@@ -543,7 +543,7 @@ export class SalesSyncService {
           );
           salesCount += orderSalesCount;
         } catch (orderError: any) {
-          const errorMsg = `Lá»—i khi xá»­ lÃ½ order ${order.docCode}: ${orderError?.message || orderError}`;
+          const errorMsg = `Error processing order ${order.docCode}: ${orderError?.message || orderError}`;
           this.logger.error(errorMsg);
           errors.push(errorMsg);
         }
@@ -551,7 +551,7 @@ export class SalesSyncService {
 
       return {
         success: errors.length === 0,
-        message: `Äá»“ng bá»™ thÃ nh cÃ´ng ${orders.length} Ä‘Æ¡n hÃ ng cho ngÃ y ${date}${brand ? ` (brand: ${brand})` : ''}`,
+        message: `Sync sales from Zappy API for ${date}`,
         ordersCount: orders.length,
         salesCount,
         customersCount,
@@ -559,7 +559,7 @@ export class SalesSyncService {
       };
     } catch (error: any) {
       this.logger.error(
-        `Lá»—i khi Ä‘á»“ng bá»™ tá»« Zappy API: ${error?.message || error}`,
+        `Error syncing sales from Zappy API for ${date}: ${error?.message || error}`,
       );
       throw error;
     }
@@ -724,9 +724,34 @@ export class SalesSyncService {
             voucherAmount = firstVoucher.total_in || 0;
           }
 
-          const ordertypeName = this.resolveOrderTypeName(saleItem);
+          const ordertypeName = this.resolveOrderTypeName(saleItem) || '';
 
-          const newSale = this.saleRepository.create({
+          // Check idempotency
+          // Với đơn "08. Tách thẻ": cần thêm qty vào điều kiện vì có thể có 2 dòng cùng itemCode nhưng qty khác nhau (-1 và 1)
+          const isTachThe =
+            ordertypeName.includes('08. Tách thẻ') ||
+            ordertypeName.includes('08.Tách thẻ') ||
+            ordertypeName.includes('08.  Tách thẻ');
+
+          let existingSale: Sale | null = null;
+          if (isTachThe) {
+            existingSale = await this.saleRepository.findOne({
+              where: {
+                docCode: order.docCode,
+                itemCode: saleItem.itemCode || '',
+                qty: saleItem.qty || 0,
+              },
+            });
+          } else {
+            existingSale = await this.saleRepository.findOne({
+              where: {
+                docCode: order.docCode,
+                itemCode: saleItem.itemCode || '',
+              },
+            });
+          }
+
+          const saleData: any = {
             docCode: order.docCode,
             docDate: new Date(order.docDate),
             branchCode: order.branchCode,
@@ -769,11 +794,26 @@ export class SalesSyncService {
               voucherAmount && voucherAmount > 0 ? voucherAmount : undefined,
             customer: customer,
             brand: brand,
-            isProcessed: false,
+            // Keep existing isProcessed status if update
+            isProcessed: existingSale ? existingSale.isProcessed : false,
             statusAsys: statusAsys,
             type_sale: 'RETAIL',
-          } as any);
-          await this.saleRepository.save(newSale);
+          };
+
+          if (existingSale) {
+            // UPDATE
+            this.logger.log(
+              `[SalesSyncService] Cập nhật sale ${order.docCode}/${saleItem.itemCode} (ID: ${existingSale.id})`,
+            );
+            await this.saleRepository.update(existingSale.id, saleData);
+          } else {
+            // CREATE MỚI
+            this.logger.log(
+              `[SalesSyncService] Tạo mới sale ${order.docCode}/${saleItem.itemCode}`,
+            );
+            const newSale = this.saleRepository.create(saleData);
+            await this.saleRepository.save(newSale);
+          }
           salesCount++;
         } catch (saleError: any) {
           const errorMsg = `Lá»—i khi lÆ°u sale ${order.docCode}/${saleItem.itemCode}: ${saleError?.message || saleError}`;
