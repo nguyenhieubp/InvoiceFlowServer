@@ -304,6 +304,31 @@ export class InvoiceLogicUtils {
     let tienHang = saleTienHang || linetotal || revenue || 0;
     let giaBan = Number(sale.giaBan || 0);
 
+    // FIX V7: Sync Pricing Logic (Source of Truth)
+    // Re-calculate giaBan for non-normal orders using Gross Amount if available
+    if (!isDoiDiem && !isNormalOrder) {
+      const tongChietKhau =
+        Number(sale.other_discamt || sale.chietKhauMuaHangGiamGia || 0) +
+        Number(sale.chietKhauCkTheoChinhSach || 0) +
+        Number(sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0) +
+        Number(
+          sale.paid_by_voucher_ecode_ecoin_bp ||
+            sale.chietKhauThanhToanVoucher ||
+            0,
+        );
+
+      let calcTienHangGoc = Number(
+        sale.mn_linetotal || sale.linetotal || sale.tienHang || 0,
+      );
+      if (calcTienHangGoc === 0) {
+        calcTienHangGoc = tienHang + tongChietKhau;
+      }
+
+      if (giaBan === 0 && saleQty > 0 && calcTienHangGoc > 0) {
+        giaBan = calcTienHangGoc / saleQty;
+      }
+    }
+
     if (isDoiDiem) {
       giaBan = 0;
       tienHang = 0;

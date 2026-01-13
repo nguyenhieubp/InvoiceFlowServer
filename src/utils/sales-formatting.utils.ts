@@ -231,29 +231,7 @@ export async function formatSaleForFrontend(
     qtyFromStock: qtyFromST ?? undefined,
   });
 
-  // FIX V7: Sync Pricing Logic with Backend (Source of Truth)
-  // Re-calculate tienHangGoc and giaBan for non-normal orders
-  if (!isDoiDiem && !isThuong) {
-    // tien_hang phải là giá gốc (trước chiết khấu)
-    // Ưu tiên: mn_linetotal > linetotal > tienHang > (revenue + tongChietKhau)
-    // Calculate approximate total discount for fallback
-    const tongChietKhau =
-      Number(sale.other_discamt || 0) +
-      Number(sale.chietKhauCkTheoChinhSach || 0) +
-      Number(sale.chietKhauMuaHangCkVip || 0) +
-      Number(sale.paid_by_voucher_ecode_ecoin_bp || 0);
-
-    let calcTienHangGoc = Number(
-      sale.mn_linetotal || sale.linetotal || sale.tienHang || 0,
-    );
-    if (calcTienHangGoc === 0) {
-      calcTienHangGoc = tienHang + tongChietKhau;
-    }
-
-    if (giaBan === 0 && saleQty > 0 && calcTienHangGoc > 0) {
-      giaBan = calcTienHangGoc / saleQty;
-    }
-  }
+  // Pricing logic for non-normal orders (FIX V7) is now handled inside InvoiceLogicUtils.calculatePrices
 
   // FIX V7: Re-evaluate isTangHang strict logic
   let isTangHang = giaBan === 0 && tienHang === 0;
