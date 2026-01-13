@@ -1,0 +1,271 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { DailyCashio } from '../../entities/daily-cashio.entity';
+import { Sale } from '../../entities/sale.entity';
+import { LoyaltyService } from 'src/services/loyalty.service';
+import { CategoriesService } from '../categories/categories.service';
+import { getSupplierCode } from '../../utils/payment-supplier.util';
+
+export interface PaymentData {
+  // From daily_cashio (ds)
+  fop_syscode: string; // Mã hình thức thanh toán
+  docdate: Date; // Ngày (from daily_cashio)
+  total_in: number; // Tiền thu
+  so_code: string; // Mã đơn hàng
+  branch_code_cashio: string; // Mã chi nhánh (from daily_cashio)
+  ma_dvcs_cashio: string; // Mã ĐVCS từ cashio branch
+  refno: string; // Mã tham chiếu
+  bank_code: string; // Ngân hàng
+  period_code: string; // Kỳ hạn
+  ma_doi_tac_payment?: string; // Mã đối tác từ PaymentMethod
+
+  // From sales (s)
+  docDate: Date; // Ngày hóa đơn (from sales)
+  revenue: number; // Doanh thu
+  branchCode: string; // Mã chi nhánh (from sales)
+  boPhan: string; // Mã bộ phận (from sales)
+  ma_dvcs_sale: string; // Mã ĐVCS từ sale branch
+  maCa: string; // Mã ca
+  partnerCode: string; // Mã đối tác
+}
+
+@Injectable()
+export class PaymentService {
+  private readonly logger = new Logger(PaymentService.name);
+
+  constructor(
+    @InjectRepository(DailyCashio)
+    private dailyCashioRepository: Repository<DailyCashio>,
+    @InjectRepository(Sale)
+    private saleRepository: Repository<Sale>,
+    private loyaltyService: LoyaltyService,
+    private categoryService: CategoriesService,
+  ) {}
+
+  async findAll(options: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    brand?: string;
+  }) {
+    const { page = 1, limit = 10, search, dateFrom, dateTo, brand } = options;
+
+    // Build query with raw SQL for exact field selection
+    let query = this.dailyCashioRepository
+      .createQueryBuilder('ds')
+      .select([
+        'ds.fop_syscode as fop_syscode',
+        'ds.docdate as docdate',
+        'ds.total_in as total_in',
+        'ds.so_code as so_code',
+        'ds.branch_code as branch_code_cashio',
+        'ds.refno as refno',
+        'ds.bank_code as bank_code',
+        'ds.period_code as period_code',
+        'MAX(s.docDate) as "docDate"',
+        'SUM(s.revenue) as revenue',
+        'MAX(s.branchCode) as "branchCode"',
+        'COALESCE(MAX(s.boPhan), MAX(s.branchCode)) as "boPhan"',
+        'MAX(s.maCa) as "maCa"',
+        'MAX(s.partnerCode) as "partnerCode"',
+      ])
+      .innerJoin(Sale, 's', 'ds.so_code = s.docCode')
+      .groupBy('ds.id')
+      .addGroupBy('ds.fop_syscode')
+      .addGroupBy('ds.docdate')
+      .addGroupBy('ds.total_in')
+      .addGroupBy('ds.so_code')
+      .addGroupBy('ds.branch_code')
+      .addGroupBy('ds.refno')
+      .addGroupBy('ds.bank_code')
+      .addGroupBy('ds.period_code')
+      .orderBy('ds.docdate', 'DESC')
+      .offset((page - 1) * limit)
+      .limit(limit);
+
+    // Filters
+    if (search) {
+      query.andWhere(
+        '(ds.so_code ILIKE :search OR s.partnerCode ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    if (dateFrom) {
+      query.andWhere('ds.docdate >= :dateFrom', { dateFrom });
+    }
+
+    if (dateTo) {
+      query.andWhere('ds.docdate <= :dateTo', { dateTo });
+    }
+
+    if (brand) {
+      query.andWhere('ds.brand = :brand', { brand });
+    }
+
+    // Get results as raw datafindPaymentMethodByCode
+    const results = await query.getRawMany();
+
+    // Fetch ma_dvcs for all branch codes
+    const branchCodes = new Set<string>();
+    results.forEach((row: any) => {
+      if (row.branch_code_cashio) branchCodes.add(row.branch_code_cashio);
+      if (row.branchCode) branchCodes.add(row.branchCode);
+    });
+
+    const departmentMap =
+      branchCodes.size > 0
+        ? await this.loyaltyService.fetchLoyaltyDepartments(
+            Array.from(branchCodes),
+          )
+        : new Map();
+
+    // Fetch payment methods
+    const fopSysCodes = new Set<string>();
+    results.forEach((row: any) => {
+      if (row.fop_syscode) fopSysCodes.add(row.fop_syscode);
+    });
+
+    const paymentMethodMap = new Map<string, any>();
+    if (fopSysCodes.size > 0) {
+      await Promise.all(
+        Array.from(fopSysCodes).map(async (code) => {
+          const pm = await this.categoryService.findPaymentMethodByCode(code);
+          if (pm) {
+            paymentMethodMap.set(code, pm);
+          }
+        }),
+      );
+    }
+
+    // Map ma_dvcs and payment info to results
+    const enrichedResults = results.map((row: any) => {
+      const cashioDept = departmentMap.get(row.branch_code_cashio);
+      const saleDept = departmentMap.get(row.branchCode);
+      const paymentMethod = paymentMethodMap.get(row.fop_syscode);
+
+      // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
+      const periodCode = row.period_code
+        ? row.period_code.split('/').pop()
+        : null;
+
+      return {
+        ...row,
+        period_code: periodCode,
+        ma_dvcs_cashio: cashioDept?.ma_dvcs || null,
+        ma_dvcs_sale: saleDept?.ma_dvcs || null,
+        ma_doi_tac_payment: getSupplierCode(paymentMethod?.maDoiTac) || null,
+      };
+    });
+
+    // Get total count
+    const countQuery = this.dailyCashioRepository
+      .createQueryBuilder('ds')
+      .innerJoin(Sale, 's', 'ds.so_code = s.docCode');
+
+    if (search) {
+      countQuery.andWhere(
+        '(ds.so_code ILIKE :search OR s.partnerCode ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+    if (dateFrom) {
+      countQuery.andWhere('ds.docdate >= :dateFrom', { dateFrom });
+    }
+    if (dateTo) {
+      countQuery.andWhere('ds.docdate <= :dateTo', { dateTo });
+    }
+    if (brand) {
+      countQuery.andWhere('ds.brand = :brand', { brand });
+    }
+
+    const totalResult = await countQuery
+      .select('COUNT(DISTINCT ds.id)', 'count')
+      .getRawOne();
+    const total = parseInt(totalResult?.count || 0);
+
+    return {
+      data: enrichedResults as PaymentData[],
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async getStatistics(options: {
+    dateFrom?: string;
+    dateTo?: string;
+    brand?: string;
+  }) {
+    const { dateFrom, dateTo, brand } = options;
+
+    const query = this.dailyCashioRepository
+      .createQueryBuilder('cashio')
+      .select('SUM(cashio.total_in)', 'totalRevenue')
+      .addSelect('COUNT(DISTINCT cashio.so_code)', 'totalOrders')
+      .addSelect('COUNT(*)', 'totalTransactions');
+
+    if (dateFrom) {
+      query.andWhere('cashio.docdate >= :dateFrom', { dateFrom });
+    }
+
+    if (dateTo) {
+      query.andWhere('cashio.docdate <= :dateTo', { dateTo });
+    }
+
+    if (brand) {
+      query.andWhere('cashio.brand = :brand', { brand });
+    }
+
+    const result = await query.getRawOne();
+
+    return {
+      totalRevenue: parseFloat(result.totalRevenue || 0),
+      totalOrders: parseInt(result.totalOrders || 0),
+      totalTransactions: parseInt(result.totalTransactions || 0),
+    };
+  }
+
+  async getPaymentMethods(options: {
+    dateFrom?: string;
+    dateTo?: string;
+    brand?: string;
+  }) {
+    const { dateFrom, dateTo, brand } = options;
+
+    const query = this.dailyCashioRepository
+      .createQueryBuilder('cashio')
+      .select('cashio.fop_syscode', 'paymentMethod')
+      .addSelect('cashio.fop_description', 'description')
+      .addSelect('SUM(cashio.total_in)', 'totalAmount')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('cashio.fop_syscode')
+      .addGroupBy('cashio.fop_description')
+      .orderBy('SUM(cashio.total_in)', 'DESC');
+
+    if (dateFrom) {
+      query.andWhere('cashio.docdate >= :dateFrom', { dateFrom });
+    }
+
+    if (dateTo) {
+      query.andWhere('cashio.docdate <= :dateTo', { dateTo });
+    }
+
+    if (brand) {
+      query.andWhere('cashio.brand = :brand', { brand });
+    }
+
+    const results = await query.getRawMany();
+
+    return results.map((r) => ({
+      paymentMethod: r.paymentMethod,
+      description: r.description,
+      totalAmount: parseFloat(r.totalAmount || 0),
+      count: parseInt(r.count || 0),
+    }));
+  }
+}
