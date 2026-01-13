@@ -388,14 +388,35 @@ export class SyncService {
                   `[SalesService] Tạo mới sale ${order.docCode}/${saleItem.itemCode}: ` +
                     `ordertype_name raw="${saleItem.ordertype_name}" (type: ${typeof saleItem.ordertype_name}), final="${finalOrderTypeNameForNew}"`,
                 );
-                const newSale = this.saleRepository.create({
+                // Kiểm tra xem sale đã tồn tại chưa (Idempotency Check)
+                let existingSale: Sale | null = null;
+
+                if (isTachThe) {
+                  // Với đơn tách thẻ, cần check cả qty vì có thể có 2 dòng cùng itemCode (-1 và 1)
+                  existingSale = await this.saleRepository.findOne({
+                    where: {
+                      docCode: order.docCode,
+                      itemCode: saleItem.itemCode || '',
+                      qty: saleItem.qty || 0,
+                    },
+                  });
+                } else {
+                  // Với đơn thường, check docCode + itemCode
+                  existingSale = await this.saleRepository.findOne({
+                    where: {
+                      docCode: order.docCode,
+                      itemCode: saleItem.itemCode || '',
+                    },
+                  });
+                }
+
+                // Dữ liệu cần lưu/update
+                const saleData: Partial<Sale> = {
                   docCode: order.docCode,
                   docDate: new Date(order.docDate),
                   branchCode: order.branchCode,
                   docSourceType: order.docSourceType,
                   ordertype: saleItem.ordertype,
-                  // Luôn lưu ordertypeName, kể cả khi là undefined (để lưu từ Zappy API)
-                  // Nếu ordertypeName là empty string, set thành undefined
                   ordertypeName: finalOrderTypeNameForNew,
                   description: saleItem.description,
                   partnerCode: saleItem.partnerCode,
@@ -420,26 +441,20 @@ export class SyncService {
                   paid_by_voucher_ecode_ecoin_bp:
                     saleItem.paid_by_voucher_ecode_ecoin_bp,
                   maCa: saleItem.shift_code,
-                  // Validate saleperson_id để tránh NaN
                   saleperson_id: this.validateInteger(saleItem.saleperson_id),
                   partner_name: saleItem.partner_name,
                   order_source: saleItem.order_source,
-                  // Lưu mvc_serial vào maThe
                   maThe: saleItem.mvc_serial,
-                  // Category fields
                   cat1: saleItem.cat1,
                   cat2: saleItem.cat2,
                   cat3: saleItem.cat3,
                   catcode1: saleItem.catcode1,
                   catcode2: saleItem.catcode2,
                   catcode3: saleItem.catcode3,
-                  // Luôn lưu productType, kể cả khi là null (để lưu từ Zappy API)
-                  // Nếu productType là empty string, set thành null
                   productType:
                     productType && productType.trim() !== ''
                       ? productType.trim()
                       : null,
-                  // Enrich voucher data từ get_daily_cash
                   voucherDp1: voucherRefno,
                   thanhToanVoucher:
                     voucherAmount && voucherAmount > 0
@@ -447,11 +462,27 @@ export class SyncService {
                       : undefined,
                   customer: customer,
                   brand: brand,
-                  isProcessed: false,
-                  statusAsys: statusAsys, // Set statusAsys: true nếu sản phẩm tồn tại, false nếu 404
+                  // Giữ nguyên isProcessed nếu update
+                  isProcessed: existingSale ? existingSale.isProcessed : false,
+                  statusAsys: statusAsys,
                   type_sale: 'RETAIL',
-                } as Partial<Sale>);
-                await this.saleRepository.save(newSale);
+                };
+
+                if (existingSale) {
+                  // UPDATE: Merge dữ liệu mới vào record cũ
+                  this.logger.log(
+                    `[SalesService] Cập nhật sale ${order.docCode}/${saleItem.itemCode} (ID: ${existingSale.id})`,
+                  );
+                  await this.saleRepository.update(existingSale.id, saleData);
+                } else {
+                  // CREATE MỚI
+                  this.logger.log(
+                    `[SalesService] Tạo mới sale ${order.docCode}/${saleItem.itemCode}`,
+                  );
+                  const newSale = this.saleRepository.create(saleData);
+                  await this.saleRepository.save(newSale);
+                }
+
                 salesCount++;
               } catch (saleError: any) {
                 const errorMsg = `Lỗi khi lưu sale ${order.docCode}/${saleItem.itemCode}: ${saleError?.message || saleError}`;
@@ -685,17 +716,15 @@ export class SyncService {
       for (let index = 0; index < stockTransData.length; index++) {
         const item = stockTransData[index];
         try {
-          // Tạo compositeKey với timestamp + index để đảm bảo unique cho mỗi record
-          // Ngay cả khi có nhiều records giống nhau, mỗi record vẫn có unique key
-          const timestamp = Date.now();
-          const uniqueId = `${timestamp}_${index}_${Math.random().toString(36).substring(2, 9)}`;
+          // Tạo compositeKey dựa trên nội dung để đảm bảo tính duy nhất (Deterministic)
+          // Loại bỏ timestamp và random để đảm bảo idempotency
           const compositeKey = [
             item.doccode || '',
             item.item_code || '',
             (item.qty || 0).toString(),
             item.stock_code || '',
-            item.so_code || 'null',
-            uniqueId, // Timestamp + index + random để đảm bảo unique
+            item.iotype || '', // Thêm iotype để phân biệt nhập/xuất
+            item.batchserial || '', // Thêm batchserial nếu có
           ].join('|');
 
           // Lấy materialCode từ Loyalty API
@@ -726,11 +755,27 @@ export class SyncService {
             compositeKey: compositeKey,
           };
 
-          // Chỉ insert mới, không check duplicate
-          const newStockTransfer =
-            this.stockTransferRepository.create(stockTransferData);
-          await this.stockTransferRepository.save(newStockTransfer);
-          savedCount++;
+          // Kiểm tra xem đã tồn tại chưa
+          const existingTransfer = await this.stockTransferRepository.findOne({
+            where: { compositeKey },
+          });
+
+          if (existingTransfer) {
+            // UPDATE
+            this.logger.log(
+              `[Stock Transfer] Cập nhật record ${item.doccode}/${item.item_code} (ID: ${existingTransfer.id})`,
+            );
+            await this.stockTransferRepository.update(
+              existingTransfer.id,
+              stockTransferData,
+            );
+          } else {
+            // CREATE MỚI
+            const newStockTransfer =
+              this.stockTransferRepository.create(stockTransferData);
+            await this.stockTransferRepository.save(newStockTransfer);
+            savedCount++;
+          }
         } catch (itemError: any) {
           const errorMsg = `Lỗi khi lưu stock transfer ${item.doccode}/${item.item_code}: ${itemError?.message || itemError}`;
           this.logger.error(`[Stock Transfer] ${errorMsg}`);
