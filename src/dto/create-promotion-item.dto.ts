@@ -75,4 +75,3 @@ export class UpdatePromotionItemDto extends CreatePromotionItemDto {
   @IsString()
   nguoiSua?: string;
 }
-

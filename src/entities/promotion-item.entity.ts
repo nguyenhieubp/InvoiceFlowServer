@@ -71,4 +71,3 @@ export class PromotionItem {
   @UpdateDateColumn()
   ngaySua: Date;
 }
-

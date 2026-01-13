@@ -15,4 +15,3 @@ import { SalesModule } from '../sales/sales.module';
   exports: [FastApiInvoiceService],
 })
 export class FastApiInvoicesModule {}
-

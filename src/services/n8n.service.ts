@@ -32,7 +32,9 @@ export class N8nService {
       });
       return response.data;
     } catch (error: any) {
-      this.logger.error(`Error fetching card data for ${docCode}: ${error?.message || error}`);
+      this.logger.error(
+        `Error fetching card data for ${docCode}: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -61,7 +63,10 @@ export class N8nService {
       return response.data;
     } catch (getError: any) {
       // Nếu GET fail với 404 hoặc 405, thử POST
-      if (getError?.response?.status === 404 || getError?.response?.status === 405) {
+      if (
+        getError?.response?.status === 404 ||
+        getError?.response?.status === 405
+      ) {
         try {
           const response = await this.httpService.axiosRef.post(
             apiUrl,
@@ -71,15 +76,19 @@ export class N8nService {
                 'Content-Type': 'application/json',
               },
               timeout: 30000,
-            }
+            },
           );
           return response.data;
         } catch (postError: any) {
-          this.logger.error(`Error fetching card data (POST fallback) for ${docCode}: ${postError?.message || postError}`);
+          this.logger.error(
+            `Error fetching card data (POST fallback) for ${docCode}: ${postError?.message || postError}`,
+          );
           return null;
         }
       } else {
-        this.logger.error(`Error fetching card data (GET) for ${docCode}: ${getError?.message || getError}`);
+        this.logger.error(
+          `Error fetching card data (GET) for ${docCode}: ${getError?.message || getError}`,
+        );
         return null;
       }
     }
@@ -91,7 +100,11 @@ export class N8nService {
    * @returns Array of card data
    */
   parseCardData(cardResponse: any): any[] {
-    if (!cardResponse || !Array.isArray(cardResponse) || cardResponse.length === 0) {
+    if (
+      !cardResponse ||
+      !Array.isArray(cardResponse) ||
+      cardResponse.length === 0
+    ) {
       return [];
     }
 
@@ -118,20 +131,24 @@ export class N8nService {
 
       if (saleQty < 0) {
         // Tìm item có qty < 0
-        const negativeItem = cardData.find((item: any) => Number(item.qty || 0) < 0);
+        const negativeItem = cardData.find(
+          (item: any) => Number(item.qty || 0) < 0,
+        );
         if (negativeItem?.issue_partner_code) {
           sale.issuePartnerCode = negativeItem.issue_partner_code;
         }
       } else if (saleQty > 0) {
         // Tìm item có qty > 0 và action = "ADJUST"
         const positiveItem = cardData.find(
-          (item: any) => Number(item.qty || 0) > 0 && item.action === 'ADJUST'
+          (item: any) => Number(item.qty || 0) > 0 && item.action === 'ADJUST',
         );
         if (positiveItem?.issue_partner_code) {
           sale.issuePartnerCode = positiveItem.issue_partner_code;
         } else {
           // Fallback: Tìm item có qty > 0 (không cần action = "ADJUST")
-          const positiveItemFallback = cardData.find((item: any) => Number(item.qty || 0) > 0);
+          const positiveItemFallback = cardData.find(
+            (item: any) => Number(item.qty || 0) > 0,
+          );
           if (positiveItemFallback?.issue_partner_code) {
             sale.issuePartnerCode = positiveItemFallback.issue_partner_code;
           }

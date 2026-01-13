@@ -71,7 +71,7 @@ export class InvoiceValidationService {
    * Sử dụng includes để xử lý các biến thể (có/không có khoảng trắng)
    */
   private isOrderTypeAllowed(ordertypeValue: string): boolean {
-    return this.ALLOWED_ORDER_TYPES.some(allowedType => {
+    return this.ALLOWED_ORDER_TYPES.some((allowedType) => {
       return ordertypeValue.includes(allowedType);
     });
   }
@@ -103,7 +103,7 @@ export class InvoiceValidationService {
     // Kiểm tra TẤT CẢ các sales trong đơn hàng
     // Tất cả các sales phải có order type thuộc danh sách được phép
     const allowedTypesStr = this.getAllowedOrderTypesDisplay();
-    
+
     for (const sale of orderData.sales) {
       const ordertypeName = sale?.ordertypeName || sale?.ordertype || '';
       const ordertypeValue = String(ordertypeName).trim();
@@ -114,9 +114,9 @@ export class InvoiceValidationService {
 
       if (!isAllowed) {
         const errorMessage = `Chỉ cho phép tạo hóa đơn cho đơn hàng có Loại thuộc: [${allowedTypesStr}]. Đơn hàng ${orderData.docCode} có Loại = "${ordertypeName}"`;
-        
+
         this.logger.warn(`[InvoiceValidation] ${errorMessage}`);
-        
+
         return {
           success: false,
           message: errorMessage,
@@ -127,9 +127,12 @@ export class InvoiceValidationService {
 
     // Tất cả các sales đều hợp lệ
     const firstSale = orderData.sales[0];
-    const ordertypeName = firstSale?.ordertypeName || firstSale?.ordertype || '';
-    this.logger.debug(`[InvoiceValidation] Đơn hàng ${orderData.docCode} với Loại = "${ordertypeName}" được phép tạo hóa đơn`);
-    
+    const ordertypeName =
+      firstSale?.ordertypeName || firstSale?.ordertype || '';
+    this.logger.debug(
+      `[InvoiceValidation] Đơn hàng ${orderData.docCode} với Loại = "${ordertypeName}" được phép tạo hóa đơn`,
+    );
+
     return {
       success: true,
       orderType: ordertypeName,
@@ -144,7 +147,9 @@ export class InvoiceValidationService {
     const normalized = String(orderType).trim();
     if (normalized && !this.ALLOWED_ORDER_TYPES.includes(normalized)) {
       this.ALLOWED_ORDER_TYPES.push(normalized);
-      this.logger.log(`[InvoiceValidation] Đã thêm order type "${normalized}" vào danh sách được phép`);
+      this.logger.log(
+        `[InvoiceValidation] Đã thêm order type "${normalized}" vào danh sách được phép`,
+      );
     }
   }
 
@@ -157,7 +162,9 @@ export class InvoiceValidationService {
     const index = this.ALLOWED_ORDER_TYPES.indexOf(normalized);
     if (index > -1) {
       this.ALLOWED_ORDER_TYPES.splice(index, 1);
-      this.logger.log(`[InvoiceValidation] Đã xóa order type "${normalized}" khỏi danh sách được phép`);
+      this.logger.log(
+        `[InvoiceValidation] Đã xóa order type "${normalized}" khỏi danh sách được phép`,
+      );
     }
   }
 
@@ -169,4 +176,3 @@ export class InvoiceValidationService {
     return [...this.ALLOWED_ORDER_TYPES];
   }
 }
-

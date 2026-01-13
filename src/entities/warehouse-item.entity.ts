@@ -44,4 +44,3 @@ export class WarehouseItem {
   @UpdateDateColumn()
   ngaySua: Date; // Ngày sửa
 }
-

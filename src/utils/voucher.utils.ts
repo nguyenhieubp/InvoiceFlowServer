@@ -15,7 +15,7 @@ export function calculateMaCk05(
   sale: any,
   productType: string | null | undefined,
   isGift: boolean,
-  brand: string | null | undefined
+  brand: string | null | undefined,
 ): string | null {
   if (!sale) return null;
 
@@ -33,17 +33,17 @@ export function calculateMaCk05(
   switch (brandLower) {
     case 'yaman':
       return calculateMaCk05Yaman(productType);
-    
+
     case 'facialbar':
     case 'f3':
       return calculateMaCk05Facialbar(productType);
-    
+
     case 'labhair':
       return calculateMaCk05Labhair(productType, isGift);
-    
+
     case 'menard':
       return calculateMaCk05Menard(productType, isGift);
-    
+
     default:
       return null;
   }
@@ -59,7 +59,8 @@ export function calculateMaCk05FromSale(sale: any): string | null {
 
   // Lấy productType và isGift từ sale bằng helper từ SalesUtils
   // Chú ý: Cần import SalesUtils nếu chưa có, hoặc gọi trực tiếp logic
-  const productType = sale.productType ||
+  const productType =
+    sale.productType ||
     sale.producttype ||
     sale.product?.productType ||
     sale.product?.producttype ||
@@ -74,7 +75,9 @@ export function calculateMaCk05FromSale(sale: any): string | null {
 /**
  * Tính mã CK05 cho brand Yaman
  */
-function calculateMaCk05Yaman(productType: string | null | undefined): string | null {
+function calculateMaCk05Yaman(
+  productType: string | null | undefined,
+): string | null {
   if (productType === 'I') {
     return 'YVC.HB';
   }
@@ -87,7 +90,9 @@ function calculateMaCk05Yaman(productType: string | null | undefined): string | 
 /**
  * Tính mã CK05 cho brand Facialbar/F3
  */
-function calculateMaCk05Facialbar(productType: string | null | undefined): string | null {
+function calculateMaCk05Facialbar(
+  productType: string | null | undefined,
+): string | null {
   if (productType === 'I') {
     return 'FBV TT VCDV';
   }
@@ -102,7 +107,7 @@ function calculateMaCk05Facialbar(productType: string | null | undefined): strin
  */
 function calculateMaCk05Labhair(
   productType: string | null | undefined,
-  isGift: boolean
+  isGift: boolean,
 ): string | null {
   if (productType === 'I') {
     if (isGift) {
@@ -121,7 +126,7 @@ function calculateMaCk05Labhair(
  */
 function calculateMaCk05Menard(
   productType: string | null | undefined,
-  isGift: boolean
+  isGift: boolean,
 ): string | null {
   if (productType === 'I') {
     if (isGift) {

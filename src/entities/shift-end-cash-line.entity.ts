@@ -15,7 +15,9 @@ export class ShiftEndCashLine {
   id: string;
 
   // Relationship với ShiftEndCash
-  @ManyToOne(() => ShiftEndCash, (shiftEndCash) => shiftEndCash.lines, { onDelete: 'CASCADE' })
+  @ManyToOne(() => ShiftEndCash, (shiftEndCash) => shiftEndCash.lines, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'shiftEndCashId' })
   shiftEndCash: ShiftEndCash;
 
@@ -56,4 +58,3 @@ export class ShiftEndCashLine {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

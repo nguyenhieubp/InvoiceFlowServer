@@ -79,4 +79,3 @@ export class Invoice {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

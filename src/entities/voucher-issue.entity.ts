@@ -44,7 +44,13 @@ export class VoucherIssue {
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   val: number; // 150000
 
-  @Column({ type: 'decimal', precision: 5, scale: 2, default: 0, nullable: true })
+  @Column({
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    default: 0,
+    nullable: true,
+  })
   percent: number | null; // 0
 
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
@@ -141,7 +147,10 @@ export class VoucherIssue {
   applyfor_wso: string | null;
 
   // Relationship với details
-  @OneToMany(() => VoucherIssueDetail, (detail) => detail.voucherIssue, { cascade: true, eager: false })
+  @OneToMany(() => VoucherIssueDetail, (detail) => detail.voucherIssue, {
+    cascade: true,
+    eager: false,
+  })
   details: VoucherIssueDetail[];
 
   // Metadata
@@ -161,4 +170,3 @@ export class VoucherIssue {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

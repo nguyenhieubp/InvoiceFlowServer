@@ -15,7 +15,9 @@ export class PromotionLine {
   id: string;
 
   // Relationship với Promotion
-  @ManyToOne(() => Promotion, (promotion) => promotion.lines, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Promotion, (promotion) => promotion.lines, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'promotionId' })
   promotion: Promotion;
 
@@ -93,4 +95,3 @@ export class PromotionLine {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

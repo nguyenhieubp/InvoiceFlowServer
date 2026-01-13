@@ -244,7 +244,7 @@ export async function formatSaleForFrontend(
       Number(sale.paid_by_voucher_ecode_ecoin_bp || 0);
 
     let calcTienHangGoc = Number(
-      (sale as any).mn_linetotal || sale.linetotal || sale.tienHang || 0,
+      sale.mn_linetotal || sale.linetotal || sale.tienHang || 0,
     );
     if (calcTienHangGoc === 0) {
       calcTienHangGoc = tienHang + tongChietKhau;

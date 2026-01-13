@@ -34,4 +34,3 @@ export class WarehouseCodeMapping {
   @UpdateDateColumn()
   ngaySua: Date; // Ngày sửa
 }
-

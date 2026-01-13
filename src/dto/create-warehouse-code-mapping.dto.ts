@@ -23,4 +23,3 @@ export class UpdateWarehouseCodeMappingDto extends CreateWarehouseCodeMappingDto
   @IsString()
   nguoiSua?: string;
 }
-

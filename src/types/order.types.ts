@@ -71,4 +71,3 @@ export interface Order {
   isProcessed: boolean;
   sales?: SaleItem[];
 }
-

@@ -19,7 +19,9 @@ export function getDocCodesForStockTransfer(docCodes: string[]): string[] {
     // Nếu là đơn trả lại (RT), thêm mã đơn gốc (SO) vào danh sách
     if (docCode.startsWith('RT')) {
       // RT33.00121928_1 -> SO33.00121928 (chuyển RT thành SO, bỏ _1)
-      const originalOrderCode = docCode.replace(/^RT/, 'SO').replace(/_\d+$/, '');
+      const originalOrderCode = docCode
+        .replace(/^RT/, 'SO')
+        .replace(/_\d+$/, '');
       result.add(originalOrderCode);
     }
   }
@@ -37,7 +39,7 @@ export function getDocCodesForStockTransfer(docCodes: string[]): string[] {
 export function buildStockTransferMaps(
   stockTransfers: StockTransfer[],
   loyaltyProductMap: Map<string, any>,
-  docCodes: string[]
+  docCodes: string[],
 ): {
   stockTransferMap: Map<string, StockTransfer[]>;
   stockTransferByDocCodeMap: Map<string, StockTransfer[]>;
@@ -46,8 +48,11 @@ export function buildStockTransferMaps(
   const stockTransferByDocCodeMap = new Map<string, StockTransfer[]>();
 
   for (const transfer of stockTransfers) {
-    const transferLoyaltyProduct = transfer.itemCode ? loyaltyProductMap.get(transfer.itemCode) : null;
-    const materialCode = transfer.materialCode || transferLoyaltyProduct?.materialCode;
+    const transferLoyaltyProduct = transfer.itemCode
+      ? loyaltyProductMap.get(transfer.itemCode)
+      : null;
+    const materialCode =
+      transfer.materialCode || transferLoyaltyProduct?.materialCode;
 
     if (!materialCode) continue;
 
@@ -57,20 +62,28 @@ export function buildStockTransferMaps(
     if (!stockTransferMap.has(key)) stockTransferMap.set(key, []);
     stockTransferMap.get(key)!.push(transfer);
 
-    if (!stockTransferByDocCodeMap.has(orderDocCode)) stockTransferByDocCodeMap.set(orderDocCode, []);
+    if (!stockTransferByDocCodeMap.has(orderDocCode))
+      stockTransferByDocCodeMap.set(orderDocCode, []);
     stockTransferByDocCodeMap.get(orderDocCode)!.push(transfer);
 
     // Xử lý đơn trả lại
-    if (orderDocCode.startsWith('SO') && docCodes.some(docCode => docCode.startsWith('RT'))) {
+    if (
+      orderDocCode.startsWith('SO') &&
+      docCodes.some((docCode) => docCode.startsWith('RT'))
+    ) {
       for (const docCode of docCodes) {
         if (docCode.startsWith('RT')) {
-          const originalOrderCode = docCode.replace(/^RT/, 'SO').replace(/_\d+$/, '');
+          const originalOrderCode = docCode
+            .replace(/^RT/, 'SO')
+            .replace(/_\d+$/, '');
           if (originalOrderCode === orderDocCode) {
             const returnKey = `${docCode}_${materialCode}`;
-            if (!stockTransferMap.has(returnKey)) stockTransferMap.set(returnKey, []);
+            if (!stockTransferMap.has(returnKey))
+              stockTransferMap.set(returnKey, []);
             stockTransferMap.get(returnKey)!.push(transfer);
 
-            if (!stockTransferByDocCodeMap.has(docCode)) stockTransferByDocCodeMap.set(docCode, []);
+            if (!stockTransferByDocCodeMap.has(docCode))
+              stockTransferByDocCodeMap.set(docCode, []);
             stockTransferByDocCodeMap.get(docCode)!.push(transfer);
           }
         }
@@ -89,7 +102,7 @@ export function findMatchingStockTransfer(
   docCode: string,
   stockTransfers: StockTransfer[],
   saleMaterialCode?: string | null,
-  stockTransferMap?: Map<string, StockTransfer[]>
+  stockTransferMap?: Map<string, StockTransfer[]>,
 ): StockTransfer | null {
   const isReturnOrder = docCode.startsWith('RT');
   let originalOrderCode: string | null = null;
@@ -113,12 +126,19 @@ export function findMatchingStockTransfer(
   }
 
   if (sale.itemCode) {
-    let matched = stockTransfers.find(st => st.soCode === docCode && st.itemCode === sale.itemCode);
+    let matched = stockTransfers.find(
+      (st) => st.soCode === docCode && st.itemCode === sale.itemCode,
+    );
     if (!matched && isReturnOrder && originalOrderCode) {
-      matched = stockTransfers.find(st => st.soCode === originalOrderCode && st.itemCode === sale.itemCode);
+      matched = stockTransfers.find(
+        (st) =>
+          st.soCode === originalOrderCode && st.itemCode === sale.itemCode,
+      );
     }
     if (!matched && isReturnOrder && stockOutDocCode) {
-      matched = stockTransfers.find(st => st.docCode === stockOutDocCode && st.itemCode === sale.itemCode);
+      matched = stockTransfers.find(
+        (st) => st.docCode === stockOutDocCode && st.itemCode === sale.itemCode,
+      );
     }
     if (matched) return matched;
   }

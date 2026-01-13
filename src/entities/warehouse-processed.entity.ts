@@ -38,4 +38,3 @@ export class WarehouseProcessed {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

@@ -20,4 +20,3 @@ export interface StockTransferItem {
 export interface CreateStockTransferDto {
   data: StockTransferItem[];
 }
-

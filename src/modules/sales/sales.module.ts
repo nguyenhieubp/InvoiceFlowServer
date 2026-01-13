@@ -4,7 +4,6 @@ import { HttpModule } from '@nestjs/axios';
 import { SalesController } from './sales.controller';
 import { SalesService } from './sales.service';
 import { SalesQueryService } from './sales-query.service';
-import { SalesExportService } from './sales-export.service';
 import { SalesSyncService } from './sales-sync.service';
 import { SalesInvoiceService } from './sales-invoice.service';
 import { SalesWarehouseService } from './sales-warehouse.service';
@@ -51,7 +50,6 @@ import { SyncModule } from '../sync/sync.module';
     SalesService,
     // New specialized services
     SalesQueryService,
-    SalesExportService,
     SalesSyncService,
     SalesInvoiceService,
     SalesWarehouseService,
@@ -63,6 +61,14 @@ import { SyncModule } from '../sync/sync.module';
     InvoiceValidationService,
     N8nService,
   ],
-  exports: [SalesService, FastApiInvoiceFlowService],
+  exports: [
+    SalesService,
+    FastApiInvoiceFlowService,
+    // Export specialized services để có thể sử dụng ở module khác
+    SalesQueryService,
+    SalesSyncService,
+    SalesInvoiceService,
+    SalesWarehouseService,
+  ],
 })
 export class SalesModule {}

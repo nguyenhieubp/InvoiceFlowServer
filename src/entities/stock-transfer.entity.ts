@@ -83,4 +83,3 @@ export class StockTransfer {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

@@ -24,14 +24,33 @@ import { VoucherIssueDetail } from '../../entities/voucher-issue-detail.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Customer, Sale, DailyCashio, StockTransfer, WarehouseProcessed, ShiftEndCash, ShiftEndCashLine, RepackFormula, RepackFormulaItem, Promotion, PromotionLine, VoucherIssue, VoucherIssueDetail]),
+    TypeOrmModule.forFeature([
+      Customer,
+      Sale,
+      DailyCashio,
+      StockTransfer,
+      WarehouseProcessed,
+      ShiftEndCash,
+      ShiftEndCashLine,
+      RepackFormula,
+      RepackFormulaItem,
+      Promotion,
+      PromotionLine,
+      VoucherIssue,
+      VoucherIssueDetail,
+    ]),
     HttpModule,
     forwardRef(() => SalesModule),
   ],
   controllers: [SyncController],
-  providers: [SyncService, SyncTask, ZappyApiService, LoyaltyService, FastApiClientService],
+  providers: [
+    SyncService,
+    SyncTask,
+    ZappyApiService,
+    LoyaltyService,
+    FastApiClientService,
+  ],
   exports: [SyncService],
   // Import SalesModule để có thể inject FastApiInvoiceFlowService (đã export từ SalesModule)
 })
 export class SyncModule {}
-

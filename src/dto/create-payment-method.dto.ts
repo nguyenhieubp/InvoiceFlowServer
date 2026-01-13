@@ -19,4 +19,3 @@ export class UpdatePaymentMethodDto {
   bankUnit?: string;
   trangThai?: string;
 }
-

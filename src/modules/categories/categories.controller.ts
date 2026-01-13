@@ -13,16 +13,34 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CategoriesService } from './categories.service';
-import { CreateProductItemDto, UpdateProductItemDto } from '../../dto/create-product-item.dto';
-import { CreatePromotionItemDto, UpdatePromotionItemDto } from '../../dto/create-promotion-item.dto';
-import { CreateWarehouseItemDto, UpdateWarehouseItemDto } from '../../dto/create-warehouse-item.dto';
-import { CreateWarehouseCodeMappingDto, UpdateWarehouseCodeMappingDto } from '../../dto/create-warehouse-code-mapping.dto';
-import { CreatePaymentMethodDto, UpdatePaymentMethodDto } from '../../dto/create-payment-method.dto';
-import { CreateEcommerceCustomerDto, UpdateEcommerceCustomerDto } from '../../dto/create-ecommerce-customer.dto';
+import {
+  CreateProductItemDto,
+  UpdateProductItemDto,
+} from '../../dto/create-product-item.dto';
+import {
+  CreatePromotionItemDto,
+  UpdatePromotionItemDto,
+} from '../../dto/create-promotion-item.dto';
+import {
+  CreateWarehouseItemDto,
+  UpdateWarehouseItemDto,
+} from '../../dto/create-warehouse-item.dto';
+import {
+  CreateWarehouseCodeMappingDto,
+  UpdateWarehouseCodeMappingDto,
+} from '../../dto/create-warehouse-code-mapping.dto';
+import {
+  CreatePaymentMethodDto,
+  UpdatePaymentMethodDto,
+} from '../../dto/create-payment-method.dto';
+import {
+  CreateEcommerceCustomerDto,
+  UpdateEcommerceCustomerDto,
+} from '../../dto/create-ecommerce-customer.dto';
 
 @Controller('categories')
 export class CategoriesController {
-  constructor(private readonly categoriesService: CategoriesService) { }
+  constructor(private readonly categoriesService: CategoriesService) {}
 
   @Get('products')
   async findAll(
@@ -154,7 +172,8 @@ export class CategoriesController {
     }
 
     try {
-      const result = await this.categoriesService.importPromotionsFromExcel(file);
+      const result =
+        await this.categoriesService.importPromotionsFromExcel(file);
       return {
         message: `Import thành công ${result.success}/${result.total} bản ghi`,
         ...result,
@@ -226,7 +245,8 @@ export class CategoriesController {
     }
 
     try {
-      const result = await this.categoriesService.importWarehousesFromExcel(file);
+      const result =
+        await this.categoriesService.importWarehousesFromExcel(file);
       return {
         message: `Import thành công ${result.success}/${result.total} bản ghi`,
         ...result,
@@ -285,7 +305,9 @@ export class CategoriesController {
   }
 
   @Post('warehouse-code-mappings')
-  async createWarehouseCodeMapping(@Body() createDto: CreateWarehouseCodeMappingDto) {
+  async createWarehouseCodeMapping(
+    @Body() createDto: CreateWarehouseCodeMappingDto,
+  ) {
     return this.categoriesService.createWarehouseCodeMapping(createDto);
   }
 
@@ -305,7 +327,9 @@ export class CategoriesController {
 
   @Post('warehouse-code-mappings/import')
   @UseInterceptors(FileInterceptor('file'))
-  async importWarehouseCodeMappingsExcel(@UploadedFile() file: Express.Multer.File) {
+  async importWarehouseCodeMappingsExcel(
+    @UploadedFile() file: Express.Multer.File,
+  ) {
     if (!file) {
       throw new BadRequestException('File không được tìm thấy');
     }
@@ -324,7 +348,8 @@ export class CategoriesController {
     }
 
     try {
-      const result = await this.categoriesService.importWarehouseCodeMappingsFromExcel(file);
+      const result =
+        await this.categoriesService.importWarehouseCodeMappingsFromExcel(file);
       return {
         message: `Import thành công ${result.success}/${result.total} bản ghi`,
         ...result,
@@ -401,7 +426,8 @@ export class CategoriesController {
     }
 
     try {
-      const result = await this.categoriesService.importPaymentMethodsFromExcel(file);
+      const result =
+        await this.categoriesService.importPaymentMethodsFromExcel(file);
       return {
         message: `Import thành công ${result.success}/${result.total} bản ghi`,
         ...result,
@@ -499,7 +525,9 @@ export class CategoriesController {
 
   @Post('ecommerce-customers/import')
   @UseInterceptors(FileInterceptor('file'))
-  async importEcommerceCustomersExcel(@UploadedFile() file: Express.Multer.File) {
+  async importEcommerceCustomersExcel(
+    @UploadedFile() file: Express.Multer.File,
+  ) {
     if (!file) {
       throw new BadRequestException('File không được tìm thấy');
     }
@@ -518,7 +546,8 @@ export class CategoriesController {
     }
 
     try {
-      const result = await this.categoriesService.importEcommerceCustomersFromExcel(file);
+      const result =
+        await this.categoriesService.importEcommerceCustomersFromExcel(file);
       return {
         message: `Import thành công ${result.success}/${result.total} bản ghi`,
         ...result,
@@ -529,6 +558,4 @@ export class CategoriesController {
       );
     }
   }
-
 }
-

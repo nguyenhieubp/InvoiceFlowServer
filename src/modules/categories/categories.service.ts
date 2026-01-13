@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, Like, ILike, DataSource, In } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
@@ -11,12 +16,30 @@ import { PaymentMethod } from '../../entities/payment-method.entity';
 import { Customer } from '../../entities/customer.entity';
 import { Sale } from '../../entities/sale.entity';
 import { EcommerceCustomer } from '../../entities/ecommerce-customer.entity';
-import { CreateProductItemDto, UpdateProductItemDto } from '../../dto/create-product-item.dto';
-import { CreatePromotionItemDto, UpdatePromotionItemDto } from '../../dto/create-promotion-item.dto';
-import { CreateWarehouseItemDto, UpdateWarehouseItemDto } from '../../dto/create-warehouse-item.dto';
-import { CreateWarehouseCodeMappingDto, UpdateWarehouseCodeMappingDto } from '../../dto/create-warehouse-code-mapping.dto';
-import { CreatePaymentMethodDto, UpdatePaymentMethodDto } from '../../dto/create-payment-method.dto';
-import { CreateEcommerceCustomerDto, UpdateEcommerceCustomerDto } from '../../dto/create-ecommerce-customer.dto';
+import {
+  CreateProductItemDto,
+  UpdateProductItemDto,
+} from '../../dto/create-product-item.dto';
+import {
+  CreatePromotionItemDto,
+  UpdatePromotionItemDto,
+} from '../../dto/create-promotion-item.dto';
+import {
+  CreateWarehouseItemDto,
+  UpdateWarehouseItemDto,
+} from '../../dto/create-warehouse-item.dto';
+import {
+  CreateWarehouseCodeMappingDto,
+  UpdateWarehouseCodeMappingDto,
+} from '../../dto/create-warehouse-code-mapping.dto';
+import {
+  CreatePaymentMethodDto,
+  UpdatePaymentMethodDto,
+} from '../../dto/create-payment-method.dto';
+import {
+  CreateEcommerceCustomerDto,
+  UpdateEcommerceCustomerDto,
+} from '../../dto/create-ecommerce-customer.dto';
 import * as XLSX from 'xlsx';
 
 @Injectable()
@@ -43,13 +66,9 @@ export class CategoriesService {
     @InjectDataSource()
     private dataSource: DataSource,
     private httpService: HttpService,
-  ) { }
+  ) {}
 
-  async findAll(options: {
-    page?: number;
-    limit?: number;
-    search?: string;
-  }) {
+  async findAll(options: { page?: number; limit?: number; search?: string }) {
     const { page = 1, limit = 50, search } = options;
 
     const query = this.productItemRepository
@@ -97,7 +116,10 @@ export class CategoriesService {
     return await this.productItemRepository.save(product);
   }
 
-  async update(id: string, updateDto: UpdateProductItemDto): Promise<ProductItem> {
+  async update(
+    id: string,
+    updateDto: UpdateProductItemDto,
+  ): Promise<ProductItem> {
     const product = await this.findOne(id);
 
     Object.assign(product, updateDto);
@@ -117,11 +139,19 @@ export class CategoriesService {
     errors: Array<{ row: number; error: string }>;
   }> {
     try {
-      const workbook = XLSX.read(file.buffer, { type: 'buffer', cellDates: false, cellNF: false, cellText: false });
+      const workbook = XLSX.read(file.buffer, {
+        type: 'buffer',
+        cellDates: false,
+        cellNF: false,
+        cellText: false,
+      });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
       // Sử dụng raw: true để lấy giá trị gốc (số), sau đó convert sang string nếu cần
-      const data = XLSX.utils.sheet_to_json(worksheet, { raw: true, defval: null }) as any[];
+      const data = XLSX.utils.sheet_to_json(worksheet, {
+        raw: true,
+        defval: null,
+      }) as Record<string, any>[];
 
       const errors: Array<{ row: number; error: string }> = [];
       let success = 0;
@@ -140,7 +170,11 @@ export class CategoriesService {
         nhom: ['nhóm', 'nhom'],
         line: ['line'],
         maERP: ['mã erp', 'ma erp', 'mã erp'],
-        maVatTuNhaCungCap: ['mã vật tư nhà cung cấp', 'ma vat tu nha cung cap', 'mã vật tư nhà cung cấp'],
+        maVatTuNhaCungCap: [
+          'mã vật tư nhà cung cấp',
+          'ma vat tu nha cung cap',
+          'mã vật tư nhà cung cấp',
+        ],
         maVatTu: ['mã vật tư', 'ma vat tu', 'mã vật tư', 'mã vt', 'ma vt'],
         tenVatTu: ['tên vật tư', 'ten vat tu', 'tên vật tư'],
         tenKhac: ['tên khác', 'ten khac'],
@@ -173,23 +207,46 @@ export class CategoriesService {
         tkChiPhiKhuyenMai: ['tk chi phí khuyến mãi', 'tk chi phi khuyen mai'],
         kieuLo: ['kiểu lô', 'kieu lo'],
         cachXuat: ['cách xuất', 'cach xuat'],
-        vongDoiSP: ['vòng đời sp (số ngày)', 'vong doi sp (so ngay)', 'vòng đời sp'],
-        tgBaoHanh: ['tg bảo hành (số ngày)', 'tg bao hanh (so ngay)', 'thời gian bảo hành'],
-        choPhepTaoLoNgayKhiNhap: ['cho phép tạo lô ngay khi nhập', 'cho phep tao lo ngay khi nhap'],
+        vongDoiSP: [
+          'vòng đời sp (số ngày)',
+          'vong doi sp (so ngay)',
+          'vòng đời sp',
+        ],
+        tgBaoHanh: [
+          'tg bảo hành (số ngày)',
+          'tg bao hanh (so ngay)',
+          'thời gian bảo hành',
+        ],
+        choPhepTaoLoNgayKhiNhap: [
+          'cho phép tạo lô ngay khi nhập',
+          'cho phep tao lo ngay khi nhap',
+        ],
         abc: ['abc'],
-        soLuongTonToiThieu: ['số lượng tồn tối thiểu', 'so luong ton toi thieu'],
+        soLuongTonToiThieu: [
+          'số lượng tồn tối thiểu',
+          'so luong ton toi thieu',
+        ],
         soLuongTonToiDa: ['số lượng tồn tối đa', 'so luong ton toi da'],
         theTich: ['thể tích', 'the tich'],
         donViTinhTheTich: ['đơn vị tính thể tích', 'don vi tinh the tich'],
         khoiLuong: ['khối lượng', 'khoi luong'],
-        donViTinhKhoiLuong: ['đơn vị tính khối lượng', 'don vi tinh khoi luong'],
+        donViTinhKhoiLuong: [
+          'đơn vị tính khối lượng',
+          'don vi tinh khoi luong',
+        ],
         giaDichVu: ['giá dịch vụ', 'gia dich vu'],
         loaiHinhDichVu: ['loại hình dịch vụ', 'loai hinh dich vu'],
         maVatTuGoc: ['mã vật tư gốc', 'ma vat tu goc'],
         tkGiaVonBanLe: ['tk giá vốn bán lẻ', 'tk gia von ban le'],
         tkDoanhThuBanLe: ['tk doanh thu bán lẻ', 'tk doanh thu ban le'],
-        tkChiPhiKhauHaoCCDC: ['tk chi phí khấu hao ccdc', 'tk chi phi khau hao ccdc'],
-        tkChiPhiKhauHaoTSDC: ['tk chi phí khấu hao tsdc', 'tk chi phi khau hao tsdc'],
+        tkChiPhiKhauHaoCCDC: [
+          'tk chi phí khấu hao ccdc',
+          'tk chi phi khau hao ccdc',
+        ],
+        tkChiPhiKhauHaoTSDC: [
+          'tk chi phí khấu hao tsdc',
+          'tk chi phi khau hao tsdc',
+        ],
         tkDoanhThuHangNo: ['tk doanh thu hàng nợ', 'tk doanh thu hang no'],
         tkGiaVonHangNo: ['tk giá vốn hàng nợ', 'tk gia von hang no'],
         tkVatTuHangNo: ['tk vật tư hàng nợ', 'tk vat tu hang no'],
@@ -202,18 +259,18 @@ export class CategoriesService {
       // Mapping từ header Excel sang field của entity (cho backward compatibility)
       const fieldMapping: Record<string, string> = {
         'Mã nhãn hiệu': 'maNhanHieu',
-        'Loại': 'loai',
-        'Lớp': 'lop',
-        'Nhóm': 'nhom',
-        'Line': 'line',
+        Loại: 'loai',
+        Lớp: 'lop',
+        Nhóm: 'nhom',
+        Line: 'line',
         'Mã ERP': 'maERP',
         'Mã Vật tư nhà cung cấp': 'maVatTuNhaCungCap',
         'Mã vật tư': 'maVatTu',
         'Tên vật tư': 'tenVatTu',
         'Tên khác': 'tenKhac',
         'Tên (HD)': 'tenHD',
-        'Barcode': 'barcode',
-        'Đvt': 'dvt',
+        Barcode: 'barcode',
+        Đvt: 'dvt',
         'Nhiều Đvt': 'nhieuDvt',
         'Theo dõi tồn kho': 'theoDoiTonKho',
         'Theo dõi lô': 'theoDoiLo',
@@ -243,7 +300,7 @@ export class CategoriesService {
         'Vòng đời sp (số ngày)': 'vongDoiSP',
         'TG bảo hành (số ngày)': 'tgBaoHanh',
         'Cho phép tạo lô ngay khi nhập': 'choPhepTaoLoNgayKhiNhap',
-        'ABC': 'abc',
+        ABC: 'abc',
         'Số lượng tồn tối thiểu': 'soLuongTonToiThieu',
         'Số lượng tồn tối đa': 'soLuongTonToiDa',
         'Thể tích': 'theTich',
@@ -278,8 +335,10 @@ export class CategoriesService {
         if (typeof value === 'number') {
           // Kiểm tra NaN và Infinity
           if (isNaN(value) || !isFinite(value)) return undefined;
-          if (value === 1 || value === 1.0 || Math.abs(value - 1) < 0.0001) return true;
-          if (value === 0 || value === 0.0 || Math.abs(value) < 0.0001) return false;
+          if (value === 1 || value === 1.0 || Math.abs(value - 1) < 0.0001)
+            return true;
+          if (value === 0 || value === 0.0 || Math.abs(value) < 0.0001)
+            return false;
           return undefined;
         }
 
@@ -292,7 +351,10 @@ export class CategoriesService {
 
           // Bỏ qua các ký tự đặc biệt không hợp lệ (như $ü)
           // Chỉ xử lý nếu string chứa ký tự hợp lệ
-          if (!/^[\d\s\.,\-+eE]+$/.test(str) && !/^(true|false|yes|no|có|không|x|y|n|1|0)$/i.test(str)) {
+          if (
+            !/^[\d\s\.,\-+eE]+$/.test(str) &&
+            !/^(true|false|yes|no|có|không|x|y|n|1|0)$/i.test(str)
+          ) {
             // Nếu không phải số hoặc giá trị boolean text hợp lệ, return undefined
             return undefined;
           }
@@ -302,15 +364,38 @@ export class CategoriesService {
           // Thử parse thành số trước (để xử lý "1.0", " 1 ", "0", "0.0", etc.)
           const numValue = parseFloat(lowerStr);
           if (!isNaN(numValue) && isFinite(numValue)) {
-            if (numValue === 1 || numValue === 1.0 || Math.abs(numValue - 1) < 0.0001) return true;
-            if (numValue === 0 || numValue === 0.0 || Math.abs(numValue) < 0.0001) return false;
+            if (
+              numValue === 1 ||
+              numValue === 1.0 ||
+              Math.abs(numValue - 1) < 0.0001
+            )
+              return true;
+            if (
+              numValue === 0 ||
+              numValue === 0.0 ||
+              Math.abs(numValue) < 0.0001
+            )
+              return false;
           }
 
           // Xử lý các giá trị text
-          if (lowerStr === 'true' || lowerStr === 'yes' || lowerStr === 'có' || lowerStr === 'x' || lowerStr === 'y' || lowerStr === '1') {
+          if (
+            lowerStr === 'true' ||
+            lowerStr === 'yes' ||
+            lowerStr === 'có' ||
+            lowerStr === 'x' ||
+            lowerStr === 'y' ||
+            lowerStr === '1'
+          ) {
             return true;
           }
-          if (lowerStr === 'false' || lowerStr === 'no' || lowerStr === 'không' || lowerStr === 'n' || lowerStr === '0') {
+          if (
+            lowerStr === 'false' ||
+            lowerStr === 'no' ||
+            lowerStr === 'không' ||
+            lowerStr === 'n' ||
+            lowerStr === '0'
+          ) {
             return false;
           }
         }
@@ -321,7 +406,8 @@ export class CategoriesService {
 
       // Normalize number values
       const normalizeNumber = (value: any): number | undefined => {
-        if (value === null || value === undefined || value === '') return undefined;
+        if (value === null || value === undefined || value === '')
+          return undefined;
         if (typeof value === 'number') return value;
         const str = String(value).trim().replace(/,/g, '');
         const num = parseFloat(str);
@@ -332,7 +418,9 @@ export class CategoriesService {
       const normalizedMapping: Record<string, string> = {};
 
       // Thêm từ fieldMappingVariants (đã có nhiều biến thể)
-      for (const [fieldName, variants] of Object.entries(fieldMappingVariants)) {
+      for (const [fieldName, variants] of Object.entries(
+        fieldMappingVariants,
+      )) {
         for (const variant of variants) {
           normalizedMapping[normalizeHeader(variant)] = fieldName;
         }
@@ -349,13 +437,15 @@ export class CategoriesService {
       // Lấy danh sách headers thực tế từ Excel
       const actualHeaders = data.length > 0 ? Object.keys(data[0]) : [];
       this.logger.log(`Excel headers found: ${actualHeaders.join(', ')}`);
-      this.logger.log(`Looking for 'Mã vật tư' in normalized headers: ${normalizeHeader('Mã vật tư')}`);
+      this.logger.log(
+        `Looking for 'Mã vật tư' in normalized headers: ${normalizeHeader('Mã vật tư')}`,
+      );
 
       // Lọc bỏ các dòng trống trước khi xử lý và lưu lại index gốc
       const nonEmptyRowsWithIndex = data
         .map((row, index) => ({ row, originalIndex: index }))
         .filter(({ row }) => {
-          return !actualHeaders.every(header => {
+          return !actualHeaders.every((header) => {
             const value = row[header];
             if (value === null || value === undefined) return true;
             if (typeof value === 'string' && value.trim() === '') return true;
@@ -364,7 +454,10 @@ export class CategoriesService {
         });
 
       // Parse tất cả dữ liệu trước
-      const parsedProducts: Array<{ productData: Partial<ProductItem>; rowNumber: number }> = [];
+      const parsedProducts: Array<{
+        productData: Partial<ProductItem>;
+        rowNumber: number;
+      }> = [];
 
       for (let i = 0; i < nonEmptyRowsWithIndex.length; i++) {
         const { row, originalIndex } = nonEmptyRowsWithIndex[i];
@@ -380,18 +473,31 @@ export class CategoriesService {
             const normalizedHeader = normalizeHeader(actualHeader);
             const fieldName = normalizedMapping[normalizedHeader];
 
-            if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
+            if (
+              fieldName &&
+              row[actualHeader] !== undefined &&
+              row[actualHeader] !== null
+            ) {
               const rawValue = row[actualHeader];
 
               // Xử lý boolean fields trước (để xử lý cả giá trị 0)
-              if (fieldName.includes('theoDoi') || fieldName === 'nhieuDvt' || fieldName === 'suaTkVatTu' || fieldName === 'choPhepTaoLoNgayKhiNhap') {
+              if (
+                fieldName.includes('theoDoi') ||
+                fieldName === 'nhieuDvt' ||
+                fieldName === 'suaTkVatTu' ||
+                fieldName === 'choPhepTaoLoNgayKhiNhap'
+              ) {
                 const boolValue = normalizeBoolean(rawValue);
                 // Lưu cả true và false (chỉ bỏ qua khi undefined)
                 if (boolValue !== undefined) {
                   productData[fieldName] = boolValue;
-                  this.logger.debug(`Row ${rowNumber}: Set ${fieldName} = ${boolValue} (from rawValue: ${rawValue}, type: ${typeof rawValue})`);
+                  this.logger.debug(
+                    `Row ${rowNumber}: Set ${fieldName} = ${boolValue} (from rawValue: ${rawValue}, type: ${typeof rawValue})`,
+                  );
                 } else {
-                  this.logger.debug(`Row ${rowNumber}: Skip ${fieldName} (rawValue: ${rawValue}, type: ${typeof rawValue}, normalized: undefined)`);
+                  this.logger.debug(
+                    `Row ${rowNumber}: Skip ${fieldName} (rawValue: ${rawValue}, type: ${typeof rawValue}, normalized: undefined)`,
+                  );
                 }
                 continue; // Đã xử lý boolean, skip các xử lý khác
               }
@@ -427,7 +533,11 @@ export class CategoriesService {
           }
 
           // Validate required fields với thông báo chi tiết hơn
-          if (!productData.maVatTu || (typeof productData.maVatTu === 'string' && productData.maVatTu.trim() === '')) {
+          if (
+            !productData.maVatTu ||
+            (typeof productData.maVatTu === 'string' &&
+              productData.maVatTu.trim() === '')
+          ) {
             const availableHeaders = actualHeaders.join(', ');
             errors.push({
               row: rowNumber,
@@ -449,11 +559,13 @@ export class CategoriesService {
       }
 
       // Tối ưu: Load tất cả existing records trong một query
-      const maVatTuList = parsedProducts.map(p => p.productData.maVatTu).filter(Boolean) as string[];
+      const maVatTuList = parsedProducts
+        .map((p) => p.productData.maVatTu)
+        .filter(Boolean) as string[];
       const existingProducts = await this.productItemRepository.find({
         where: { maVatTu: In(maVatTuList) },
       });
-      const existingMap = new Map(existingProducts.map(p => [p.maVatTu, p]));
+      const existingMap = new Map(existingProducts.map((p) => [p.maVatTu, p]));
 
       // Batch processing: xử lý theo từng batch 1000 records
       const BATCH_SIZE = 1000;
@@ -470,7 +582,7 @@ export class CategoriesService {
 
           for (const { productData, rowNumber } of batch) {
             try {
-              const existing = existingMap.get(productData.maVatTu!);
+              const existing = existingMap.get(productData.maVatTu);
 
               if (existing) {
                 // Xóa record cũ
@@ -481,7 +593,9 @@ export class CategoriesService {
               const product = this.productItemRepository.create(productData);
               productsToSave.push(product);
             } catch (error: any) {
-              this.logger.error(`Error processing row ${rowNumber}: ${error.message}`);
+              this.logger.error(
+                `Error processing row ${rowNumber}: ${error.message}`,
+              );
               errors.push({
                 row: rowNumber,
                 error: error.message || 'Unknown error',
@@ -501,7 +615,9 @@ export class CategoriesService {
             success += productsToSave.length;
           }
 
-          this.logger.log(`Processed batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(parsedProducts.length / BATCH_SIZE)} (${productsToSave.length} records)`);
+          this.logger.log(
+            `Processed batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(parsedProducts.length / BATCH_SIZE)} (${productsToSave.length} records)`,
+          );
         }
 
         await queryRunner.commitTransaction();
@@ -570,7 +686,9 @@ export class CategoriesService {
     return promotion;
   }
 
-  async createPromotion(createDto: CreatePromotionItemDto): Promise<PromotionItem> {
+  async createPromotion(
+    createDto: CreatePromotionItemDto,
+  ): Promise<PromotionItem> {
     const promotion = this.promotionItemRepository.create({
       ...createDto,
       trangThai: createDto.trangThai || 'active',
@@ -579,7 +697,10 @@ export class CategoriesService {
     return await this.promotionItemRepository.save(promotion);
   }
 
-  async updatePromotion(id: string, updateDto: UpdatePromotionItemDto): Promise<PromotionItem> {
+  async updatePromotion(
+    id: string,
+    updateDto: UpdatePromotionItemDto,
+  ): Promise<PromotionItem> {
     const promotion = await this.findOnePromotion(id);
 
     Object.assign(promotion, updateDto);
@@ -599,11 +720,19 @@ export class CategoriesService {
     errors: Array<{ row: number; error: string }>;
   }> {
     try {
-      const workbook = XLSX.read(file.buffer, { type: 'buffer', cellDates: false, cellNF: false, cellText: false });
+      const workbook = XLSX.read(file.buffer, {
+        type: 'buffer',
+        cellDates: false,
+        cellNF: false,
+        cellText: false,
+      });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
       // Sử dụng raw: true để lấy giá trị gốc (số), sau đó convert sang string nếu cần
-      const data = XLSX.utils.sheet_to_json(worksheet, { raw: true, defval: null }) as any[];
+      const data = XLSX.utils.sheet_to_json(worksheet, {
+        raw: true,
+        defval: null,
+      }) as Record<string, any>[];
 
       const errors: Array<{ row: number; error: string }> = [];
       let success = 0;
@@ -630,7 +759,10 @@ export class CategoriesService {
         maPhi: ['mã phí', 'ma phi'],
         maBoPhan: ['mã bộ phận', 'ma bo phan'],
         taiKhoanChietKhau: ['tài khoản chiết khấu', 'tai khoan chiet khau'],
-        taiKhoanChiPhiKhuyenMai: ['tài khoản chi phí khuyến mãi', 'tai khoan chi phi khuyen mai'],
+        taiKhoanChiPhiKhuyenMai: [
+          'tài khoản chi phí khuyến mãi',
+          'tai khoan chi phi khuyen mai',
+        ],
         trangThai: ['trạng thái', 'trang thai'],
       };
 
@@ -642,13 +774,13 @@ export class CategoriesService {
         'CK theo CS': 'ckTheoCS',
         'CK VIP': 'ckVIP',
         'CK theo CS, CK VIP': 'ckTheoCS', // Nếu có cả 2 trong 1 field, map vào ckTheoCS
-        'VOUCHER': 'voucher',
-        'COUPON': 'coupon',
-        'ECODE': 'ecode',
+        VOUCHER: 'voucher',
+        COUPON: 'coupon',
+        ECODE: 'ecode',
         'VOUCHER, COUPON, ECODE...': 'voucher', // Nếu có nhiều trong 1 field, map vào voucher
         'Tặng hàng': 'tangHang',
-        'NSKM': 'nskm',
-        'Combo': 'combo',
+        NSKM: 'nskm',
+        Combo: 'combo',
         'Mã phí': 'maPhi',
         'Mã bộ phận': 'maBoPhan',
         'Tài khoản chiết khấu': 'taiKhoanChietKhau',
@@ -660,7 +792,9 @@ export class CategoriesService {
       const normalizedMapping: Record<string, string> = {};
 
       // Thêm từ fieldMappingVariants (đã có nhiều biến thể)
-      for (const [fieldName, variants] of Object.entries(fieldMappingVariants)) {
+      for (const [fieldName, variants] of Object.entries(
+        fieldMappingVariants,
+      )) {
         for (const variant of variants) {
           normalizedMapping[normalizeHeader(variant)] = fieldName;
         }
@@ -686,8 +820,10 @@ export class CategoriesService {
         if (typeof value === 'number') {
           // Kiểm tra NaN và Infinity
           if (isNaN(value) || !isFinite(value)) return undefined;
-          if (value === 1 || value === 1.0 || Math.abs(value - 1) < 0.0001) return true;
-          if (value === 0 || value === 0.0 || Math.abs(value) < 0.0001) return false;
+          if (value === 1 || value === 1.0 || Math.abs(value - 1) < 0.0001)
+            return true;
+          if (value === 0 || value === 0.0 || Math.abs(value) < 0.0001)
+            return false;
           return undefined;
         }
 
@@ -700,7 +836,10 @@ export class CategoriesService {
 
           // Bỏ qua các ký tự đặc biệt không hợp lệ (như $ü)
           // Chỉ xử lý nếu string chứa ký tự hợp lệ
-          if (!/^[\d\s\.,\-+eE]+$/.test(str) && !/^(true|false|yes|no|có|không|x|y|n|1|0)$/i.test(str)) {
+          if (
+            !/^[\d\s\.,\-+eE]+$/.test(str) &&
+            !/^(true|false|yes|no|có|không|x|y|n|1|0)$/i.test(str)
+          ) {
             // Nếu không phải số hoặc giá trị boolean text hợp lệ, return undefined
             return undefined;
           }
@@ -710,15 +849,38 @@ export class CategoriesService {
           // Thử parse thành số trước (để xử lý "1.0", " 1 ", "0", "0.0", etc.)
           const numValue = parseFloat(lowerStr);
           if (!isNaN(numValue) && isFinite(numValue)) {
-            if (numValue === 1 || numValue === 1.0 || Math.abs(numValue - 1) < 0.0001) return true;
-            if (numValue === 0 || numValue === 0.0 || Math.abs(numValue) < 0.0001) return false;
+            if (
+              numValue === 1 ||
+              numValue === 1.0 ||
+              Math.abs(numValue - 1) < 0.0001
+            )
+              return true;
+            if (
+              numValue === 0 ||
+              numValue === 0.0 ||
+              Math.abs(numValue) < 0.0001
+            )
+              return false;
           }
 
           // Xử lý các giá trị text
-          if (lowerStr === 'true' || lowerStr === 'yes' || lowerStr === 'có' || lowerStr === 'x' || lowerStr === 'y' || lowerStr === '1') {
+          if (
+            lowerStr === 'true' ||
+            lowerStr === 'yes' ||
+            lowerStr === 'có' ||
+            lowerStr === 'x' ||
+            lowerStr === 'y' ||
+            lowerStr === '1'
+          ) {
             return true;
           }
-          if (lowerStr === 'false' || lowerStr === 'no' || lowerStr === 'không' || lowerStr === 'n' || lowerStr === '0') {
+          if (
+            lowerStr === 'false' ||
+            lowerStr === 'no' ||
+            lowerStr === 'không' ||
+            lowerStr === 'n' ||
+            lowerStr === '0'
+          ) {
             return false;
           }
         }
@@ -730,13 +892,15 @@ export class CategoriesService {
       // Lấy danh sách headers thực tế từ Excel
       const actualHeaders = data.length > 0 ? Object.keys(data[0]) : [];
       this.logger.log(`Excel headers found: ${actualHeaders.join(', ')}`);
-      this.logger.log(`Looking for 'Mã chương trình' in normalized headers: ${normalizeHeader('Mã chương trình')}`);
+      this.logger.log(
+        `Looking for 'Mã chương trình' in normalized headers: ${normalizeHeader('Mã chương trình')}`,
+      );
 
       // Lọc bỏ các dòng trống trước khi xử lý và lưu lại index gốc
       const nonEmptyRowsWithIndex = data
         .map((row, index) => ({ row, originalIndex: index }))
         .filter(({ row }) => {
-          return !actualHeaders.every(header => {
+          return !actualHeaders.every((header) => {
             const value = row[header];
             if (value === null || value === undefined) return true;
             if (typeof value === 'string' && value.trim() === '') return true;
@@ -758,7 +922,11 @@ export class CategoriesService {
             const normalizedHeader = normalizeHeader(actualHeader);
             const fieldName = normalizedMapping[normalizedHeader];
 
-            if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
+            if (
+              fieldName &&
+              row[actualHeader] !== undefined &&
+              row[actualHeader] !== null
+            ) {
               const rawValue = row[actualHeader];
 
               // Kiểm tra nếu là string rỗng hoặc chỉ có khoảng trắng
@@ -767,7 +935,10 @@ export class CategoriesService {
               }
 
               // Kiểm tra nếu là số 0 hoặc string "0" (kể cả có khoảng trắng) → không set (để null)
-              if (typeof rawValue === 'number' && (rawValue === 0 || rawValue === 0.0)) {
+              if (
+                typeof rawValue === 'number' &&
+                (rawValue === 0 || rawValue === 0.0)
+              ) {
                 continue; // Không set, để null
               }
               if (typeof rawValue === 'string') {
@@ -786,7 +957,11 @@ export class CategoriesService {
           }
 
           // Validate required fields
-          if (!promotionData.maChuongTrinh || (typeof promotionData.maChuongTrinh === 'string' && promotionData.maChuongTrinh.trim() === '')) {
+          if (
+            !promotionData.maChuongTrinh ||
+            (typeof promotionData.maChuongTrinh === 'string' &&
+              promotionData.maChuongTrinh.trim() === '')
+          ) {
             const availableHeaders = actualHeaders.join(', ');
             errors.push({
               row: rowNumber,
@@ -812,7 +987,9 @@ export class CategoriesService {
 
           success++;
         } catch (error: any) {
-          this.logger.error(`Error importing promotion row ${rowNumber}: ${error.message}`);
+          this.logger.error(
+            `Error importing promotion row ${rowNumber}: ${error.message}`,
+          );
           errors.push({
             row: rowNumber,
             error: error.message || 'Unknown error',
@@ -828,7 +1005,9 @@ export class CategoriesService {
         errors,
       };
     } catch (error: any) {
-      this.logger.error(`Error importing promotions Excel file: ${error.message}`);
+      this.logger.error(
+        `Error importing promotions Excel file: ${error.message}`,
+      );
       throw new Error(`Lỗi khi import file Excel: ${error.message}`);
     }
   }
@@ -878,7 +1057,9 @@ export class CategoriesService {
     return warehouse;
   }
 
-  async createWarehouse(createDto: CreateWarehouseItemDto): Promise<WarehouseItem> {
+  async createWarehouse(
+    createDto: CreateWarehouseItemDto,
+  ): Promise<WarehouseItem> {
     const warehouse = this.warehouseItemRepository.create({
       ...createDto,
       trangThai: createDto.trangThai || 'active',
@@ -887,7 +1068,10 @@ export class CategoriesService {
     return await this.warehouseItemRepository.save(warehouse);
   }
 
-  async updateWarehouse(id: string, updateDto: UpdateWarehouseItemDto): Promise<WarehouseItem> {
+  async updateWarehouse(
+    id: string,
+    updateDto: UpdateWarehouseItemDto,
+  ): Promise<WarehouseItem> {
     const warehouse = await this.findOneWarehouse(id);
 
     Object.assign(warehouse, updateDto);
@@ -910,7 +1094,9 @@ export class CategoriesService {
       const workbook = XLSX.read(file.buffer, { type: 'buffer' });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(worksheet, { raw: false }) as any[];
+      const data = XLSX.utils.sheet_to_json(worksheet, {
+        raw: false,
+      }) as Record<string, any>[];
 
       const errors: Array<{ row: number; error: string }> = [];
       let success = 0;
@@ -946,7 +1132,7 @@ export class CategoriesService {
       const nonEmptyRowsWithIndex = data
         .map((row, index) => ({ row, originalIndex: index }))
         .filter(({ row }) => {
-          return !actualHeaders.every(header => {
+          return !actualHeaders.every((header) => {
             const value = row[header];
             if (value === null || value === undefined) return true;
             if (typeof value === 'string' && value.trim() === '') return true;
@@ -968,7 +1154,11 @@ export class CategoriesService {
             const normalizedHeader = normalizeHeader(actualHeader);
             const fieldName = normalizedMapping[normalizedHeader];
 
-            if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
+            if (
+              fieldName &&
+              row[actualHeader] !== undefined &&
+              row[actualHeader] !== null
+            ) {
               const rawValue = row[actualHeader];
               if (typeof rawValue === 'string' && rawValue.trim() === '') {
                 continue;
@@ -983,7 +1173,11 @@ export class CategoriesService {
           }
 
           // Validate required fields
-          if (!warehouseData.maKho || (typeof warehouseData.maKho === 'string' && warehouseData.maKho.trim() === '')) {
+          if (
+            !warehouseData.maKho ||
+            (typeof warehouseData.maKho === 'string' &&
+              warehouseData.maKho.trim() === '')
+          ) {
             const availableHeaders = actualHeaders.join(', ');
             errors.push({
               row: rowNumber,
@@ -1009,7 +1203,9 @@ export class CategoriesService {
 
           success++;
         } catch (error: any) {
-          this.logger.error(`Error importing warehouse row ${rowNumber}: ${error.message}`);
+          this.logger.error(
+            `Error importing warehouse row ${rowNumber}: ${error.message}`,
+          );
           errors.push({
             row: rowNumber,
             error: error.message || 'Unknown error',
@@ -1025,7 +1221,9 @@ export class CategoriesService {
         errors,
       };
     } catch (error: any) {
-      this.logger.error(`Error importing warehouses Excel file: ${error.message}`);
+      this.logger.error(
+        `Error importing warehouses Excel file: ${error.message}`,
+      );
       throw new Error(`Lỗi khi import file Excel: ${error.message}`);
     }
   }
@@ -1069,13 +1267,17 @@ export class CategoriesService {
     });
 
     if (!mapping) {
-      throw new NotFoundException(`Warehouse code mapping with ID ${id} not found`);
+      throw new NotFoundException(
+        `Warehouse code mapping with ID ${id} not found`,
+      );
     }
 
     return mapping;
   }
 
-  async findWarehouseCodeMappingByMaCu(maCu: string): Promise<WarehouseCodeMapping | null> {
+  async findWarehouseCodeMappingByMaCu(
+    maCu: string,
+  ): Promise<WarehouseCodeMapping | null> {
     return await this.warehouseCodeMappingRepository.findOne({
       where: { maCu },
     });
@@ -1086,7 +1288,9 @@ export class CategoriesService {
    * @param maCu - Mã kho cũ
    * @returns Mã mới nếu tìm thấy, null nếu không tìm thấy
    */
-  async mapWarehouseCode(maCu: string | null | undefined): Promise<string | null> {
+  async mapWarehouseCode(
+    maCu: string | null | undefined,
+  ): Promise<string | null> {
     if (!maCu || maCu.trim() === '') {
       return null;
     }
@@ -1101,7 +1305,9 @@ export class CategoriesService {
     return mapping ? mapping.maMoi : null;
   }
 
-  async createWarehouseCodeMapping(createDto: CreateWarehouseCodeMappingDto): Promise<WarehouseCodeMapping> {
+  async createWarehouseCodeMapping(
+    createDto: CreateWarehouseCodeMappingDto,
+  ): Promise<WarehouseCodeMapping> {
     // Kiểm tra xem maCu đã tồn tại chưa
     const existing = await this.warehouseCodeMappingRepository.findOne({
       where: { maCu: createDto.maCu },
@@ -1119,7 +1325,10 @@ export class CategoriesService {
     return await this.warehouseCodeMappingRepository.save(mapping);
   }
 
-  async updateWarehouseCodeMapping(id: string, updateDto: UpdateWarehouseCodeMappingDto): Promise<WarehouseCodeMapping> {
+  async updateWarehouseCodeMapping(
+    id: string,
+    updateDto: UpdateWarehouseCodeMappingDto,
+  ): Promise<WarehouseCodeMapping> {
     const mapping = await this.findOneWarehouseCodeMapping(id);
 
     // Nếu maCu thay đổi, kiểm tra xem có trùng với record khác không
@@ -1143,7 +1352,9 @@ export class CategoriesService {
     await this.warehouseCodeMappingRepository.remove(mapping);
   }
 
-  async importWarehouseCodeMappingsFromExcel(file: Express.Multer.File): Promise<{
+  async importWarehouseCodeMappingsFromExcel(
+    file: Express.Multer.File,
+  ): Promise<{
     total: number;
     success: number;
     failed: number;
@@ -1153,7 +1364,9 @@ export class CategoriesService {
       const workbook = XLSX.read(file.buffer, { type: 'buffer' });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(worksheet, { raw: false }) as any[];
+      const data = XLSX.utils.sheet_to_json(worksheet, {
+        raw: false,
+      }) as Record<string, any>[];
 
       const errors: Array<{ row: number; error: string }> = [];
       let success = 0;
@@ -1166,10 +1379,10 @@ export class CategoriesService {
 
       // Mapping từ header Excel sang field của entity
       const fieldMapping: Record<string, string> = {
-        'Cũ': 'maCu',
+        Cũ: 'maCu',
         'Mã cũ': 'maCu',
         'Mã Cũ': 'maCu',
-        'Mới': 'maMoi',
+        Mới: 'maMoi',
         'Mã mới': 'maMoi',
         'Mã Mới': 'maMoi',
       };
@@ -1188,7 +1401,7 @@ export class CategoriesService {
       const nonEmptyRowsWithIndex = data
         .map((row, index) => ({ row, originalIndex: index }))
         .filter(({ row }) => {
-          return !actualHeaders.every(header => {
+          return !actualHeaders.every((header) => {
             const value = row[header];
             if (value === null || value === undefined) return true;
             if (typeof value === 'string' && value.trim() === '') return true;
@@ -1210,7 +1423,11 @@ export class CategoriesService {
             const normalizedHeader = normalizeHeader(actualHeader);
             const fieldName = normalizedMapping[normalizedHeader];
 
-            if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
+            if (
+              fieldName &&
+              row[actualHeader] !== undefined &&
+              row[actualHeader] !== null
+            ) {
               const rawValue = row[actualHeader];
               if (typeof rawValue === 'string' && rawValue.trim() === '') {
                 continue;
@@ -1225,7 +1442,11 @@ export class CategoriesService {
           }
 
           // Validate required fields
-          if (!mappingData.maCu || (typeof mappingData.maCu === 'string' && mappingData.maCu.trim() === '')) {
+          if (
+            !mappingData.maCu ||
+            (typeof mappingData.maCu === 'string' &&
+              mappingData.maCu.trim() === '')
+          ) {
             const availableHeaders = actualHeaders.join(', ');
             errors.push({
               row: rowNumber,
@@ -1235,7 +1456,11 @@ export class CategoriesService {
             continue;
           }
 
-          if (!mappingData.maMoi || (typeof mappingData.maMoi === 'string' && mappingData.maMoi.trim() === '')) {
+          if (
+            !mappingData.maMoi ||
+            (typeof mappingData.maMoi === 'string' &&
+              mappingData.maMoi.trim() === '')
+          ) {
             const availableHeaders = actualHeaders.join(', ');
             errors.push({
               row: rowNumber,
@@ -1256,12 +1481,15 @@ export class CategoriesService {
           }
 
           // Tạo mới (hoặc tạo lại sau khi xóa)
-          const mapping = this.warehouseCodeMappingRepository.create(mappingData);
+          const mapping =
+            this.warehouseCodeMappingRepository.create(mappingData);
           await this.warehouseCodeMappingRepository.save(mapping);
 
           success++;
         } catch (error: any) {
-          this.logger.error(`Error importing warehouse code mapping row ${rowNumber}: ${error.message}`);
+          this.logger.error(
+            `Error importing warehouse code mapping row ${rowNumber}: ${error.message}`,
+          );
           errors.push({
             row: rowNumber,
             error: error.message || 'Unknown error',
@@ -1277,9 +1505,18 @@ export class CategoriesService {
         errors,
       };
     } catch (error: any) {
-      this.logger.error(`Error importing warehouse code mappings Excel file: ${error.message}`);
+      this.logger.error(
+        `Error importing warehouse code mappings Excel file: ${error.message}`,
+      );
       throw new Error(`Lỗi khi import file Excel: ${error.message}`);
     }
+  }
+
+  async getWarehouseCodeMap(): Promise<Map<string, string>> {
+    const mappings = await this.warehouseCodeMappingRepository.find({
+      where: { trangThai: 'active' },
+    });
+    return new Map(mappings.map((m) => [m.maCu, m.maMoi]));
   }
 
   // ========== PAYMENT METHOD METHODS ==========
@@ -1333,14 +1570,18 @@ export class CategoriesService {
     });
   }
 
-  async createPaymentMethod(createDto: CreatePaymentMethodDto): Promise<PaymentMethod> {
+  async createPaymentMethod(
+    createDto: CreatePaymentMethodDto,
+  ): Promise<PaymentMethod> {
     // Kiểm tra xem code đã tồn tại chưa
     const existing = await this.paymentMethodRepository.findOne({
       where: { code: createDto.code },
     });
 
     if (existing) {
-      throw new BadRequestException(`Mã phương thức thanh toán "${createDto.code}" đã tồn tại`);
+      throw new BadRequestException(
+        `Mã phương thức thanh toán "${createDto.code}" đã tồn tại`,
+      );
     }
 
     const paymentMethod = this.paymentMethodRepository.create({
@@ -1351,7 +1592,10 @@ export class CategoriesService {
     return await this.paymentMethodRepository.save(paymentMethod);
   }
 
-  async updatePaymentMethod(id: string, updateDto: UpdatePaymentMethodDto): Promise<PaymentMethod> {
+  async updatePaymentMethod(
+    id: string,
+    updateDto: UpdatePaymentMethodDto,
+  ): Promise<PaymentMethod> {
     const paymentMethod = await this.findOnePaymentMethod(id);
 
     // Nếu code thay đổi, kiểm tra xem có trùng với record khác không
@@ -1361,7 +1605,9 @@ export class CategoriesService {
       });
 
       if (existing && existing.id !== id) {
-        throw new BadRequestException(`Mã phương thức thanh toán "${updateDto.code}" đã tồn tại`);
+        throw new BadRequestException(
+          `Mã phương thức thanh toán "${updateDto.code}" đã tồn tại`,
+        );
       }
     }
 
@@ -1387,7 +1633,9 @@ export class CategoriesService {
       const workbook = XLSX.read(file.buffer, { type: 'buffer' });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(worksheet, { raw: false }) as any[];
+      const data = XLSX.utils.sheet_to_json(worksheet, {
+        raw: false,
+      }) as Record<string, any>[];
 
       const errors: Array<{ row: number; error: string }> = [];
       let success = 0;
@@ -1401,11 +1649,11 @@ export class CategoriesService {
 
       // Mapping từ header Excel sang field của entity
       const fieldMapping: Record<string, string> = {
-        'Id': 'externalId',
-        'id': 'externalId',
-        'ID': 'externalId',
-        'Mã': 'code',
-        'mã': 'code',
+        Id: 'externalId',
+        id: 'externalId',
+        ID: 'externalId',
+        Mã: 'code',
+        mã: 'code',
         'Mã phương thức thanh toán': 'code',
         'mã phương thức thanh toán': 'code',
         'Diễn giải': 'description',
@@ -1416,8 +1664,8 @@ export class CategoriesService {
         'Loại chứng từ': 'documentType',
         'loại chứng từ': 'documentType',
         'Loại Chứng Từ': 'documentType',
-        'ERP': 'erp',
-        'erp': 'erp',
+        ERP: 'erp',
+        erp: 'erp',
         'Đơn vị ngân hàng': 'bankUnit',
         'đơn vị ngân hàng': 'bankUnit',
         'Đơn Vị Ngân Hàng': 'bankUnit',
@@ -1434,10 +1682,14 @@ export class CategoriesService {
       this.logger.log(`Excel headers found: ${actualHeaders.join(', ')}`);
 
       // Xử lý tất cả các dòng, không lọc bỏ dòng trống
-      const allRowsWithIndex = data
-        .map((row, index) => ({ row, originalIndex: index }));
+      const allRowsWithIndex = data.map((row, index) => ({
+        row,
+        originalIndex: index,
+      }));
 
-      this.logger.log(`Total rows in file: ${totalRowsInFile}, Processing all rows`);
+      this.logger.log(
+        `Total rows in file: ${totalRowsInFile}, Processing all rows`,
+      );
 
       for (let i = 0; i < allRowsWithIndex.length; i++) {
         const { row, originalIndex } = allRowsWithIndex[i];
@@ -1453,7 +1705,11 @@ export class CategoriesService {
             const normalizedHeader = normalizeHeader(actualHeader);
             const fieldName = normalizedMapping[normalizedHeader];
 
-            if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
+            if (
+              fieldName &&
+              row[actualHeader] !== undefined &&
+              row[actualHeader] !== null
+            ) {
               const rawValue = row[actualHeader];
               if (typeof rawValue === 'string' && rawValue.trim() === '') {
                 continue;
@@ -1468,7 +1724,11 @@ export class CategoriesService {
           }
 
           // Validate required fields
-          if (!paymentMethodData.code || (typeof paymentMethodData.code === 'string' && paymentMethodData.code.trim() === '')) {
+          if (
+            !paymentMethodData.code ||
+            (typeof paymentMethodData.code === 'string' &&
+              paymentMethodData.code.trim() === '')
+          ) {
             const availableHeaders = actualHeaders.join(', ');
             errors.push({
               row: rowNumber,
@@ -1489,13 +1749,16 @@ export class CategoriesService {
             await this.paymentMethodRepository.save(existing);
           } else {
             // Tạo mới
-            const paymentMethod = this.paymentMethodRepository.create(paymentMethodData);
+            const paymentMethod =
+              this.paymentMethodRepository.create(paymentMethodData);
             await this.paymentMethodRepository.save(paymentMethod);
           }
 
           success++;
         } catch (error: any) {
-          this.logger.error(`Error importing payment method row ${rowNumber}: ${error.message}`);
+          this.logger.error(
+            `Error importing payment method row ${rowNumber}: ${error.message}`,
+          );
           errors.push({
             row: rowNumber,
             error: error.message || 'Unknown error',
@@ -1512,7 +1775,9 @@ export class CategoriesService {
         errors,
       };
     } catch (error: any) {
-      this.logger.error(`Error importing payment methods Excel file: ${error.message}`);
+      this.logger.error(
+        `Error importing payment methods Excel file: ${error.message}`,
+      );
       throw new Error(`Lỗi khi import file Excel: ${error.message}`);
     }
   }
@@ -1569,7 +1834,9 @@ export class CategoriesService {
     const formattedSales = sales.map((sale) => {
       // Format docmonth from docDate
       const docDate = sale.docDate ? new Date(sale.docDate) : null;
-      const docmonth = docDate ? `${docDate.getFullYear()}/${String(docDate.getMonth() + 1).padStart(2, '0')}` : null;
+      const docmonth = docDate
+        ? `${docDate.getFullYear()}/${String(docDate.getMonth() + 1).padStart(2, '0')}`
+        : null;
 
       return {
         qty: sale.qty,
@@ -1655,7 +1922,9 @@ export class CategoriesService {
 
       return null;
     } catch (error: any) {
-      this.logger.error(`Error fetching product ${itemCode} from Loyalty API: ${error?.message || error}`);
+      this.logger.error(
+        `Error fetching product ${itemCode} from Loyalty API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -1677,7 +1946,9 @@ export class CategoriesService {
       const department = response?.data?.data?.items?.[0] || null;
       return department;
     } catch (error: any) {
-      this.logger.error(`Error fetching department ${branchcode} from Loyalty API: ${error?.message || error}`);
+      this.logger.error(
+        `Error fetching department ${branchcode} from Loyalty API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -1718,7 +1989,9 @@ export class CategoriesService {
 
       return promotion.data.data;
     } catch (error: any) {
-      this.logger.error(`Error creating promotion from Loyalty API: ${error?.message || error}`);
+      this.logger.error(
+        `Error creating promotion from Loyalty API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -1775,7 +2048,9 @@ export class CategoriesService {
     });
   }
 
-  async findActiveEcommerceCustomerByCode(code: string): Promise<EcommerceCustomer | null> {
+  async findActiveEcommerceCustomerByCode(
+    code: string,
+  ): Promise<EcommerceCustomer | null> {
     const ec = await this.ecommerceCustomerRepository.findOne({
       where: { customerCode: code, trangThai: 'active' },
     });
@@ -1787,7 +2062,9 @@ export class CategoriesService {
     return ec;
   }
 
-  async createEcommerceCustomer(createDto: CreateEcommerceCustomerDto): Promise<EcommerceCustomer> {
+  async createEcommerceCustomer(
+    createDto: CreateEcommerceCustomerDto,
+  ): Promise<EcommerceCustomer> {
     const ec = this.ecommerceCustomerRepository.create({
       ...createDto,
       trangThai: createDto.trangThai || 'active',
@@ -1796,7 +2073,10 @@ export class CategoriesService {
     return await this.ecommerceCustomerRepository.save(ec);
   }
 
-  async updateEcommerceCustomer(id: string, updateDto: UpdateEcommerceCustomerDto): Promise<EcommerceCustomer> {
+  async updateEcommerceCustomer(
+    id: string,
+    updateDto: UpdateEcommerceCustomerDto,
+  ): Promise<EcommerceCustomer> {
     const ec = await this.findOneEcommerceCustomer(id);
 
     Object.assign(ec, updateDto);
@@ -1816,10 +2096,18 @@ export class CategoriesService {
     errors: Array<{ row: number; error: string }>;
   }> {
     try {
-      const workbook = XLSX.read(file.buffer, { type: 'buffer', cellDates: false, cellNF: false, cellText: false });
+      const workbook = XLSX.read(file.buffer, {
+        type: 'buffer',
+        cellDates: false,
+        cellNF: false,
+        cellText: false,
+      });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(worksheet, { raw: true, defval: null }) as any[];
+      const data = XLSX.utils.sheet_to_json(worksheet, {
+        raw: true,
+        defval: null,
+      }) as Record<string, any>[];
 
       const errors: Array<{ row: number; error: string }> = [];
       let success = 0;
@@ -1832,12 +2120,28 @@ export class CategoriesService {
       // Mapping từ header Excel sang field
       const fieldMappingVariants: Record<string, string[]> = {
         brand: ['brand', 'thương hiệu', 'thuong hieu'],
-        customerCode: ['customer code', 'customercode', 'mã khách hàng', 'ma khach hang', 'mã kh', 'ma kh'],
-        ecomName: ['ecom name', 'ecomname', 'tên sàn', 'ten san', 'ten s', 'ten s'],
+        customerCode: [
+          'customer code',
+          'customercode',
+          'mã khách hàng',
+          'ma khach hang',
+          'mã kh',
+          'ma kh',
+        ],
+        ecomName: [
+          'ecom name',
+          'ecomname',
+          'tên sàn',
+          'ten san',
+          'ten s',
+          'ten s',
+        ],
       };
 
       const normalizedMapping: Record<string, string> = {};
-      for (const [fieldName, variants] of Object.entries(fieldMappingVariants)) {
+      for (const [fieldName, variants] of Object.entries(
+        fieldMappingVariants,
+      )) {
         for (const variant of variants) {
           normalizedMapping[normalizeHeader(variant)] = fieldName;
         }
@@ -1850,7 +2154,7 @@ export class CategoriesService {
       const nonEmptyRowsWithIndex = data
         .map((row, index) => ({ row, originalIndex: index }))
         .filter(({ row }) => {
-          return !actualHeaders.every(header => {
+          return !actualHeaders.every((header) => {
             const value = row[header];
             if (value === null || value === undefined) return true;
             if (typeof value === 'string' && value.trim() === '') return true;
@@ -1859,7 +2163,10 @@ export class CategoriesService {
         });
 
       // Parse data
-      const parsedItems: Array<{ itemData: Partial<EcommerceCustomer>; rowNumber: number }> = [];
+      const parsedItems: Array<{
+        itemData: Partial<EcommerceCustomer>;
+        rowNumber: number;
+      }> = [];
 
       for (let i = 0; i < nonEmptyRowsWithIndex.length; i++) {
         const { row, originalIndex } = nonEmptyRowsWithIndex[i];
@@ -1874,7 +2181,11 @@ export class CategoriesService {
             const normalizedHeader = normalizeHeader(actualHeader);
             const fieldName = normalizedMapping[normalizedHeader];
 
-            if (fieldName && row[actualHeader] !== undefined && row[actualHeader] !== null) {
+            if (
+              fieldName &&
+              row[actualHeader] !== undefined &&
+              row[actualHeader] !== null
+            ) {
               const rawValue = row[actualHeader];
               if (typeof rawValue === 'string' && rawValue.trim() === '') {
                 continue;
@@ -1904,11 +2215,15 @@ export class CategoriesService {
       }
 
       // Load existing records
-      const customerCodeList = parsedItems.map(p => p.itemData.customerCode).filter(Boolean) as string[];
+      const customerCodeList = parsedItems
+        .map((p) => p.itemData.customerCode)
+        .filter(Boolean) as string[];
       const existingItems = await this.ecommerceCustomerRepository.find({
         where: { customerCode: In(customerCodeList) },
       });
-      const existingMap = new Map(existingItems.map(p => [p.customerCode, p]));
+      const existingMap = new Map(
+        existingItems.map((p) => [p.customerCode, p]),
+      );
 
       // Batch processing
       const BATCH_SIZE = 1000;
@@ -1934,7 +2249,9 @@ export class CategoriesService {
               const item = this.ecommerceCustomerRepository.create(itemData);
               itemsToSave.push(item);
             } catch (error: any) {
-              this.logger.error(`Error processing row ${rowNumber}: ${error.message}`);
+              this.logger.error(
+                `Error processing row ${rowNumber}: ${error.message}`,
+              );
               errors.push({
                 row: rowNumber,
                 error: error.message || 'Unknown error',

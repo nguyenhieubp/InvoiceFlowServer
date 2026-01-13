@@ -34,7 +34,9 @@ export function normalizeMaKh(maKh: string | null | undefined): string {
 /**
  * Xử lý promotion code: cắt phần sau dấu "-" để lấy code hiển thị
  */
-export function getPromotionDisplayCode(promCode: string | null | undefined): string | null {
+export function getPromotionDisplayCode(
+  promCode: string | null | undefined,
+): string | null {
   if (!promCode) return null;
   const parts = promCode.split('-');
   return parts[0] || promCode;
@@ -49,12 +51,12 @@ export function mapBrandToCode(brand: string | null | undefined): string {
 
   const brandLower = brand.toLowerCase().trim();
   const brandMap: Record<string, string> = {
-    'menard': 'MN',
-    'f3': 'FBV',
-    'facialbar': 'FBV',
-    'chando': 'CDV',
-    'labhair': 'LHV',
-    'yaman': 'BTH',
+    menard: 'MN',
+    f3: 'FBV',
+    facialbar: 'FBV',
+    chando: 'CDV',
+    labhair: 'LHV',
+    yaman: 'BTH',
   };
 
   return brandMap[brandLower] || 'MN'; // Default to MN
@@ -67,7 +69,10 @@ export function mapBrandToCode(brand: string | null | undefined): string {
  * - MM: Tháng từ docDate (2 số)
  * - {brand_code}: Brand code từ customer.brand (MN, FBV, CDV, LHV, BTH)
  */
-export function generateTkTienAoLabel(docDate: any, brand: string | null | undefined): string {
+export function generateTkTienAoLabel(
+  docDate: any,
+  brand: string | null | undefined,
+): string {
   // Lấy ngày từ docDate
   let date: Date;
   if (docDate instanceof Date) {
@@ -102,7 +107,9 @@ export function generateTkTienAoLabel(docDate: any, brand: string | null | undef
  * - "L" cho: "02. Làm dịch vụ", "04. Đổi DV", "08. Tách thẻ", "Đổi thẻ KEEP->Thẻ DV"
  * - "B" cho: "01.Thường", "03. Đổi điểm", "05. Tặng sinh nhật", "06. Đầu tư", "07. Bán tài khoản", "9. Sàn TMDT", "Đổi vỏ"
  */
-export function getOrderTypePrefix(ordertypeName: string | null | undefined): string | null {
+export function getOrderTypePrefix(
+  ordertypeName: string | null | undefined,
+): string | null {
   if (!ordertypeName) return null;
 
   const normalized = String(ordertypeName).trim();
@@ -166,57 +173,85 @@ export function getOrderTypePrefix(ordertypeName: string | null | undefined): st
 /**
  * Helper: Kiểm tra xem đơn hàng có phải "03. Đổi điểm" không
  */
-export function isDoiDiemOrder(ordertype: string | null | undefined, ordertypeName: string | null | undefined): boolean {
+export function isDoiDiemOrder(
+  ordertype: string | null | undefined,
+  ordertypeName: string | null | undefined,
+): boolean {
   const ordertypeValue = ordertype || ordertypeName || '';
-  return ordertypeValue.includes('03. Đổi điểm') ||
+  return (
+    ordertypeValue.includes('03. Đổi điểm') ||
     ordertypeValue.includes('03.Đổi điểm') ||
-    ordertypeValue.includes('03.  Đổi điểm');
+    ordertypeValue.includes('03.  Đổi điểm')
+  );
 }
 
 /**
  * Helper: Kiểm tra xem đơn hàng có phải "04. Đổi DV" không
  */
-export function isDoiDvOrder(ordertype: string | null | undefined, ordertypeName: string | null | undefined): boolean {
+export function isDoiDvOrder(
+  ordertype: string | null | undefined,
+  ordertypeName: string | null | undefined,
+): boolean {
   const ordertypeValue = ordertype || ordertypeName || '';
-  return ordertypeValue.includes('04. Đổi DV') ||
+  return (
+    ordertypeValue.includes('04. Đổi DV') ||
     ordertypeValue.includes('04.Đổi DV') ||
-    ordertypeValue.includes('04.  Đổi DV');
+    ordertypeValue.includes('04.  Đổi DV')
+  );
 }
 
 /**
  * Helper: Kiểm tra xem đơn hàng có phải "05. Tặng sinh nhật" không
  */
-export function isTangSinhNhatOrder(ordertype: string | null | undefined, ordertypeName: string | null | undefined): boolean {
+export function isTangSinhNhatOrder(
+  ordertype: string | null | undefined,
+  ordertypeName: string | null | undefined,
+): boolean {
   const ordertypeValue = ordertype || ordertypeName || '';
-  return ordertypeValue.includes('05. Tặng sinh nhật') ||
+  return (
+    ordertypeValue.includes('05. Tặng sinh nhật') ||
     ordertypeValue.includes('05.Tặng sinh nhật') ||
-    ordertypeValue.includes('05.  Tặng sinh nhật');
+    ordertypeValue.includes('05.  Tặng sinh nhật')
+  );
 }
 
 /**
  * Helper: Kiểm tra xem đơn hàng có phải "06. Đầu tư" không
  */
-export function isDauTuOrder(ordertype: string | null | undefined, ordertypeName: string | null | undefined): boolean {
+export function isDauTuOrder(
+  ordertype: string | null | undefined,
+  ordertypeName: string | null | undefined,
+): boolean {
   const ordertypeValue = ordertype || ordertypeName || '';
-  return ordertypeValue.includes('06. Đầu tư') ||
+  return (
+    ordertypeValue.includes('06. Đầu tư') ||
     ordertypeValue.includes('06.Đầu tư') ||
-    ordertypeValue.includes('06.  Đầu tư');
+    ordertypeValue.includes('06.  Đầu tư')
+  );
 }
 
 /**
  * Helper: Kiểm tra xem đơn hàng có phải "08. Tách thẻ" không
  */
-export function isTachTheOrder(ordertype: string | null | undefined, ordertypeName: string | null | undefined): boolean {
+export function isTachTheOrder(
+  ordertype: string | null | undefined,
+  ordertypeName: string | null | undefined,
+): boolean {
   const ordertypeValue = ordertype || ordertypeName || '';
-  return ordertypeValue.includes('08. Tách thẻ') ||
+  return (
+    ordertypeValue.includes('08. Tách thẻ') ||
     ordertypeValue.includes('08.Tách thẻ') ||
-    ordertypeValue.includes('08.  Tách thẻ');
+    ordertypeValue.includes('08.  Tách thẻ')
+  );
 }
 
 /**
  * Helper: Kiểm tra xem đơn hàng có phải "Đổi vỏ" không
  */
-export function isDoiVoOrder(ordertype: string | null | undefined, ordertypeName: string | null | undefined): boolean {
+export function isDoiVoOrder(
+  ordertype: string | null | undefined,
+  ordertypeName: string | null | undefined,
+): boolean {
   const ordertypeValue = ordertype || ordertypeName || '';
   return ordertypeValue.includes('Đổi vỏ');
 }
@@ -237,59 +272,76 @@ export function normalizeBrand(brand: string | null | undefined): string {
  * Lấy productType từ nhiều nguồn (ưu tiên loyaltyProduct, sau đó sale)
  */
 export function getProductType(sale: any, loyaltyProduct?: any): string | null {
-  return loyaltyProduct?.productType ||
+  return (
+    loyaltyProduct?.productType ||
     loyaltyProduct?.producttype ||
     sale.productType ||
     sale.producttype ||
     sale.product?.productType ||
     sale.product?.producttype ||
-    null;
+    null
+  );
 }
 
 /**
  * Lấy materialCode từ nhiều nguồn (ưu tiên loyaltyProduct, sau đó sale)
  */
-export function getMaterialCode(sale: any, loyaltyProduct?: any): string | null {
-  return loyaltyProduct?.materialCode ||
+export function getMaterialCode(
+  sale: any,
+  loyaltyProduct?: any,
+): string | null {
+  return (
+    loyaltyProduct?.materialCode ||
     sale.product?.maVatTu ||
     sale.product?.materialCode ||
     sale.itemCode ||
-    null;
+    null
+  );
 }
 
 /**
  * Lấy trackInventory từ nhiều nguồn (ưu tiên loyaltyProduct, sau đó sale)
  */
-export function getTrackInventory(sale: any, loyaltyProduct?: any): boolean | null {
-  return loyaltyProduct?.trackInventory ??
+export function getTrackInventory(
+  sale: any,
+  loyaltyProduct?: any,
+): boolean | null {
+  return (
+    loyaltyProduct?.trackInventory ??
     sale.trackInventory ??
     sale.product?.trackInventory ??
-    null;
+    null
+  );
 }
 
 /**
  * Lấy trackSerial từ nhiều nguồn (ưu tiên loyaltyProduct, sau đó sale)
  */
-export function getTrackSerial(sale: any, loyaltyProduct?: any): boolean | null {
-  return loyaltyProduct?.trackSerial ??
+export function getTrackSerial(
+  sale: any,
+  loyaltyProduct?: any,
+): boolean | null {
+  return (
+    loyaltyProduct?.trackSerial ??
     sale.trackSerial ??
     sale.product?.trackSerial ??
-    null;
+    null
+  );
 }
 
 /**
  * Tính VIP type dựa trên quy tắc (theo thứ tự ưu tiên):
- * 
+ *
  * 1. VIP DV MAT: Nếu productType == "DIVU"
  *    - Ví dụ: SPAMDV511 (productType: "DIVU", catName: "DVBDY", unit: "Lần")
- * 
+ *
  * 2. VIP VC MP: Nếu productType == "VOUC"
  *    - Ví dụ: E_VCM10.5TR_MDVK04 (productType: "VOUC", code có "E_" và "VC")
- * 
+ *
  * 3. VIP VC MP: Nếu materialCode bắt đầu bằng "E." HOẶC
  *               "VC" có trong materialCode/code (không phân biệt hoa thường) HOẶC
  *               (trackInventory == false VÀ trackSerial == true)
- * 
+ *
  * 4. VIP MP: Tất cả các trường hợp còn lại
  *    - Ví dụ: AUTO02 (productType: "MAKE", materialCode: "M00151", không có "VC")
  */
@@ -336,7 +388,10 @@ export function calculateVipType(
  * trackBatch: true → dùng ma_lo
  * Nếu cả hai đều true → ưu tiên trackBatch (dùng ma_lo)
  */
-export function shouldUseBatch(trackBatch: boolean | null | undefined, trackSerial: boolean | null | undefined): boolean {
+export function shouldUseBatch(
+  trackBatch: boolean | null | undefined,
+  trackSerial: boolean | null | undefined,
+): boolean {
   // Nếu trackBatch = true → dùng ma_lo (ưu tiên)
   if (trackBatch === true) {
     return true;
@@ -370,7 +425,10 @@ export function createProductMap(products: any[]): Map<string, any> {
  * @param productMap - Map products theo maERP
  * @returns Sale object đã được enrich với product
  */
-export function enrichSaleWithProduct(sale: any, productMap: Map<string, any>): any {
+export function enrichSaleWithProduct(
+  sale: any,
+  productMap: Map<string, any>,
+): any {
   return {
     ...sale,
     product: sale.itemCode ? productMap.get(sale.itemCode) || null : null,
@@ -383,8 +441,13 @@ export function enrichSaleWithProduct(sale: any, productMap: Map<string, any>): 
  * @param loyaltyProductMap - Map products từ Loyalty API theo itemCode
  * @returns Sale object đã được enrich với thông tin từ Loyalty API
  */
-export function enrichSaleWithLoyaltyProduct(sale: any, loyaltyProductMap: Map<string, any>): any {
-  const loyaltyProduct = sale.itemCode ? loyaltyProductMap.get(sale.itemCode) : null;
+export function enrichSaleWithLoyaltyProduct(
+  sale: any,
+  loyaltyProductMap: Map<string, any>,
+): any {
+  const loyaltyProduct = sale.itemCode
+    ? loyaltyProductMap.get(sale.itemCode)
+    : null;
   const existingProduct = sale.product;
 
   // Nếu có product từ Loyalty API, merge thông tin (ưu tiên dvt từ Loyalty API)
@@ -392,19 +455,34 @@ export function enrichSaleWithLoyaltyProduct(sale: any, loyaltyProductMap: Map<s
     return {
       ...sale,
       // Lấy producttype từ Loyalty API (không còn trong database)
-      producttype: loyaltyProduct?.producttype || loyaltyProduct?.productType || null,
+      producttype:
+        loyaltyProduct?.producttype || loyaltyProduct?.productType || null,
       product: {
         ...existingProduct,
         ...loyaltyProduct,
         // Map unit từ Loyalty API thành dvt
         dvt: loyaltyProduct.unit || existingProduct?.dvt || null,
         // Giữ lại các field từ database nếu có, chỉ dùng materialCode từ Loyalty API
-        maVatTu: existingProduct?.maVatTu || loyaltyProduct.materialCode || sale.itemCode,
-        maERP: existingProduct?.maERP || loyaltyProduct.materialCode || sale.itemCode,
+        maVatTu:
+          existingProduct?.maVatTu ||
+          loyaltyProduct.materialCode ||
+          sale.itemCode,
+        maERP:
+          existingProduct?.maERP ||
+          loyaltyProduct.materialCode ||
+          sale.itemCode,
         // Đảm bảo productType từ Loyalty API được giữ lại (ưu tiên productType, sau đó producttype)
-        productType: loyaltyProduct.productType || loyaltyProduct.producttype || (existingProduct as any)?.productType || null,
+        productType:
+          loyaltyProduct.productType ||
+          loyaltyProduct.producttype ||
+          existingProduct?.productType ||
+          null,
         // Lấy producttype từ Loyalty API
-        producttype: loyaltyProduct.producttype || loyaltyProduct.productType || (existingProduct as any)?.producttype || null,
+        producttype:
+          loyaltyProduct.producttype ||
+          loyaltyProduct.productType ||
+          existingProduct?.producttype ||
+          null,
       },
     };
   }
@@ -419,7 +497,7 @@ export function enrichSaleWithLoyaltyProduct(sale: any, loyaltyProductMap: Map<s
  */
 export function createCardCodeMap(cardData: any): Map<string, string> {
   const cardCodeMap = new Map<string, string>();
-  
+
   if (!cardData || !Array.isArray(cardData.data)) {
     return cardCodeMap;
   }
@@ -440,7 +518,10 @@ export function createCardCodeMap(cardData: any): Map<string, string> {
  * @param cardCodeMap - Map card codes theo service_item_name
  * @returns Sale object đã được enrich với maThe
  */
-export function enrichSaleWithCardCode(sale: any, cardCodeMap: Map<string, string>): any {
+export function enrichSaleWithCardCode(
+  sale: any,
+  cardCodeMap: Map<string, string>,
+): any {
   return {
     ...sale,
     maThe: cardCodeMap.get(sale.itemCode) || '',
@@ -457,8 +538,8 @@ export function extractUniqueItemCodes(sales: any[]): string[] {
     new Set(
       sales
         .map((sale) => sale.itemCode)
-        .filter((code): code is string => !!code && code.trim() !== '')
-    )
+        .filter((code): code is string => !!code && code.trim() !== ''),
+    ),
   );
 }
 
@@ -472,8 +553,8 @@ export function extractUniqueBranchCodes(sales: any[]): string[] {
     new Set(
       sales
         .map((sale) => sale.branchCode)
-        .filter((code): code is string => !!code && code.trim() !== '')
-    )
+        .filter((code): code is string => !!code && code.trim() !== ''),
+    ),
   );
 }
 
@@ -483,9 +564,132 @@ export function extractUniqueBranchCodes(sales: any[]): string[] {
  * @param sales - Danh sách sales
  * @returns Array các itemCode cho sales hợp lệ
  */
-export function filterValidItemCodes(itemCodes: string[], sales: any[]): string[] {
-  return itemCodes.filter(itemCode => {
-    const sale = sales.find(s => s.itemCode === itemCode);
+export function filterValidItemCodes(
+  itemCodes: string[],
+  sales: any[],
+): string[] {
+  return itemCodes.filter((itemCode) => {
+    const sale = sales.find((s) => s.itemCode === itemCode);
     return sale && sale.statusAsys !== false;
   });
+}
+
+/**
+ * Parse date từ format DDMMMYYYY (ví dụ: 01JAN2025)
+ */
+export function parseDateFromDDMMMYYYY(dateStr: string): Date {
+  const day = parseInt(dateStr.substring(0, 2));
+  const monthStr = dateStr.substring(2, 5).toUpperCase();
+  const year = parseInt(dateStr.substring(5, 9));
+
+  const monthMap: Record<string, number> = {
+    JAN: 0,
+    FEB: 1,
+    MAR: 2,
+    APR: 3,
+    MAY: 4,
+    JUN: 5,
+    JUL: 6,
+    AUG: 7,
+    SEP: 8,
+    OCT: 9,
+    NOV: 10,
+    DEC: 11,
+  };
+
+  const month = monthMap[monthStr] || 0;
+  return new Date(year, month, day);
+}
+
+/**
+ * Map company name sang brand code
+ */
+export function mapCompanyToBrand(company: string | null | undefined): string {
+  if (!company) return '';
+
+  const companyUpper = company.toUpperCase();
+  const brandMap: Record<string, string> = {
+    F3: 'f3',
+    FACIALBAR: 'f3',
+    MENARD: 'menard',
+    LABHAIR: 'labhair',
+    YAMAN: 'yaman',
+    CHANDO: 'chando',
+  };
+
+  return brandMap[companyUpper] || company.toLowerCase();
+}
+
+/**
+ * Build customer object từ sale data
+ */
+export function buildCustomerObject(
+  customer: any,
+  partnerCode?: string | null,
+) {
+  if (customer) {
+    return {
+      code: customer.code || partnerCode || null,
+      brand: customer.brand || null,
+      name: customer.name || null,
+      mobile: customer.mobile || null,
+    };
+  }
+
+  if (partnerCode) {
+    return {
+      code: partnerCode,
+      brand: null,
+      name: null,
+      mobile: null,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Tạo date range mặc định (30 ngày gần nhất)
+ */
+export function getDefaultDateRange(): { startDate: Date; endDate: Date } {
+  const endDate = new Date();
+  endDate.setHours(23, 59, 59, 999);
+
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - 30);
+  startDate.setHours(0, 0, 0, 0);
+
+  return { startDate, endDate };
+}
+
+/**
+ * Set thời gian bắt đầu ngày (00:00:00.000)
+ */
+export function setStartOfDay(date: Date): Date {
+  const newDate = new Date(date);
+  newDate.setHours(0, 0, 0, 0);
+  return newDate;
+}
+
+/**
+ * Set thời gian kết thúc ngày (23:59:59.999)
+ */
+export function setEndOfDay(date: Date): Date {
+  const newDate = new Date(date);
+  newDate.setHours(23, 59, 59, 999);
+  return newDate;
+}
+
+/**
+ * Parse date string và set start of day
+ */
+export function parseDateStart(dateStr: string): Date {
+  return setStartOfDay(new Date(dateStr));
+}
+
+/**
+ * Parse date string và set end of day
+ */
+export function parseDateEnd(dateStr: string): Date {
+  return setEndOfDay(new Date(dateStr));
 }

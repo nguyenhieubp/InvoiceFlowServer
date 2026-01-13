@@ -46,7 +46,9 @@ export class FastApiInvoiceService {
     }
 
     if (docCode) {
-      query.andWhere('invoice.docCode LIKE :docCode', { docCode: `%${docCode}%` });
+      query.andWhere('invoice.docCode LIKE :docCode', {
+        docCode: `%${docCode}%`,
+      });
     }
 
     if (maKh) {
@@ -65,14 +67,18 @@ export class FastApiInvoiceService {
       // Set thời gian về đầu ngày (00:00:00)
       const startDateNormalized = new Date(startDate);
       startDateNormalized.setHours(0, 0, 0, 0);
-      query.andWhere('invoice.ngayCt >= :startDate', { startDate: startDateNormalized });
+      query.andWhere('invoice.ngayCt >= :startDate', {
+        startDate: startDateNormalized,
+      });
     }
 
     if (endDate) {
       // Set thời gian về cuối ngày (23:59:59.999) để lấy tất cả invoice trong ngày đó
       const endDateNormalized = new Date(endDate);
       endDateNormalized.setHours(23, 59, 59, 999);
-      query.andWhere('invoice.ngayCt <= :endDate', { endDate: endDateNormalized });
+      query.andWhere('invoice.ngayCt <= :endDate', {
+        endDate: endDateNormalized,
+      });
     }
 
     // Order by created date descending
@@ -135,14 +141,18 @@ export class FastApiInvoiceService {
       // Set thời gian về đầu ngày (00:00:00)
       const startDateNormalized = new Date(options.startDate);
       startDateNormalized.setHours(0, 0, 0, 0);
-      query.andWhere('invoice.ngayCt >= :startDate', { startDate: startDateNormalized });
+      query.andWhere('invoice.ngayCt >= :startDate', {
+        startDate: startDateNormalized,
+      });
     }
 
     if (options?.endDate) {
       // Set thời gian về cuối ngày (23:59:59.999) để lấy tất cả invoice trong ngày đó
       const endDateNormalized = new Date(options.endDate);
       endDateNormalized.setHours(23, 59, 59, 999);
-      query.andWhere('invoice.ngayCt <= :endDate', { endDate: endDateNormalized });
+      query.andWhere('invoice.ngayCt <= :endDate', {
+        endDate: endDateNormalized,
+      });
     }
 
     if (options?.maDvcs) {
@@ -150,8 +160,14 @@ export class FastApiInvoiceService {
     }
 
     const total = await query.getCount();
-    const success = await query.clone().andWhere('invoice.status = :status', { status: 1 }).getCount();
-    const failed = await query.clone().andWhere('invoice.status = :status', { status: 0 }).getCount();
+    const success = await query
+      .clone()
+      .andWhere('invoice.status = :status', { status: 1 })
+      .getCount();
+    const failed = await query
+      .clone()
+      .andWhere('invoice.status = :status', { status: 0 })
+      .getCount();
 
     return {
       total,
@@ -177,11 +193,15 @@ export class FastApiInvoiceService {
     // Filter theo khoảng thời gian (chuẩn xác)
     const startDateNormalized = new Date(options.startDate);
     startDateNormalized.setHours(0, 0, 0, 0);
-    query.andWhere('invoice.ngayCt >= :startDate', { startDate: startDateNormalized });
+    query.andWhere('invoice.ngayCt >= :startDate', {
+      startDate: startDateNormalized,
+    });
 
     const endDateNormalized = new Date(options.endDate);
     endDateNormalized.setHours(23, 59, 59, 999);
-    query.andWhere('invoice.ngayCt <= :endDate', { endDate: endDateNormalized });
+    query.andWhere('invoice.ngayCt <= :endDate', {
+      endDate: endDateNormalized,
+    });
 
     // Filter theo maDvcs nếu có
     if (options.maDvcs) {
@@ -194,4 +214,3 @@ export class FastApiInvoiceService {
     return await query.getMany();
   }
 }
-

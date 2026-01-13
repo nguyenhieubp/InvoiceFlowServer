@@ -74,4 +74,3 @@ export class SyncResponseDto {
 
 // Response thực tế là mảng các object, mỗi object có key "data"
 export type SyncApiResponse = Array<SyncResponseDto>;
-

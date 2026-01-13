@@ -12,9 +12,7 @@ import { ZappyApiService } from 'src/services/zappy-api.service';
 export class SyncTask {
   private readonly logger = new Logger(SyncTask.name);
 
-  constructor(
-    private readonly syncService: SyncService
-  ) { }
+  constructor(private readonly syncService: SyncService) {}
 
   /**
    * Helper function: Format ngày hôm qua thành format DDMMMYYYY
@@ -24,12 +22,24 @@ export class SyncTask {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const day = yesterday.getDate().toString().padStart(2, '0');
-    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    const months = [
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
+    ];
     const month = months[yesterday.getMonth()];
     const year = yesterday.getFullYear();
     return `${day}${month}${year}`;
   }
-
 
   // Chạy mỗi ngày lúc 1:00 AM - Đồng bộ dữ liệu xuất kho
   // @Cron('0 1 * * *', {
@@ -37,7 +47,9 @@ export class SyncTask {
   //   timeZone: 'Asia/Ho_Chi_Minh',
   // })
   async handleDailyStockTransferSync() {
-    this.logger.log('Bắt đầu đồng bộ dữ liệu xuất kho tự động (scheduled task)...');
+    this.logger.log(
+      'Bắt đầu đồng bộ dữ liệu xuất kho tự động (scheduled task)...',
+    );
     try {
       const date = this.formatYesterdayDate();
 
@@ -45,21 +57,31 @@ export class SyncTask {
       const brands = ['f3', 'labhair', 'yaman', 'menard'];
       for (const brand of brands) {
         try {
-          this.logger.log(`[Scheduled Stock Transfer] Đang đồng bộ xuất kho brand ${brand} cho ngày ${date}`);
+          this.logger.log(
+            `[Scheduled Stock Transfer] Đang đồng bộ xuất kho brand ${brand} cho ngày ${date}`,
+          );
           const result = await this.syncService.syncStockTransfer(date, brand);
           if (result.success) {
-            this.logger.log(`[Scheduled Stock Transfer] Hoàn thành đồng bộ xuất kho brand ${brand}: ${result.message}`);
+            this.logger.log(
+              `[Scheduled Stock Transfer] Hoàn thành đồng bộ xuất kho brand ${brand}: ${result.message}`,
+            );
           } else {
-            this.logger.error(`[Scheduled Stock Transfer] Lỗi khi đồng bộ xuất kho brand ${brand}: ${result.message}`);
+            this.logger.error(
+              `[Scheduled Stock Transfer] Lỗi khi đồng bộ xuất kho brand ${brand}: ${result.message}`,
+            );
           }
         } catch (error) {
-          this.logger.error(`[Scheduled Stock Transfer] Lỗi khi đồng bộ xuất kho ${brand} cho ngày ${date}: ${error.message}`);
+          this.logger.error(
+            `[Scheduled Stock Transfer] Lỗi khi đồng bộ xuất kho ${brand} cho ngày ${date}: ${error.message}`,
+          );
         }
       }
 
       this.logger.log('Hoàn thành đồng bộ dữ liệu xuất kho tự động');
     } catch (error) {
-      this.logger.error(`Lỗi khi đồng bộ dữ liệu xuất kho tự động: ${error.message}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ dữ liệu xuất kho tự động: ${error.message}`,
+      );
     }
   }
 
@@ -68,27 +90,38 @@ export class SyncTask {
    */
   private async syncSalesForYesterday(cronName: string): Promise<void> {
     const date = this.formatYesterdayDate();
-    this.logger.log(`[${cronName}] Bắt đầu đồng bộ dữ liệu bán hàng cho ngày ${date} (T-1)...`);
+    this.logger.log(
+      `[${cronName}] Bắt đầu đồng bộ dữ liệu bán hàng cho ngày ${date} (T-1)...`,
+    );
 
     try {
       // Đồng bộ từng brand tuần tự
       const brands = ['f3', 'labhair', 'yaman', 'menard', 'chando'];
       for (const brand of brands) {
         try {
-          this.logger.log(`[${cronName}] Đang đồng bộ brand ${brand} cho ngày ${date}`);
+          this.logger.log(
+            `[${cronName}] Đang đồng bộ brand ${brand} cho ngày ${date}`,
+          );
           await this.syncService.syncBrand(brand, date);
-          this.logger.log(`[${cronName}] Hoàn thành đồng bộ brand ${brand} cho ngày ${date}`);
+          this.logger.log(
+            `[${cronName}] Hoàn thành đồng bộ brand ${brand} cho ngày ${date}`,
+          );
         } catch (error) {
-          this.logger.error(`[${cronName}] Lỗi khi đồng bộ ${brand} cho ngày ${date}: ${error.message}`);
+          this.logger.error(
+            `[${cronName}] Lỗi khi đồng bộ ${brand} cho ngày ${date}: ${error.message}`,
+          );
         }
       }
 
-      this.logger.log(`[${cronName}] Hoàn thành đồng bộ dữ liệu bán hàng tự động`);
+      this.logger.log(
+        `[${cronName}] Hoàn thành đồng bộ dữ liệu bán hàng tự động`,
+      );
     } catch (error) {
-      this.logger.error(`[${cronName}] Lỗi khi đồng bộ dữ liệu bán hàng tự động: ${error.message}`);
+      this.logger.error(
+        `[${cronName}] Lỗi khi đồng bộ dữ liệu bán hàng tự động: ${error.message}`,
+      );
     }
   }
-
 
   // Chạy mỗi ngày lúc 2:30 AM - Đồng bộ báo cáo nộp quỹ cuối ca (ngày T-1)
   // @Cron('30 2 * * *', {
@@ -96,7 +129,9 @@ export class SyncTask {
   //   timeZone: 'Asia/Ho_Chi_Minh',
   // })
   async handleDailyShiftEndCashSync230AM() {
-    this.logger.log('Bắt đầu đồng bộ báo cáo nộp quỹ cuối ca tự động (scheduled task)...');
+    this.logger.log(
+      'Bắt đầu đồng bộ báo cáo nộp quỹ cuối ca tự động (scheduled task)...',
+    );
     try {
       const date = this.formatYesterdayDate();
 
@@ -106,7 +141,9 @@ export class SyncTask {
 
       for (const brand of brands) {
         try {
-          this.logger.log(`[Scheduled ShiftEndCash] Đang đồng bộ báo cáo nộp quỹ cuối ca brand ${brand} cho ngày ${date}`);
+          this.logger.log(
+            `[Scheduled ShiftEndCash] Đang đồng bộ báo cáo nộp quỹ cuối ca brand ${brand} cho ngày ${date}`,
+          );
           const result = await this.syncService.syncShiftEndCash(date, brand);
           if (result.success) {
             this.logger.log(
@@ -118,7 +155,9 @@ export class SyncTask {
               allNewRecordIds.push(...result.newRecordIds);
             }
           } else {
-            this.logger.error(`[Scheduled ShiftEndCash] Lỗi khi đồng bộ brand ${brand}: ${result.message}`);
+            this.logger.error(
+              `[Scheduled ShiftEndCash] Lỗi khi đồng bộ brand ${brand}: ${result.message}`,
+            );
             if (result.errors && result.errors.length > 0) {
               result.errors.forEach((error) => {
                 this.logger.error(`[Scheduled ShiftEndCash] ${error}`);
@@ -126,30 +165,43 @@ export class SyncTask {
             }
           }
         } catch (error: any) {
-          this.logger.error(`[Scheduled ShiftEndCash] Lỗi khi đồng bộ ${brand} cho ngày ${date}: ${error?.message || error}`);
+          this.logger.error(
+            `[Scheduled ShiftEndCash] Lỗi khi đồng bộ ${brand} cho ngày ${date}: ${error?.message || error}`,
+          );
         }
       }
 
       // Tự động tạo payment cho các records mới
       if (allNewRecordIds.length > 0) {
-        this.logger.log(`[Scheduled ShiftEndCash] Bắt đầu tự động tạo payment cho ${allNewRecordIds.length} records mới`);
+        this.logger.log(
+          `[Scheduled ShiftEndCash] Bắt đầu tự động tạo payment cho ${allNewRecordIds.length} records mới`,
+        );
         let successCount = 0;
         let failedCount = 0;
 
         for (const recordId of allNewRecordIds) {
           try {
-            this.logger.log(`[Scheduled ShiftEndCash Payment] Đang tạo payment cho record ${recordId}`);
-            const paymentResult = await this.syncService.createPaymentFromShiftEndCash(recordId);
+            this.logger.log(
+              `[Scheduled ShiftEndCash Payment] Đang tạo payment cho record ${recordId}`,
+            );
+            const paymentResult =
+              await this.syncService.createPaymentFromShiftEndCash(recordId);
             if (paymentResult.success) {
               successCount++;
-              this.logger.log(`[Scheduled ShiftEndCash Payment] Tạo payment thành công cho record ${recordId}`);
+              this.logger.log(
+                `[Scheduled ShiftEndCash Payment] Tạo payment thành công cho record ${recordId}`,
+              );
             } else {
               failedCount++;
-              this.logger.error(`[Scheduled ShiftEndCash Payment] Tạo payment thất bại cho record ${recordId}: ${paymentResult.message || paymentResult.error}`);
+              this.logger.error(
+                `[Scheduled ShiftEndCash Payment] Tạo payment thất bại cho record ${recordId}: ${paymentResult.message || paymentResult.error}`,
+              );
             }
           } catch (error: any) {
             failedCount++;
-            this.logger.error(`[Scheduled ShiftEndCash Payment] Lỗi khi tạo payment cho record ${recordId}: ${error?.message || error}`);
+            this.logger.error(
+              `[Scheduled ShiftEndCash Payment] Lỗi khi tạo payment cho record ${recordId}: ${error?.message || error}`,
+            );
           }
         }
 
@@ -157,12 +209,16 @@ export class SyncTask {
           `[Scheduled ShiftEndCash Payment] Hoàn thành tự động tạo payment: ${successCount} thành công, ${failedCount} thất bại`,
         );
       } else {
-        this.logger.log(`[Scheduled ShiftEndCash Payment] Không có records mới để tạo payment`);
+        this.logger.log(
+          `[Scheduled ShiftEndCash Payment] Không có records mới để tạo payment`,
+        );
       }
 
       this.logger.log('Hoàn thành đồng bộ báo cáo nộp quỹ cuối ca tự động');
     } catch (error: any) {
-      this.logger.error(`Lỗi khi đồng bộ báo cáo nộp quỹ cuối ca tự động: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ báo cáo nộp quỹ cuối ca tự động: ${error?.message || error}`,
+      );
     }
   }
 
@@ -175,7 +231,6 @@ export class SyncTask {
     await this.syncSalesForYesterday('Sales Sync 3AM');
   }
 
-
   // Chạy đồng bộ odoo
   // @Cron('0 4 * * *', {
   //   name: 'daily-odoo-sync-4am',
@@ -184,11 +239,11 @@ export class SyncTask {
   async handleDailyOdooSync4AM() {
     const today = new Date();
     today.setDate(today.getDate() - 1);
-    const formatted =
-      `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
+    const formatted = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
     await this.syncService.syncOdoo(formatted, formatted);
     this.logger.log('Hoàn thành đồng bộ odoo');
-  } catch(error: any) {
+  }
+  catch(error: any) {
     this.logger.error(`Lỗi khi đồng bộ odoo: ${error?.message || error}`);
   }
 
@@ -199,7 +254,20 @@ export class SyncTask {
   private formatFirstDayOfCurrentMonth(): string {
     const now = new Date();
     const day = '01';
-    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    const months = [
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
+    ];
     const month = months[now.getMonth()];
     const year = now.getFullYear();
     return `${day}${month}${year}`;
@@ -211,9 +279,26 @@ export class SyncTask {
    */
   private formatLastDayOfCurrentMonth(): string {
     const now = new Date();
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const lastDay = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+    ).getDate();
     const day = lastDay.toString().padStart(2, '0');
-    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    const months = [
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
+    ];
     const month = months[now.getMonth()];
     const year = now.getFullYear();
     return `${day}${month}${year}`;
@@ -225,38 +310,54 @@ export class SyncTask {
   //   timeZone: 'Asia/Ho_Chi_Minh',
   // })
   async handleDailyPromotionSync4AM() {
-    this.logger.log('Bắt đầu đồng bộ promotion tự động cho tháng hiện tại (scheduled task)...');
+    this.logger.log(
+      'Bắt đầu đồng bộ promotion tự động cho tháng hiện tại (scheduled task)...',
+    );
     try {
       const dateFrom = this.formatFirstDayOfCurrentMonth();
       const dateTo = this.formatLastDayOfCurrentMonth();
 
-      this.logger.log(`[Scheduled Promotion] Đang đồng bộ promotion cho tháng hiện tại: ${dateFrom} - ${dateTo}`);
+      this.logger.log(
+        `[Scheduled Promotion] Đang đồng bộ promotion cho tháng hiện tại: ${dateFrom} - ${dateTo}`,
+      );
 
       // Đồng bộ promotion cho tất cả brands
       const brands = ['f3', 'labhair', 'yaman', 'menard'];
       for (const brand of brands) {
         try {
-          this.logger.log(`[Scheduled Promotion] Đang đồng bộ promotion brand ${brand} cho tháng ${dateFrom} - ${dateTo}`);
-          const result = await this.syncService.syncPromotion(dateFrom, dateTo, brand);
+          this.logger.log(
+            `[Scheduled Promotion] Đang đồng bộ promotion brand ${brand} cho tháng ${dateFrom} - ${dateTo}`,
+          );
+          const result = await this.syncService.syncPromotion(
+            dateFrom,
+            dateTo,
+            brand,
+          );
           if (result.success) {
             this.logger.log(
               `[Scheduled Promotion] Hoàn thành đồng bộ promotion brand ${brand}: ${result.recordsCount} records, ${result.savedCount} saved, ${result.updatedCount} updated`,
             );
           } else {
-            this.logger.error(`[Scheduled Promotion] Lỗi khi đồng bộ promotion brand ${brand}: ${result.message}`);
+            this.logger.error(
+              `[Scheduled Promotion] Lỗi khi đồng bộ promotion brand ${brand}: ${result.message}`,
+            );
           }
         } catch (error: any) {
-          this.logger.error(`[Scheduled Promotion] Lỗi khi đồng bộ promotion ${brand} cho tháng ${dateFrom} - ${dateTo}: ${error?.message || error}`);
+          this.logger.error(
+            `[Scheduled Promotion] Lỗi khi đồng bộ promotion ${brand} cho tháng ${dateFrom} - ${dateTo}: ${error?.message || error}`,
+          );
         }
       }
 
-      this.logger.log('Hoàn thành đồng bộ promotion tự động cho tháng hiện tại');
+      this.logger.log(
+        'Hoàn thành đồng bộ promotion tự động cho tháng hiện tại',
+      );
     } catch (error: any) {
-      this.logger.error(`Lỗi khi đồng bộ promotion tự động: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ promotion tự động: ${error?.message || error}`,
+      );
     }
   }
-
-
 
   // Chạy mỗi ngày lúc 5:00 AM - Đồng bộ bán buôn cho ngày T-1
   // @Cron('0 5 * * *', {
@@ -264,24 +365,32 @@ export class SyncTask {
   //   timeZone: 'Asia/Ho_Chi_Minh',
   // })
   async handleDailyWsaleSync5AM() {
-    this.logger.log('Bắt đầu đồng bộ bán buôn tự động cho ngày hiện tại (scheduled task)...');
+    this.logger.log(
+      'Bắt đầu đồng bộ bán buôn tự động cho ngày hiện tại (scheduled task)...',
+    );
     try {
       const date = this.formatYesterdayDate();
       const brands = ['menard'];
       for (const brand of brands) {
-
-        this.logger.log(`[Scheduled Wsale] Đang đồng bộ bán buôn brand ${brand} cho ngày ${date}`);
+        this.logger.log(
+          `[Scheduled Wsale] Đang đồng bộ bán buôn brand ${brand} cho ngày ${date}`,
+        );
         const orders = await this.syncService.getDailyWsale(date, brand);
         if (orders.length > 0) {
-          this.logger.log(`[Scheduled Wsale] Hoàn thành đồng bộ bán buôn brand ${brand} cho ngày ${date}: ${orders.length} records`);
+          this.logger.log(
+            `[Scheduled Wsale] Hoàn thành đồng bộ bán buôn brand ${brand} cho ngày ${date}: ${orders.length} records`,
+          );
         } else {
-          this.logger.error(`[Scheduled Wsale] Lỗi khi đồng bộ bán buôn brand ${brand} cho ngày ${date}: ${orders.length} records`);
+          this.logger.error(
+            `[Scheduled Wsale] Lỗi khi đồng bộ bán buôn brand ${brand} cho ngày ${date}: ${orders.length} records`,
+          );
         }
       }
       this.logger.log('Hoàn thành đồng bộ bán buôn tự động cho ngày hiện tại');
     } catch (error: any) {
-      this.logger.error(`Lỗi khi đồng bộ bán buôn tự động: ${error?.message || error}`);
+      this.logger.error(
+        `Lỗi khi đồng bộ bán buôn tự động: ${error?.message || error}`,
+      );
     }
   }
 }
-

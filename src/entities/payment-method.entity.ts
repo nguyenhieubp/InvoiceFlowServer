@@ -47,4 +47,3 @@ export class PaymentMethod {
   @Column({ nullable: true })
   nguoiSua?: string;
 }
-

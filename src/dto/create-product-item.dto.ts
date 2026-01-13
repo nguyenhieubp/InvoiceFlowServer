@@ -1,4 +1,10 @@
-import { IsOptional, IsString, IsBoolean, IsNumber, IsInt } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsBoolean,
+  IsNumber,
+  IsInt,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateProductItemDto {
@@ -281,4 +287,3 @@ export class UpdateProductItemDto extends CreateProductItemDto {
   @IsString()
   nguoiSua?: string;
 }
-

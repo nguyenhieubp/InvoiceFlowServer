@@ -1,4 +1,14 @@
-import { Controller, Get, Query, Param, Post, Body, BadRequestException, NotFoundException, Res } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Query,
+  Param,
+  Post,
+  Body,
+  BadRequestException,
+  NotFoundException,
+  Res,
+} from '@nestjs/common';
 import { SalesService } from './sales.service';
 import type { CreateStockTransferDto } from '../../dto/create-stock-transfer.dto';
 import type { Response } from 'express';
@@ -22,7 +32,8 @@ export class SalesController {
     // Luôn trả về danh sách đơn hàng (gộp theo docCode) với dữ liệu cơ bản
     return this.salesService.findAllOrders({
       brand,
-      isProcessed: processed === 'true' ? true : processed === 'false' ? false : undefined,
+      isProcessed:
+        processed === 'true' ? true : processed === 'false' ? false : undefined,
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 50,
       date, // Pass date parameter
@@ -32,7 +43,6 @@ export class SalesController {
       typeSale, // Pass typeSale parameter
     });
   }
-
 
   @Get('status-asys')
   async getStatusAsys(
@@ -47,7 +57,7 @@ export class SalesController {
     try {
       const pageNumber = page ? parseInt(page) : undefined;
       const limitNumber = limit ? parseInt(limit) : undefined;
-      
+
       return await this.salesService.getStatusAsys(
         statusAsys,
         pageNumber,
@@ -59,7 +69,7 @@ export class SalesController {
       );
     } catch (error: any) {
       throw new BadRequestException(
-        `Lỗi khi lấy danh sách đơn hàng: ${error?.message || error}`
+        `Lỗi khi lấy danh sách đơn hàng: ${error?.message || error}`,
       );
     }
   }
@@ -74,16 +84,20 @@ export class SalesController {
     return this.salesService.findByOrderCode(docCode);
   }
 
-
   @Post('mark-processed-from-invoices')
   async markProcessedOrdersFromInvoices() {
     return this.salesService.markProcessedOrdersFromInvoices();
   }
 
   @Post('sync-from-zappy')
-  async syncFromZappy(@Body('date') date: string, @Body('brand') brand?: string) {
+  async syncFromZappy(
+    @Body('date') date: string,
+    @Body('brand') brand?: string,
+  ) {
     if (!date) {
-      throw new BadRequestException('Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 04DEC2025)');
+      throw new BadRequestException(
+        'Tham số date là bắt buộc (format: DDMMMYYYY, ví dụ: 04DEC2025)',
+      );
     }
     return this.salesService.syncFromZappy(date, brand);
   }
@@ -94,7 +108,9 @@ export class SalesController {
     @Body('endDate') endDate: string,
   ) {
     if (!startDate || !endDate) {
-      throw new BadRequestException('Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)');
+      throw new BadRequestException(
+        'Tham số startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+      );
     }
     return this.salesService.syncSalesByDateRange(startDate, endDate);
   }
@@ -110,7 +126,10 @@ export class SalesController {
     @Param('docCode') docCode: string,
     @Body() body: { forceRetry?: boolean },
   ) {
-    return this.salesService.createInvoiceViaFastApi(docCode, body?.forceRetry || false);
+    return this.salesService.createInvoiceViaFastApi(
+      docCode,
+      body?.forceRetry || false,
+    );
   }
 
   @Post('orders/create-invoice-fast')
@@ -118,7 +137,7 @@ export class SalesController {
     if (!Array.isArray(docCodes) || docCodes.length === 0) {
       throw new BadRequestException('Danh sách đơn hàng không hợp lệ');
     }
-    
+
     const results: Array<{
       docCode: string;
       success: boolean;
@@ -156,12 +175,15 @@ export class SalesController {
 
   @Post('stock-transfer')
   async createStockTransfer(@Body() createDto: CreateStockTransferDto) {
-    if (!createDto.data || !Array.isArray(createDto.data) || createDto.data.length === 0) {
+    if (
+      !createDto.data ||
+      !Array.isArray(createDto.data) ||
+      createDto.data.length === 0
+    ) {
       throw new BadRequestException('Dữ liệu stock transfer không hợp lệ');
     }
     return this.salesService.createStockTransfer(createDto);
   }
-
 
   @Post('sync-error-orders')
   async syncErrorOrders() {
@@ -179,22 +201,32 @@ export class SalesController {
       // Lấy stock transfer từ database
       const stockTransfer = await this.salesService.getStockTransferById(id);
       if (!stockTransfer) {
-        throw new NotFoundException(`Stock transfer với id ${id} không tồn tại`);
+        throw new NotFoundException(
+          `Stock transfer với id ${id} không tồn tại`,
+        );
       }
 
       // Xử lý warehouse receipt/release
-      return await this.salesService.processWarehouseFromStockTransfer(stockTransfer);
+      return await this.salesService.processWarehouseFromStockTransfer(
+        stockTransfer,
+      );
     } catch (error: any) {
       throw new BadRequestException(error.message || 'Lỗi khi xử lý warehouse');
     }
   }
 
   @Post('stock-transfer/doc-code/:docCode/warehouse-retry')
-  async retryWarehouseFromStockTransferByDocCode(@Param('docCode') docCode: string) {
+  async retryWarehouseFromStockTransferByDocCode(
+    @Param('docCode') docCode: string,
+  ) {
     try {
-      return await this.salesService.processWarehouseFromStockTransferByDocCode(docCode);
+      return await this.salesService.processWarehouseFromStockTransferByDocCode(
+        docCode,
+      );
     } catch (error: any) {
-      throw new BadRequestException(error.message || 'Lỗi khi xử lý lại warehouse');
+      throw new BadRequestException(
+        error.message || 'Lỗi khi xử lý lại warehouse',
+      );
     }
   }
 
@@ -204,16 +236,21 @@ export class SalesController {
     @Body('dateTo') dateTo: string,
   ) {
     if (!dateFrom || !dateTo) {
-      throw new BadRequestException('dateFrom và dateTo là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)');
+      throw new BadRequestException(
+        'dateFrom và dateTo là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+      );
     }
 
     try {
-      const result = await this.salesService.retryWarehouseFailedByDateRange(dateFrom, dateTo);
+      const result = await this.salesService.retryWarehouseFailedByDateRange(
+        dateFrom,
+        dateTo,
+      );
       return result;
     } catch (error: any) {
-      throw new BadRequestException(error.message || 'Lỗi khi xử lý lại warehouse batch');
+      throw new BadRequestException(
+        error.message || 'Lỗi khi xử lý lại warehouse batch',
+      );
     }
   }
-
 }
-

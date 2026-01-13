@@ -14,7 +14,9 @@ export function calculateVCType(
   trackInventory: boolean | null | undefined,
 ): 'VCDV' | 'VCHB' | 'VCKM' | null {
   // Normalize productType
-  const normalizedProductType = productType ? String(productType).trim().toUpperCase() : null;
+  const normalizedProductType = productType
+    ? String(productType).trim().toUpperCase()
+    : null;
 
   // VCDV: productType = "DIVU"
   if (normalizedProductType === 'DIVU') {
@@ -27,7 +29,11 @@ export function calculateVCType(
   }
 
   // VCHB: productType != "DIVU" && productType != "GIFT" && trackInventory = true
-  if (normalizedProductType && normalizedProductType !== 'DIVU' && normalizedProductType !== 'GIFT') {
+  if (
+    normalizedProductType &&
+    normalizedProductType !== 'DIVU' &&
+    normalizedProductType !== 'GIFT'
+  ) {
     if (trackInventory === true) {
       return 'VCHB';
     }
@@ -35,4 +41,3 @@ export function calculateVCType(
 
   return null;
 }
-

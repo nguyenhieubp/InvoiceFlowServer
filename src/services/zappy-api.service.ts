@@ -3,7 +3,11 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Order, OrderCustomer, SaleItem } from '../types/order.types';
 import axios from 'axios';
-import { convertDate, convertOrderToOrderLineFormat, convertOrderToOrderLineFormatPOS } from 'src/utils/convert.utils';
+import {
+  convertDate,
+  convertOrderToOrderLineFormat,
+  convertOrderToOrderLineFormatPOS,
+} from 'src/utils/convert.utils';
 
 /**
  * Service để gọi API từ Zappy và transform dữ liệu
@@ -11,17 +15,18 @@ import { convertDate, convertOrderToOrderLineFormat, convertOrderToOrderLineForm
 @Injectable()
 export class ZappyApiService {
   private readonly logger = new Logger(ZappyApiService.name);
-  private readonly DEFAULT_ZAPPY_API_BASE_URL = process.env.ZAPPY_API_BASE_URL || 'https://zappy.io.vn/ords/vmt/api';
+  private readonly DEFAULT_ZAPPY_API_BASE_URL =
+    process.env.ZAPPY_API_BASE_URL || 'https://zappy.io.vn/ords/vmt/api';
 
   // Map brand name to Zappy API base URL
   private readonly brandApiUrls: Record<string, string> = {
-    'f3': 'https://zappy.io.vn/ords/vmt/api',
-    'labhair': 'https://zappy.io.vn/ords/labhair/api',
-    'yaman': 'https://zappy.io.vn/ords/yaman/api',
-    'menard': 'https://vmterp.com/ords/erp/retail/api',
+    f3: 'https://zappy.io.vn/ords/vmt/api',
+    labhair: 'https://zappy.io.vn/ords/labhair/api',
+    yaman: 'https://zappy.io.vn/ords/yaman/api',
+    menard: 'https://vmterp.com/ords/erp/retail/api',
   };
 
-  constructor(private readonly httpService: HttpService) { }
+  constructor(private readonly httpService: HttpService) {}
 
   /**
    * Lấy base URL cho brand
@@ -33,14 +38,10 @@ export class ZappyApiService {
     return this.DEFAULT_ZAPPY_API_BASE_URL;
   }
 
-
   /**
- * Lấy dữ liệu bán buôn theo NGÀY
- */
-  public async getDailyWsale(
-    date: string,
-    brand?: string,
-  ): Promise<Order[]> {
+   * Lấy dữ liệu bán buôn theo NGÀY
+   */
+  public async getDailyWsale(date: string, brand?: string): Promise<Order[]> {
     const baseUrl = this.getBaseUrlForBrand(brand);
 
     try {
@@ -56,11 +57,7 @@ export class ZappyApiService {
         return [];
       }
 
-      return this.transformZappySalesToOrders(
-        rawData,
-        brand,
-        'WHOLESALE',
-      );
+      return this.transformZappySalesToOrders(rawData, brand, 'WHOLESALE');
     } catch (error: any) {
       this.logger.error(
         `Error fetching daily wsale (${date}): ${error?.message || error}`,
@@ -77,44 +74,52 @@ export class ZappyApiService {
   async getDailySales(date: string, brand?: string): Promise<Order[]> {
     const formattedDate = convertDate(date);
     try {
-      let orderChando: any[] = [];
+      const orderChando: any[] = [];
       if (brand === 'chando') {
         const urlOrder = 'https://ecs.vmt.vn/api/sale-orders';
-        const responseOrder = await axios.post(urlOrder, {
-          params: {
-            token: 'chHIqq7u8bhm5rFD68be',
-            date_from: formattedDate,
-            date_to: formattedDate
+        const responseOrder = await axios.post(
+          urlOrder,
+          {
+            params: {
+              token: 'chHIqq7u8bhm5rFD68be',
+              date_from: formattedDate,
+              date_to: formattedDate,
+            },
           },
-        }, {
-          headers: {
-            'Content-Type': 'application/json',
+          {
+            headers: {
+              'Content-Type': 'application/json',
+            },
           },
-        });
+        );
 
         let orderChandoOnline = responseOrder?.data?.result?.data || [];
         orderChandoOnline = orderChandoOnline.flatMap((order: any) =>
-          convertOrderToOrderLineFormat(order)
+          convertOrderToOrderLineFormat(order),
         );
 
         orderChando.push(...orderChandoOnline);
 
-        let urlPOS = 'https://pos.vmt.vn/api/pos-orders';
-        const responsePOS = await axios.post(urlPOS, {
-          params: {
-            token: '08ZgC22yjuJAJpf',
-            date_from: formattedDate,
-            date_to: formattedDate
+        const urlPOS = 'https://pos.vmt.vn/api/pos-orders';
+        const responsePOS = await axios.post(
+          urlPOS,
+          {
+            params: {
+              token: '08ZgC22yjuJAJpf',
+              date_from: formattedDate,
+              date_to: formattedDate,
+            },
           },
-        }, {
-          headers: {
-            'Content-Type': 'application/json',
+          {
+            headers: {
+              'Content-Type': 'application/json',
+            },
           },
-        });
-      
+        );
+
         let orderChandoPOS = responsePOS?.data?.result?.data || [];
         orderChandoPOS = orderChandoPOS.flatMap((order: any) =>
-          convertOrderToOrderLineFormatPOS(order)
+          convertOrderToOrderLineFormatPOS(order),
         );
         orderChando.push(...orderChandoPOS);
         return this.transformZappySalesToOrders(orderChando);
@@ -146,21 +151,27 @@ export class ZappyApiService {
         });
 
         if (filteredData.length === 0) {
-          this.logger.warn(`No sales data found for date ${date} after filtering (filtered from ${rawData.length} total items)`);
+          this.logger.warn(
+            `No sales data found for date ${date} after filtering (filtered from ${rawData.length} total items)`,
+          );
           return [];
         }
 
         // Log số lượng đã filter
         const trutonkeepCount = rawData.length - filteredData.length;
         if (trutonkeepCount > 0) {
-          this.logger.log(`Filtered out ${trutonkeepCount} items with itemCode = "TRUTONKEEP"`);
+          this.logger.log(
+            `Filtered out ${trutonkeepCount} items with itemCode = "TRUTONKEEP"`,
+          );
         }
 
         // Transform dữ liệu từ Zappy format sang Order format
         return this.transformZappySalesToOrders(filteredData, brand);
       }
     } catch (error: any) {
-      this.logger.error(`Error fetching daily sales from Zappy API: ${error?.message || error}`);
+      this.logger.error(
+        `Error fetching daily sales from Zappy API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -189,7 +200,9 @@ export class ZappyApiService {
 
       return response?.data?.data || [];
     } catch (error: any) {
-      this.logger.error(`Error fetching daily cash from Zappy API: ${error?.message || error}`);
+      this.logger.error(
+        `Error fetching daily cash from Zappy API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -219,7 +232,9 @@ export class ZappyApiService {
 
       return rawData;
     } catch (error: any) {
-      this.logger.error(`Error fetching shift end cash from API: ${error?.message || error}`);
+      this.logger.error(
+        `Error fetching shift end cash from API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -231,7 +246,11 @@ export class ZappyApiService {
    * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
    * @returns Array of promotion records
    */
-  async getPromotion(dateFrom: string, dateTo: string, brand?: string): Promise<any[]> {
+  async getPromotion(
+    dateFrom: string,
+    dateTo: string,
+    brand?: string,
+  ): Promise<any[]> {
     try {
       const baseUrl = this.getBaseUrlForBrand(brand);
       const url = `${baseUrl}/get_promotion?P_FDATE=${dateFrom}&P_TDATE=${dateTo}`;
@@ -244,13 +263,17 @@ export class ZappyApiService {
 
       const rawData = response?.data?.data || [];
       if (!Array.isArray(rawData)) {
-        this.logger.warn(`No promotion data found for date range ${dateFrom} - ${dateTo}`);
+        this.logger.warn(
+          `No promotion data found for date range ${dateFrom} - ${dateTo}`,
+        );
         return [];
       }
 
       return rawData;
     } catch (error: any) {
-      this.logger.error(`Error fetching promotion from API: ${error?.message || error}`);
+      this.logger.error(
+        `Error fetching promotion from API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -276,25 +299,41 @@ export class ZappyApiService {
       // Các brand khác có cấu trúc: response.data.data[0]
       let rawData: any = null;
 
-      if (response?.data?.items && Array.isArray(response.data.items) && response.data.items.length > 0) {
+      if (
+        response?.data?.items &&
+        Array.isArray(response.data.items) &&
+        response.data.items.length > 0
+      ) {
         // Cấu trúc menard: items[0].data[0]
         const firstItem = response.data.items[0];
-        if (firstItem?.data && Array.isArray(firstItem.data) && firstItem.data.length > 0) {
+        if (
+          firstItem?.data &&
+          Array.isArray(firstItem.data) &&
+          firstItem.data.length > 0
+        ) {
           rawData = firstItem.data[0];
         }
-      } else if (response?.data?.data && Array.isArray(response.data.data) && response.data.data.length > 0) {
+      } else if (
+        response?.data?.data &&
+        Array.isArray(response.data.data) &&
+        response.data.data.length > 0
+      ) {
         // Cấu trúc các brand khác: data[0]
         rawData = response.data.data[0];
       }
 
       if (!rawData) {
-        this.logger.warn(`No promotion line data found for promotionId ${promotionId} (brand: ${brand})`);
+        this.logger.warn(
+          `No promotion line data found for promotionId ${promotionId} (brand: ${brand})`,
+        );
         return {};
       }
 
       return rawData;
     } catch (error: any) {
-      this.logger.error(`Error fetching promotion line from API: ${error?.message || error}`);
+      this.logger.error(
+        `Error fetching promotion line from API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -306,7 +345,11 @@ export class ZappyApiService {
    * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
    * @returns Array of voucher issue records
    */
-  async getVoucherIssue(dateFrom: string, dateTo: string, brand?: string): Promise<any[]> {
+  async getVoucherIssue(
+    dateFrom: string,
+    dateTo: string,
+    brand?: string,
+  ): Promise<any[]> {
     try {
       const baseUrl = this.getBaseUrlForBrand(brand);
       const url = `${baseUrl}/get_voucher_issue?P_FDATE=${dateFrom}&P_TDATE=${dateTo}`;
@@ -319,13 +362,17 @@ export class ZappyApiService {
 
       const rawData = response?.data?.data || [];
       if (!Array.isArray(rawData)) {
-        this.logger.warn(`No voucher issue data found for date range ${dateFrom} - ${dateTo}`);
+        this.logger.warn(
+          `No voucher issue data found for date range ${dateFrom} - ${dateTo}`,
+        );
         return [];
       }
 
       return rawData;
     } catch (error: any) {
-      this.logger.error(`Error fetching voucher issue from API: ${error?.message || error}`);
+      this.logger.error(
+        `Error fetching voucher issue from API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -336,7 +383,10 @@ export class ZappyApiService {
    * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
    * @returns Object chứa chi tiết voucher issue
    */
-  async getVoucherIssueDetail(voucherIssueId: number, brand?: string): Promise<any> {
+  async getVoucherIssueDetail(
+    voucherIssueId: number,
+    brand?: string,
+  ): Promise<any> {
     try {
       const baseUrl = this.getBaseUrlForBrand(brand);
       const url = `${baseUrl}/get_1voucher_issue?P_ID=${voucherIssueId}`;
@@ -350,7 +400,9 @@ export class ZappyApiService {
       const rawData = response?.data?.data?.[0] || {};
       return rawData;
     } catch (error: any) {
-      this.logger.error(`Error fetching voucher issue detail from API: ${error?.message || error}`);
+      this.logger.error(
+        `Error fetching voucher issue detail from API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -362,7 +414,11 @@ export class ZappyApiService {
    * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
    * @returns Array of repack formula records
    */
-  async getRepackFormula(dateFrom: string, dateTo: string, brand?: string): Promise<any[]> {
+  async getRepackFormula(
+    dateFrom: string,
+    dateTo: string,
+    brand?: string,
+  ): Promise<any[]> {
     try {
       const baseUrl = this.getBaseUrlForBrand(brand);
       const url = `${baseUrl}/get_repack_formula?P_FDATE=${dateFrom}&P_TDATE=${dateTo}`;
@@ -375,13 +431,17 @@ export class ZappyApiService {
 
       const rawData = response?.data?.data || [];
       if (!Array.isArray(rawData)) {
-        this.logger.warn(`No repack formula data found for date range ${dateFrom} - ${dateTo}`);
+        this.logger.warn(
+          `No repack formula data found for date range ${dateFrom} - ${dateTo}`,
+        );
         return [];
       }
 
       return rawData;
     } catch (error: any) {
-      this.logger.error(`Error fetching repack formula from API: ${error?.message || error}`);
+      this.logger.error(
+        `Error fetching repack formula from API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -393,7 +453,11 @@ export class ZappyApiService {
    * @param part - Phần dữ liệu cần lấy (1, 2, 3). Nếu không có thì lấy tất cả
    * @returns Array of stock transfer records
    */
-  async getDailyStockTrans(date: string, brand?: string, part?: number): Promise<any[]> {
+  async getDailyStockTrans(
+    date: string,
+    brand?: string,
+    part?: number,
+  ): Promise<any[]> {
     try {
       const baseUrl = this.getBaseUrlForBrand(brand);
       let url = `${baseUrl}/get_daily_stock_trans?P_DATE=${date}`;
@@ -411,13 +475,17 @@ export class ZappyApiService {
 
       const rawData = response?.data?.data || [];
       if (!Array.isArray(rawData)) {
-        this.logger.warn(`No stock transfer data found for date ${date}${part ? ` part ${part}` : ''}`);
+        this.logger.warn(
+          `No stock transfer data found for date ${date}${part ? ` part ${part}` : ''}`,
+        );
         return [];
       }
 
       return rawData;
     } catch (error: any) {
-      this.logger.error(`Error fetching daily stock transfer from Zappy API: ${error?.message || error}`);
+      this.logger.error(
+        `Error fetching daily stock transfer from Zappy API: ${error?.message || error}`,
+      );
       throw error;
     }
   }
@@ -425,7 +493,11 @@ export class ZappyApiService {
   /**
    * Transform dữ liệu từ Zappy format sang Order format
    */
-  private transformZappySalesToOrders(zappySales: any[], brand?: string, typeSale?: string): Order[] {
+  private transformZappySalesToOrders(
+    zappySales: any[],
+    brand?: string,
+    typeSale?: string,
+  ): Order[] {
     return zappySales.map((zappySale) => {
       const docCode = zappySale.code || '';
 
@@ -512,7 +584,6 @@ export class ZappyApiService {
     });
   }
 
-
   /**
    * Map order type name từ Zappy sang code (deprecated - giữ lại để tương thích)
    * Bây giờ lưu ordertype_name trực tiếp
@@ -556,4 +627,3 @@ export class ZappyApiService {
     }
   }
 }
-

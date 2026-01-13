@@ -1,4 +1,10 @@
-import { IsString, IsOptional, IsNumber, IsArray, ValidateNested } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsArray,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class InvoiceItemDto {
@@ -66,4 +72,3 @@ export class CreateInvoiceDto {
   @IsOptional()
   key?: string; // Optional key, nếu không có sẽ tự động tạo
 }
-

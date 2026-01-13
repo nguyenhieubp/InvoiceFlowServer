@@ -212,4 +212,3 @@ export class ProductItem {
   @UpdateDateColumn()
   ngaySua: Date;
 }
-

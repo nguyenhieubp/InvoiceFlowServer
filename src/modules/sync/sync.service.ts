@@ -237,7 +237,9 @@ export class SyncService {
               grade_name: order.customer.grade_name,
               branch_code: order.customer.branch_code,
             } as Partial<Customer>);
-            customer = await this.customerRepository.save(newCustomer);
+            customer = (await this.customerRepository.save(
+              newCustomer,
+            )) as unknown as Customer;
             customersCount++;
           } else {
             // Cập nhật thông tin customer nếu cần
@@ -249,7 +251,9 @@ export class SyncService {
             if (brandFromDepartment) {
               customer.brand = brandFromDepartment;
             }
-            customer = await this.customerRepository.save(customer);
+            customer = (await this.customerRepository.save(
+              customer,
+            )) as unknown as Customer;
           }
 
           // Đảm bảo customer không null
@@ -928,7 +932,9 @@ export class SyncService {
               grade_name: order.customer.grade_name,
               branch_code: order.customer.branch_code,
             } as Partial<Customer>);
-            customer = await this.customerRepository.save(newCustomer);
+            customer = (await this.customerRepository.save(
+              newCustomer,
+            )) as unknown as Customer;
             customersCount++;
           } else {
             // Cập nhật thông tin customer nếu cần
@@ -940,7 +946,9 @@ export class SyncService {
             if (brandFromDepartment) {
               customer.brand = brandFromDepartment;
             }
-            customer = await this.customerRepository.save(customer);
+            customer = (await this.customerRepository.save(
+              customer,
+            )) as unknown as Customer;
           }
 
           // Đảm bảo customer không null
@@ -1268,7 +1276,7 @@ export class SyncService {
       }> = [];
 
       // Lặp qua từng ngày
-      let currentDate = new Date(startDate.getTime());
+      const currentDate = new Date(startDate.getTime());
       while (currentDate <= endDate) {
         const dateStr = formatToDDMMMYYYY(currentDate);
 
@@ -1800,9 +1808,8 @@ export class SyncService {
                         ? Number(line.template_id)
                         : null,
                   }));
-                  const lines = this.shiftEndCashLineRepository.create(
-                    linesToCreate as any,
-                  );
+                  const lines =
+                    this.shiftEndCashLineRepository.create(linesToCreate);
                   await this.shiftEndCashLineRepository.save(lines);
                 }
 
@@ -4352,7 +4359,7 @@ export class SyncService {
                 });
 
                 // Lấy chi tiết từ API
-                let details: VoucherIssueDetail[] = [];
+                const details: VoucherIssueDetail[] = [];
                 try {
                   const detailData =
                     await this.zappyApiService.getVoucherIssueDetail(

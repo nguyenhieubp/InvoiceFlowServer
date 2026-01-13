@@ -15,7 +15,9 @@ export class VoucherIssueDetail {
   id: string;
 
   // Relationship với VoucherIssue
-  @ManyToOne(() => VoucherIssue, (voucherIssue) => voucherIssue.details, { onDelete: 'CASCADE' })
+  @ManyToOne(() => VoucherIssue, (voucherIssue) => voucherIssue.details, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'voucherIssueId' })
   voucherIssue: VoucherIssue;
 
@@ -51,4 +53,3 @@ export class VoucherIssueDetail {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

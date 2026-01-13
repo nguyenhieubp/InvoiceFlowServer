@@ -37,8 +37,9 @@ export class LoyaltyService {
       );
 
       // Parse response: endpoint /material-catalogs/code/ trả về data.item
-      const product = response?.data?.data?.item || response?.data?.data || response?.data;
-      
+      const product =
+        response?.data?.data?.item || response?.data?.data || response?.data;
+
       if (product && (product.id || product.code)) {
         // this.logger.debug(`[LoyaltyService] Tìm thấy sản phẩm ${trimmedItemCode} tại /material-catalogs/code/`);
         return product;
@@ -75,9 +76,13 @@ export class LoyaltyService {
     } catch (fallbackError: any) {
       // Nếu 404, thử fallback tiếp theo
       if (fallbackError?.response?.status === 404) {
-        this.logger.debug(`[LoyaltyService] Sản phẩm không tìm thấy tại /material-catalogs/old-code/: ${trimmedItemCode} (404), thử /material-catalogs/material-code/...`);
+        this.logger.debug(
+          `[LoyaltyService] Sản phẩm không tìm thấy tại /material-catalogs/old-code/: ${trimmedItemCode} (404), thử /material-catalogs/material-code/...`,
+        );
       } else {
-        this.logger.warn(`[LoyaltyService] Lỗi khi fetch product ${trimmedItemCode} từ /material-catalogs/old-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`);
+        this.logger.warn(
+          `[LoyaltyService] Lỗi khi fetch product ${trimmedItemCode} từ /material-catalogs/old-code/: ${fallbackError?.message || fallbackError?.response?.status || 'Unknown error'}`,
+        );
       }
     }
 
@@ -100,9 +105,13 @@ export class LoyaltyService {
     } catch (materialCodeError: any) {
       // Cả 3 endpoint đều không tìm thấy
       if (materialCodeError?.response?.status === 404) {
-        this.logger.debug(`[LoyaltyService] Sản phẩm không tìm thấy tại /material-catalogs/material-code/: ${trimmedItemCode} (404)`);
+        this.logger.debug(
+          `[LoyaltyService] Sản phẩm không tìm thấy tại /material-catalogs/material-code/: ${trimmedItemCode} (404)`,
+        );
       } else {
-        this.logger.warn(`[LoyaltyService] Lỗi khi fetch product ${trimmedItemCode} từ /material-catalogs/material-code/: ${materialCodeError?.message || materialCodeError?.response?.status || 'Unknown error'}`);
+        this.logger.warn(
+          `[LoyaltyService] Lỗi khi fetch product ${trimmedItemCode} từ /material-catalogs/material-code/: ${materialCodeError?.message || materialCodeError?.response?.status || 'Unknown error'}`,
+        );
       }
     }
 
@@ -125,7 +134,7 @@ export class LoyaltyService {
    */
   async fetchProducts(itemCodes: string[]): Promise<Map<string, any>> {
     const productMap = new Map<string, any>();
-    
+
     if (itemCodes.length === 0) {
       return productMap;
     }
@@ -136,13 +145,15 @@ export class LoyaltyService {
         const loyaltyProduct = await this.checkProduct(itemCode);
         return { itemCode, loyaltyProduct };
       } catch (error) {
-        this.logger.warn(`[LoyaltyService] Failed to fetch product ${itemCode} from Loyalty API: ${error}`);
+        this.logger.warn(
+          `[LoyaltyService] Failed to fetch product ${itemCode} from Loyalty API: ${error}`,
+        );
         return { itemCode, loyaltyProduct: null };
       }
     });
 
     const results = await Promise.all(productPromises);
-    
+
     results.forEach(({ itemCode, loyaltyProduct }) => {
       if (loyaltyProduct) {
         productMap.set(itemCode, loyaltyProduct);
@@ -167,7 +178,9 @@ export class LoyaltyService {
    * @param branchCodes - Mảng các mã chi nhánh
    * @returns Map<string, any> với key là branchCode và value là department object
    */
-  async fetchLoyaltyDepartments(branchCodes: string[]): Promise<Map<string, any>> {
+  async fetchLoyaltyDepartments(
+    branchCodes: string[],
+  ): Promise<Map<string, any>> {
     const departmentMap = new Map<string, any>();
     if (branchCodes.length === 0) return departmentMap;
 
@@ -175,12 +188,17 @@ export class LoyaltyService {
       try {
         const response = await this.httpService.axiosRef.get(
           `${this.LOYALTY_API_BASE_URL}/departments?page=1&limit=25&branchcode=${branchCode}`,
-          { headers: { accept: 'application/json' }, timeout: this.REQUEST_TIMEOUT },
+          {
+            headers: { accept: 'application/json' },
+            timeout: this.REQUEST_TIMEOUT,
+          },
         );
         const department = response?.data?.data?.items?.[0];
         return { branchCode, department };
       } catch (error) {
-        this.logger.warn(`Failed to fetch department for branchCode ${branchCode}: ${error}`);
+        this.logger.warn(
+          `Failed to fetch department for branchCode ${branchCode}: ${error}`,
+        );
         return { branchCode, department: null };
       }
     });
@@ -195,4 +213,3 @@ export class LoyaltyService {
     return departmentMap;
   }
 }
-

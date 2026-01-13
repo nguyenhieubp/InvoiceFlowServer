@@ -60,7 +60,10 @@ export class Promotion {
   enteredat: Date; // 07/11/2025 21:29
 
   // Relationship với lines
-  @OneToMany(() => PromotionLine, (line) => line.promotion, { cascade: true, eager: false })
+  @OneToMany(() => PromotionLine, (line) => line.promotion, {
+    cascade: true,
+    eager: false,
+  })
   lines: PromotionLine[];
 
   // Metadata
@@ -80,4 +83,3 @@ export class Promotion {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

@@ -21,7 +21,10 @@ export class FastApiInvoicesController {
 
   @Get('test')
   async test() {
-    return { message: 'FastApiInvoicesController is working', timestamp: new Date().toISOString() };
+    return {
+      message: 'FastApiInvoicesController is working',
+      timestamp: new Date().toISOString(),
+    };
   }
 
   @Get('statistics')
@@ -112,14 +115,18 @@ export class FastApiInvoicesController {
     @Body('maDvcs') maDvcs?: string,
   ) {
     if (!startDate || !endDate) {
-      throw new BadRequestException('startDate và endDate là bắt buộc (format: YYYY-MM-DD)');
+      throw new BadRequestException(
+        'startDate và endDate là bắt buộc (format: YYYY-MM-DD)',
+      );
     }
 
     const startDateObj = new Date(startDate);
     const endDateObj = new Date(endDate);
 
     if (isNaN(startDateObj.getTime()) || isNaN(endDateObj.getTime())) {
-      throw new BadRequestException('startDate và endDate phải là định dạng ngày hợp lệ');
+      throw new BadRequestException(
+        'startDate và endDate phải là định dạng ngày hợp lệ',
+      );
     }
 
     if (startDateObj > endDateObj) {
@@ -127,11 +134,12 @@ export class FastApiInvoicesController {
     }
 
     // Lấy danh sách invoice thất bại trong khoảng thời gian
-    const failedInvoices = await this.fastApiInvoiceService.getFailedInvoicesByDateRange({
-      startDate: startDateObj,
-      endDate: endDateObj,
-      maDvcs,
-    });
+    const failedInvoices =
+      await this.fastApiInvoiceService.getFailedInvoicesByDateRange({
+        startDate: startDateObj,
+        endDate: endDateObj,
+        maDvcs,
+      });
 
     if (failedInvoices.length === 0) {
       return {
@@ -159,8 +167,11 @@ export class FastApiInvoicesController {
 
     for (const invoice of failedInvoices) {
       try {
-        const result = await this.salesService.createInvoiceViaFastApi(invoice.docCode, true);
-        
+        const result = await this.salesService.createInvoiceViaFastApi(
+          invoice.docCode,
+          true,
+        );
+
         if (result.alreadyExists) {
           alreadyExistsCount++;
           results.push({
@@ -206,4 +217,3 @@ export class FastApiInvoicesController {
     };
   }
 }
-

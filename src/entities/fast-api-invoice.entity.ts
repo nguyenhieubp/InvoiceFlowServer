@@ -46,4 +46,3 @@ export class FastApiInvoice {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

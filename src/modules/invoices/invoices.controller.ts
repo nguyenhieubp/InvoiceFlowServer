@@ -37,4 +37,3 @@ export class InvoicesController {
     return this.invoiceService.updateInvoice(id, updateInvoiceDto);
   }
 }
-

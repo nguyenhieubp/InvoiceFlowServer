@@ -15,7 +15,9 @@ export class RepackFormulaItem {
   id: string;
 
   // Relationship với RepackFormula
-  @ManyToOne(() => RepackFormula, (repackFormula) => repackFormula.items, { onDelete: 'CASCADE' })
+  @ManyToOne(() => RepackFormula, (repackFormula) => repackFormula.items, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'repackFormulaId' })
   repackFormula: RepackFormula;
 
@@ -39,4 +41,3 @@ export class RepackFormulaItem {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

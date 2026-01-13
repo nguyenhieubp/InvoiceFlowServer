@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Invoice } from '../../entities/invoice.entity';
@@ -21,8 +18,7 @@ export class InvoiceService {
     // Tính toán các giá trị
     const items = dto.items.map((item) => {
       const amount = item.quantity * item.price;
-      const discountAmount =
-        (amount * (item.discountRate || 0)) / 100;
+      const discountAmount = (amount * (item.discountRate || 0)) / 100;
       const amountAfterDiscount = amount - discountAmount;
       const taxAmount = (amountAfterDiscount * (item.taxRate || 0)) / 100;
 
@@ -49,10 +45,9 @@ export class InvoiceService {
     const invoiceDate = dto.invoiceDate
       ? this.parseDate(dto.invoiceDate)
       : new Date();
-    const key = dto.key || `INV_${Date.now()}_${dto.customerCode.substring(0, 10)}`.substring(
-      0,
-      32,
-    );
+    const key =
+      dto.key ||
+      `INV_${Date.now()}_${dto.customerCode.substring(0, 10)}`.substring(0, 32);
 
     // Tạo invoice
     const invoice = this.invoiceRepository.create({
@@ -130,7 +125,10 @@ export class InvoiceService {
     });
   }
 
-  async updateInvoice(id: string, dto: Partial<CreateInvoiceDto>): Promise<Invoice> {
+  async updateInvoice(
+    id: string,
+    dto: Partial<CreateInvoiceDto>,
+  ): Promise<Invoice> {
     const invoice = await this.getInvoice(id);
 
     if (dto.customerName) invoice.customerName = dto.customerName;
@@ -165,7 +163,10 @@ export class InvoiceService {
       });
 
       const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
-      const totalDiscount = items.reduce((sum, item) => sum + item.discountAmount, 0);
+      const totalDiscount = items.reduce(
+        (sum, item) => sum + item.discountAmount,
+        0,
+      );
       const totalTax = items.reduce((sum, item) => sum + item.taxAmount, 0);
       const totalAmountWithTax = totalAmount + totalTax;
 
@@ -290,4 +291,3 @@ export class InvoiceService {
     return result.trim();
   }
 }
-
