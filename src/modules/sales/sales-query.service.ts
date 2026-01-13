@@ -390,7 +390,7 @@ export class SalesQueryService {
       brand,
       isProcessed,
       page = 1,
-      limit = 50,
+      limit = 10,
       date,
       dateFrom,
       dateTo,

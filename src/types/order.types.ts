@@ -56,6 +56,8 @@ export interface SaleItem {
   catcode1?: string;
   catcode2?: string;
   catcode3?: string;
+  disc_tm?: number;
+  disc_ctkm?: number;
   [key: string]: any;
 }
 

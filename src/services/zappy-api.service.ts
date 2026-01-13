@@ -562,6 +562,8 @@ export class ZappyApiService {
         catcode2: zappySale.catcode2 || undefined,
         catcode3: zappySale.catcode3 || undefined,
         type_sale: typeSale || undefined,
+        disc_tm: zappySale.disc_tm,
+        disc_ctkm: zappySale.disc_ctkm,
       };
 
       const docDate = this.parseZappyDate(zappySale.docdate);

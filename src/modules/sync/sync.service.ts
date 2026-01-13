@@ -722,12 +722,7 @@ export class SyncService {
                   // Lưu mvc_serial vào maThe
                   maThe: saleItem.mvc_serial,
                   // Category fields
-                  cat1: saleItem.cat1,
-                  cat2: saleItem.cat2,
-                  cat3: saleItem.cat3,
-                  catcode1: saleItem.catcode1,
-                  catcode2: saleItem.catcode2,
-                  catcode3: saleItem.catcode3,
+
                   // Luôn lưu productType, kể cả khi là null (để lưu từ Zappy API)
                   // Nếu productType là empty string, set thành null
                   productType:
@@ -745,6 +740,8 @@ export class SyncService {
                   isProcessed: false,
                   statusAsys: statusAsys, // Set statusAsys: true nếu sản phẩm tồn tại, false nếu 404
                   type_sale: 'WHOLESALE',
+                  disc_tm: saleItem.disc_tm,
+                  disc_ctkm: saleItem.disc_ctkm,
                 } as Partial<Sale>);
                 await this.saleRepository.save(newSale);
                 salesCount++;
@@ -4423,13 +4420,19 @@ export class SyncService {
     cashData: any[],
     date: string,
     brand?: string,
-  ): Promise<{ savedCount: number; skippedCount: number; errors: string[] }> {
+  ): Promise<{
+    savedCount: number;
+    skippedCount: number;
+    updatedCount: number;
+    errors: string[];
+  }> {
     const errors: string[] = [];
     let savedCount = 0;
     let skippedCount = 0;
+    let updatedCount = 0;
 
     if (cashData.length === 0) {
-      return { savedCount: 0, skippedCount: 0, errors: [] };
+      return { savedCount: 0, skippedCount: 0, updatedCount: 0, errors: [] };
     }
 
     try {
@@ -4465,19 +4468,13 @@ export class SyncService {
         return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
       };
 
-      // Lưu từng cashio record vào database (chỉ insert nếu chưa có, skip nếu đã có)
+      // Lưu từng cashio record vào database (chỉ insert nếu chưa có, update nếu đã có)
       for (const cash of cashData) {
         try {
           // Tìm xem đã có record với api_id chưa (api_id là unique từ API)
           const existingCashio = await this.dailyCashioRepository.findOne({
             where: { api_id: cash.id },
           });
-
-          // Nếu đã có record với api_id này rồi → skip, không lưu nữa
-          if (existingCashio) {
-            skippedCount++;
-            continue;
-          }
 
           const parsedRefnoIdate = cash.refno_idate
             ? parseRefnoIdate(cash.refno_idate)
@@ -4500,12 +4497,23 @@ export class SyncService {
             total_out: cash.total_out ? Number(cash.total_out) : 0,
             sync_date: date,
             brand: brand || undefined,
+            bank_code: cash.bank_code || undefined,
+            period_code: cash.period_code || undefined,
           };
 
-          // Insert new record
-          const newCashio = this.dailyCashioRepository.create(cashioData);
-          await this.dailyCashioRepository.save(newCashio);
-          savedCount++;
+          if (existingCashio) {
+            // Update existing record
+            await this.dailyCashioRepository.update(
+              { id: existingCashio.id },
+              cashioData,
+            );
+            updatedCount++;
+          } else {
+            // Insert new record
+            const newCashio = this.dailyCashioRepository.create(cashioData);
+            await this.dailyCashioRepository.save(newCashio);
+            savedCount++;
+          }
         } catch (cashioError: any) {
           const errorMsg = `Failed to save cashio record ${cash.code}: ${cashioError?.message || cashioError}`;
           this.logger.warn(errorMsg);
@@ -4514,7 +4522,7 @@ export class SyncService {
       }
 
       this.logger.log(
-        `[Cashio] Đã lưu ${savedCount} cashio records mới, bỏ qua ${skippedCount} records đã tồn tại (tổng ${cashData.length} records từ API)`,
+        `[Cashio] Đã lưu ${savedCount} cashio records mới, cập nhật ${updatedCount} records, bỏ qua ${skippedCount} records (tổng ${cashData.length} records từ API)`,
       );
     } catch (error: any) {
       const errorMsg = `Failed to save cashio data to database: ${error?.message || error}`;
@@ -4522,7 +4530,7 @@ export class SyncService {
       errors.push(errorMsg);
     }
 
-    return { savedCount, skippedCount, errors };
+    return { savedCount, skippedCount, updatedCount, errors };
   }
 
   /**
@@ -4539,11 +4547,13 @@ export class SyncService {
     totalRecordsCount: number;
     totalSavedCount: number;
     totalSkippedCount: number;
+    totalUpdatedCount: number;
     brandResults: Array<{
       brand: string;
       recordsCount: number;
       savedCount: number;
       skippedCount: number;
+      updatedCount: number;
       errors?: string[];
     }>;
     errors?: string[];
@@ -4557,11 +4567,13 @@ export class SyncService {
       let totalRecordsCount = 0;
       let totalSavedCount = 0;
       let totalSkippedCount = 0;
+      let totalUpdatedCount = 0;
       const brandResults: Array<{
         brand: string;
         recordsCount: number;
         savedCount: number;
         skippedCount: number;
+        updatedCount: number;
         errors?: string[];
       }> = [];
       const allErrors: string[] = [];
@@ -4588,6 +4600,7 @@ export class SyncService {
           );
           totalSavedCount += saveResult.savedCount;
           totalSkippedCount += saveResult.skippedCount;
+          totalUpdatedCount += saveResult.updatedCount;
 
           if (saveResult.errors.length > 0) {
             allErrors.push(...saveResult.errors);
@@ -4598,12 +4611,13 @@ export class SyncService {
             recordsCount,
             savedCount: saveResult.savedCount,
             skippedCount: saveResult.skippedCount,
+            updatedCount: saveResult.updatedCount,
             errors:
               saveResult.errors.length > 0 ? saveResult.errors : undefined,
           });
 
           this.logger.log(
-            `[Cashio] Hoàn thành đồng bộ ${brandName}: ${saveResult.savedCount} mới, ${saveResult.skippedCount} đã tồn tại (tổng ${recordsCount} records)`,
+            `[Cashio] Hoàn thành đồng bộ ${brandName}: ${saveResult.savedCount} mới, ${saveResult.updatedCount} cập nhật, ${saveResult.skippedCount} đã tồn tại (tổng ${recordsCount} records)`,
           );
         } catch (brandError: any) {
           const errorMsg = `[${brandName}] Lỗi khi đồng bộ cashio: ${brandError?.message || brandError}`;
@@ -4615,13 +4629,14 @@ export class SyncService {
             recordsCount: 0,
             savedCount: 0,
             skippedCount: 0,
+            updatedCount: 0,
             errors: [errorMsg],
           });
         }
       }
 
       this.logger.log(
-        `[Cashio] Hoàn thành đồng bộ cashio cho ngày ${date}: ${totalSavedCount} mới, ${totalSkippedCount} đã tồn tại (tổng ${totalRecordsCount} records từ tất cả brands)`,
+        `[Cashio] Hoàn thành đồng bộ cashio cho ngày ${date}: ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật, ${totalSkippedCount} đã tồn tại (tổng ${totalRecordsCount} records từ tất cả brands)`,
       );
 
       return {
@@ -4629,6 +4644,7 @@ export class SyncService {
         totalRecordsCount,
         totalSavedCount,
         totalSkippedCount,
+        totalUpdatedCount,
         brandResults,
         errors: allErrors.length > 0 ? allErrors : undefined,
       };
@@ -4656,11 +4672,13 @@ export class SyncService {
     totalRecordsCount: number;
     totalSavedCount: number;
     totalSkippedCount: number;
+    totalUpdatedCount: number;
     brandResults: Array<{
       brand: string;
       recordsCount: number;
       savedCount: number;
       skippedCount: number;
+      updatedCount: number;
       errors?: string[];
     }>;
     errors?: string[];
@@ -4734,11 +4752,13 @@ export class SyncService {
       let totalRecordsCount = 0;
       let totalSavedCount = 0;
       let totalSkippedCount = 0;
+      let totalUpdatedCount = 0;
       const brandResults: Array<{
         brand: string;
         recordsCount: number;
         savedCount: number;
         skippedCount: number;
+        updatedCount: number;
         errors?: string[];
       }> = [];
       const allErrors: string[] = [];
@@ -4748,6 +4768,7 @@ export class SyncService {
         let brandRecordsCount = 0;
         let brandSavedCount = 0;
         let brandSkippedCount = 0;
+        let brandUpdatedCount = 0;
         const brandErrors: string[] = [];
 
         try {
@@ -4775,6 +4796,7 @@ export class SyncService {
               );
               brandSavedCount += saveResult.savedCount;
               brandSkippedCount += saveResult.skippedCount;
+              brandUpdatedCount += saveResult.updatedCount;
 
               if (saveResult.errors.length > 0) {
                 brandErrors.push(...saveResult.errors);
@@ -4792,6 +4814,7 @@ export class SyncService {
           totalRecordsCount += brandRecordsCount;
           totalSavedCount += brandSavedCount;
           totalSkippedCount += brandSkippedCount;
+          totalUpdatedCount += brandUpdatedCount;
 
           if (brandErrors.length > 0) {
             allErrors.push(...brandErrors);
@@ -4802,11 +4825,12 @@ export class SyncService {
             recordsCount: brandRecordsCount,
             savedCount: brandSavedCount,
             skippedCount: brandSkippedCount,
+            updatedCount: brandUpdatedCount,
             errors: brandErrors.length > 0 ? brandErrors : undefined,
           });
 
           this.logger.log(
-            `[Cashio Range] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandSkippedCount} đã tồn tại (tổng ${brandRecordsCount} records)`,
+            `[Cashio Range] Hoàn thành đồng bộ ${brandName}: ${brandSavedCount} mới, ${brandUpdatedCount} cập nhật, ${brandSkippedCount} đã tồn tại (tổng ${brandRecordsCount} records)`,
           );
         } catch (brandError: any) {
           const errorMsg = `[${brandName}] Lỗi khi đồng bộ cashio range: ${brandError?.message || brandError}`;
@@ -4818,13 +4842,14 @@ export class SyncService {
             recordsCount: 0,
             savedCount: 0,
             skippedCount: 0,
+            updatedCount: 0,
             errors: [errorMsg],
           });
         }
       }
 
       this.logger.log(
-        `[Cashio Range] Hoàn thành đồng bộ cashio từ ${startDate} đến ${endDate}: ${totalSavedCount} mới, ${totalSkippedCount} đã tồn tại (tổng ${totalRecordsCount} records từ tất cả brands)`,
+        `[Cashio Range] Hoàn thành đồng bộ cashio từ ${startDate} đến ${endDate}: ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật, ${totalSkippedCount} đã tồn tại (tổng ${totalRecordsCount} records từ tất cả brands)`,
       );
 
       return {
@@ -4832,6 +4857,7 @@ export class SyncService {
         totalRecordsCount,
         totalSavedCount,
         totalSkippedCount,
+        totalUpdatedCount,
         brandResults,
         errors: allErrors.length > 0 ? allErrors : undefined,
       };

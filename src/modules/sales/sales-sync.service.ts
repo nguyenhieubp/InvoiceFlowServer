@@ -782,12 +782,7 @@ export class SalesSyncService {
             partner_name: saleItem.partner_name,
             order_source: saleItem.order_source,
             maThe: saleItem.mvc_serial,
-            cat1: saleItem.cat1,
-            cat2: saleItem.cat2,
-            cat3: saleItem.cat3,
-            catcode1: saleItem.catcode1,
-            catcode2: saleItem.catcode2,
-            catcode3: saleItem.catcode3,
+
             productType: productType,
             voucherDp1: voucherRefno,
             thanhToanVoucher:
