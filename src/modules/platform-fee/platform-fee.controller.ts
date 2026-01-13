@@ -27,8 +27,17 @@ export class PlatformFeeController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
     @Query('search') search?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
-    return this.platformFeeService.findAll({ brand, page, limit, search });
+    return this.platformFeeService.findAll({
+      brand,
+      page,
+      limit,
+      search,
+      startDate,
+      endDate,
+    });
   }
 
   @Get(':id')

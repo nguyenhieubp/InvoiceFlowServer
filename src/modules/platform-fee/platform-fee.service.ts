@@ -25,6 +25,8 @@ export class PlatformFeeService {
     page?: number;
     limit?: number;
     search?: string;
+    startDate?: string;
+    endDate?: string;
   }) {
     const page = query?.page || 1;
     const limit = query?.limit || 10;
@@ -62,6 +64,13 @@ export class PlatformFeeService {
     if (query?.search) {
       qb.andWhere('pf.erpOrderCode ILIKE :search', {
         search: `%${query.search}%`,
+      });
+    }
+
+    if (query?.startDate && query?.endDate) {
+      qb.andWhere('pf.orderFeeCreatedAt BETWEEN :startDate AND :endDate', {
+        startDate: query.startDate,
+        endDate: query.endDate,
       });
     }
 

@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { MultiDbService } from './multi-db.service';
 import { MultiDbSyncService } from './multi-db-sync.service';
 
@@ -52,5 +52,15 @@ export class MultiDbController {
     @Query('brand') brand?: string,
   ) {
     return this.multiDbService.syncOrderFeeByCode(erpCode, brand);
+  }
+
+  @Post('range-sync-order-fees')
+  async rangeSyncOrderFees(
+    @Body() dateRange: { startAt: string; endAt: string },
+  ) {
+    return this.multiDbSyncService.rangeSyncOrderFees(
+      dateRange.startAt,
+      dateRange.endAt,
+    );
   }
 }

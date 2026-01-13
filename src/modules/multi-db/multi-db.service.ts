@@ -185,8 +185,15 @@ export class MultiDbService {
    * Sync all order fees from external databases to primary database
    * This method is called by cronjob at 1 AM daily
    */
-  async syncAllOrderFees() {
-    this.logger.log('Starting order fee sync...');
+  /**
+   * Sync all order fees from external databases to primary database
+   * Can optionally filter by date range (createdAt of log)
+   * This method is called by cronjob at 1 AM daily
+   */
+  async syncAllOrderFees(startAt?: string, endAt?: string) {
+    this.logger.log(
+      `Starting order fee sync...${startAt ? ` (From: ${startAt} To: ${endAt})` : ''}`,
+    );
 
     let totalSynced = 0;
     let totalFailed = 0;
@@ -195,7 +202,7 @@ export class MultiDbService {
     try {
       for (const brand of this.brands) {
         this.logger.log(`Syncing brand: ${brand.name.toUpperCase()}...`);
-        const result = await this.syncBrandOrders(brand);
+        const result = await this.syncBrandOrders(brand, startAt, endAt);
         totalSynced += result.synced;
         totalFailed += result.failed;
         totalRecords += result.total;
@@ -212,16 +219,26 @@ export class MultiDbService {
     }
   }
 
-  private async syncBrandOrders(brandConfig: any) {
+  private async syncBrandOrders(
+    brandConfig: any,
+    startAt?: string,
+    endAt?: string,
+  ) {
     this.logger.log(`Starting sync for brand ${brandConfig.name}...`);
     let synced = 0;
     let failed = 0;
 
     try {
-      // Get all ERP order codes from secondary database
-      const erpLogs = await this.secondaryDataSource.query(
-        `SELECT "erpOrderCode", "pancakeOrderId" FROM ${brandConfig.tableLogs}`,
-      );
+      // Get ERP order codes from secondary database
+      let query = `SELECT "erpOrderCode", "pancakeOrderId" FROM ${brandConfig.tableLogs}`;
+      const params: any[] = [];
+
+      if (startAt && endAt) {
+        query += ` WHERE "createdAt" BETWEEN $1 AND $2`;
+        params.push(startAt, endAt);
+      }
+
+      const erpLogs = await this.secondaryDataSource.query(query, params);
 
       this.logger.log(
         `Found ${erpLogs.length} ERP orders to sync for ${brandConfig.name}`,
@@ -269,6 +286,12 @@ export class MultiDbService {
                 const platformFeeAmount =
                   orderSellingPrice - voucherFromSeller - escrowAmount;
 
+                // User requested "create_at" from detail_order_fee
+                const feeCreatedAt =
+                  fee.rawData?.create_at ||
+                  fee.rawData?.created_at ||
+                  new Date();
+
                 await this.platformFeeRepository.upsert(
                   {
                     brand: fee.brand,
@@ -276,6 +299,7 @@ export class MultiDbService {
                     pancakeOrderId: fee.pancakeOrderId,
                     amount: platformFeeAmount,
                     formulaDescription: `(${orderSellingPrice} - ${voucherFromSeller}) - ${escrowAmount}`,
+                    orderFeeCreatedAt: feeCreatedAt,
                     syncedAt: new Date(),
                   },
                   ['erpOrderCode', 'pancakeOrderId'],
@@ -354,6 +378,10 @@ export class MultiDbService {
           const platformFeeAmount =
             orderSellingPrice - voucherFromSeller - escrowAmount;
 
+          // User requested "create_at" from detail_order_fee
+          const feeCreatedAt =
+            fee.rawData?.create_at || fee.rawData?.created_at || new Date();
+
           await this.platformFeeRepository.upsert(
             {
               brand: fee.brand,
@@ -361,6 +389,7 @@ export class MultiDbService {
               pancakeOrderId: fee.pancakeOrderId,
               amount: platformFeeAmount,
               formulaDescription: `(${orderSellingPrice} - ${voucherFromSeller}) - ${escrowAmount}`,
+              orderFeeCreatedAt: feeCreatedAt,
               syncedAt: new Date(),
             },
             ['erpOrderCode', 'pancakeOrderId'],

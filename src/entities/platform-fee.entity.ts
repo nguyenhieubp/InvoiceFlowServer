@@ -33,6 +33,9 @@ export class PlatformFee {
   @Column({ name: 'synced_at', type: 'timestamp' })
   syncedAt: Date;
 
+  @Column({ name: 'order_fee_created_at', type: 'timestamp', nullable: true })
+  orderFeeCreatedAt: Date;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
