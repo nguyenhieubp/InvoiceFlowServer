@@ -32,6 +32,9 @@ export class PaymentMethod {
   @Column({ nullable: true })
   bankUnit: string; // Đơn vị ngân hàng
 
+  @Column({ nullable: true })
+  maDoiTac: string; // Mã đối tác
+
   @Column({ default: 'active' })
   trangThai: string; // Trạng thái (active/inactive)
 

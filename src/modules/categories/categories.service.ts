@@ -1611,7 +1611,23 @@ export class CategoriesService {
       }
     }
 
-    Object.assign(paymentMethod, updateDto);
+    // Only update fields that are provided in the DTO
+    if (updateDto.code !== undefined) paymentMethod.code = updateDto.code;
+    if (updateDto.externalId !== undefined)
+      paymentMethod.externalId = updateDto.externalId;
+    if (updateDto.description !== undefined)
+      paymentMethod.description = updateDto.description;
+    if (updateDto.systemCode !== undefined)
+      paymentMethod.systemCode = updateDto.systemCode;
+    if (updateDto.documentType !== undefined)
+      paymentMethod.documentType = updateDto.documentType;
+    if (updateDto.erp !== undefined) paymentMethod.erp = updateDto.erp;
+    if (updateDto.bankUnit !== undefined)
+      paymentMethod.bankUnit = updateDto.bankUnit;
+    if (updateDto.trangThai !== undefined)
+      paymentMethod.trangThai = updateDto.trangThai;
+    if (updateDto.maDoiTac !== undefined)
+      paymentMethod.maDoiTac = updateDto.maDoiTac;
 
     return await this.paymentMethodRepository.save(paymentMethod);
   }
@@ -1642,44 +1658,92 @@ export class CategoriesService {
       let failed = 0;
       const totalRowsInFile = data.length; // Tổng số dòng trong file (không tính header)
 
-      // Normalize header để xử lý khoảng trắng và chữ hoa/thường
+      // Normalize header để xử lý khoảng trắng, chữ hoa/thường và Unicode (NFC)
       const normalizeHeader = (header: string): string => {
         return String(header).trim().toLowerCase().replace(/\s+/g, ' ');
       };
 
-      // Mapping từ header Excel sang field của entity
-      const fieldMapping: Record<string, string> = {
-        Id: 'externalId',
-        id: 'externalId',
-        ID: 'externalId',
-        Mã: 'code',
-        mã: 'code',
-        'Mã phương thức thanh toán': 'code',
-        'mã phương thức thanh toán': 'code',
-        'Diễn giải': 'description',
-        'diễn giải': 'description',
-        'Mã hệ thống': 'systemCode',
-        'mã hệ thống': 'systemCode',
-        'Mã Hệ Thống': 'systemCode',
-        'Loại chứng từ': 'documentType',
-        'loại chứng từ': 'documentType',
-        'Loại Chứng Từ': 'documentType',
-        ERP: 'erp',
-        erp: 'erp',
-        'Đơn vị ngân hàng': 'bankUnit',
-        'đơn vị ngân hàng': 'bankUnit',
-        'Đơn Vị Ngân Hàng': 'bankUnit',
+      // Mapping từ header Excel sang field của entity (với nhiều biến thể)
+      const fieldMappingVariants: Record<string, string[]> = {
+        externalId: ['id', 'id (hệ thống cũ)', 'externalid', 'old id'],
+        code: [
+          'mã',
+          'ma',
+          'code',
+          'mã phương thức thanh toán',
+          'ma phuong thuc thanh toan',
+        ],
+        description: [
+          'diễn giải',
+          'dien giai',
+          'description',
+          'name',
+          'tên',
+          'ten',
+        ],
+        systemCode: ['mã hệ thống', 'ma he thong', 'systemcode', 'system code'],
+        documentType: [
+          'loại chứng từ',
+          'loai chung tu',
+          'documenttype',
+          'document type',
+        ],
+        erp: ['erp', 'erp code'],
+        bankUnit: [
+          'đơn vị ngân hàng',
+          'don vi ngan hang',
+          'bankunit',
+          'bank unit',
+        ],
+        trangThai: ['trạng thái', 'trang thai', 'status', 'active'],
+        maDoiTac: [
+          'mã đối tác',
+          'ma doi tac',
+          'partner code',
+          'partnercode',
+          'Mã đối tác',
+        ], // Thêm cả header từ ví dụ user gửi
       };
 
-      // Tạo reverse mapping với normalized keys
+      // Mapping từ header Excel sang field của entity (cho backward compatibility)
+      const fieldMapping: Record<string, string> = {
+        Id: 'externalId',
+        Mã: 'code',
+        'Diễn giải': 'description',
+        'Mã hệ thống': 'systemCode',
+        'Loại chứng từ': 'documentType',
+        ERP: 'erp',
+        'Đơn vị ngân hàng': 'bankUnit',
+        'Trạng thái': 'trangThai',
+        'Mã đối tác': 'maDoiTac',
+      };
+
+      // Tạo reverse mapping từ normalized header sang field name (merge cả fieldMappingVariants và fieldMapping)
       const normalizedMapping: Record<string, string> = {};
+
+      // Thêm từ fieldMappingVariants (đã có nhiều biến thể)
+      for (const [fieldName, variants] of Object.entries(
+        fieldMappingVariants,
+      )) {
+        for (const variant of variants) {
+          normalizedMapping[normalizeHeader(variant)] = fieldName;
+        }
+      }
+
+      // Thêm từ fieldMapping (cho backward compatibility)
       for (const [excelHeader, fieldName] of Object.entries(fieldMapping)) {
-        normalizedMapping[normalizeHeader(excelHeader)] = fieldName;
+        const normalized = normalizeHeader(excelHeader);
+        if (!normalizedMapping[normalized]) {
+          normalizedMapping[normalized] = fieldName;
+        }
       }
 
       // Lấy danh sách headers thực tế từ Excel
       const actualHeaders = data.length > 0 ? Object.keys(data[0]) : [];
       this.logger.log(`Excel headers found: ${actualHeaders.join(', ')}`);
+      this.logger.debug(
+        `Normalized mapping keys: ${Object.keys(normalizedMapping).join(', ')}`,
+      );
 
       // Xử lý tất cả các dòng, không lọc bỏ dòng trống
       const allRowsWithIndex = data.map((row, index) => ({
@@ -1716,9 +1780,48 @@ export class CategoriesService {
               }
 
               // Tất cả đều là string fields
-              const stringValue = String(rawValue).trim();
+              let stringValue = String(rawValue).trim();
+
+              // Normalize trạng thái
+              if (fieldName === 'trangThai') {
+                if (
+                  stringValue.toLowerCase() === 'đang sử dụng' ||
+                  stringValue.toLowerCase() === 'active' ||
+                  stringValue === '1'
+                ) {
+                  stringValue = 'active';
+                } else if (
+                  stringValue.toLowerCase() === 'ngưng sử dụng' ||
+                  stringValue.toLowerCase() === 'inactive' ||
+                  stringValue === '0'
+                ) {
+                  stringValue = 'inactive';
+                }
+              }
+
               if (stringValue !== '') {
                 paymentMethodData[fieldName] = stringValue;
+                // Debug log cho maDoiTac
+                if (fieldName === 'maDoiTac') {
+                  this.logger.debug(
+                    `Row ${rowNumber}: Found maDoiTac = "${stringValue}" from header "${actualHeader}"`,
+                  );
+                }
+              }
+            } else {
+              // Log nếu không tìm thấy mapping hoặc giá trị null cho header này
+              if (rowNumber === 2) {
+                // Chỉ log dòng đầu tiên
+                const normalizedHeader = normalizeHeader(actualHeader);
+                this.logger.warn(
+                  `Unmapped Header: "${actualHeader}" -> Normalized: "${normalizedHeader}"`,
+                );
+                const codes: number[] = [];
+                for (let k = 0; k < normalizedHeader.length; k++)
+                  codes.push(normalizedHeader.charCodeAt(k));
+                this.logger.warn(
+                  `Char codes for "${normalizedHeader}": [${codes.join(', ')}]`,
+                );
               }
             }
           }
@@ -1952,28 +2055,6 @@ export class CategoriesService {
       throw error;
     }
   }
-
-  // /**
-  //  * Lấy promotion từ Loyalty API theo code
-  //  */
-  // async getPromotionFromLoyaltyAPI(code: string): Promise<any> {
-  //   try {
-  //     const response = await firstValueFrom(
-  //       this.httpService.get(
-  //         `https://loyaltyapi.vmt.vn/promotions/item/code/${encodeURIComponent(code)}`,
-  //         {
-  //           headers: { accept: 'application/json' },
-  //         },
-  //       ),
-  //     );
-
-  //     const promotion = response?.data || null;
-  //     return promotion && promotion.code ? promotion : null;
-  //   } catch (error: any) {
-  //     this.logger.error(`Error fetching promotion ${code} from Loyalty API: ${error?.message || error}`);
-  //     throw error;
-  //   }
-  // }
 
   async createPromotionFromLoyaltyAPI(promotionData: any): Promise<any> {
     try {
