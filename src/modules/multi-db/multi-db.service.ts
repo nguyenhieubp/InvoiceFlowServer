@@ -72,25 +72,25 @@ export class MultiDbService {
     try {
       await this.primaryDataSource.query('SELECT 1');
       results.primary = true;
-      this.logger.log('✅ Primary database connected');
+      this.logger.log('Primary database connected');
     } catch (error) {
-      this.logger.error('❌ Primary database connection failed', error);
+      this.logger.error('Primary database connection failed', error);
     }
 
     try {
       await this.secondaryDataSource.query('SELECT 1');
       results.secondary = true;
-      this.logger.log('✅ Secondary database connected');
+      this.logger.log('Secondary database connected');
     } catch (error) {
-      this.logger.error('❌ Secondary database connection failed', error);
+      this.logger.error('Secondary database connection failed', error);
     }
 
     try {
       await this.thirdDataSource.query('SELECT 1');
       results.third = true;
-      this.logger.log('✅ Third database connected');
+      this.logger.log('Third database connected');
     } catch (error) {
-      this.logger.error('❌ Third database connection failed', error);
+      this.logger.error('Third database connection failed', error);
     }
 
     return results;
