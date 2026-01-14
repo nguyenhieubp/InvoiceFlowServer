@@ -69,7 +69,7 @@ export class PaymentService {
         'MAX(s.docDate) as "docDate"',
         'SUM(s.revenue) as revenue',
         'MAX(s.branchCode) as "branchCode"',
-        'COALESCE(MAX(s.boPhan), MAX(s.branchCode)) as "boPhan"',
+        'MAX(s.branchCode) as "boPhan"',
         'MAX(s.maCa) as "maCa"',
         'MAX(s.partnerCode) as "partnerCode"',
       ])

@@ -2,7 +2,6 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Sale } from '../../entities/sale.entity';
-import { Customer } from '../../entities/customer.entity';
 import { StockTransfer } from '../../entities/stock-transfer.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
 import { LoyaltyService } from '../../services/loyalty.service';
