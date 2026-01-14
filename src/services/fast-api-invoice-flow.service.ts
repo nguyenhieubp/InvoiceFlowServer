@@ -524,7 +524,7 @@ export class FastApiInvoiceFlowService {
       // Map data from PaymentService to Fast API payload structure
       const payload = {
         httt: data.fop_syscode,
-        so_pt: data.refno || '', // Ưu tiên refno làm số phiếu thu
+        so_pt: data.refno || data.so_code || '', // Ưu tiên refno, fallback về so_code
         ngay_pt: data.docdate,
         tien_pt: Number(data.total_in || 0),
         ma_nt: 'VND', // Default
@@ -533,12 +533,15 @@ export class FastApiInvoiceFlowService {
         ngay_hd: data.docDate,
         tien_hd: Number(data.revenue || 0),
         ma_bp: data.boPhan || data.branchCode || '',
-        ma_dvcs_pt: data.ma_dvcs_cashio || '',
+        ma_dvcs_pt:
+          data.fop_syscode === 'CASH'
+            ? data.ma_dvcs_sale || ''
+            : data.ma_dvcs_cashio || '',
         ma_dvcs_hd: data.ma_dvcs_sale || '',
         ma_ca: data.maCa || '',
         ma_kh: data.partnerCode || '',
         ma_kh2: data.ma_doi_tac_payment || '', // Đối tác
-        ma_tc: data.refno || '', // Mã tham chiếu cũng dùng refno
+        ma_tc: data.refno || data.so_code || '', // Mã tham chiếu cũng fallback về so_code
         ky_han: data.period_code || '',
       };
       this.logger.log(
@@ -712,6 +715,10 @@ export class FastApiInvoiceFlowService {
 
         // Chỉ xử lý nếu total_out > 0
         if (totalOut > 0) {
+          // [NEW] Get dvcs from map
+          const saleDept = departmentMap.get(cashioData.branch_code);
+          const dvcs = saleDept?.ma_dvcs || '';
+
           // Trường hợp 1: fop_syscode = "CASH" và total_out > 0 → Gọi Payment (Phiếu chi tiền mặt)
           if (cashioData.fop_syscode === 'CASH') {
             try {
@@ -719,10 +726,18 @@ export class FastApiInvoiceFlowService {
                 `[Payment] Phát hiện CASH payment cho đơn hàng ${docCode} (${cashioData.code}), total_out: ${totalOut}, gọi payment API`,
               );
 
+              // Override ma_dvcs in invoiceData for CASH payload if needed, or pass explicitly
+              // Here we create a modified copy of invoiceData or pass dvcs directly if helper supports it.
+              // Helper buildPaymentPayload uses invoiceData.ma_dvcs.
+              const invoiceDataWithCorrectDvcs = {
+                ...invoiceData,
+                ma_dvcs: dvcs || invoiceData.ma_dvcs,
+              };
+
               const paymentPayload = FastApiPayloadHelper.buildPaymentPayload(
                 cashioData,
                 orderData,
-                invoiceData,
+                invoiceDataWithCorrectDvcs,
                 null,
                 '2', // loai_ct = 2 (Chi cho khách hàng)
               );

@@ -81,7 +81,7 @@ export class PaymentService {
     query.offset((page - 1) * limit).limit(limit);
 
     const results = await query.getRawMany();
-    const enrichedResults = await this.enrichPaymentResults(results);
+    const enrichedResults = await this.enrichPaymentResults(results, false);
 
     // Get total count
     const countQuery = this.dailyCashioRepository
@@ -124,7 +124,7 @@ export class PaymentService {
     query.andWhere('s.docCode = :docCode', { docCode });
 
     const results = await query.getRawMany();
-    return this.enrichPaymentResults(results);
+    return this.enrichPaymentResults(results, true);
   }
 
   async getStatistics(options: {
@@ -208,7 +208,7 @@ export class PaymentService {
     );
 
     const results = await query.getRawMany();
-    return this.enrichPaymentResults(results);
+    return this.enrichPaymentResults(results, true);
   }
 
   async autoLogPaymentData() {
@@ -336,7 +336,10 @@ export class PaymentService {
       .orderBy('ds.docdate', 'DESC');
   }
 
-  private async enrichPaymentResults(results: any[]): Promise<PaymentData[]> {
+  private async enrichPaymentResults(
+    results: any[],
+    includeCash: boolean = false,
+  ): Promise<PaymentData[]> {
     if (!results || results.length === 0) {
       return [];
     }
@@ -398,7 +401,11 @@ export class PaymentService {
 
         return { row, saleDept, dvcs, paymentMethod };
       })
-      .filter((item) => !!item.paymentMethod)
+      .filter(
+        (item) =>
+          !!item.paymentMethod ||
+          (includeCash && item.row.fop_syscode === 'CASH'),
+      )
       .map(({ row, saleDept, dvcs, paymentMethod }) => {
         // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
         const periodCode = row.period_code
