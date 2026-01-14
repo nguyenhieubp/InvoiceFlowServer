@@ -7,7 +7,6 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
 import { LoyaltyService } from 'src/services/loyalty.service';
 import { CategoriesService } from '../categories/categories.service';
 import { getSupplierCode } from '../../utils/payment-supplier.util';
-import { Cron } from '@nestjs/schedule';
 import { FastApiInvoiceFlowService } from 'src/services/fast-api-invoice-flow.service';
 
 export interface PaymentData {
@@ -40,8 +39,6 @@ export class PaymentService {
   constructor(
     @InjectRepository(DailyCashio)
     private dailyCashioRepository: Repository<DailyCashio>,
-    @InjectRepository(Sale)
-    private saleRepository: Repository<Sale>,
     private loyaltyService: LoyaltyService,
     private categoryService: CategoriesService,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
@@ -59,38 +56,7 @@ export class PaymentService {
   }) {
     const { page = 1, limit = 10, search, dateFrom, dateTo, brand } = options;
 
-    // Build query with raw SQL for exact field selection
-    let query = this.dailyCashioRepository
-      .createQueryBuilder('ds')
-      .select([
-        'ds.fop_syscode as fop_syscode',
-        'ds.docdate as docdate',
-        'ds.total_in as total_in',
-        'ds.so_code as so_code',
-        'ds.branch_code as branch_code_cashio',
-        'ds.refno as refno',
-        'ds.bank_code as bank_code',
-        'ds.period_code as period_code',
-        'MAX(s.docDate) as "docDate"',
-        'SUM(s.revenue) as revenue',
-        'MAX(s.branchCode) as "branchCode"',
-        'MAX(s.branchCode) as "boPhan"',
-        'MAX(s.maCa) as "maCa"',
-        'MAX(s.partnerCode) as "partnerCode"',
-      ])
-      .innerJoin(Sale, 's', 'ds.so_code = s.docCode')
-      .groupBy('ds.id')
-      .addGroupBy('ds.fop_syscode')
-      .addGroupBy('ds.docdate')
-      .addGroupBy('ds.total_in')
-      .addGroupBy('ds.so_code')
-      .addGroupBy('ds.branch_code')
-      .addGroupBy('ds.refno')
-      .addGroupBy('ds.bank_code')
-      .addGroupBy('ds.period_code')
-      .orderBy('ds.docdate', 'DESC')
-      .offset((page - 1) * limit)
-      .limit(limit);
+    const query = this.createBasePaymentQuery();
 
     // Filters
     if (search) {
@@ -112,65 +78,16 @@ export class PaymentService {
       query.andWhere('ds.brand = :brand', { brand });
     }
 
-    // Get results as raw datafindPaymentMethodByCode
+    query.offset((page - 1) * limit).limit(limit);
+
     const results = await query.getRawMany();
-
-    // Fetch ma_dvcs for all branch codes
-    const branchCodes = new Set<string>();
-    results.forEach((row: any) => {
-      if (row.branch_code_cashio) branchCodes.add(row.branch_code_cashio);
-      if (row.branchCode) branchCodes.add(row.branchCode);
-    });
-
-    const departmentMap =
-      branchCodes.size > 0
-        ? await this.loyaltyService.fetchLoyaltyDepartments(
-            Array.from(branchCodes),
-          )
-        : new Map();
-
-    // Fetch payment methods
-    const fopSysCodes = new Set<string>();
-    results.forEach((row: any) => {
-      if (row.fop_syscode) fopSysCodes.add(row.fop_syscode);
-    });
-
-    const paymentMethodMap = new Map<string, any>();
-    if (fopSysCodes.size > 0) {
-      await Promise.all(
-        Array.from(fopSysCodes).map(async (code) => {
-          const pm = await this.categoryService.findPaymentMethodByCode(code);
-          if (pm) {
-            paymentMethodMap.set(code, pm);
-          }
-        }),
-      );
-    }
-
-    // Map ma_dvcs and payment info to results
-    const enrichedResults = results.map((row: any) => {
-      const cashioDept = departmentMap.get(row.branch_code_cashio);
-      const saleDept = departmentMap.get(row.branchCode);
-      const paymentMethod = paymentMethodMap.get(row.fop_syscode);
-
-      // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
-      const periodCode = row.period_code
-        ? row.period_code.split('/').pop()
-        : null;
-
-      return {
-        ...row,
-        period_code: periodCode,
-        ma_dvcs_cashio: cashioDept?.ma_dvcs || null,
-        ma_dvcs_sale: saleDept?.ma_dvcs || null,
-        ma_doi_tac_payment: getSupplierCode(paymentMethod?.maDoiTac) || null,
-      };
-    });
+    const enrichedResults = await this.enrichPaymentResults(results);
 
     // Get total count
     const countQuery = this.dailyCashioRepository
       .createQueryBuilder('ds')
-      .innerJoin(Sale, 's', 'ds.so_code = s.docCode');
+      .innerJoin(Sale, 's', 'ds.so_code = s.docCode')
+      .where('ds.fop_syscode != :voucherCode', { voucherCode: 'VOUCHER' });
 
     if (search) {
       countQuery.andWhere(
@@ -194,7 +111,7 @@ export class PaymentService {
     const total = parseInt(totalResult?.count || 0);
 
     return {
-      data: enrichedResults as PaymentData[],
+      data: enrichedResults,
       total,
       page,
       limit,
@@ -203,97 +120,11 @@ export class PaymentService {
   }
 
   async findPaymentByDocCode(docCode: string): Promise<PaymentData[]> {
-    // Build query with raw SQL for exact field selection
-    let query = this.dailyCashioRepository
-      .createQueryBuilder('ds')
-      .select([
-        'ds.fop_syscode as fop_syscode',
-        'ds.docdate as docdate',
-        'ds.total_in as total_in',
-        'ds.so_code as so_code',
-        'ds.branch_code as branch_code_cashio',
-        'ds.refno as refno',
-        'ds.bank_code as bank_code',
-        'ds.period_code as period_code',
-        'MAX(s.docDate) as "docDate"',
-        'SUM(s.revenue) as revenue',
-        'MAX(s.branchCode) as "branchCode"',
-        'MAX(s.branchCode) as "boPhan"',
-        'MAX(s.maCa) as "maCa"',
-        'MAX(s.partnerCode) as "partnerCode"',
-      ])
-      .innerJoin(Sale, 's', 'ds.so_code = s.docCode')
-      .where('s.docCode = :docCode', { docCode })
-      .groupBy('ds.id')
-      .addGroupBy('ds.fop_syscode')
-      .addGroupBy('ds.docdate')
-      .addGroupBy('ds.total_in')
-      .addGroupBy('ds.so_code')
-      .addGroupBy('ds.branch_code')
-      .addGroupBy('ds.refno')
-      .addGroupBy('ds.bank_code')
-      .addGroupBy('ds.period_code')
-      .orderBy('ds.docdate', 'DESC');
+    const query = this.createBasePaymentQuery();
+    query.andWhere('s.docCode = :docCode', { docCode });
 
     const results = await query.getRawMany();
-
-    if (!results || results.length === 0) {
-      return [];
-    }
-
-    // Fetch ma_dvcs for all branch codes
-    const branchCodes = new Set<string>();
-    results.forEach((row: any) => {
-      if (row.branch_code_cashio) branchCodes.add(row.branch_code_cashio);
-      if (row.branchCode) branchCodes.add(row.branchCode);
-    });
-
-    const departmentMap =
-      branchCodes.size > 0
-        ? await this.loyaltyService.fetchLoyaltyDepartments(
-            Array.from(branchCodes),
-          )
-        : new Map();
-
-    // Fetch payment methods
-    const fopSysCodes = new Set<string>();
-    results.forEach((row: any) => {
-      if (row.fop_syscode) fopSysCodes.add(row.fop_syscode);
-    });
-
-    const paymentMethodMap = new Map<string, any>();
-    if (fopSysCodes.size > 0) {
-      await Promise.all(
-        Array.from(fopSysCodes).map(async (code) => {
-          const pm = await this.categoryService.findPaymentMethodByCode(code);
-          if (pm) {
-            paymentMethodMap.set(code, pm);
-          }
-        }),
-      );
-    }
-
-    // Map ma_dvcs and payment info to results
-    const enrichedResults = results.map((row: any) => {
-      const cashioDept = departmentMap.get(row.branch_code_cashio);
-      const saleDept = departmentMap.get(row.branchCode);
-      const paymentMethod = paymentMethodMap.get(row.fop_syscode);
-
-      // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
-      const periodCode = row.period_code
-        ? row.period_code.split('/').pop()
-        : null;
-
-      return {
-        ...row,
-        period_code: periodCode,
-        ma_dvcs_cashio: cashioDept?.ma_dvcs || null,
-        ma_dvcs_sale: saleDept?.ma_dvcs || null,
-        ma_doi_tac_payment: getSupplierCode(paymentMethod?.maDoiTac) || null,
-      };
-    });
-
-    return enrichedResults as PaymentData[];
+    return this.enrichPaymentResults(results);
   }
 
   async getStatistics(options: {
@@ -370,102 +201,16 @@ export class PaymentService {
   }
 
   async getDailyPaymentDetails(date: string): Promise<PaymentData[]> {
-    // Build query similar to findAll/findPaymentByDocCode but filtered by date
-    let query = this.dailyCashioRepository
-      .createQueryBuilder('ds')
-      .select([
-        'ds.fop_syscode as fop_syscode',
-        'ds.docdate as docdate',
-        'ds.total_in as total_in',
-        'ds.so_code as so_code',
-        'ds.branch_code as branch_code_cashio',
-        'ds.refno as refno',
-        'ds.bank_code as bank_code',
-        'ds.period_code as period_code',
-        'MAX(s.docDate) as "docDate"',
-        'SUM(s.revenue) as revenue',
-        'MAX(s.branchCode) as "branchCode"',
-        'MAX(s.branchCode) as "boPhan"',
-        'MAX(s.maCa) as "maCa"',
-        'MAX(s.partnerCode) as "partnerCode"',
-      ])
-      .innerJoin(Sale, 's', 'ds.so_code = s.docCode')
-      .where(
-        "ds.docdate >= :date AND ds.docdate < (:date::date + interval '1 day')",
-        { date },
-      )
-      .groupBy('ds.id')
-      .addGroupBy('ds.fop_syscode')
-      .addGroupBy('ds.docdate')
-      .addGroupBy('ds.total_in')
-      .addGroupBy('ds.so_code')
-      .addGroupBy('ds.branch_code')
-      .addGroupBy('ds.refno')
-      .addGroupBy('ds.bank_code')
-      .addGroupBy('ds.period_code')
-      .orderBy('ds.docdate', 'DESC');
+    const query = this.createBasePaymentQuery();
+    query.andWhere(
+      "ds.docdate >= :date AND ds.docdate < (:date::date + interval '1 day')",
+      { date },
+    );
 
     const results = await query.getRawMany();
-
-    if (!results || results.length === 0) {
-      return [];
-    }
-
-    // Fetch ma_dvcs for all branch codes
-    const branchCodes = new Set<string>();
-    results.forEach((row: any) => {
-      if (row.branch_code_cashio) branchCodes.add(row.branch_code_cashio);
-      if (row.branchCode) branchCodes.add(row.branchCode);
-    });
-
-    const departmentMap =
-      branchCodes.size > 0
-        ? await this.loyaltyService.fetchLoyaltyDepartments(
-            Array.from(branchCodes),
-          )
-        : new Map();
-
-    // Fetch payment methods
-    const fopSysCodes = new Set<string>();
-    results.forEach((row: any) => {
-      if (row.fop_syscode) fopSysCodes.add(row.fop_syscode);
-    });
-
-    const paymentMethodMap = new Map<string, any>();
-    if (fopSysCodes.size > 0) {
-      await Promise.all(
-        Array.from(fopSysCodes).map(async (code) => {
-          const pm = await this.categoryService.findPaymentMethodByCode(code);
-          if (pm) {
-            paymentMethodMap.set(code, pm);
-          }
-        }),
-      );
-    }
-
-    // Map ma_dvcs and payment info to results
-    const enrichedResults = results.map((row: any) => {
-      const cashioDept = departmentMap.get(row.branch_code_cashio);
-      const saleDept = departmentMap.get(row.branchCode);
-      const paymentMethod = paymentMethodMap.get(row.fop_syscode);
-
-      const periodCode = row.period_code
-        ? row.period_code.split('/').pop()
-        : null;
-
-      return {
-        ...row,
-        period_code: periodCode,
-        ma_dvcs_cashio: cashioDept?.ma_dvcs || null,
-        ma_dvcs_sale: saleDept?.ma_dvcs || null,
-        ma_doi_tac_payment: getSupplierCode(paymentMethod?.maDoiTac) || null,
-      };
-    });
-
-    return enrichedResults as PaymentData[];
+    return this.enrichPaymentResults(results);
   }
 
-  // @Cron('0 4 * * *')
   async autoLogPaymentData() {
     this.logger.log('Starting daily payment method sync...');
     const yesterday = new Date();
@@ -554,5 +299,99 @@ export class PaymentService {
       }
     }
     this.logger.log('Finished processing payment methods.');
+  }
+
+  // Helper Methods
+
+  private createBasePaymentQuery() {
+    return this.dailyCashioRepository
+      .createQueryBuilder('ds')
+      .select([
+        'ds.fop_syscode as fop_syscode',
+        'ds.docdate as docdate',
+        'ds.total_in as total_in',
+        'ds.so_code as so_code',
+        'ds.branch_code as branch_code_cashio',
+        'ds.refno as refno',
+        'ds.bank_code as bank_code',
+        'ds.period_code as period_code',
+        'MAX(s.docDate) as "docDate"',
+        'SUM(s.revenue) as revenue',
+        'MAX(s.branchCode) as "branchCode"',
+        'MAX(s.branchCode) as "boPhan"',
+        'MAX(s.maCa) as "maCa"',
+        'MAX(s.partnerCode) as "partnerCode"',
+      ])
+      .innerJoin(Sale, 's', 'ds.so_code = s.docCode')
+      .groupBy('ds.id')
+      .addGroupBy('ds.fop_syscode')
+      .addGroupBy('ds.docdate')
+      .addGroupBy('ds.total_in')
+      .addGroupBy('ds.so_code')
+      .addGroupBy('ds.branch_code')
+      .addGroupBy('ds.refno')
+      .addGroupBy('ds.bank_code')
+      .addGroupBy('ds.period_code')
+      .where('ds.fop_syscode != :voucherCode', { voucherCode: 'VOUCHER' })
+      .orderBy('ds.docdate', 'DESC');
+  }
+
+  private async enrichPaymentResults(results: any[]): Promise<PaymentData[]> {
+    if (!results || results.length === 0) {
+      return [];
+    }
+
+    // Fetch ma_dvcs for all branch codes
+    const branchCodes = new Set<string>();
+    results.forEach((row: any) => {
+      if (row.branch_code_cashio) branchCodes.add(row.branch_code_cashio);
+      if (row.branchCode) branchCodes.add(row.branchCode);
+    });
+
+    const departmentMap =
+      branchCodes.size > 0
+        ? await this.loyaltyService.fetchLoyaltyDepartments(
+            Array.from(branchCodes),
+          )
+        : new Map();
+
+    // Fetch payment methods
+    const fopSysCodes = new Set<string>();
+    results.forEach((row: any) => {
+      if (row.fop_syscode) fopSysCodes.add(row.fop_syscode);
+    });
+
+    const paymentMethodMap = new Map<string, any>();
+    if (fopSysCodes.size > 0) {
+      await Promise.all(
+        Array.from(fopSysCodes).map(async (code) => {
+          if (code === 'VOUCHER') return;
+          const pm = await this.categoryService.findPaymentMethodByCode(code);
+
+          if (pm && pm.documentType === 'Giấy báo có') {
+            paymentMethodMap.set(code, pm);
+          }
+        }),
+      );
+    }
+
+    // Map ma_dvcs and payment info to results
+    return results.map((row: any) => {
+      const saleDept = departmentMap.get(row.branchCode);
+      const paymentMethod = paymentMethodMap.get(row.fop_syscode);
+
+      // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
+      const periodCode = row.period_code
+        ? row.period_code.split('/').pop()
+        : null;
+
+      return {
+        ...row,
+        period_code: periodCode,
+        ma_dvcs_cashio: paymentMethod?.bankUnit || null,
+        ma_dvcs_sale: saleDept?.ma_dvcs || null,
+        ma_doi_tac_payment: getSupplierCode(paymentMethod?.maDoiTac) || null,
+      };
+    });
   }
 }
