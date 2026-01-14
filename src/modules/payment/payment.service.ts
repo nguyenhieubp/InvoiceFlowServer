@@ -371,27 +371,30 @@ export class PaymentService {
           if (pm && pm.documentType === 'Giấy báo có') {
             paymentMethodMap.set(code, pm);
           }
+          return;
         }),
       );
     }
 
     // Map ma_dvcs and payment info to results
-    return results.map((row: any) => {
-      const saleDept = departmentMap.get(row.branchCode);
-      const paymentMethod = paymentMethodMap.get(row.fop_syscode);
+    return results
+      .filter((row: any) => paymentMethodMap.has(row.fop_syscode))
+      .map((row: any) => {
+        const saleDept = departmentMap.get(row.branchCode);
+        const paymentMethod = paymentMethodMap.get(row.fop_syscode);
 
-      // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
-      const periodCode = row.period_code
-        ? row.period_code.split('/').pop()
-        : null;
+        // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
+        const periodCode = row.period_code
+          ? row.period_code.split('/').pop()
+          : null;
 
-      return {
-        ...row,
-        period_code: periodCode,
-        ma_dvcs_cashio: paymentMethod?.bankUnit || null,
-        ma_dvcs_sale: saleDept?.ma_dvcs || null,
-        ma_doi_tac_payment: getSupplierCode(paymentMethod?.maDoiTac) || null,
-      };
-    });
+        return {
+          ...row,
+          period_code: periodCode,
+          ma_dvcs_cashio: paymentMethod?.bankUnit || null,
+          ma_dvcs_sale: saleDept?.ma_dvcs || null,
+          ma_doi_tac_payment: getSupplierCode(paymentMethod?.maDoiTac) || null,
+        };
+      });
   }
 }
