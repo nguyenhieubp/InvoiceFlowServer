@@ -356,33 +356,50 @@ export class PaymentService {
         : new Map();
 
     // Fetch payment methods
-    const fopSysCodes = new Set<string>();
+    const paymentTasks = new Map<
+      string,
+      { code: string; dvcs: string | null }
+    >();
+
     results.forEach((row: any) => {
-      if (row.fop_syscode) fopSysCodes.add(row.fop_syscode);
+      if (!row.fop_syscode || row.fop_syscode === 'VOUCHER') return;
+
+      const saleDept = departmentMap.get(row.branchCode);
+      const dvcs = saleDept?.ma_dvcs || null;
+      const key = `${row.fop_syscode}|${dvcs}`;
+      if (!paymentTasks.has(key)) {
+        paymentTasks.set(key, { code: row.fop_syscode, dvcs });
+      }
     });
 
     const paymentMethodMap = new Map<string, any>();
-    if (fopSysCodes.size > 0) {
+    if (paymentTasks.size > 0) {
       await Promise.all(
-        Array.from(fopSysCodes).map(async (code) => {
-          if (code === 'VOUCHER') return;
-          const pm = await this.categoryService.findPaymentMethodByCode(code);
+        Array.from(paymentTasks.values()).map(async ({ code, dvcs }) => {
+          const pm = await this.categoryService.findPaymentMethodByCode(
+            code,
+            dvcs || '',
+          );
 
           if (pm && pm.documentType === 'Giấy báo có') {
-            paymentMethodMap.set(code, pm);
+            paymentMethodMap.set(`${code}|${dvcs}`, pm);
           }
-          return;
         }),
       );
     }
 
     // Map ma_dvcs and payment info to results
     return results
-      .filter((row: any) => paymentMethodMap.has(row.fop_syscode))
       .map((row: any) => {
         const saleDept = departmentMap.get(row.branchCode);
-        const paymentMethod = paymentMethodMap.get(row.fop_syscode);
+        const dvcs = saleDept?.ma_dvcs || null;
+        const key = `${row.fop_syscode}|${dvcs}`;
+        const paymentMethod = paymentMethodMap.get(key);
 
+        return { row, saleDept, dvcs, paymentMethod };
+      })
+      .filter((item) => !!item.paymentMethod)
+      .map(({ row, saleDept, dvcs, paymentMethod }) => {
         // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
         const periodCode = row.period_code
           ? row.period_code.split('/').pop()
@@ -392,7 +409,7 @@ export class PaymentService {
           ...row,
           period_code: periodCode,
           ma_dvcs_cashio: paymentMethod?.bankUnit || null,
-          ma_dvcs_sale: saleDept?.ma_dvcs || null,
+          ma_dvcs_sale: dvcs,
           ma_doi_tac_payment: getSupplierCode(paymentMethod?.maDoiTac) || null,
         };
       });

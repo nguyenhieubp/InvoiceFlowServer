@@ -14,7 +14,7 @@ export class PaymentMethod {
   @Column({ nullable: true })
   externalId: string; // ID từ hệ thống cũ/Excel (VD: 108505)
 
-  @Column({ unique: true })
+  @Column()
   code: string; // Mã phương thức thanh toán (VD: BANK298)
 
   @Column({ type: 'text', nullable: true })

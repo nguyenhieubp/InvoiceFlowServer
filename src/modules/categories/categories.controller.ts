@@ -376,9 +376,12 @@ export class CategoriesController {
     });
   }
 
-  @Get('payment-methods/code/:code')
-  async findPaymentMethodByCode(@Param('code') code: string) {
-    return this.categoriesService.findPaymentMethodByCode(code);
+  @Get('payment-methods/code/:code/:dvcs')
+  async findPaymentMethodByCode(
+    @Param('code') code: string,
+    @Param('dvcs') dvcs: string,
+  ) {
+    return this.categoriesService.findPaymentMethodByCode(code, dvcs);
   }
 
   @Get('payment-methods/:id')

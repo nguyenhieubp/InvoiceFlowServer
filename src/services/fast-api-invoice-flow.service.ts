@@ -690,6 +690,19 @@ export class FastApiInvoiceFlowService {
         return {};
       }
 
+      // [NEW] Fetch department info to get ma_dvcs for payment method lookup
+      const branchCodes = new Set<string>();
+      cashioResult.data.forEach((row) => {
+        if (row.branch_code) branchCodes.add(row.branch_code);
+      });
+
+      const departmentMap =
+        branchCodes.size > 0
+          ? await this.loyaltyService.fetchLoyaltyDepartments(
+              Array.from(branchCodes),
+            )
+          : new Map();
+
       const paymentResults: any[] = [];
       const debitAdviceResults: any[] = [];
 
@@ -762,10 +775,15 @@ export class FastApiInvoiceFlowService {
 
           // Trường hợp 2: fop_syscode != "CASH" → Kiểm tra payment method
           if (cashioData.fop_syscode && cashioData.fop_syscode !== 'CASH') {
+            // [NEW] Get dvcs from map
+            const saleDept = departmentMap.get(cashioData.branch_code);
+            const dvcs = saleDept?.ma_dvcs || '';
+
             // Lấy payment method theo code
             const paymentMethod =
               await this.categoriesService.findPaymentMethodByCode(
                 cashioData.fop_syscode,
+                dvcs,
               );
 
             // Kiểm tra payment method có tồn tại không

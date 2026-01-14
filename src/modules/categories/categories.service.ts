@@ -1564,9 +1564,12 @@ export class CategoriesService {
     return paymentMethod;
   }
 
-  async findPaymentMethodByCode(code: string): Promise<PaymentMethod | null> {
+  async findPaymentMethodByCode(
+    code: string,
+    dvcs: string,
+  ): Promise<PaymentMethod | null> {
     return await this.paymentMethodRepository.findOne({
-      where: { code },
+      where: { code, erp: dvcs },
     });
   }
 
@@ -1702,6 +1705,8 @@ export class CategoriesService {
           'partner code',
           'partnercode',
           'Mã đối tác',
+          'maDoiTac',
+          'madoitac',
         ], // Thêm cả header từ ví dụ user gửi
       };
 
@@ -1738,8 +1743,12 @@ export class CategoriesService {
         }
       }
 
-      // Lấy danh sách headers thực tế từ Excel
-      const actualHeaders = data.length > 0 ? Object.keys(data[0]) : [];
+      // Lấy danh sách headers thực tế từ Excel (tổng hợp từ tất cả các dòng vì có thể dòng đầu tiên thiếu cột nếu value rỗng)
+      const allHeadersSet = new Set<string>();
+      data.forEach((row) =>
+        Object.keys(row).forEach((key) => allHeadersSet.add(key)),
+      );
+      const actualHeaders = Array.from(allHeadersSet);
       this.logger.log(`Excel headers found: ${actualHeaders.join(', ')}`);
       this.logger.debug(
         `Normalized mapping keys: ${Object.keys(normalizedMapping).join(', ')}`,
@@ -1841,21 +1850,10 @@ export class CategoriesService {
             continue;
           }
 
-          // Kiểm tra xem đã tồn tại chưa (dựa trên code)
-          const existing = await this.paymentMethodRepository.findOne({
-            where: { code: paymentMethodData.code },
-          });
-
-          if (existing) {
-            // Cập nhật record cũ
-            Object.assign(existing, paymentMethodData);
-            await this.paymentMethodRepository.save(existing);
-          } else {
-            // Tạo mới
-            const paymentMethod =
-              this.paymentMethodRepository.create(paymentMethodData);
-            await this.paymentMethodRepository.save(paymentMethod);
-          }
+          // Không check trùng, luôn tạo mới
+          const paymentMethod =
+            this.paymentMethodRepository.create(paymentMethodData);
+          await this.paymentMethodRepository.save(paymentMethod);
 
           success++;
         } catch (error: any) {
