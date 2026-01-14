@@ -1290,6 +1290,81 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Gọi API Hình thức thanh toán
+   */
+  async submitPaymentMethod(paymentMethodData: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Gọi API paymentMethod với token
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.baseUrl}/paymentMethod`,
+          paymentMethodData,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        ),
+      );
+
+      this.logger.log('Payment method submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(
+        `Error submitting payment method: ${error?.message || error}`,
+      );
+      if (error?.response) {
+        this.logger.error(`Response status: ${error.response.status}`);
+        this.logger.error(
+          `Response data: ${JSON.stringify(error.response.data)}`,
+        );
+      }
+
+      // Nếu lỗi 401 (Unauthorized), refresh token và retry
+      if (error?.response?.status === 401) {
+        this.logger.log(
+          'Token expired, refreshing and retrying payment method...',
+        );
+        const newToken = await this.login();
+        if (newToken) {
+          try {
+            const retryResponse = await firstValueFrom(
+              this.httpService.post(
+                `${this.baseUrl}/paymentMethod`,
+                paymentMethodData,
+                {
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${newToken}`,
+                  },
+                },
+              ),
+            );
+            this.logger.log(
+              'Payment method submitted successfully (after retry)',
+            );
+            return retryResponse.data;
+          } catch (retryError: any) {
+            this.logger.error(
+              `Retry payment method API failed: ${retryError?.message || retryError}`,
+            );
+            throw retryError;
+          }
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  /**
    * Cleanup khi module bị destroy
    */
   onModuleDestroy() {

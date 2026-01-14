@@ -28,6 +28,9 @@ import { InvoiceLogicUtils } from '../../utils/invoice-logic.utils';
 import { SalesQueryService } from './sales-query.service';
 import * as SalesFormattingUtils from '../../utils/sales-formatting.utils';
 
+import { PaymentService } from '../payment/payment.service';
+import { forwardRef, Inject } from '@nestjs/common';
+
 @Injectable()
 export class SalesInvoiceService {
   private readonly logger = new Logger(SalesInvoiceService.name);
@@ -53,6 +56,8 @@ export class SalesInvoiceService {
     private invoiceValidationService: InvoiceValidationService,
     private categoriesService: CategoriesService,
     private salesQueryService: SalesQueryService,
+    @Inject(forwardRef(() => PaymentService))
+    private paymentService: PaymentService,
   ) {}
 
   /**
@@ -581,13 +586,37 @@ export class SalesInvoiceService {
           throw error;
         }
 
-        // 4. Cashio Payment
-        const cashioResult =
-          await this.fastApiInvoiceFlowService.processCashioPayment(
-            docCode,
-            orderData,
-            invoiceData,
+        // 4. Cashio Payment (Synced via PaymentMethod API)
+        const cashioResult = {
+          cashReceiptResults: [],
+          creditAdviceResults: [],
+        };
+
+        try {
+          const paymentDataList =
+            await this.paymentService.findPaymentByDocCode(docCode);
+          if (paymentDataList && paymentDataList.length > 0) {
+            this.logger.log(
+              `[Cashio] Found ${paymentDataList.length} payment records for order ${docCode}. Processing...`,
+            );
+            for (const paymentData of paymentDataList) {
+              await this.fastApiInvoiceFlowService.processCashioPayment(
+                paymentData,
+              );
+            }
+            this.logger.log(
+              `[Cashio] Successfully triggered payment sync for order ${docCode}`,
+            );
+          } else {
+            this.logger.log(
+              `[Cashio] No payment records found for order ${docCode}`,
+            );
+          }
+        } catch (err) {
+          this.logger.error(
+            `[Cashio] Error processing payment sync for order ${docCode}: ${err?.message || err}`,
           );
+        }
 
         // 5. Payment (Stock)
         let paymentResult: any = null;
@@ -1279,36 +1308,40 @@ export class SalesInvoiceService {
         );
       }
 
-      // Step 3.5: Xử lý cashio payment (Phiếu thu tiền mặt/Giấy báo có) nếu salesInvoice thành công
-      let cashioResult: any = null;
-      if (salesInvoiceResult) {
-        this.logger.log(
-          `[Cashio] Bắt đầu xử lý cashio payment cho đơn hàng ${docCode} (02. Làm dịch vụ)`,
+      let cashioResult: any = {
+        cashReceiptResults: [],
+        creditAdviceResults: [],
+      };
+
+      try {
+        const paymentDataList =
+          await this.paymentService.findPaymentByDocCode(docCode);
+        if (paymentDataList && paymentDataList.length > 0) {
+          this.logger.log(
+            `[Cashio] Found ${paymentDataList.length} payment records for order ${docCode}. Processing...`,
+          );
+          for (const paymentData of paymentDataList) {
+            await this.fastApiInvoiceFlowService.processCashioPayment(
+              paymentData,
+            );
+          }
+          // Note: Since we are using the new sync flow, we don't return specific cashReceipt/creditAdvice results here
+          // But we can Log success
+          this.logger.log(
+            `[Cashio] Successfully triggered payment sync for order ${docCode}`,
+          );
+        } else {
+          this.logger.log(
+            `[Cashio] No payment records found for order ${docCode}`,
+          );
+        }
+      } catch (err) {
+        this.logger.error(
+          `[Cashio] Error processing payment sync for order ${docCode}: ${err?.message || err}`,
         );
-        cashioResult =
-          await this.fastApiInvoiceFlowService.processCashioPayment(
-            docCode,
-            orderData,
-            invoiceData,
-          );
+      }
 
-        if (
-          cashioResult.cashReceiptResults &&
-          cashioResult.cashReceiptResults.length > 0
-        ) {
-          this.logger.log(
-            `[Cashio] Đã tạo ${cashioResult.cashReceiptResults.length} cashReceipt thành công cho đơn hàng ${docCode} (02. Làm dịch vụ)`,
-          );
-        }
-        if (
-          cashioResult.creditAdviceResults &&
-          cashioResult.creditAdviceResults.length > 0
-        ) {
-          this.logger.log(
-            `[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode} (02. Làm dịch vụ)`,
-          );
-        }
-
+      if (salesInvoiceResult) {
         // Xử lý payment (Phiếu chi tiền mặt) nếu có mã kho
         // CHỈ xử lý cho đơn có docSourceType = ORDER_RETURN hoặc SALE_RETURN
         try {
@@ -2043,12 +2076,36 @@ export class SalesInvoiceService {
         this.logger.log(
           `[Cashio] Bắt đầu xử lý cashio payment cho đơn hàng ${docCode} (đơn có đuôi _X)`,
         );
-        cashioResult =
-          await this.fastApiInvoiceFlowService.processCashioPayment(
-            docCode,
-            orderData,
-            invoiceData,
+        cashioResult = {
+          cashReceiptResults: [],
+          creditAdviceResults: [],
+        };
+
+        try {
+          const paymentDataList =
+            await this.paymentService.findPaymentByDocCode(docCode);
+          if (paymentDataList && paymentDataList.length > 0) {
+            this.logger.log(
+              `[Cashio] Found ${paymentDataList.length} payment records for order ${docCode}. Processing...`,
+            );
+            for (const paymentData of paymentDataList) {
+              await this.fastApiInvoiceFlowService.processCashioPayment(
+                paymentData,
+              );
+            }
+            this.logger.log(
+              `[Cashio] Successfully triggered payment sync for order ${docCode}`,
+            );
+          } else {
+            this.logger.log(
+              `[Cashio] No payment records found for order ${docCode}`,
+            );
+          }
+        } catch (err) {
+          this.logger.error(
+            `[Cashio] Error processing payment sync for order ${docCode}: ${err?.message || err}`,
           );
+        }
 
         if (
           cashioResult.cashReceiptResults &&

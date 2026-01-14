@@ -342,21 +342,25 @@ export async function formatSaleForFrontend(
       isTachThe && sale.issuePartnerCode
         ? sale.issuePartnerCode
         : sale.partnerCode || sale.partner_code || null,
-    ckTheoChinhSach: sale.disc_ctkm,
-    chietKhauCkTheoChinhSach: sale.disc_tm,
     ...displayFields,
     productType: productType,
-
+    product: loyaltyProduct
+      ? {
+          ...loyaltyProduct,
+          productType: productType,
+          dvt: loyaltyProduct.unit || null,
+          maVatTu: loyaltyProduct.materialCode || sale.itemCode,
+          trackInventory: loyaltyProduct.trackInventory ?? null,
+          trackSerial: trackSerial,
+          trackBatch: trackBatch,
+        }
+      : null,
+    department: department,
     dvt: loyaltyProduct?.unit || sale.dvt || null,
     tkChietKhau,
     tkChiPhi,
     maPhi,
     brand: sale?.brand?.toUpperCase() || null,
     type_sale: sale?.type_sale || null,
-    // Optimization: Remove heavy nested objects that are not needed by frontend
-    product: undefined,
-    department: undefined,
-    customer: undefined,
-    stockTransfers: undefined,
   };
 }

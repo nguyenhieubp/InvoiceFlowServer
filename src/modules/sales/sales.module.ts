@@ -25,6 +25,7 @@ import { WarehouseProcessed } from '../../entities/warehouse-processed.entity';
 import { InvoicesModule } from '../invoices/invoices.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { SyncModule } from '../sync/sync.module';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { SyncModule } from '../sync/sync.module';
     forwardRef(() => InvoicesModule),
     CategoriesModule,
     forwardRef(() => SyncModule),
+    forwardRef(() => PaymentModule),
   ],
   controllers: [SalesController],
   providers: [
