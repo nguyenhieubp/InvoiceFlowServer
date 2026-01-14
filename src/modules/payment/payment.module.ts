@@ -4,6 +4,7 @@ import { HttpModule } from '@nestjs/axios';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
 import { Sale } from '../../entities/sale.entity';
 import { PaymentMethod } from '../../entities/payment-method.entity';
+import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
 import { PaymentController } from './payment.controller';
 import { PaymentService } from './payment.service';
 import { LoyaltyService } from '../../services/loyalty.service';
@@ -12,7 +13,12 @@ import { SalesModule } from '../sales/sales.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([DailyCashio, Sale, PaymentMethod]),
+    TypeOrmModule.forFeature([
+      DailyCashio,
+      Sale,
+      PaymentMethod,
+      PaymentSyncLog,
+    ]),
     HttpModule,
     CategoriesModule,
     forwardRef(() => SalesModule),

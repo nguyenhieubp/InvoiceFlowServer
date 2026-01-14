@@ -27,6 +27,8 @@ import { CategoriesModule } from '../categories/categories.module';
 import { SyncModule } from '../sync/sync.module';
 import { PaymentModule } from '../payment/payment.module';
 
+import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -39,6 +41,7 @@ import { PaymentModule } from '../payment/payment.module';
       DailyCashio,
       StockTransfer,
       WarehouseProcessed,
+      PaymentSyncLog,
     ]),
     HttpModule,
     forwardRef(() => InvoicesModule),

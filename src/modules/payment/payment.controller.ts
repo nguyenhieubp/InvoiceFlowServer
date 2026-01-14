@@ -1,9 +1,29 @@
-import { Controller, Get, Query, Post, Body } from '@nestjs/common';
+import { Controller, Get, Query, Post, Body, Param } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 
 @Controller('payments')
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
+
+  @Get('audit')
+  async getAuditLogs(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('docCode') docCode?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.paymentService.getAuditLogs({
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 20,
+      docCode,
+      status,
+    });
+  }
+
+  @Post('audit/:id/retry')
+  async retryPaymentSync(@Param('id') id: string) {
+    return this.paymentService.retryPaymentSync(id);
+  }
 
   @Get()
   async findAll(

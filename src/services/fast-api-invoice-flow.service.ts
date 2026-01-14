@@ -11,6 +11,9 @@ import { SyncService } from '../modules/sync/sync.service';
 import { LoyaltyService } from './loyalty.service';
 import { FastApiPayloadHelper } from './fast-api-payload.helper';
 import { formatDateYYYYMMDD } from '../utils/convert.utils';
+import { Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { PaymentSyncLog } from '../entities/payment-sync-log.entity';
 
 /**
  * Service quản lý tạo invoice trong Fast API
@@ -26,6 +29,8 @@ export class FastApiInvoiceFlowService {
     @Inject(forwardRef(() => SyncService))
     private readonly syncService: SyncService,
     private readonly loyaltyService: LoyaltyService,
+    @InjectRepository(PaymentSyncLog)
+    private readonly paymentSyncLogRepository: Repository<PaymentSyncLog>,
   ) {}
 
   /**
@@ -536,60 +541,97 @@ export class FastApiInvoiceFlowService {
         ma_tc: data.refno || '', // Mã tham chiếu cũng dùng refno
         ky_han: data.period_code || '',
       };
-
       this.logger.log(
         `[ProcessCashioPayment] Submitting payment for ${payload.so_hd} (${payload.httt})`,
       );
 
-      return await this.submitPaymentMethod(payload);
+      return await this.submitPaymentPayload(payload);
     } catch (error) {
       this.logger.error(
-        `[Payment] Failed to process cashio payment: ${error?.message || error}`,
+        `Failed to process cashio payment: ${error.message} - Data: ${JSON.stringify(
+          data,
+        )}`,
       );
       throw error;
     }
   }
 
   /**
-   * Gửi thông tin hình thức thanh toán lên Fast API
+   * Gửi thông tin hình thức thanh toán lên Fast API và lưu log audit
    * API: /Fast/paymentMethod
    */
-  async submitPaymentMethod(paymentMethodData: any): Promise<any> {
+  async submitPaymentPayload(payload: any): Promise<any> {
     try {
-      this.logger.log(
-        `[Flow] Submitting payment method: ${paymentMethodData.paymentMethod} - Amount: ${paymentMethodData.totalAmount}`,
-      );
-      const result =
-        await this.fastApiService.submitPaymentMethod(paymentMethodData);
+      const result = await this.fastApiService.submitPaymentMethod(payload);
 
-      // Validate response: status = 1 mới là success
+      // Audit Logging
+      try {
+        const log = new PaymentSyncLog();
+        log.docCode = payload.so_hd;
+        log.docDate = payload.ngay_pt ? new Date(payload.ngay_pt) : new Date();
+        log.requestPayload = JSON.stringify(payload);
+        log.responsePayload = JSON.stringify(result);
+
+        // Determine status
+        let isSuccess = false;
+        let errorMessage = null;
+
+        if (Array.isArray(result) && result.length > 0) {
+          // Case: Response is an array like [{ status: 1, message: 'OK' }]
+          const firstItem = result[0];
+          isSuccess = firstItem.status === 1;
+          if (!isSuccess) {
+            errorMessage = firstItem.message || 'Unknown error (status !== 1)';
+          }
+        } else if (result && typeof result === 'object') {
+          // Case: Response is an object like { status: 1, success: true }
+          isSuccess = result.status === 1 || result.success === true;
+          if (!isSuccess) {
+            errorMessage = result.message || result.error || 'Unknown error';
+          }
+        }
+
+        log.status = isSuccess ? 'SUCCESS' : 'ERROR';
+        log.errorMessage = errorMessage;
+
+        await this.paymentSyncLogRepository.save(log);
+      } catch (logErr) {
+        this.logger.error(`Failed to save payment sync log: ${logErr}`);
+      }
+
+      // Validate response logic from original code
       if (Array.isArray(result) && result.length > 0) {
         const firstItem = result[0];
         if (firstItem.status !== 1) {
-          const errorMessage =
-            firstItem.message || 'Submit payment method thất bại';
-          this.logger.error(
-            `[Flow] Payment Method API trả về status = ${firstItem.status}: ${errorMessage}`,
+          throw new BadRequestException(
+            firstItem.message || 'Submit payment method thất bại',
           );
-          throw new BadRequestException(errorMessage);
         }
-      } else if (
-        result &&
-        typeof result === 'object' &&
-        result.status !== undefined
-      ) {
+      } else if (result && result.status !== undefined) {
         if (result.status !== 1) {
-          const errorMessage =
-            result.message || 'Submit payment method thất bại';
-          this.logger.error(
-            `[Flow] Payment Method API trả về status = ${result.status}: ${errorMessage}`,
+          throw new BadRequestException(
+            result.message || 'Submit payment method thất bại',
           );
-          throw new BadRequestException(errorMessage);
         }
       }
 
       return result;
-    } catch (error: any) {
+    } catch (error) {
+      // Audit Logging for Exception
+      try {
+        const log = new PaymentSyncLog();
+        log.docCode = payload.so_hd;
+        log.docDate = payload.ngay_pt ? new Date(payload.ngay_pt) : new Date();
+        log.requestPayload = JSON.stringify(payload);
+        log.status = 'ERROR';
+        log.errorMessage = error.message;
+        await this.paymentSyncLogRepository.save(log);
+      } catch (logErr) {
+        this.logger.error(
+          `Failed to save payment sync log (exception): ${logErr}`,
+        );
+      }
+
       this.logger.error(
         `[Flow] Failed to submit payment method: ${error?.message || error}`,
       );

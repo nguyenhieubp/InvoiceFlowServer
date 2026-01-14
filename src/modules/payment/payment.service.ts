@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
 import { Sale } from '../../entities/sale.entity';
+import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
 import { LoyaltyService } from 'src/services/loyalty.service';
 import { CategoriesService } from '../categories/categories.service';
 import { getSupplierCode } from '../../utils/payment-supplier.util';
@@ -44,6 +45,8 @@ export class PaymentService {
     private loyaltyService: LoyaltyService,
     private categoryService: CategoriesService,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
+    @InjectRepository(PaymentSyncLog)
+    private paymentSyncLogRepository: Repository<PaymentSyncLog>,
   ) {}
 
   async findAll(options: {
@@ -462,7 +465,7 @@ export class PaymentService {
     return enrichedResults as PaymentData[];
   }
 
-  @Cron('0 4 * * *')
+  // @Cron('0 4 * * *')
   async autoLogPaymentData() {
     this.logger.log('Starting daily payment method sync...');
     const yesterday = new Date();
@@ -480,6 +483,56 @@ export class PaymentService {
     } catch (error) {
       this.logger.error(`Daily payment method sync failed: ${error}`);
     }
+  }
+
+  async getAuditLogs(options: {
+    page?: number;
+    limit?: number;
+    docCode?: string;
+    status?: string;
+  }) {
+    const { page = 1, limit = 20, docCode, status } = options;
+    const query = this.paymentSyncLogRepository.createQueryBuilder('log');
+
+    if (docCode) {
+      query.andWhere('log.docCode LIKE :docCode', { docCode: `%${docCode}%` });
+    }
+    if (status) {
+      query.andWhere('log.status = :status', { status });
+    }
+
+    query.orderBy('log.createdAt', 'DESC');
+    query.skip((page - 1) * limit).take(limit);
+
+    const [items, total] = await query.getManyAndCount();
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async retryPaymentSync(id: string) {
+    const log = await this.paymentSyncLogRepository.findOne({ where: { id } });
+    if (!log) {
+      throw new Error('Audit log not found');
+    }
+
+    if (!log.requestPayload) {
+      throw new Error('No payload to retry');
+    }
+
+    const payload = JSON.parse(log.requestPayload);
+
+    // Update retry count
+    log.retryCount += 1;
+    await this.paymentSyncLogRepository.save(log);
+
+    // Resubmit (this will create a NEW log entry via submitPaymentPayload)
+    return this.fastApiInvoiceFlowService.submitPaymentPayload(payload);
   }
 
   async processFastPayment(data: any[]) {
