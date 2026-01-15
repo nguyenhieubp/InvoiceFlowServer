@@ -317,6 +317,29 @@ export async function formatSaleForFrontend(
     ? 0
     : (sale.other_discamt ?? sale.chietKhauMuaHangGiamGia ?? 0);
 
+  // 7. Wholesale Promotion Code Mapping
+  // Áp dụng cho đơn hàng bán buôn khi dist_tm > 0
+  let maCkTheoChinhSach;
+  const typeSale = (sale.type_sale || '').toUpperCase().trim();
+  const distTm = Number(sale.disc_tm || 0);
+
+  // Kiểm tra điều kiện: WHOLESALE và ordertypeName = "Bán buôn kênh Đại lý"
+  const isWholesale = typeSale === 'WHOLESALE';
+  const isAgencyChannel = ordertypeName.includes('Bán buôn kênh Đại lý');
+
+  if (isWholesale && isAgencyChannel && distTm > 0) {
+    // Gọi hàm map mã CTKM cho bán buôn
+    const wholesalePromoCode = InvoiceLogicUtils.resolveWholesalePromotionCode({
+      productType: productType,
+      distTm: distTm,
+    });
+
+    // Gán mã CTKM đã map vào maCkTheoChinhSach
+    if (wholesalePromoCode) {
+      maCkTheoChinhSach = wholesalePromoCode;
+    }
+  }
+
   return {
     ...sale,
     itemName: sale.itemName || loyaltyProduct?.name || null,
@@ -331,6 +354,7 @@ export async function formatSaleForFrontend(
     muaHangGiamGiaDisplay: maCk01,
     other_discamt: other_discamt,
     chietKhauMuaHangGiamGia: other_discamt,
+    maCkTheoChinhSach: maCkTheoChinhSach, // Mã CTKM cho bán buôn
     giaBan: giaBan,
     tienHang: tienHang,
     linetotal: isDoiDiem ? 0 : (sale.linetotal ?? tienHang),

@@ -433,4 +433,85 @@ export class InvoiceLogicUtils {
     // Ưu tiên kho từ Stock Transfer, sau đó đến kho từ Sale
     return maKhoFromST || maKhoFromSale || '';
   }
+
+  /**
+   * Xác định mã CTKM cho đơn hàng bán buôn (WHOLESALE)
+   * Áp dụng khi: type_sale = WHOLESALE, ordertypeName = "Bán buôn kênh Đại lý", dist_tm > 0
+   */
+  static resolveWholesalePromotionCode(params: {
+    productType: string | null;
+    distTm: number;
+  }): string {
+    const { productType, distTm } = params;
+
+    // Chỉ áp dụng khi dist_tm > 0
+    if (!distTm || distTm <= 0) {
+      return '';
+    }
+
+    // Xác định loại hàng (0 hoặc 1)
+    // Loại hàng = 1 (Ecode) nếu productType bắt đầu bằng "E."
+    // Loại hàng = 0 cho các trường hợp còn lại
+    const isEcode = productType?.startsWith('E.') || false;
+
+    // Xác định nhóm sản phẩm dựa trên productType
+    // Mỹ phẩm: 01SKIN, 02MAKE, 04BODY, 05HAIR, 06FRAG, 07PROF, 10GIFT
+    // TPCN: 03TPCN
+    // CCDC: 11MMOC
+    let category = '';
+
+    if (productType) {
+      const mpCategories = [
+        '01SKIN',
+        '02MAKE',
+        '04BODY',
+        '05HAIR',
+        '06FRAG',
+        '07PROF',
+        '10GIFT',
+      ];
+      const tpcnCategories = ['03TPCN'];
+      const ccdcCategories = ['11MMOC'];
+
+      // Kiểm tra xem productType có chứa các mã nhóm không
+      if (mpCategories.some((cat) => productType.includes(cat))) {
+        category = 'MP'; // Mỹ phẩm
+      } else if (tpcnCategories.some((cat) => productType.includes(cat))) {
+        category = 'TPCN'; // Thực phẩm chức năng
+      } else if (ccdcCategories.some((cat) => productType.includes(cat))) {
+        category = 'CCDC'; // Công cụ dụng cụ
+      } else {
+        // Mặc định là Mỹ phẩm nếu không xác định được
+        category = 'MP';
+      }
+    } else {
+      // Mặc định là Mỹ phẩm nếu không có productType
+      category = 'MP';
+    }
+
+    // Map mã CTKM theo quy tắc
+    let mappedCode = '';
+
+    if (isEcode) {
+      // Loại hàng = 1 (Ecode)
+      if (category === 'MP') {
+        mappedCode = 'CKCSBH.E.MP';
+      } else if (category === 'TPCN') {
+        mappedCode = 'CKCSBH.E.TPCN';
+      } else if (category === 'CCDC') {
+        mappedCode = 'CKCSBH.E.CCDC';
+      }
+    } else {
+      // Loại hàng = 0 (Thường)
+      if (category === 'MP') {
+        mappedCode = 'CKCSBH.MP';
+      } else if (category === 'TPCN') {
+        mappedCode = 'CKCSBH.TPCN';
+      } else if (category === 'CCDC') {
+        mappedCode = 'CKCSBH.CCDC';
+      }
+    }
+
+    return mappedCode;
+  }
 }
