@@ -2755,7 +2755,10 @@ export class SalesInvoiceService {
         sale.other_discamt || sale.chietKhauMuaHangGiamGia,
         0,
       ),
-      ck02_nt: this.toNumber(sale.chietKhauCkTheoChinhSach, 0),
+      ck02_nt:
+        this.toNumber(sale.disc_tm, 0) > 0
+          ? this.toNumber(sale.disc_tm, 0)
+          : this.toNumber(sale.chietKhauCkTheoChinhSach, 0),
       ck03_nt: this.toNumber(
         sale.chietKhauMuaHangCkVip || sale.grade_discamt,
         0,
@@ -2861,7 +2864,6 @@ export class SalesInvoiceService {
     );
     const productType =
       sale.productType ||
-      sale.producttype ||
       sale.product?.productType ||
       sale.product?.producttype ||
       '';
@@ -3021,6 +3023,7 @@ export class SalesInvoiceService {
     amounts: any,
     sale: any,
     orderData: any,
+    loyaltyProduct: any,
   ) {
     for (let i = 1; i <= 22; i++) {
       const idx = i.toString().padStart(2, '0');
@@ -3029,7 +3032,26 @@ export class SalesInvoiceService {
       detailItem[key] = Number(amounts[key] || 0);
 
       // Special ma_ck logic
-      if (i === 3) {
+      if (i === 2) {
+        // 02. Chiết khấu theo chính sách (Bán buôn)
+        const isWholesale =
+          sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS';
+        const distTm = detailItem.ck02_nt;
+
+        // Bỏ check channel_code vì dữ liệu không có sẵn trong entity
+        if (isWholesale && distTm > 0) {
+          detailItem[maKey] = this.val(
+            InvoiceLogicUtils.resolveWholesalePromotionCode({
+              groupProductType: loyaltyProduct?.productType,
+              productTypeCode: loyaltyProduct?.materialCode,
+              distTm: distTm,
+            }),
+            32,
+          );
+        } else {
+          detailItem[maKey] = this.val(sale.maCk02 || '', 32);
+        }
+      } else if (i === 3) {
         const brand = orderData.customer?.brand || orderData.brand || '';
         detailItem[maKey] = this.val(
           SalesCalculationUtils.calculateMuaHangCkVip(
@@ -3264,7 +3286,13 @@ export class SalesInvoiceService {
           : {}),
     });
 
-    this.fillInvoiceChietKhauFields(detailItem, amounts, sale, orderData);
+    this.fillInvoiceChietKhauFields(
+      detailItem,
+      amounts,
+      sale,
+      orderData,
+      loyaltyProduct,
+    );
 
     return detailItem;
   }

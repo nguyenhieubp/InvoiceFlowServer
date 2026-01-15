@@ -274,6 +274,9 @@ export async function formatSaleForFrontend(
     ? String(productType).toUpperCase().trim()
     : null;
 
+  const groupProductType = loyaltyProduct?.productType;
+  const productTypeCode = loyaltyProduct?.materialCode;
+
   const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht || '';
   // isTangHang is already calculated above (V7 Fix)
 
@@ -330,7 +333,8 @@ export async function formatSaleForFrontend(
   if (isWholesale && isAgencyChannel && distTm > 0) {
     // Gọi hàm map mã CTKM cho bán buôn
     const wholesalePromoCode = InvoiceLogicUtils.resolveWholesalePromotionCode({
-      productType: productType,
+      groupProductType: groupProductType,
+      productTypeCode: productTypeCode,
       distTm: distTm,
     });
 
