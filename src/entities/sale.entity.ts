@@ -175,6 +175,9 @@ export class Sale {
   @Column({ nullable: true }) //
   disc_ctkm?: string; // For WHOLESALE
 
+  @Column({ nullable: true }) //
+  svc_code?: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

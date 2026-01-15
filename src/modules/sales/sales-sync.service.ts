@@ -792,6 +792,7 @@ export class SalesSyncService {
             // Keep existing isProcessed status if update
             isProcessed: existingSale ? existingSale.isProcessed : false,
             statusAsys: statusAsys,
+            svc_code: saleItem.svc_code,
             type_sale: 'RETAIL',
           };
 
