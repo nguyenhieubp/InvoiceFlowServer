@@ -3330,6 +3330,7 @@ export class SalesInvoiceService {
       ma_bp: maBp,
       tk_thue_no: '131111',
       ma_kenh: 'ONLINE',
+      loai_gd: firstSale ? this.resolveInvoiceLoaiGd(firstSale) : '01',
       trans_date: transDate
         ? this.formatDateKeepLocalDay(new Date(transDate))
         : null,

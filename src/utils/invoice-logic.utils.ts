@@ -405,12 +405,16 @@ export class InvoiceLogicUtils {
         return '01';
       } else if (sale.productType === 'S' && sale.qty > 0) {
         return '02';
+      } else if (sale.productType === 'V') {
+        return '03';
       }
     }
 
     if (isDichVu) {
       if (sale.productType === 'S' && sale.qty > 0) {
         return '01';
+      } else if (sale.productType === 'S' && Number(sale.giaBan) === 0) {
+        return '06';
       }
     }
 

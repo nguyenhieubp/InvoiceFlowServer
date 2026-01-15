@@ -65,7 +65,6 @@ export class FastApiPayloadHelper {
         ma_bp: orderData.ma_bp,
         tk_thue_no: orderData.tk_thue_no ?? '131111',
         ma_kenh: orderData.ma_kenh ?? 'ONLINE',
-        loai_gd: '01',
         detail: (orderData.detail || []).map((item: any) => {
           const { product, ...cleanItem } = item;
           const result: any = { ...cleanItem };
@@ -102,7 +101,6 @@ export class FastApiPayloadHelper {
       ma_bp: orderData.ma_bp,
       tk_thue_no: orderData.tk_thue_no ?? '131111',
       ma_kenh: orderData.ma_kenh ?? 'ONLINE',
-      loai_gd: '01',
       detail: (orderData.detail || []).map((item: any) => {
         const { product, ...cleanItem } = item;
         const result: any = { ...cleanItem };
