@@ -20,7 +20,6 @@ import { RepackFormulaItem } from '../../entities/repack-formula-item.entity';
 import { Promotion } from '../../entities/promotion.entity';
 import { PromotionLine } from '../../entities/promotion-line.entity';
 import { VoucherIssue } from '../../entities/voucher-issue.entity';
-import { VoucherIssueDetail } from '../../entities/voucher-issue-detail.entity';
 
 @Module({
   imports: [
@@ -37,7 +36,6 @@ import { VoucherIssueDetail } from '../../entities/voucher-issue-detail.entity';
       Promotion,
       PromotionLine,
       VoucherIssue,
-      VoucherIssueDetail,
     ]),
     HttpModule,
     forwardRef(() => SalesModule),

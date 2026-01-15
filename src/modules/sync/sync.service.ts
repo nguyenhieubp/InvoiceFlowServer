@@ -21,7 +21,7 @@ import { RepackFormulaItem } from '../../entities/repack-formula-item.entity';
 import { Promotion } from '../../entities/promotion.entity';
 import { PromotionLine } from '../../entities/promotion-line.entity';
 import { VoucherIssue } from '../../entities/voucher-issue.entity';
-import { VoucherIssueDetail } from '../../entities/voucher-issue-detail.entity';
+
 import { ZappyApiService } from '../../services/zappy-api.service';
 import { LoyaltyService } from '../../services/loyalty.service';
 import { SalesSyncService } from '../sales/sales-sync.service';
@@ -76,8 +76,7 @@ export class SyncService {
     private promotionLineRepository: Repository<PromotionLine>,
     @InjectRepository(VoucherIssue)
     private voucherIssueRepository: Repository<VoucherIssue>,
-    @InjectRepository(VoucherIssueDetail)
-    private voucherIssueDetailRepository: Repository<VoucherIssueDetail>,
+
     private httpService: HttpService,
     private zappyApiService: ZappyApiService,
     private loyaltyService: LoyaltyService,
@@ -3680,11 +3679,65 @@ export class SyncService {
   }
 
   /**
+   * Helper: Parse voucher date string to Date object
+   */
+  private parseVoucherDate(dateStr: string | null | undefined): Date | null {
+    if (!dateStr || typeof dateStr !== 'string') return null;
+    try {
+      const trimmed = dateStr.trim();
+      if (!trimmed) return null;
+
+      if (trimmed.includes('T') || trimmed.includes('Z')) {
+        const isoDate = new Date(trimmed);
+        if (isNaN(isoDate.getTime())) {
+          return null;
+        }
+        return isoDate;
+      }
+
+      // Format: DD/MM/YYYY HH:mm or DD/MM/YYYY
+      const parts = trimmed.split(' ');
+      const datePart = parts[0];
+      const timePart = parts[1] || '00:00';
+
+      if (!datePart || !datePart.includes('/')) {
+        return null;
+      }
+
+      const [day, month, year] = datePart.split('/');
+      const [hours, minutes] = timePart.split(':');
+
+      const yearNum = parseInt(year, 10);
+      const monthNum = parseInt(month, 10);
+      const dayNum = parseInt(day, 10);
+      const hoursNum = parseInt(hours || '0', 10);
+      const minutesNum = parseInt(minutes || '0', 10);
+
+      if (isNaN(yearNum) || isNaN(monthNum) || isNaN(dayNum)) {
+        return null;
+      }
+
+      const date = new Date(
+        yearNum,
+        monthNum - 1,
+        dayNum,
+        isNaN(hoursNum) ? 0 : hoursNum,
+        isNaN(minutesNum) ? 0 : minutesNum,
+      );
+
+      if (isNaN(date.getTime())) {
+        return null;
+      }
+
+      return date;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
    * Đồng bộ dữ liệu danh sách Voucher Issue từ API
-   * @param dateFrom - Ngày bắt đầu (format: DDMMMYYYY, ví dụ: 01NOV2025)
-   * @param dateTo - Ngày kết thúc (format: DDMMMYYYY, ví dụ: 30NOV2025)
-   * @param brand - Optional brand name. Nếu không có thì đồng bộ tất cả brands
-   * @returns Kết quả đồng bộ
+   * Refactored: Flatten structure - One row per detail line
    */
   async syncVoucherIssue(
     dateFrom: string,
@@ -3711,7 +3764,7 @@ export class SyncService {
             `[VoucherIssue] Đang đồng bộ ${brandName} cho khoảng ${dateFrom} - ${dateTo}`,
           );
 
-          // Lấy danh sách voucher issue từ API
+          // 1. Fetch summary list
           const voucherIssueData = await this.zappyApiService.getVoucherIssue(
             dateFrom,
             dateTo,
@@ -3725,399 +3778,203 @@ export class SyncService {
             continue;
           }
 
+          this.logger.log(
+            `[VoucherIssue] Tìm thấy ${voucherIssueData.length} vouchers summary. Bắt đầu fetch details...`,
+          );
+
           let brandSavedCount = 0;
           let brandUpdatedCount = 0;
           const brandErrors: string[] = [];
 
-          // Parse date string sang Date object (sử dụng hàm parseDateString từ syncPromotion)
-          const parseDateString = (
-            dateStr: string | null | undefined,
-          ): Date | null => {
-            if (!dateStr || typeof dateStr !== 'string') return null;
-            try {
-              const trimmed = dateStr.trim();
-              if (!trimmed) return null;
+          const BATCH_SIZE = 10;
+          for (let i = 0; i < voucherIssueData.length; i += BATCH_SIZE) {
+            const batch = voucherIssueData.slice(i, i + BATCH_SIZE);
 
-              if (trimmed.includes('T') || trimmed.includes('Z')) {
-                const isoDate = new Date(trimmed);
-                if (isNaN(isoDate.getTime())) {
-                  this.logger.warn(`Invalid ISO date: ${dateStr}`);
-                  return null;
+            // Fetch details concurrently for the batch
+            const batchResults = await Promise.all(
+              batch.map(async (voucherData) => {
+                const apiId =
+                  typeof voucherData.id === 'number'
+                    ? voucherData.id
+                    : parseInt(String(voucherData.id), 10);
+
+                if (isNaN(apiId)) {
+                  return { voucherData, details: null, error: 'Invalid ID' };
                 }
-                return isoDate;
-              }
 
-              const parts = trimmed.split(' ');
-              const datePart = parts[0];
-              const timePart = parts[1] || '00:00';
-
-              if (!datePart || !datePart.includes('/')) {
-                this.logger.warn(`Invalid date format (no /): ${dateStr}`);
-                return null;
-              }
-
-              const [day, month, year] = datePart.split('/');
-              const [hours, minutes] = timePart.split(':');
-
-              const yearNum = parseInt(year, 10);
-              const monthNum = parseInt(month, 10);
-              const dayNum = parseInt(day, 10);
-              const hoursNum = parseInt(hours || '0', 10);
-              const minutesNum = parseInt(minutes || '0', 10);
-
-              if (isNaN(yearNum) || isNaN(monthNum) || isNaN(dayNum)) {
-                this.logger.warn(`Invalid date values: ${dateStr}`);
-                return null;
-              }
-
-              if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31) {
-                this.logger.warn(`Invalid month/day: ${dateStr}`);
-                return null;
-              }
-
-              const date = new Date(
-                yearNum,
-                monthNum - 1,
-                dayNum,
-                isNaN(hoursNum) ? 0 : hoursNum,
-                isNaN(minutesNum) ? 0 : minutesNum,
-              );
-
-              if (isNaN(date.getTime())) {
-                this.logger.warn(
-                  `Invalid Date object created from: ${dateStr}`,
-                );
-                return null;
-              }
-
-              return date;
-            } catch (error) {
-              this.logger.warn(`Không thể parse date: ${dateStr} - ${error}`);
-              return null;
-            }
-          };
-
-          for (const voucherData of voucherIssueData) {
-            // Đảm bảo api_id là number
-            const apiId =
-              typeof voucherData.id === 'number'
-                ? voucherData.id
-                : parseInt(String(voucherData.id), 10);
-
-            if (isNaN(apiId)) {
-              this.logger.warn(
-                `Invalid api_id for voucher issue: ${voucherData.id}`,
-              );
-              continue;
-            }
-
-            try {
-              // Kiểm tra xem đã tồn tại chưa (dựa trên api_id và brand)
-              const existingRecord = await this.voucherIssueRepository.findOne({
-                where: {
-                  api_id: apiId,
-                  brand: brandName,
-                },
-              });
-
-              const docdate = parseDateString(voucherData.docdate);
-              const validFromdate = parseDateString(voucherData.valid_fromdate);
-              const validTodate = parseDateString(voucherData.valid_todate);
-              const enteredat = parseDateString(voucherData.enteredat);
-
-              if (existingRecord) {
-                this.logger.log(
-                  `[VoucherIssue] Cập nhật voucher issue ${apiId} (${voucherData.code || 'N/A'}) cho brand ${brandName}`,
-                );
-
-                // Cập nhật record đã tồn tại
-                existingRecord.code = voucherData.code || existingRecord.code;
-                existingRecord.status_lov =
-                  voucherData.status_lov || existingRecord.status_lov;
-                existingRecord.docdate = docdate || existingRecord.docdate;
-                existingRecord.description =
-                  voucherData.description || existingRecord.description;
-                existingRecord.brand_code =
-                  voucherData.brand_code || existingRecord.brand_code;
-                existingRecord.apply_for_branch_types =
-                  voucherData.apply_for_branch_types ||
-                  existingRecord.apply_for_branch_types;
-                existingRecord.val =
-                  voucherData.val !== undefined && voucherData.val !== null
-                    ? voucherData.val
-                    : existingRecord.val;
-                existingRecord.percent =
-                  voucherData.percent !== undefined &&
-                  voucherData.percent !== null
-                    ? voucherData.percent
-                    : (existingRecord.percent ?? 0);
-                existingRecord.max_value =
-                  voucherData.max_value !== undefined &&
-                  voucherData.max_value !== null
-                    ? voucherData.max_value
-                    : existingRecord.max_value;
-                existingRecord.saletype =
-                  voucherData.saletype || existingRecord.saletype;
-                existingRecord.enable_precost =
-                  voucherData.enable_precost || existingRecord.enable_precost;
-                existingRecord.supplier_support_fee =
-                  voucherData.supplier_support_fee !== undefined &&
-                  voucherData.supplier_support_fee !== null
-                    ? voucherData.supplier_support_fee
-                    : existingRecord.supplier_support_fee;
-                existingRecord.valid_fromdate =
-                  validFromdate || existingRecord.valid_fromdate;
-                existingRecord.valid_todate =
-                  validTodate !== null
-                    ? validTodate
-                    : existingRecord.valid_todate;
-                existingRecord.valid_days_from_so =
-                  voucherData.valid_days_from_so !== undefined &&
-                  voucherData.valid_days_from_so !== null
-                    ? voucherData.valid_days_from_so
-                    : existingRecord.valid_days_from_so;
-                existingRecord.check_ownership =
-                  voucherData.check_ownership || existingRecord.check_ownership;
-                existingRecord.allow_cashback =
-                  voucherData.allow_cashback || existingRecord.allow_cashback;
-                existingRecord.prom_for_employee =
-                  voucherData.prom_for_employee ||
-                  existingRecord.prom_for_employee;
-                existingRecord.bonus_for_sale_employee =
-                  voucherData.bonus_for_sale_employee ||
-                  existingRecord.bonus_for_sale_employee;
-                existingRecord.so_percent =
-                  voucherData.so_percent !== undefined &&
-                  voucherData.so_percent !== null
-                    ? voucherData.so_percent
-                    : existingRecord.so_percent;
-                existingRecord.r_total_scope =
-                  voucherData.r_total_scope || existingRecord.r_total_scope;
-                existingRecord.ecode_item_code =
-                  voucherData.ecode_item_code !== undefined
-                    ? voucherData.ecode_item_code
-                    : existingRecord.ecode_item_code;
-                existingRecord.voucher_item_code =
-                  voucherData.voucher_item_code ||
-                  existingRecord.voucher_item_code;
-                existingRecord.voucher_item_name =
-                  voucherData.voucher_item_name ||
-                  existingRecord.voucher_item_name;
-                existingRecord.cost_for_gl =
-                  voucherData.cost_for_gl !== undefined &&
-                  voucherData.cost_for_gl !== null
-                    ? voucherData.cost_for_gl
-                    : existingRecord.cost_for_gl;
-                existingRecord.buy_items_by_date_range =
-                  voucherData.buy_items_by_date_range ||
-                  existingRecord.buy_items_by_date_range;
-                existingRecord.buy_items_option_name =
-                  voucherData.buy_items_option_name ||
-                  existingRecord.buy_items_option_name;
-                existingRecord.disable_bonus_point_for_sale =
-                  voucherData.disable_bonus_point_for_sale ||
-                  existingRecord.disable_bonus_point_for_sale;
-                existingRecord.disable_bonus_point =
-                  voucherData.disable_bonus_point ||
-                  existingRecord.disable_bonus_point;
-                existingRecord.for_mkt_kol =
-                  voucherData.for_mkt_kol || existingRecord.for_mkt_kol;
-                existingRecord.for_mkt_prom =
-                  voucherData.for_mkt_prom || existingRecord.for_mkt_prom;
-                existingRecord.allow_apply_for_promoted_so =
-                  voucherData.allow_apply_for_promoted_so ||
-                  existingRecord.allow_apply_for_promoted_so;
-                existingRecord.campaign_code =
-                  voucherData.campaign_code !== undefined
-                    ? voucherData.campaign_code
-                    : existingRecord.campaign_code;
-                existingRecord.sl_max_sudung_cho_1_kh =
-                  voucherData.sl_max_sudung_cho_1_kh !== undefined
-                    ? voucherData.sl_max_sudung_cho_1_kh
-                    : existingRecord.sl_max_sudung_cho_1_kh;
-                existingRecord.is_locked =
-                  voucherData.is_locked || existingRecord.is_locked;
-                existingRecord.enteredat =
-                  enteredat || existingRecord.enteredat;
-                existingRecord.enteredby =
-                  voucherData.enteredby || existingRecord.enteredby;
-                existingRecord.material_type =
-                  voucherData.material_type || existingRecord.material_type;
-                existingRecord.applyfor_wso =
-                  voucherData.applyfor_wso !== undefined
-                    ? voucherData.applyfor_wso
-                    : existingRecord.applyfor_wso;
-                existingRecord.sync_date_from = dateFrom;
-                existingRecord.sync_date_to = dateTo;
-
-                // Xóa các details cũ
-                await this.voucherIssueDetailRepository.delete({
-                  voucherIssueId: existingRecord.id,
-                });
-
-                // Lấy chi tiết từ API
-                const details: VoucherIssueDetail[] = [];
                 try {
-                  const detailData =
+                  const details =
                     await this.zappyApiService.getVoucherIssueDetail(
                       apiId,
                       brandName,
                     );
-
-                  // Lưu toàn bộ detail_data dạng JSON
-                  if (detailData) {
-                    const detail = this.voucherIssueDetailRepository.create({
-                      voucherIssue: existingRecord,
-                      detail_data: detailData,
-                    });
-                    details.push(detail);
-                  }
-
-                  if (details.length > 0) {
-                    await this.voucherIssueDetailRepository.save(details);
-                  }
-                } catch (detailError: any) {
-                  this.logger.warn(
-                    `Không thể lấy details cho voucher issue ${apiId}: ${detailError?.message || detailError}`,
-                  );
-                  // Vẫn tiếp tục, không throw error
+                  return { voucherData, details, error: null };
+                } catch (e: any) {
+                  return {
+                    voucherData,
+                    details: null,
+                    error: e?.message || e,
+                  };
                 }
+              }),
+            );
 
-                existingRecord.details = details;
-                await this.voucherIssueRepository.save(existingRecord);
-                brandUpdatedCount++;
-              } else {
-                // Tạo record mới
-                this.logger.log(
-                  `[VoucherIssue] Tạo mới voucher issue ${apiId} (${voucherData.code || 'N/A'}) cho brand ${brandName}`,
-                );
-                const newRecord = this.voucherIssueRepository.create({
-                  api_id: apiId,
-                  code: voucherData.code || undefined,
-                  status_lov: voucherData.status_lov || undefined,
-                  docdate: docdate || undefined,
-                  description: voucherData.description || undefined,
-                  brand_code: voucherData.brand_code || undefined,
-                  apply_for_branch_types:
-                    voucherData.apply_for_branch_types || undefined,
-                  val:
-                    voucherData.val !== undefined && voucherData.val !== null
-                      ? voucherData.val
-                      : 0,
-                  percent:
-                    voucherData.percent !== undefined &&
-                    voucherData.percent !== null
-                      ? voucherData.percent
-                      : 0,
-                  max_value:
-                    voucherData.max_value !== undefined &&
-                    voucherData.max_value !== null
-                      ? voucherData.max_value
-                      : 0,
-                  saletype: voucherData.saletype || undefined,
-                  enable_precost: voucherData.enable_precost || undefined,
-                  supplier_support_fee:
-                    voucherData.supplier_support_fee !== undefined &&
-                    voucherData.supplier_support_fee !== null
-                      ? voucherData.supplier_support_fee
-                      : 0,
-                  valid_fromdate: validFromdate || undefined,
-                  valid_todate: validTodate || undefined,
-                  valid_days_from_so:
-                    voucherData.valid_days_from_so !== undefined &&
-                    voucherData.valid_days_from_so !== null
-                      ? voucherData.valid_days_from_so
-                      : 0,
-                  check_ownership: voucherData.check_ownership || undefined,
-                  allow_cashback: voucherData.allow_cashback || undefined,
-                  prom_for_employee: voucherData.prom_for_employee || undefined,
-                  bonus_for_sale_employee:
-                    voucherData.bonus_for_sale_employee || undefined,
-                  so_percent:
-                    voucherData.so_percent !== undefined &&
-                    voucherData.so_percent !== null
-                      ? voucherData.so_percent
-                      : undefined,
-                  r_total_scope: voucherData.r_total_scope || undefined,
-                  ecode_item_code:
-                    voucherData.ecode_item_code !== undefined
-                      ? voucherData.ecode_item_code
-                      : undefined,
-                  voucher_item_code: voucherData.voucher_item_code || undefined,
-                  voucher_item_name: voucherData.voucher_item_name || undefined,
-                  cost_for_gl:
-                    voucherData.cost_for_gl !== undefined &&
-                    voucherData.cost_for_gl !== null
-                      ? voucherData.cost_for_gl
-                      : 0,
-                  buy_items_by_date_range:
-                    voucherData.buy_items_by_date_range || undefined,
-                  buy_items_option_name:
-                    voucherData.buy_items_option_name || undefined,
-                  disable_bonus_point_for_sale:
-                    voucherData.disable_bonus_point_for_sale || undefined,
-                  disable_bonus_point:
-                    voucherData.disable_bonus_point || undefined,
-                  for_mkt_kol: voucherData.for_mkt_kol || undefined,
-                  for_mkt_prom: voucherData.for_mkt_prom || undefined,
-                  allow_apply_for_promoted_so:
-                    voucherData.allow_apply_for_promoted_so || undefined,
-                  campaign_code:
-                    voucherData.campaign_code !== undefined
-                      ? voucherData.campaign_code
-                      : undefined,
-                  sl_max_sudung_cho_1_kh:
-                    voucherData.sl_max_sudung_cho_1_kh !== undefined &&
-                    voucherData.sl_max_sudung_cho_1_kh !== null
-                      ? voucherData.sl_max_sudung_cho_1_kh
-                      : 0,
-                  is_locked: voucherData.is_locked || undefined,
-                  enteredat: enteredat || undefined,
-                  enteredby: voucherData.enteredby || undefined,
-                  material_type: voucherData.material_type || undefined,
-                  applyfor_wso:
-                    voucherData.applyfor_wso !== undefined
-                      ? voucherData.applyfor_wso
-                      : undefined,
-                  sync_date_from: dateFrom,
-                  sync_date_to: dateTo,
-                  brand: brandName,
-                });
+            // Process batch results
+            for (const result of batchResults) {
+              const { voucherData, details, error } = result;
+              const apiId = Number(voucherData.id);
 
-                const savedRecord = (await this.voucherIssueRepository.save(
-                  newRecord,
-                )) as unknown as VoucherIssue;
-
-                // Lấy chi tiết từ API
-                try {
-                  const detailData =
-                    await this.zappyApiService.getVoucherIssueDetail(
-                      apiId,
-                      brandName,
-                    );
-
-                  // Lưu toàn bộ detail_data dạng JSON
-                  if (detailData) {
-                    const detail = this.voucherIssueDetailRepository.create({
-                      voucherIssue: savedRecord,
-                      detail_data: detailData,
-                    });
-                    await this.voucherIssueDetailRepository.save(detail);
-                  }
-                } catch (detailError: any) {
-                  this.logger.warn(
-                    `Không thể lấy details cho voucher issue ${apiId}: ${detailError?.message || detailError}`,
-                  );
-                  // Vẫn tiếp tục, không throw error
-                }
-
-                brandSavedCount++;
+              if (error) {
+                const msg = `Lỗi khi lấy details voucher ${apiId}: ${error}`;
+                this.logger.error(msg);
+                brandErrors.push(msg);
+                continue;
               }
-              totalRecordsCount++;
-            } catch (error: any) {
-              const errorMsg = `Lỗi khi xử lý voucher issue id ${apiId}: ${error?.message || error}`;
-              this.logger.error(errorMsg);
-              brandErrors.push(errorMsg);
+
+              // Flatten logic:
+              // Iterate through 'series' in contents.
+              // Use series or items? User example showed "series".
+              // details usually has structure: { items: [], series: [...] } or just [...]?
+              // Assuming details is the object containing series.
+
+              let lines: any[] = [];
+              if (details && details.series && Array.isArray(details.series)) {
+                lines = details.series;
+              } else if (
+                details &&
+                details.items &&
+                Array.isArray(details.items)
+              ) {
+                // Fallback to items if series is empty/missing but items exist?
+                // User said "series". Let's stick to series first.
+                // If both are empty, we might want to create 1 dummy row or skip?
+                // User requirement: "theo dạng line". If no line, maybe no record?
+                // Or maybe just create one record with empty serial?
+                // Implementation: If lines exist, create rows. If NO lines, create 1 row with null serial.
+              }
+
+              for (const line of lines) {
+                try {
+                  const serial = line.serial || null;
+                  // Unique key logic: api_id + serial + brand
+                  // If serial is null, it's just api_id + brand (which might duplicate if we have multiple nulls?)
+                  // Ideally serial should be unique per voucher.
+
+                  const existingRecord =
+                    await this.voucherIssueRepository.findOne({
+                      where: {
+                        api_id: apiId,
+                        brand: brandName,
+                        serial: serial, // Check logic matches Index
+                      },
+                    });
+
+                  // Map common fields from parent
+                  const docdate = this.parseVoucherDate(voucherData.docdate);
+                  const validFromdate = this.parseVoucherDate(
+                    voucherData.valid_fromdate,
+                  );
+                  const validTodate = this.parseVoucherDate(
+                    voucherData.valid_todate,
+                  );
+                  const enteredat = this.parseVoucherDate(
+                    voucherData.enteredat,
+                  );
+
+                  // Line specific dates (user mentioned valid_todate in series)
+                  const lineValidFrom = this.parseVoucherDate(
+                    line.valid_fromdate,
+                  );
+                  const lineValidTo = this.parseVoucherDate(line.valid_todate);
+
+                  const entityData: Partial<VoucherIssue> = {
+                    api_id: apiId,
+                    brand: brandName,
+                    code: voucherData.code,
+                    status_lov: voucherData.status_lov,
+                    docdate: docdate || undefined,
+                    description: voucherData.description,
+                    brand_code: voucherData.brand_code,
+                    apply_for_branch_types: voucherData.apply_for_branch_types,
+                    val: Number(voucherData.val || 0),
+                    percent:
+                      voucherData.percent !== undefined
+                        ? Number(voucherData.percent)
+                        : 0,
+                    max_value: Number(voucherData.max_value || 0),
+                    saletype: voucherData.saletype,
+                    enable_precost: voucherData.enable_precost,
+                    supplier_support_fee: Number(
+                      voucherData.supplier_support_fee || 0,
+                    ),
+                    valid_fromdate: validFromdate || undefined,
+                    valid_todate: validTodate || undefined,
+                    valid_days_from_so: Number(
+                      voucherData.valid_days_from_so || 0,
+                    ),
+                    check_ownership: voucherData.check_ownership,
+                    allow_cashback: voucherData.allow_cashback,
+                    prom_for_employee: voucherData.prom_for_employee,
+                    bonus_for_sale_employee:
+                      voucherData.bonus_for_sale_employee,
+                    so_percent:
+                      voucherData.so_percent !== undefined
+                        ? Number(voucherData.so_percent)
+                        : null,
+                    r_total_scope: voucherData.r_total_scope,
+                    ecode_item_code: voucherData.ecode_item_code,
+                    voucher_item_code: voucherData.voucher_item_code,
+                    voucher_item_name: voucherData.voucher_item_name,
+                    cost_for_gl: Number(voucherData.cost_for_gl || 0),
+                    buy_items_by_date_range:
+                      voucherData.buy_items_by_date_range,
+                    buy_items_option_name: voucherData.buy_items_option_name,
+                    disable_bonus_point_for_sale:
+                      voucherData.disable_bonus_point_for_sale,
+                    disable_bonus_point: voucherData.disable_bonus_point,
+                    for_mkt_kol: voucherData.for_mkt_kol,
+                    for_mkt_prom: voucherData.for_mkt_prom,
+                    allow_apply_for_promoted_so:
+                      voucherData.allow_apply_for_promoted_so,
+                    campaign_code: voucherData.campaign_code,
+                    sl_max_sudung_cho_1_kh: Number(
+                      voucherData.sl_max_sudung_cho_1_kh || 0,
+                    ),
+                    is_locked: voucherData.is_locked,
+                    enteredat: enteredat || undefined,
+                    enteredby: voucherData.enteredby,
+                    material_type: voucherData.material_type,
+                    applyfor_wso: voucherData.applyfor_wso,
+                    partnership: voucherData.partnership,
+                    sync_date_from: dateFrom,
+                    sync_date_to: dateTo,
+
+                    // FLATTENED FIELDS
+                    serial: serial,
+                    console_code: line.console_code || undefined,
+                    valid_fromdate_detail: lineValidFrom || undefined,
+                    valid_todate_detail: lineValidTo || undefined,
+                  };
+
+                  if (existingRecord) {
+                    await this.voucherIssueRepository.update(
+                      existingRecord.id,
+                      entityData,
+                    );
+                    brandUpdatedCount++;
+                  } else {
+                    const newEntity =
+                      this.voucherIssueRepository.create(entityData);
+                    await this.voucherIssueRepository.save(newEntity);
+                    brandSavedCount++;
+                  }
+                  totalRecordsCount++;
+                } catch (saveError: any) {
+                  const errorMsg = `Lỗi lưu voucher ${apiId} (serial: ${line.serial}): ${saveError?.message || saveError}`;
+                  this.logger.error(errorMsg);
+                  brandErrors.push(errorMsg);
+                }
+              }
             }
           }
 
@@ -4137,7 +3994,7 @@ export class SyncService {
 
       return {
         success: allErrors.length === 0,
-        message: `Đồng bộ danh sách Voucher Issue thành công: ${totalRecordsCount} voucher, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
+        message: `Đồng bộ danh sách Voucher Issue thành công: ${totalRecordsCount} records, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,
         recordsCount: totalRecordsCount,
         savedCount: totalSavedCount,
         updatedCount: totalUpdatedCount,
@@ -4294,7 +4151,7 @@ export class SyncService {
 
       const queryBuilder = this.voucherIssueRepository
         .createQueryBuilder('vi')
-        .leftJoinAndSelect('vi.details', 'details')
+
         .orderBy('vi.docdate', 'DESC')
         .addOrderBy('vi.code', 'ASC');
 

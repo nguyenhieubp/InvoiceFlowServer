@@ -397,7 +397,8 @@ export class ZappyApiService {
         }),
       );
 
-      const rawData = response?.data?.data?.[0] || {};
+      const data = response?.data?.data;
+      const rawData = Array.isArray(data) ? data[0] || {} : data || {};
       return rawData;
     } catch (error: any) {
       this.logger.error(

@@ -7,10 +7,9 @@ import {
   UpdateDateColumn,
   Index,
 } from 'typeorm';
-import { VoucherIssueDetail } from './voucher-issue-detail.entity';
 
 @Entity('voucher_issues')
-@Index(['api_id', 'brand'], { unique: true })
+@Index(['api_id', 'serial', 'brand'], { unique: true }) // Update unique constraint
 @Index(['code', 'brand'])
 @Index(['docdate'])
 @Index(['sync_date_from', 'sync_date_to', 'brand'])
@@ -146,12 +145,22 @@ export class VoucherIssue {
   @Column({ type: 'varchar', nullable: true })
   applyfor_wso: string | null;
 
-  // Relationship với details
-  @OneToMany(() => VoucherIssueDetail, (detail) => detail.voucherIssue, {
-    cascade: true,
-    eager: false,
-  })
-  details: VoucherIssueDetail[];
+  @Column({ type: 'varchar', nullable: true })
+  partnership: string | null;
+
+  // --- NEW FIELDS FROM FLATTENING ---
+  @Column({ type: 'varchar', nullable: true })
+  @Index()
+  serial: string; // "DG4862"
+
+  @Column({ type: 'varchar', nullable: true })
+  console_code: string; // "DDKEEPD012_1"
+
+  @Column({ type: 'timestamp', nullable: true })
+  valid_fromdate_detail: Date;
+
+  @Column({ type: 'timestamp', nullable: true })
+  valid_todate_detail: Date;
 
   // Metadata
   @Column({ type: 'varchar', nullable: true })
