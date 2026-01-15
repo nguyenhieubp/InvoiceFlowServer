@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { SyncService } from '../modules/sync/sync.service';
 import { SalesService } from '../modules/sales/sales.service';
 import { FastApiInvoiceFlowService } from '../services/fast-api-invoice-flow.service';
+import { SalesInvoiceService } from '../modules/sales/sales-invoice.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Sale } from '../entities/sale.entity';
@@ -12,7 +13,12 @@ import { ZappyApiService } from 'src/services/zappy-api.service';
 export class SyncTask {
   private readonly logger = new Logger(SyncTask.name);
 
-  constructor(private readonly syncService: SyncService) {}
+  constructor(
+    private readonly syncService: SyncService,
+    private readonly salesInvoiceService: SalesInvoiceService,
+    @InjectRepository(Sale)
+    private saleRepository: Repository<Sale>,
+  ) {}
 
   /**
    * Helper function: Format ngày hôm qua thành format DDMMMYYYY
@@ -86,6 +92,84 @@ export class SyncTask {
   }
 
   /**
+   * Helper: Tự động chạy invoice flow cho các đơn hàng trong ngày
+   */
+  private async processAutoInvoiceForDate(dateStr: string) {
+    this.logger.log(
+      `[Auto Invoice] Bắt đầu tự động tạo hóa đơn Fast cho ngày ${dateStr}...`,
+    );
+    // try {
+    //   // 1. Parse dateStr (DDMMMYYYY) -> Date
+    //   // Ví dụ: 04DEC2025
+    //   const day = parseInt(dateStr.substring(0, 2));
+    //   const monthStr = dateStr.substring(2, 5);
+    //   const year = parseInt(dateStr.substring(5));
+    //   const months = {
+    //     JAN: 0,
+    //     FEB: 1,
+    //     MAR: 2,
+    //     APR: 3,
+    //     MAY: 4,
+    //     JUN: 5,
+    //     JUL: 6,
+    //     AUG: 7,
+    //     SEP: 8,
+    //     OCT: 9,
+    //     NOV: 10,
+    //     DEC: 11,
+    //   };
+    //   const month = months[monthStr];
+    //   const startDate = new Date(year, month, day, 0, 0, 0);
+    //   const endDate = new Date(year, month, day, 23, 59, 59);
+
+    //   // 2. Query distinct docCodes
+    //   const sales = await this.saleRepository
+    //     .createQueryBuilder('sale')
+    //     .select('DISTINCT sale.docCode', 'docCode')
+    //     .where('sale.docDate >= :startDate', { startDate })
+    //     .andWhere('sale.docDate <= :endDate', { endDate })
+    //     .getRawMany();
+
+    //   const docCodes = sales.map((s) => s.docCode);
+    //   this.logger.log(
+    //     `[Auto Invoice] Tìm thấy ${docCodes.length} đơn hàng ngày ${dateStr}. Đang xử lý...`,
+    //   );
+
+    //   // 3. Loop & Process
+    //   let successCount = 0;
+    //   let failCount = 0;
+
+    //   for (const docCode of docCodes) {
+    //     try {
+    //       const result =
+    //         await this.salesInvoiceService.createInvoiceViaFastApi(docCode);
+    //       if (result.success) {
+    //         successCount++;
+    //       } else {
+    //         failCount++;
+    //         this.logger.warn(
+    //           `[Auto Invoice] Lỗi tạo hóa đơn ${docCode}: ${result.message}`,
+    //         );
+    //       }
+    //     } catch (e: any) {
+    //       failCount++;
+    //       this.logger.error(
+    //         `[Auto Invoice] Exception đơn ${docCode}: ${e.message}`,
+    //       );
+    //     }
+    //   }
+
+    //   this.logger.log(
+    //     `[Auto Invoice] Hoàn thành ngày ${dateStr}: ${successCount} thành công, ${failCount} thất bại.`,
+    //   );
+    // } catch (err: any) {
+    //   this.logger.error(
+    //     `[Auto Invoice] Lỗi processAutoInvoiceForDate: ${err.message}`,
+    //   );
+    // }
+  }
+
+  /**
    * Helper function: Đồng bộ dữ liệu bán hàng cho ngày T-1
    */
   private async syncSalesForYesterday(cronName: string): Promise<void> {
@@ -116,6 +200,9 @@ export class SyncTask {
       this.logger.log(
         `[${cronName}] Hoàn thành đồng bộ dữ liệu bán hàng tự động`,
       );
+
+      // KÍCH HOẠT AUTO INVOICE FLOW
+      await this.processAutoInvoiceForDate(date);
     } catch (error) {
       this.logger.error(
         `[${cronName}] Lỗi khi đồng bộ dữ liệu bán hàng tự động: ${error.message}`,
@@ -237,14 +324,15 @@ export class SyncTask {
   //   timeZone: 'Asia/Ho_Chi_Minh',
   // })
   async handleDailyOdooSync4AM() {
-    const today = new Date();
-    today.setDate(today.getDate() - 1);
-    const formatted = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
-    await this.syncService.syncOdoo(formatted, formatted);
-    this.logger.log('Hoàn thành đồng bộ odoo');
-  }
-  catch(error: any) {
-    this.logger.error(`Lỗi khi đồng bộ odoo: ${error?.message || error}`);
+    try {
+      const today = new Date();
+      today.setDate(today.getDate() - 1);
+      const formatted = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
+      await this.syncService.syncOdoo(formatted, formatted);
+      this.logger.log('Hoàn thành đồng bộ odoo');
+    } catch (error: any) {
+      this.logger.error(`Lỗi khi đồng bộ odoo: ${error?.message || error}`);
+    }
   }
 
   /**
@@ -387,6 +475,9 @@ export class SyncTask {
         }
       }
       this.logger.log('Hoàn thành đồng bộ bán buôn tự động cho ngày hiện tại');
+
+      // KÍCH HOẠT AUTO INVOICE FLOW (CHO BÁN BUÔN)
+      await this.processAutoInvoiceForDate(date);
     } catch (error: any) {
       this.logger.error(
         `Lỗi khi đồng bộ bán buôn tự động: ${error?.message || error}`,
