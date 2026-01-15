@@ -794,6 +794,8 @@ export class SalesSyncService {
             statusAsys: statusAsys,
             svc_code: saleItem.svc_code,
             type_sale: 'RETAIL',
+            disc_tm: saleItem.disc_tm,
+            disc_ctkm: saleItem.disc_ctkm,
           };
 
           if (existingSale) {
