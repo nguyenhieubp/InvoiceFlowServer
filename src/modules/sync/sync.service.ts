@@ -309,27 +309,11 @@ export class SyncService {
             compositeKey: compositeKey,
           };
 
-          // Kiểm tra xem đã tồn tại chưa
-          const existingTransfer = await this.stockTransferRepository.findOne({
-            where: { compositeKey },
-          });
-
-          if (existingTransfer) {
-            // UPDATE
-            this.logger.log(
-              `[Stock Transfer] Cập nhật record ${item.doccode}/${item.item_code} (ID: ${existingTransfer.id})`,
-            );
-            await this.stockTransferRepository.update(
-              existingTransfer.id,
-              stockTransferData,
-            );
-          } else {
-            // CREATE MỚI
-            const newStockTransfer =
-              this.stockTransferRepository.create(stockTransferData);
-            await this.stockTransferRepository.save(newStockTransfer);
-            savedCount++;
-          }
+          // Insert mới luôn, không check trùng theo yêu cầu
+          const newStockTransfer =
+            this.stockTransferRepository.create(stockTransferData);
+          await this.stockTransferRepository.save(newStockTransfer);
+          savedCount++;
         } catch (itemError: any) {
           const errorMsg = `Lỗi khi lưu stock transfer ${item.doccode}/${item.item_code}: ${itemError?.message || itemError}`;
           this.logger.error(`[Stock Transfer] ${errorMsg}`);
