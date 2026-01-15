@@ -23,21 +23,9 @@ export class OrderFee {
   @Index()
   erpOrderCode: string;
 
-  @Column({ name: 'pancake_order_id', length: 100 })
+  @Column({ name: 'platform', length: 50 })
   @Index()
-  pancakeOrderId: string;
-
-  @Column({ name: 'fee_type', length: 100, nullable: true })
-  feeType: string;
-
-  @Column({
-    name: 'fee_amount',
-    type: 'decimal',
-    precision: 15,
-    scale: 2,
-    nullable: true,
-  })
-  feeAmount: number;
+  platform: string; // Sàn TMĐT: shopee, lazada, tiktok, etc.
 
   @Column({ name: 'raw_data', type: 'jsonb' })
   rawData: any;

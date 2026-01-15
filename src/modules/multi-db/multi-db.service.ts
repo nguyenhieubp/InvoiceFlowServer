@@ -264,9 +264,7 @@ export class MultiDbService {
                   feeId: fee.rawData?.id,
                   brand: fee.brand,
                   erpOrderCode: fee.erpOrderCode,
-                  pancakeOrderId: fee.pancakeOrderId,
-                  feeType: fee.rawData?.fee_type || null,
-                  feeAmount: fee.rawData?.fee_amount || null,
+                  platform: 'shopee', // Sàn TMĐT
                   rawData: fee.rawData,
                   syncedAt: new Date(),
                 },
@@ -359,9 +357,7 @@ export class MultiDbService {
             feeId: fee.rawData?.id,
             brand: fee.brand,
             erpOrderCode: fee.erpOrderCode,
-            pancakeOrderId: fee.pancakeOrderId,
-            feeType: fee.rawData?.fee_type || null,
-            feeAmount: fee.rawData?.fee_amount || null,
+            platform: 'shopee', // Sàn TMĐT
             rawData: fee.rawData,
             syncedAt: new Date(),
           },
