@@ -302,6 +302,7 @@ export async function formatSaleForFrontend(
   const loaiGd = InvoiceLogicUtils.resolveLoaiGd({
     sale,
     orderTypes,
+    loyaltyProduct,
   });
 
   // 6. Display Fields

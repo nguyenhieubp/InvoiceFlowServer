@@ -185,14 +185,15 @@ export class InvoiceLogicUtils {
 
     // Safety: Re-derive productTypeUpper if missing (Robust Check V9)
     let effectiveProductType = productTypeUpper;
+    // Xác định productType an toàn (ưu tiên loyaltyProduct)
+    const productType =
+      sale.productType ||
+      sale.producttype ||
+      sale.product?.productType ||
+      sale.product?.producttype ||
+      '';
     if (!effectiveProductType) {
-      const pt =
-        sale.productType ||
-        sale.producttype ||
-        sale.product?.productType ||
-        sale.product?.producttype ||
-        '';
-      effectiveProductType = String(pt).toUpperCase().trim();
+      effectiveProductType = String(productType).toUpperCase().trim();
     }
 
     let maCk01 = sale.muaHangGiamGiaDisplay || '';
@@ -380,8 +381,12 @@ export class InvoiceLogicUtils {
   /**
    * Xác định loại giao dịch (loai_gd) (Source of Truth)
    */
-  static resolveLoaiGd(params: { sale: any; orderTypes: OrderTypes }): string {
-    const { sale, orderTypes } = params;
+  static resolveLoaiGd(params: {
+    sale: any;
+    orderTypes: OrderTypes;
+    loyaltyProduct: any;
+  }): string {
+    const { sale, orderTypes, loyaltyProduct } = params;
     const {
       isDoiDv,
       isTachThe,
@@ -415,6 +420,15 @@ export class InvoiceLogicUtils {
         return '01';
       } else if (sale.productType === 'S' && Number(sale.giaBan) === 0) {
         return '06';
+      }
+    }
+
+    // Check wholesale from sale.type_sale OR orderTypes
+    const isWholesale = sale.type_sale === 'WHOLESALE';
+
+    if (isWholesale) {
+      if (loyaltyProduct?.materialCode?.startsWith('E.')) {
+        return '04';
       }
     }
 

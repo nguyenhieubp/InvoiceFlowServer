@@ -2903,11 +2903,15 @@ export class SalesInvoiceService {
     });
   }
 
-  private resolveInvoiceLoaiGd(sale: any): string {
+  private resolveInvoiceLoaiGd(sale: any, loyaltyProduct: any = null): string {
     const orderTypes = InvoiceLogicUtils.getOrderTypes(
       sale.ordertype || sale.ordertypeName || '',
     );
-    return InvoiceLogicUtils.resolveLoaiGd({ sale, orderTypes });
+    return InvoiceLogicUtils.resolveLoaiGd({
+      sale,
+      orderTypes,
+      loyaltyProduct,
+    });
   }
 
   private async resolveInvoiceBatchSerial(
@@ -3203,7 +3207,7 @@ export class SalesInvoiceService {
       sale.department?.ma_bp || sale.branchCode || orderData.branchCode,
       8,
     );
-    const loaiGd = this.resolveInvoiceLoaiGd(sale);
+    const loaiGd = this.resolveInvoiceLoaiGd(sale, loyaltyProduct);
     const { maLo, soSerial } = await this.resolveInvoiceBatchSerial(
       sale,
       saleMaterialCode,
@@ -3330,7 +3334,7 @@ export class SalesInvoiceService {
       ma_bp: maBp,
       tk_thue_no: '131111',
       ma_kenh: 'ONLINE',
-      loai_gd: firstSale ? this.resolveInvoiceLoaiGd(firstSale) : '01',
+      loai_gd: firstSale ? this.resolveInvoiceLoaiGd(firstSale, null) : '01',
       trans_date: transDate
         ? this.formatDateKeepLocalDay(new Date(transDate))
         : null,
