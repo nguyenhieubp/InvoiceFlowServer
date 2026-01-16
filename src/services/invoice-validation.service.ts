@@ -112,6 +112,16 @@ export class InvoiceValidationService {
       // Sử dụng helper method để xử lý các biến thể (có/không có khoảng trắng)
       const isAllowed = this.isOrderTypeAllowed(ordertypeValue);
 
+      // Kiểm tra ngoại lệ: WHOLESALE và ordertypeName chứa "Bán buôn kênh Đại lý"
+      const typeSale = (sale as any)?.type_sale?.toUpperCase()?.trim();
+      if (
+        typeSale === 'WHOLESALE' &&
+        ordertypeValue.includes('Bán buôn kênh Đại lý')
+      ) {
+        // Cho phép, bỏ qua check isAllowed
+        continue;
+      }
+
       if (!isAllowed) {
         const errorMessage = `Chỉ cho phép tạo hóa đơn cho đơn hàng có Loại thuộc: [${allowedTypesStr}]. Đơn hàng ${orderData.docCode} có Loại = "${ordertypeName}"`;
 

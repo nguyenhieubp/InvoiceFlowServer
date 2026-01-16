@@ -212,4 +212,29 @@ export class LoyaltyService {
 
     return departmentMap;
   }
+
+  /**
+   * Fetch single ma_dvcs from Loyalty API by branch code
+   * Wrapper around fetchLoyaltyDepartments or direct call
+   */
+  async fetchMaDvcs(branchCode: string): Promise<string> {
+    if (!branchCode) return '';
+    try {
+      const url = `${this.LOYALTY_API_BASE_URL}/departments?page=1&limit=25&branchcode=${branchCode}`;
+      const response = await this.httpService.axiosRef.get(url, {
+        headers: { accept: 'application/json' },
+        timeout: this.REQUEST_TIMEOUT,
+      });
+      const data = response?.data?.data?.items || [];
+      if (Array.isArray(data) && data.length > 0) {
+        return data[0].ma_dvcs || '';
+      }
+      return '';
+    } catch (error) {
+      this.logger.warn(
+        `[LoyaltyService] Failed to fetch ma_dvcs for branch ${branchCode}: ${error}`,
+      );
+      return '';
+    }
+  }
 }
