@@ -4152,6 +4152,7 @@ export class SyncService {
     dateTo?: string;
     status?: string;
     serial?: string;
+    code?: string;
   }): Promise<{
     success: boolean;
     data: any[];
@@ -4189,6 +4190,13 @@ export class SyncService {
       if (params.serial) {
         queryBuilder.andWhere('vi.serial LIKE :serial', {
           serial: `%${params.serial}%`,
+        });
+      }
+
+      // Filter by code
+      if (params.code) {
+        queryBuilder.andWhere('vi.code LIKE :code', {
+          code: `%${params.code}%`,
         });
       }
 
