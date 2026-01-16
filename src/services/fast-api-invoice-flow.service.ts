@@ -1100,7 +1100,7 @@ export class FastApiInvoiceFlowService {
         this.logger.error(
           `[Warehouse] Warehouse API trả về status = ${firstItem.status}: ${errorMessage}`,
         );
-        throw new BadRequestException(errorMessage);
+        // Không throw error để trả về result cho service gọi lưu log
       }
     } else if (
       result &&
@@ -1112,7 +1112,7 @@ export class FastApiInvoiceFlowService {
         this.logger.error(
           `[Warehouse] Warehouse API trả về status = ${result.status}: ${errorMessage}`,
         );
-        throw new BadRequestException(errorMessage);
+        // Không throw error để trả về result cho service gọi lưu log
       }
     }
 
@@ -1299,7 +1299,7 @@ export class FastApiInvoiceFlowService {
         this.logger.error(
           `[Warehouse Transfer] Warehouse Transfer API trả về status = ${firstItem.status}: ${errorMessage}`,
         );
-        throw new BadRequestException(errorMessage);
+        // Không throw error để trả về result cho service gọi lưu log
       }
     } else if (
       result &&
@@ -1312,7 +1312,7 @@ export class FastApiInvoiceFlowService {
         this.logger.error(
           `[Warehouse Transfer] Warehouse Transfer API trả về status = ${result.status}: ${errorMessage}`,
         );
-        throw new BadRequestException(errorMessage);
+        // Không throw error để trả về result cho service gọi lưu log
       }
     }
 
