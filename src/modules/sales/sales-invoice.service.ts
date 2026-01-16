@@ -559,6 +559,25 @@ export class SalesInvoiceService {
           ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
         });
 
+        const isSoSuccess =
+          (Array.isArray(soResult) &&
+            soResult.length > 0 &&
+            soResult[0].status === 1) ||
+          (soResult && soResult.status === 1);
+
+        if (!isSoSuccess) {
+          const message =
+            Array.isArray(soResult) && soResult[0]?.message
+              ? soResult[0].message
+              : soResult?.message || 'Tạo Sales Order thất bại';
+          return {
+            status: 0,
+            message: `Tạo Sales Order thất bại: ${message}`,
+            result: { salesOrder: soResult },
+            fastApiResponse: { salesOrder: soResult },
+          };
+        }
+
         // 3. Create Sales Invoice
         let siResult: any;
         try {
@@ -583,7 +602,39 @@ export class SalesInvoiceService {
               fastApiResponse: error?.response?.data || {},
             };
           }
-          throw error;
+          // throw error;
+          // Return failure with soResult preserved
+          return {
+            status: 0,
+            message: `Lỗi tạo Sales Invoice: ${error?.message || error}`,
+            result: {
+              salesOrder: soResult,
+              salesInvoiceError: error?.message || error,
+            },
+            fastApiResponse: {
+              salesOrder: soResult,
+              salesInvoiceError: error?.message || error,
+            },
+          };
+        }
+
+        const isSiSuccess =
+          (Array.isArray(siResult) &&
+            siResult.length > 0 &&
+            siResult[0].status === 1) ||
+          (siResult && siResult.status === 1);
+
+        if (!isSiSuccess) {
+          const message =
+            Array.isArray(siResult) && siResult[0]?.message
+              ? siResult[0].message
+              : siResult?.message || 'Tạo Sales Invoice thất bại';
+          return {
+            status: 0,
+            message: `Tạo Sales Invoice thất bại: ${message}`,
+            result: { salesOrder: soResult, salesInvoice: siResult },
+            fastApiResponse: { salesOrder: soResult, salesInvoice: siResult },
+          };
         }
 
         // 4. Cashio Payment (Synced via PaymentMethod API)
@@ -1271,15 +1322,33 @@ export class SalesInvoiceService {
       this.logger.log(
         `[ServiceOrderFlow] Tạo SalesOrder cho ${sales.length} dòng`,
       );
-      await this.fastApiInvoiceFlowService.createSalesOrder({
-        ...invoiceData,
-        customer: orderData.customer,
-        ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-      });
+      const salesOrderResult =
+        await this.fastApiInvoiceFlowService.createSalesOrder({
+          ...invoiceData,
+          customer: orderData.customer,
+          ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+        });
+
+      // Validate Sales Order Result
+      const isSoSuccess =
+        (Array.isArray(salesOrderResult) &&
+          salesOrderResult.length > 0 &&
+          salesOrderResult[0].status === 1) ||
+        (salesOrderResult && salesOrderResult.status === 1);
+
+      if (!isSoSuccess) {
+        const message =
+          Array.isArray(salesOrderResult) && salesOrderResult[0]?.message
+            ? salesOrderResult[0].message
+            : salesOrderResult?.message || 'Tạo Sales Order thất bại';
+        const error: any = new Error(message);
+        error.response = { data: salesOrderResult }; // Attach response for logging
+        throw error;
+      }
 
       // Step 3: Tạo SalesInvoice CHỈ cho productType = 'S'
       const serviceLines = sales.filter((s: any) => {
-        const productType = s.producttype.toUpperCase().trim();
+        const productType = s.productType.toUpperCase().trim();
         return productType === 'S';
       });
 
@@ -1302,6 +1371,22 @@ export class SalesInvoiceService {
             customer: orderData.customer,
             ten_kh: orderData.customer?.name || serviceInvoiceData.ong_ba || '',
           });
+
+        const isSiSuccess =
+          (Array.isArray(salesInvoiceResult) &&
+            salesInvoiceResult.length > 0 &&
+            salesInvoiceResult[0].status === 1) ||
+          (salesInvoiceResult && salesInvoiceResult.status === 1);
+
+        if (!isSiSuccess) {
+          const message =
+            Array.isArray(salesInvoiceResult) && salesInvoiceResult[0]?.message
+              ? salesInvoiceResult[0].message
+              : salesInvoiceResult?.message || 'Tạo Sales Invoice thất bại';
+          const error: any = new Error(message);
+          error.response = { data: salesInvoiceResult };
+          throw error;
+        }
       } else {
         this.logger.log(
           `[ServiceOrderFlow] Không có dòng dịch vụ (productType = 'S'), bỏ qua SalesInvoice`,
@@ -1464,7 +1549,7 @@ export class SalesInvoiceService {
         message: responseMessage,
         guid: salesInvoiceResult?.guid || null,
         fastApiResponse: JSON.stringify({
-          salesOrder: 'success',
+          salesOrder: salesOrderResult,
           salesInvoice: salesInvoiceResult,
           gxtInvoice: gxtInvoiceResult,
           cashio: cashioResult,
@@ -1478,7 +1563,7 @@ export class SalesInvoiceService {
         success: true,
         message: responseMessage,
         result: {
-          salesOrder: 'success',
+          salesOrder: salesOrderResult,
           salesInvoice: salesInvoiceResult,
           gxtInvoice: gxtInvoiceResult,
           cashio: cashioResult,
