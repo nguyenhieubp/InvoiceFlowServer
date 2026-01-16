@@ -6,7 +6,7 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, In } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
 import * as XLSX from 'xlsx-js-style';
 import { Customer } from '../../entities/customer.entity';

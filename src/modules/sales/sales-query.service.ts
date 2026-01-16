@@ -134,42 +134,7 @@ export class SalesQueryService {
         return isStockOut;
       });
 
-      // Deduplicate stock transfers để tránh tính trùng
-      // Group theo docCode + itemCode + stockCode + qty để đảm bảo chỉ tính một lần cho mỗi combination
-      // (có thể có duplicate records trong database với id khác nhau nhưng cùng docCode, itemCode, stockCode, qty)
-      const uniqueStockTransfersMap = new Map<string, StockTransfer>();
-      stockOutTransfers.forEach((st) => {
-        // Tạo key từ docCode + itemCode + stockCode + qty (giữ nguyên dấu âm để phân biệt ST và RT)
-        // KHÔNG dùng Math.abs vì ST (qty=-11) và RT (qty=11) là 2 chứng từ khác nhau
-        const qty = Number(st.qty || 0);
-        const key = `${st.docCode || ''}_${st.itemCode || ''}_${st.stockCode || ''}_${qty}`;
-
-        // Chỉ lưu nếu chưa có key này, hoặc nếu có thì giữ record có id (ưu tiên record có id)
-        if (!uniqueStockTransfersMap.has(key)) {
-          uniqueStockTransfersMap.set(key, st);
-        } else {
-          // Nếu đã có, chỉ thay thế nếu record hiện tại có id và record cũ không có id
-          const existing = uniqueStockTransfersMap.get(key)!;
-          if (st.id && !existing.id) {
-            uniqueStockTransfersMap.set(key, st);
-          }
-        }
-      });
-      const uniqueStockTransfers = Array.from(uniqueStockTransfersMap.values());
-
-      // Debug log nếu có duplicate hoặc có RT records bị loại bỏ
-      if (orderStockTransfers.length > stockOutTransfers.length) {
-        const returnCount =
-          orderStockTransfers.length - stockOutTransfers.length;
-        this.logger.debug(
-          `[StockTransfer] Đơn hàng ${order.docCode}: Loại bỏ ${returnCount} records nhập lại (RETURN), chỉ tính ${stockOutTransfers.length} records xuất kho (ST)`,
-        );
-      }
-      if (stockOutTransfers.length > uniqueStockTransfers.length) {
-        this.logger.warn(
-          `[StockTransfer] Đơn hàng ${order.docCode}: ${stockOutTransfers.length} records xuất kho → ${uniqueStockTransfers.length} unique (đã loại bỏ ${stockOutTransfers.length - uniqueStockTransfers.length} duplicates)`,
-        );
-      }
+      const uniqueStockTransfers = stockOutTransfers;
 
       // Tính tổng hợp thông tin stock transfer (chỉ tính từ unique records XUẤT KHO)
       // Lấy giá trị tuyệt đối của qty (vì qty xuất kho là số âm, nhưng số lượng xuất là số dương)
@@ -178,21 +143,103 @@ export class SalesQueryService {
         return sum + qty;
       }, 0);
 
-      const stockTransferSummary = {
-        totalItems: uniqueStockTransfers.length, // Số dòng stock transfer xuất kho (sau khi deduplicate)
-        totalQty: totalQty, // Tổng số lượng xuất kho (lấy giá trị tuyệt đối vì qty xuất kho là số âm)
-        uniqueItems: new Set(uniqueStockTransfers.map((st) => st.itemCode))
-          .size, // Số sản phẩm khác nhau
-        stockCodes: Array.from(
-          new Set(
-            uniqueStockTransfers.map((st) => st.stockCode).filter(Boolean),
-          ),
-        ), // Danh sách mã kho
-        hasStockTransfer: uniqueStockTransfers.length > 0, // Có stock transfer xuất kho hay không
-      };
+      // Explode sales based on stock transfers (Stock Transfer is Root)
+      const explodedSales: any[] = [];
+      const usedSalesIds = new Set<string>();
+
+      if (uniqueStockTransfers.length > 0) {
+        this.logger.debug(
+          `[Explosion] Order ${order.docCode}: Using StockTransfers as ROOT. Total STs: ${uniqueStockTransfers.length}`,
+        );
+
+        // 1. Map Stock Transfers to Sales Lines
+        uniqueStockTransfers.forEach((st) => {
+          // Find matching sale to get price/info
+          // Match by itemCode (case insensitive)
+          const sale = (order.sales || []).find(
+            (s: any) =>
+              s.itemCode === st.itemCode ||
+              s.itemCode?.toLowerCase().trim() ===
+                st.itemCode?.toLowerCase().trim(),
+          );
+
+          if (sale) {
+            usedSalesIds.add(sale.id);
+            const oldQty = Number(sale.qty || 1) || 1; // Avoid divide by zero
+            const newQty = Math.abs(Number(st.qty || 0));
+            const ratio = newQty / oldQty;
+
+            explodedSales.push({
+              ...sale,
+              id: st.id || sale.id, // Use ST id if available
+              qty: newQty, // Update Qty
+              // Recalculate financial fields based on ratio
+              revenue: Number(sale.revenue || 0) * ratio,
+              tienHang: Number(sale.tienHang || 0) * ratio,
+              linetotal: Number(sale.linetotal || 0) * ratio,
+              // Update discount fields if proportional
+              discount: Number(sale.discount || 0) * ratio,
+              chietKhauMuaHangGiamGia:
+                Number(sale.chietKhauMuaHangGiamGia || 0) * ratio,
+              other_discamt: Number(sale.other_discamt || 0) * ratio,
+
+              maKho: st.stockCode, // ST Stock Code
+              maLo: st.batchSerial,
+              soSerial: st.batchSerial,
+              isStockTransferLine: true,
+              stockTransferId: st.id,
+              stockTransfer:
+                StockTransferUtils.formatStockTransferForFrontend(st), // Singular ST
+              stockTransfers: undefined,
+            });
+          } else {
+            // If no sale found (e.g. extra item in ST?), create a pseudo-sale line from ST
+            // Or skip? User wants "StockTransfer as root", so we should show it.
+            explodedSales.push({
+              // Minimal Sale structure
+              docCode: order.docCode,
+              itemCode: st.itemCode,
+              itemName: st.itemName,
+              qty: Math.abs(Number(st.qty || 0)),
+              maKho: st.stockCode,
+              maLo: st.batchSerial,
+              isStockTransferLine: true,
+              stockTransferId: st.id,
+              price: 0, // Unknown
+              revenue: 0,
+            });
+          }
+        });
+
+        // 2. Add remaining Sales lines (e.g. Services) that were not matched by any ST
+        (order.sales || []).forEach((sale: any) => {
+          // Check if this sale was used.
+          // Note: A sale might be matched by MULTIPLE STs. `usedSalesIds` tracks if it was matched at least once.
+          // If it was matched, we assume it's fully covered by the STs (or at least replaced by them).
+          // If NOT matched, it's likely a non-stock item.
+          if (!usedSalesIds.has(sale.id)) {
+            explodedSales.push(sale);
+          }
+        });
+      } else {
+        explodedSales.push(...(order.sales || []));
+      }
+
+      // Log leftovers if any
+      if (
+        uniqueStockTransfers.length > 0 &&
+        explodedSales.length < uniqueStockTransfers.length
+      ) {
+        // This logic is tricky because explodedSales might include original sales (if no match).
+        // Better check availableStockTransfers (which is local in if block, can't access here easily unless we move logic).
+        // But I can't access availableStockTransfers here.
+        // Effectively, if we have debug logs enabled, we can infer.
+        // Let's add the log inside the if block.
+      }
 
       return {
         ...order,
+        sales: explodedSales,
         cashioData: cashioRecords.length > 0 ? cashioRecords : null,
         cashioFopSyscode: selectedCashio?.fop_syscode || null,
         cashioFopDescription: selectedCashio?.fop_description || null,
@@ -200,16 +247,6 @@ export class SalesQueryService {
         cashioMasterCode: selectedCashio?.master_code || null,
         cashioTotalIn: selectedCashio?.total_in || null,
         cashioTotalOut: selectedCashio?.total_out || null,
-        // Thông tin stock transfer
-        stockTransferInfo: stockTransferSummary,
-        stockTransfers:
-          uniqueStockTransfers.length > 0
-            ? uniqueStockTransfers.map((st) =>
-                StockTransferUtils.formatStockTransferForFrontend(st),
-              )
-            : (order.stockTransfers || []).map((st: any) =>
-                StockTransferUtils.formatStockTransferForFrontend(st),
-              ), // Format để trả về materialCode
       };
     });
   }
@@ -441,7 +478,9 @@ export class SalesQueryService {
       search,
     });
 
-    if (!isExport) {
+    const isSearchMode = !!search && totalSaleItems < 2000;
+
+    if (!isExport && !isSearchMode) {
       const offset = (page - 1) * limit;
       fullQuery.skip(offset).take(limit);
     }
@@ -685,10 +724,7 @@ export class SalesQueryService {
       );
 
       // Map stock transfers to simple Frontend format
-      enrichedSale.stockTransfers = saleStockTransfers.map((st) =>
-        StockTransferUtils.formatStockTransferForFrontend(st),
-      );
-
+      // (Lines removed to avoid attaching full list)
       enrichedSalesMap.get(docCode)!.push(enrichedSale);
     }
 
@@ -742,9 +778,6 @@ export class SalesQueryService {
         }
 
         order.sales = sales;
-        order.stockTransfers = (
-          stockTransferByDocCodeMap.get(docCode) || []
-        ).map((st) => StockTransferUtils.formatStockTransferForFrontend(st));
       }
     }
 
@@ -755,6 +788,71 @@ export class SalesQueryService {
     });
 
     const enrichedOrders = await this.enrichOrdersWithCashio(orders);
+
+    this.logger.debug(
+      `[findAllOrders] isSearchMode: ${isSearchMode}, totalSaleItems: ${totalSaleItems}, enrichedOrders: ${enrichedOrders.length}`,
+    );
+
+    if (isSearchMode) {
+      // In-Memory Pagination Logic for Search Mode (Exploded Lines)
+      // Flatten all exploded sales from all orders
+      const allExplodedSales: any[] = [];
+      const parentOrderMap = new Map<string, any>();
+
+      enrichedOrders.forEach((order) => {
+        parentOrderMap.set(order.docCode, { ...order, sales: [] }); // Store base order without sales
+        if (order.sales && order.sales.length > 0) {
+          order.sales.forEach((s: any) => {
+            // Attach docCode to sale if missing, to trace back
+            s.docCode = s.docCode || order.docCode;
+            allExplodedSales.push(s);
+          });
+        }
+      });
+
+      const explodedTotal = allExplodedSales.length;
+      const offset = (page - 1) * limit;
+      const pagedSales = allExplodedSales.slice(offset, offset + limit);
+
+      // Reconstruct Orders from pagedSales
+      const pagedOrdersMap = new Map<string, any>();
+      pagedSales.forEach((sale) => {
+        const docCode = sale.docCode;
+        if (!pagedOrdersMap.has(docCode)) {
+          // Clone parent order structure
+          if (parentOrderMap.has(docCode)) {
+            const parent = parentOrderMap.get(docCode);
+            pagedOrdersMap.set(docCode, {
+              ...parent,
+              sales: [], // Reset sales
+              // stockTransfers: [], // Removed as requested
+            });
+          }
+        }
+        if (pagedOrdersMap.has(docCode)) {
+          const ord = pagedOrdersMap.get(docCode);
+          ord.sales.push(sale);
+
+          // No longer populating order-level stockTransfers
+        }
+      });
+
+      const pagedOrders = Array.from(pagedOrdersMap.values());
+
+      if (pagedOrders.length > 0) {
+        this.logger.debug(
+          `[findAllOrders] Final Order[0] Sales: ${pagedOrders[0].sales.length}, STs: ${pagedOrders[0].stockTransfers?.length}`,
+        );
+      }
+
+      return {
+        data: pagedOrders,
+        total: explodedTotal, // Correct total (Exploded Lines)
+        page,
+        limit,
+        totalPages: Math.ceil(explodedTotal / limit),
+      };
+    }
 
     const maxOrders = limit * 2;
     const limitedOrders = enrichedOrders.slice(0, maxOrders);

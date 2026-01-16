@@ -1192,55 +1192,153 @@ export class SalesInvoiceService {
     // Và tính lại muaHangCkVip nếu chưa có hoặc cần override cho f3
     // Format sales giống findAllOrders để đảm bảo consistency với frontend
     // Format sales sau khi đã enrich promotion
-    const formattedSales = await Promise.all(
-      enrichedSalesWithDepartment.map(async (sale) => {
-        const loyaltyProduct = sale.itemCode
-          ? loyaltyProductMap.get(sale.itemCode)
+    // Gắn promotion tương ứng vào từng dòng sale (chỉ để trả ra API, không lưu DB)
+    // Và tính lại muaHangCkVip nếu chưa có hoặc cần override cho f3
+    // Format sales giống findAllOrders để đảm bảo consistency với frontend
+    // Format sales sau khi đã enrich promotion
+    // [UPDATE] Tách line theo stock transfer nếu có
+    const formattedSales: any[] = [];
+
+    // 1. Prepare base sales data (Pre-format all sales lines)
+    const preFormattedSales: any[] = [];
+    for (const sale of enrichedSalesWithDepartment) {
+      const loyaltyProduct = sale.itemCode
+        ? loyaltyProductMap.get(sale.itemCode)
+        : null;
+      const department = sale.branchCode
+        ? departmentMap.get(sale.branchCode)
+        : null;
+      const calculatedFields = SalesCalculationUtils.calculateSaleFields(
+        sale,
+        loyaltyProduct,
+        department,
+        sale.branchCode,
+      );
+
+      const orderForFormatting = {
+        customer: firstSale.customer || null,
+        cashioData: cashioRecords,
+        cashioFopSyscode: selectedCashio?.fop_syscode || null,
+        cashioTotalIn: selectedCashio?.total_in || null,
+        brand: firstSale.customer?.brand || null,
+        docDate: firstSale.docDate,
+      };
+
+      // Base format cho sale line gốc
+      const formattedSale = await SalesFormattingUtils.formatSaleForFrontend(
+        sale,
+        loyaltyProduct,
+        department,
+        calculatedFields,
+        orderForFormatting,
+        this.categoriesService,
+        this.loyaltyService,
+        // stockTransfers,
+      );
+
+      // Thêm promotion info nếu có
+      const promCode = sale.promCode;
+      const promotion =
+        promCode && promotionsByCode[promCode]
+          ? promotionsByCode[promCode]
           : null;
-        const department = sale.branchCode
-          ? departmentMap.get(sale.branchCode)
-          : null;
-        const calculatedFields = SalesCalculationUtils.calculateSaleFields(
-          sale,
-          loyaltyProduct,
-          department,
-          sale.branchCode,
-        );
 
-        const orderForFormatting = {
-          customer: firstSale.customer || null,
-          cashioData: cashioRecords,
-          cashioFopSyscode: selectedCashio?.fop_syscode || null,
-          cashioTotalIn: selectedCashio?.total_in || null,
-          brand: firstSale.customer?.brand || null,
-          docDate: firstSale.docDate,
-        };
+      const baseSaleData = {
+        ...formattedSale,
+        promotion,
+        promotionDisplayCode: SalesUtils.getPromotionDisplayCode(promCode),
+      };
 
-        const formattedSale = await SalesFormattingUtils.formatSaleForFrontend(
-          sale,
-          loyaltyProduct,
-          department,
-          calculatedFields,
-          orderForFormatting,
-          this.categoriesService,
-          this.loyaltyService,
-          stockTransfers,
-        );
+      preFormattedSales.push(baseSaleData);
+    }
 
-        // Thêm promotion info nếu có
-        const promCode = sale.promCode;
-        const promotion =
-          promCode && promotionsByCode[promCode]
-            ? promotionsByCode[promCode]
-            : null;
-
-        return {
-          ...formattedSale,
-          promotion,
-          promotionDisplayCode: SalesUtils.getPromotionDisplayCode(promCode),
-        };
-      }),
+    // 2. Build final list using Stock Transfers as ROOT
+    // Create pool of available stock transfers (filtered)
+    const availableStockTransfers = stockTransfers.filter(
+      (st) => st.doctype === 'SALE_STOCKOUT' || Number(st.qty || 0) < 0,
     );
+    const usedSaleIds = new Set<string>();
+
+    if (availableStockTransfers.length > 0) {
+      // Loop available STs (ROOT)
+      for (const st of availableStockTransfers) {
+        // Find matched sale (case insensitive)
+        const sale = preFormattedSales.find(
+          (s) =>
+            s.itemCode === st.itemCode ||
+            s.itemCode?.toLowerCase().trim() ===
+              st.itemCode?.toLowerCase().trim(),
+        );
+
+        let displayStockCode = st.stockCode || '';
+        if (displayStockCode) {
+          // Manual map as helper might be expensive in loop, or assume raw code.
+          // But preserving original logic: try to map.
+          const mapped =
+            await this.categoriesService.mapWarehouseCode(displayStockCode);
+          if (mapped) displayStockCode = mapped;
+        }
+
+        if (sale) {
+          usedSaleIds.add(sale.id);
+          const oldQty = Number(sale.qty || 1) || 1;
+          const newQty = Math.abs(Number(st.qty || 0));
+          const ratio = newQty / oldQty;
+
+          formattedSales.push({
+            ...sale,
+            id: st.id || sale.id, // Use ST id for uniqueness
+            qty: newQty, // Use ST qty
+            // Recalculate financial fields
+            revenue: Number(sale.revenue || 0) * ratio,
+            tienHang: Number(sale.tienHang || 0) * ratio,
+            linetotal: Number(sale.linetotal || 0) * ratio,
+            discount: Number(sale.discount || 0) * ratio,
+            chietKhauMuaHangGiamGia:
+              Number(sale.chietKhauMuaHangGiamGia || 0) * ratio,
+            other_discamt: Number(sale.other_discamt || 0) * ratio,
+
+            maKho: displayStockCode,
+            maLo: st.batchSerial || sale.maLo,
+            soSerial: st.batchSerial || sale.soSerial,
+            isStockTransferLine: true,
+            stockTransferId: st.id,
+            stockTransfer:
+              StockTransferUtils.formatStockTransferForFrontend(st), // Singular ST
+            stockTransfers: undefined, // Ensure no list
+          });
+        } else {
+          // Fallback if no sale match
+          formattedSales.push({
+            // Minimal structure - try to copy what we can from ST
+            id: st.id,
+            docCode: st.docCode,
+            itemCode: st.itemCode,
+            itemName: st.itemName,
+            qty: Math.abs(Number(st.qty || 0)),
+            maKho: displayStockCode,
+            maLo: st.batchSerial,
+            soSerial: st.batchSerial,
+            isStockTransferLine: true,
+            stockTransferId: st.id,
+            stockTransfer:
+              StockTransferUtils.formatStockTransferForFrontend(st), // Singular ST
+            stockTransfers: undefined,
+            // Default values
+            price: 0,
+            revenue: 0,
+          });
+        }
+      }
+
+      // 3. Add remaining Sales lines (e.g. Services)
+      preFormattedSales.forEach((s) => {
+        if (!usedSaleIds.has(s.id)) formattedSales.push(s);
+      });
+    } else {
+      // No STs, use original
+      formattedSales.push(...preFormattedSales);
+    }
 
     // Format customer object để match với frontend interface
     const formattedCustomer = firstSale.customer
