@@ -389,8 +389,7 @@ export class SyncController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('status') status?: string,
-    @Query('code') code?: string,
-    @Query('materialType') materialType?: string,
+    @Query('serial') serial?: string,
   ) {
     try {
       const result = await this.syncService.getVoucherIssue({
@@ -400,8 +399,7 @@ export class SyncController {
         dateFrom,
         dateTo,
         status,
-        code,
-        materialType,
+        serial,
       });
       return result;
     } catch (error: any) {

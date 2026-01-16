@@ -4151,8 +4151,7 @@ export class SyncService {
     dateFrom?: string;
     dateTo?: string;
     status?: string;
-    code?: string;
-    materialType?: string;
+    serial?: string;
   }): Promise<{
     success: boolean;
     data: any[];
@@ -4186,17 +4185,10 @@ export class SyncService {
         });
       }
 
-      // Filter by code
-      if (params.code) {
-        queryBuilder.andWhere('vi.code LIKE :code', {
-          code: `%${params.code}%`,
-        });
-      }
-
-      // Filter by material_type
-      if (params.materialType) {
-        queryBuilder.andWhere('vi.material_type = :materialType', {
-          materialType: params.materialType,
+      // Filter by serial
+      if (params.serial) {
+        queryBuilder.andWhere('vi.serial LIKE :serial', {
+          serial: `%${params.serial}%`,
         });
       }
 
