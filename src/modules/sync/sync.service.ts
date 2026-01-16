@@ -265,10 +265,11 @@ export class SyncService {
       let savedCount = 0;
       const errors: string[] = [];
 
-      // Xử lý từng record - chỉ insert mới, không update
-      // Mỗi record sẽ có compositeKey unique với timestamp + index để đảm bảo lưu tất cả
-      for (let index = 0; index < stockTransData.length; index++) {
-        const item = stockTransData[index];
+      // Map all data to entities first
+      const entitiesToSave: StockTransfer[] = [];
+      const conversionErrors: string[] = [];
+
+      for (const item of stockTransData) {
         try {
           // Tạo compositeKey dựa trên nội dung để đảm bảo tính duy nhất (Deterministic)
           // Loại bỏ timestamp và random để đảm bảo idempotency
@@ -309,15 +310,49 @@ export class SyncService {
             compositeKey: compositeKey,
           };
 
-          // Insert mới luôn, không check trùng theo yêu cầu
-          const newStockTransfer =
-            this.stockTransferRepository.create(stockTransferData);
-          await this.stockTransferRepository.save(newStockTransfer);
-          savedCount++;
-        } catch (itemError: any) {
-          const errorMsg = `Lỗi khi lưu stock transfer ${item.doccode}/${item.item_code}: ${itemError?.message || itemError}`;
+          const entity = this.stockTransferRepository.create(stockTransferData);
+          entitiesToSave.push(entity);
+        } catch (err: any) {
+          const errorMsg = `Lỗi khi convert stock transfer ${item.doccode}/${item.item_code}: ${err?.message || err}`;
           this.logger.error(`[Stock Transfer] ${errorMsg}`);
-          errors.push(errorMsg);
+          conversionErrors.push(errorMsg);
+        }
+      }
+
+      if (conversionErrors.length > 0) {
+        errors.push(...conversionErrors);
+      }
+
+      // Save in chunks
+      const chunkSize = 500; // Tăng lên 500 để nhanh hơn
+      this.logger.log(
+        `[Stock Transfer] Bắt đầu lưu ${entitiesToSave.length} records (Chunk size: ${chunkSize})`,
+      );
+
+      for (let i = 0; i < entitiesToSave.length; i += chunkSize) {
+        const chunk = entitiesToSave.slice(i, i + chunkSize);
+        try {
+          await this.stockTransferRepository.save(chunk);
+          savedCount += chunk.length;
+          this.logger.log(
+            `[Stock Transfer] Đã lưu chunk ${Math.floor(i / chunkSize) + 1}/${Math.ceil(entitiesToSave.length / chunkSize)} (${chunk.length} records)`,
+          );
+        } catch (chunkError: any) {
+          const errorMsg = `Lỗi khi lưu chunk ${Math.floor(i / chunkSize) + 1}: ${chunkError?.message || chunkError}`;
+          this.logger.error(`[Stock Transfer] ${errorMsg}`);
+          // Nếu fails cả chunk, thử lưu từng item trong chunk để cứu vớt
+          this.logger.log(
+            `[Stock Transfer] Thử lưu lẻ từng item trong chunk lỗi...`,
+          );
+          for (const entity of chunk) {
+            try {
+              await this.stockTransferRepository.save(entity);
+              savedCount++;
+            } catch (itemError: any) {
+              const itemErrorMsg = `Lỗi khi lưu item ${entity.docCode}/${entity.itemCode}: ${itemError?.message || itemError}`;
+              errors.push(itemErrorMsg);
+            }
+          }
         }
       }
 
