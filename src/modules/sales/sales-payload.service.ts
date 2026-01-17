@@ -80,60 +80,16 @@ export class SalesPayloadService {
           ),
       );
 
-      // AGGREGATE DETAIL: Group by ma_vt (and ma_kho)
-      // Reason: Frontend requires "Exploded" view (by Stock Transfer), but FAST ERP requires "Aggregated" view (by Product).
-      const aggregatedDetailMap = new Map<string, any>();
-
-      detail.forEach((item: any) => {
-        const key = `${item.ma_vt}_${item.ma_kho}`;
-
-        if (!aggregatedDetailMap.has(key)) {
-          // Clone first item as base
-          aggregatedDetailMap.set(key, { ...item });
-        } else {
-          // Aggregate values
-          const existing = aggregatedDetailMap.get(key);
-          existing.so_luong += item.so_luong;
-          existing.tien_hang += item.tien_hang;
-          existing.tien_thue += item.tien_thue;
-          existing.dt_tg_nt += item.dt_tg_nt;
-
-          // Sum all discounts
-          for (let i = 1; i <= 22; i++) {
-            const field = `ck${i.toString().padStart(2, '0')}_nt`;
-            if (existing[field] !== undefined && item[field] !== undefined) {
-              existing[field] += item[field];
-            }
-          }
-        }
-      });
-
-      // Recalculate Prices for Aggregated Lines
-      const aggregatedDetail = Array.from(aggregatedDetailMap.values()).map(
-        (item, index) => {
-          if (item.so_luong > 0) {
-            item.gia_ban = item.tien_hang / item.so_luong;
-          }
-          item.dong = index + 1; // Reset line number
-          return item;
-        },
-      );
-
       // 5. Build summary (cbdetail)
-      const cbdetail = this.buildInvoiceCbDetail(aggregatedDetail);
+      const cbdetail = this.buildInvoiceCbDetail(detail);
 
-      // 6. Assemble final payload with AGGREGATED detail
-      return this.assembleInvoicePayload(
-        orderData,
-        aggregatedDetail,
-        cbdetail,
-        {
-          ngayCt,
-          ngayLct,
-          transDate,
-          maBp: detail[0]?.ma_bp || '',
-        },
-      );
+      // 6. Assemble final payload (Using exploded detail, NO aggregation)
+      return this.assembleInvoicePayload(orderData, detail, cbdetail, {
+        ngayCt,
+        ngayLct,
+        transDate,
+        maBp: detail[0]?.ma_bp || '',
+      });
     } catch (error: any) {
       this.logInvoiceError(error, orderData);
       throw new Error(
