@@ -113,6 +113,17 @@ export class SalesQueryService {
       }
     });
 
+    // Pre-fetch product info for ALL Stock Transfer items to determine Batch vs Serial
+    const allStItemCodes = Array.from(
+      new Set(
+        stockTransfers
+          .map((st) => st.itemCode)
+          .filter((code): code is string => !!code),
+      ),
+    );
+    const stLoyaltyProductMap =
+      await this.loyaltyService.fetchProducts(allStItemCodes);
+
     return orders.map((order) => {
       const cashioRecords = cashioMap.get(order.docCode) || [];
       const ecoinCashio = cashioRecords.find((c) => c.fop_syscode === 'ECOIN');
@@ -128,7 +139,6 @@ export class SalesQueryService {
       // Lọc chỉ lấy các stock transfer XUẤT KHO (SALE_STOCKOUT) với qty < 0
       // Bỏ qua các stock transfer nhập lại (RETURN) với qty > 0
       const stockOutTransfers = orderStockTransfers.filter((st) => {
-        // ✅ Bỏ qua TRUTONKEEP
         if (SalesUtils.isTrutonkeepItem(st.itemCode)) {
           return false;
         }
@@ -159,6 +169,11 @@ export class SalesQueryService {
 
         // 1. Map Stock Transfers to Sales Lines
         uniqueStockTransfers.forEach((st) => {
+          // Find matching product info
+          const product = stLoyaltyProductMap.get(st.itemCode);
+          const isSerial = !!product?.trackSerial;
+          const isBatch = !!product?.trackBatch;
+
           // Find matching sale to get price/info
           // Match by itemCode (case insensitive)
           const sale = (order.sales || []).find(
@@ -189,8 +204,10 @@ export class SalesQueryService {
               other_discamt: Number(sale.other_discamt || 0) * ratio,
 
               maKho: st.stockCode, // ST Stock Code
-              maLo: st.batchSerial,
-              soSerial: st.batchSerial,
+              // Logic check trackBatch/trackSerial
+              maLo: isBatch ? st.batchSerial : undefined,
+              soSerial: isSerial ? st.batchSerial : undefined,
+
               isStockTransferLine: true,
               stockTransferId: st.id,
               stockTransfer:
@@ -207,9 +224,16 @@ export class SalesQueryService {
               itemName: st.itemName,
               qty: Math.abs(Number(st.qty || 0)),
               maKho: st.stockCode,
-              maLo: st.batchSerial,
+
+              // Logic check trackBatch/trackSerial
+              maLo: isBatch ? st.batchSerial : undefined,
+              soSerial: isSerial ? st.batchSerial : undefined,
+
               isStockTransferLine: true,
               stockTransferId: st.id,
+              stockTransfer:
+                StockTransferUtils.formatStockTransferForFrontend(st), // Singular ST
+              stockTransfers: undefined,
               price: 0, // Unknown
               revenue: 0,
             });
