@@ -257,6 +257,15 @@ export function isDoiVoOrder(
 }
 
 /**
+ * Helper: Kiểm tra xem item có phải "TRUTONKEEP" không
+ * Items này sẽ bị bỏ qua khi map kho và tạo hóa đơn
+ */
+export function isTrutonkeepItem(itemCode: string | null | undefined): boolean {
+  if (!itemCode) return false;
+  return itemCode.trim().toUpperCase() === 'TRUTONKEEP';
+}
+
+/**
  * Normalize brand name: "facialbar" → "f3", giữ nguyên các brand khác
  */
 export function normalizeBrand(brand: string | null | undefined): string {

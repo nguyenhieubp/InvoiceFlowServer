@@ -128,6 +128,11 @@ export class SalesQueryService {
       // Lọc chỉ lấy các stock transfer XUẤT KHO (SALE_STOCKOUT) với qty < 0
       // Bỏ qua các stock transfer nhập lại (RETURN) với qty > 0
       const stockOutTransfers = orderStockTransfers.filter((st) => {
+        // ✅ Bỏ qua TRUTONKEEP
+        if (SalesUtils.isTrutonkeepItem(st.itemCode)) {
+          return false;
+        }
+
         // Chỉ lấy các record có doctype = 'SALE_STOCKOUT' hoặc qty < 0 (xuất kho)
         const isStockOut =
           st.doctype === 'SALE_STOCKOUT' || Number(st.qty || 0) < 0;
@@ -825,7 +830,6 @@ export class SalesQueryService {
             pagedOrdersMap.set(docCode, {
               ...parent,
               sales: [], // Reset sales
-              // stockTransfers: [], // Removed as requested
             });
           }
         }

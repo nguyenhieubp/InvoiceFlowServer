@@ -6,6 +6,7 @@ import { SalesService } from './sales.service';
 import { SalesQueryService } from './sales-query.service';
 import { SalesSyncService } from './sales-sync.service';
 import { SalesInvoiceService } from './sales-invoice.service';
+import { SalesPayloadService } from './sales-payload.service';
 import { SalesWarehouseService } from './sales-warehouse.service';
 import { Sale } from '../../entities/sale.entity';
 import { Customer } from '../../entities/customer.entity';
@@ -57,6 +58,7 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
     SalesQueryService,
     SalesSyncService,
     SalesInvoiceService,
+    SalesPayloadService,
     SalesWarehouseService,
     // Existing services
     ZappyApiService,
@@ -73,6 +75,7 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
     SalesQueryService,
     SalesSyncService,
     SalesInvoiceService,
+    SalesPayloadService,
     SalesWarehouseService,
   ],
 })

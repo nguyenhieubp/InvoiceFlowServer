@@ -53,6 +53,18 @@ export class SalesWarehouseService {
   async processWarehouseFromStockTransfer(
     stockTransfer: StockTransfer,
   ): Promise<any> {
+    // ✅ Skip TRUTONKEEP items
+    if (SalesUtils.isTrutonkeepItem(stockTransfer.itemCode)) {
+      this.logger.log(
+        `[Warehouse] Bỏ qua stock transfer với itemCode = TRUTONKEEP (docCode: ${stockTransfer.docCode})`,
+      );
+      return {
+        success: true,
+        message: 'Skipped TRUTONKEEP item',
+        skipped: true,
+      };
+    }
+
     try {
       let result: any;
       let ioTypeForTracking: string;
