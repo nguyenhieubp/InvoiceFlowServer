@@ -49,6 +49,9 @@ export class OrderFeeController {
     // Order by syncedAt descending
     queryBuilder.orderBy('orderFee.syncedAt', 'DESC');
 
+    // Filter chỉ lấy đơn bên bán (is_customer_pay = false trong rawData)
+    queryBuilder.andWhere("orderFee.rawData ->> 'is_customer_pay' = 'false'");
+
     // Get total count
     const total = await queryBuilder.getCount();
 
