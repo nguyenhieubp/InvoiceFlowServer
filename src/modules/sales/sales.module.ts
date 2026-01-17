@@ -8,6 +8,12 @@ import { SalesSyncService } from './sales-sync.service';
 import { SalesInvoiceService } from './sales-invoice.service';
 import { SalesPayloadService } from './sales-payload.service';
 import { SalesWarehouseService } from './sales-warehouse.service';
+import { InvoicePersistenceService } from './invoice-persistence.service';
+import { InvoiceDataEnrichmentService } from './invoice-data-enrichment.service';
+import { SpecialOrderHandlerService } from './special-order-handler.service';
+import { NormalOrderHandlerService } from './normal-order-handler.service';
+import { SaleReturnHandlerService } from './sale-return-handler.service';
+import { InvoiceFlowOrchestratorService } from './invoice-flow-orchestrator.service';
 import { Sale } from '../../entities/sale.entity';
 import { Customer } from '../../entities/customer.entity';
 import { ProductItem } from '../../entities/product-item.entity';
@@ -60,6 +66,13 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
     SalesInvoiceService,
     SalesPayloadService,
     SalesWarehouseService,
+    InvoicePersistenceService,
+    InvoiceDataEnrichmentService,
+    // New handler services
+    SpecialOrderHandlerService,
+    NormalOrderHandlerService,
+    SaleReturnHandlerService,
+    InvoiceFlowOrchestratorService,
     // Existing services
     ZappyApiService,
     FastApiClientService,
@@ -77,6 +90,13 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
     SalesInvoiceService,
     SalesPayloadService,
     SalesWarehouseService,
+    InvoicePersistenceService,
+    InvoiceDataEnrichmentService,
+    // Export new handler services
+    SpecialOrderHandlerService,
+    NormalOrderHandlerService,
+    SaleReturnHandlerService,
+    InvoiceFlowOrchestratorService,
   ],
 })
 export class SalesModule {}

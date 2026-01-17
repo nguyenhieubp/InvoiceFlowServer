@@ -10,7 +10,7 @@ import * as SalesUtils from '../../utils/sales.utils';
 
 /**
  * SalesSyncService
- * Chá»‹u trÃ¡ch nhiá»‡m: Sync operations vá»›i external APIs (Zappy, Loyalty)
+ * Chịu trách nhiệm: Sync operations với external APIs (Zappy, Loyalty)
  */
 @Injectable()
 export class SalesSyncService {
@@ -27,9 +27,9 @@ export class SalesSyncService {
   ) {}
 
   /**
-   * Äá»“ng bá»™ láº¡i Ä‘Æ¡n lá»—i - check láº¡i vá»›i Loyalty API
-   * Náº¿u tÃ¬m tháº¥y trong Loyalty, cáº­p nháº­t itemCode (mÃ£ váº­t tÆ°) vÃ  statusAsys = true
-   * Xá»­ lÃ½ theo batch tá»« database Ä‘á»ƒ trÃ¡nh load quÃ¡ nhiá»u vÃ o memory
+   * Đồng bộ lại đơn lỗi - check lại với Loyalty API
+   * Nếu tìm thấy trong Loyalty, cập nhật itemCode (mã vật tư) và statusAsys = true
+   * Xử lý theo batch từ database để tránh load quá nhiều vào memory
    */
   async syncErrorOrders(): Promise<{
     total: number;
@@ -53,84 +53,15 @@ export class SalesSyncService {
       newItemCode: string;
     }> = [];
 
-    // Cáº¥u hÃ¬nh batch size
-    const DB_BATCH_SIZE = 500; // Load 500 records tá»« DB má»—i láº§n
-    const PROCESS_BATCH_SIZE = 100; // Xá»­ lÃ½ 100 sales má»—i batch trong memory
-    const CONCURRENT_LIMIT = 10; // Chá»‰ gá»i 10 API cÃ¹ng lÃºc Ä‘á»ƒ trÃ¡nh quÃ¡ táº£i
+    // Cấu hình batch size
+    const DB_BATCH_SIZE = 500; // Load 500 records từ DB mỗi lần
+    const PROCESS_BATCH_SIZE = 100; // Xử lý 100 sales mỗi batch trong memory
 
-    // Helper function Ä‘á»ƒ xá»­ lÃ½ má»™t sale
-    const processSale = async (
-      sale: any,
-    ): Promise<{
-      success: boolean;
-      update?: {
-        id: string;
-        docCode: string;
-        itemCode: string;
-        oldItemCode: string;
-        newItemCode: string;
-      };
-    }> => {
-      try {
-        const itemCode = sale.itemCode || '';
-        if (!itemCode) {
-          return { success: false };
-        }
-
-        const product = await this.loyaltyService.checkProduct(itemCode);
-
-        if (product && product.materialCode) {
-          // TÃ¬m tháº¥y trong Loyalty - cáº­p nháº­t
-          const newItemCode = product.materialCode;
-          const oldItemCode = itemCode;
-
-          // Cáº­p nháº­t sale
-          await this.saleRepository.update(sale.id, {
-            itemCode: newItemCode,
-            statusAsys: true,
-          });
-
-          return {
-            success: true,
-            update: {
-              id: sale.id,
-              docCode: sale.docCode || '',
-              itemCode: sale.itemCode || '',
-              oldItemCode,
-              newItemCode,
-            },
-          };
-        }
-        return { success: false };
-      } catch (error: any) {
-        this.logger.error(
-          `[syncErrorOrders] âŒ Lá»—i khi check sale ${sale.id}: ${error?.message || error}`,
-        );
-        return { success: false };
-      }
-    };
-
-    // Helper function Ä‘á»ƒ limit concurrent requests
-    const processBatchConcurrent = async (sales: any[], limit: number) => {
-      const results: Array<{ success: boolean; update?: any }> = [];
-      for (let i = 0; i < sales.length; i += limit) {
-        const batch = sales.slice(i, i + limit);
-        const batchResults = await Promise.all(
-          batch.map((sale) => processSale(sale)),
-        );
-        results.push(...batchResults);
-      }
-      return results;
-    };
-
-    // Xá»­ lÃ½ tá»«ng batch tá»« database
+    // Xử lý từng batch từ database
     let processedCount = 0;
-    let dbBatchNumber = 0;
 
     while (true) {
-      dbBatchNumber++;
-
-      // Load batch tá»« database
+      // Load batch từ database
       const dbBatch = await this.saleRepository.find({
         where: [{ statusAsys: false }, { statusAsys: IsNull() }],
         order: { createdAt: 'DESC' },
@@ -141,17 +72,63 @@ export class SalesSyncService {
         break;
       }
 
-      // Xá»­ lÃ½ batch nÃ y theo tá»«ng nhÃ³m nhá»
+      // Xử lý batch này theo từng nhóm nhỏ
       for (let i = 0; i < dbBatch.length; i += PROCESS_BATCH_SIZE) {
         const processBatch = dbBatch.slice(i, i + PROCESS_BATCH_SIZE);
 
-        // Xá»­ lÃ½ batch vá»›i giá»›i háº¡n concurrent
-        const batchResults = await processBatchConcurrent(
-          processBatch,
-          CONCURRENT_LIMIT,
+        // --- BATCH FETCHING OPTIMIZATION ---
+        // 1. Collect all unique itemCodes from the batch
+        const itemCodes = Array.from(
+          new Set(
+            processBatch
+              .map((s) => s.itemCode?.trim())
+              .filter((code): code is string => !!code && code !== ''),
+          ),
         );
 
-        // Cáº­p nháº­t counters
+        // 2. Fetch all products at once
+        const productMap = await this.loyaltyService.fetchProducts(itemCodes);
+
+        // 3. Process each sale using the map (Synchronous loop)
+        const updatePromises = processBatch.map(async (sale) => {
+          try {
+            const itemCode = sale.itemCode || '';
+            if (!itemCode) return { success: false };
+
+            const product = productMap.get(itemCode);
+
+            if (product && product.materialCode) {
+              const newItemCode = product.materialCode;
+              const oldItemCode = itemCode;
+
+              await this.saleRepository.update(sale.id, {
+                itemCode: newItemCode,
+                statusAsys: true,
+              });
+
+              return {
+                success: true,
+                update: {
+                  id: sale.id,
+                  docCode: sale.docCode || '',
+                  itemCode: sale.itemCode || '',
+                  oldItemCode,
+                  newItemCode,
+                },
+              };
+            }
+            return { success: false };
+          } catch (error: any) {
+            this.logger.error(
+              `[syncErrorOrders] ❌ Lỗi khi check sale ${sale.id}: ${error?.message || error}`,
+            );
+            return { success: false };
+          }
+        });
+
+        const batchResults = await Promise.all(updatePromises);
+
+        // Update counters
         for (const result of batchResults) {
           if (result.success && result.update) {
             successCount++;
@@ -164,7 +141,7 @@ export class SalesSyncService {
         processedCount += processBatch.length;
       }
 
-      // Náº¿u batch nhá» hÆ¡n DB_BATCH_SIZE, cÃ³ nghÄ©a lÃ  Ä‘Ã£ háº¿t records
+      // Nếu batch nhỏ hơn DB_BATCH_SIZE, có nghĩa là đã hết records
       if (dbBatch.length < DB_BATCH_SIZE) {
         break;
       }
@@ -179,7 +156,7 @@ export class SalesSyncService {
   }
 
   /**
-   * Äá»“ng bá»™ láº¡i má»™t Ä‘Æ¡n hÃ ng cá»¥ thá»ƒ - check láº¡i vá»›i Loyalty API
+   * Đồng bộ lại một đơn hàng cụ thể - check lại với Loyalty API
    */
   async syncErrorOrderByDocCode(docCode: string): Promise<{
     success: boolean;
@@ -203,7 +180,7 @@ export class SalesSyncService {
     if (errorSales.length === 0) {
       return {
         success: true,
-        message: `ÄÆ¡n hÃ ng ${docCode} khÃ´ng cÃ³ dÃ²ng nÃ o cáº§n Ä‘á»“ng bá»™`,
+        message: `Đơn hàng ${docCode} không có dòng nào cần đồng bộ`,
         updated: 0,
         failed: 0,
         details: [],
@@ -219,7 +196,20 @@ export class SalesSyncService {
       newItemCode: string;
     }> = [];
 
-    // Check láº¡i tá»«ng sale vá»›i Loyalty API
+    // --- BATCH FETCHING FIX ---
+    // 1. Collect unique item codes
+    const itemCodes = Array.from(
+      new Set(
+        errorSales
+          .map((s) => s.itemCode?.trim())
+          .filter((code): code is string => !!code && code !== ''),
+      ),
+    );
+
+    // 2. Batch fetch from Loyalty API
+    const productMap = await this.loyaltyService.fetchProducts(itemCodes);
+
+    // 3. Process using Map
     for (const sale of errorSales) {
       try {
         const itemCode = sale.itemCode || '';
@@ -228,7 +218,7 @@ export class SalesSyncService {
           continue;
         }
 
-        const product = await this.loyaltyService.checkProduct(itemCode);
+        const product = productMap.get(itemCode);
 
         if (product && product.materialCode) {
           const newItemCode = product.materialCode;
@@ -249,21 +239,21 @@ export class SalesSyncService {
         } else {
           failCount++;
           this.logger.warn(
-            `[syncErrorOrderByDocCode] âŒ Sale ${sale.id} (${docCode}): itemCode ${itemCode} váº«n khÃ´ng tá»“n táº¡i trong Loyalty`,
+            `[syncErrorOrderByDocCode] ❌ Sale ${sale.id} (${docCode}): itemCode ${itemCode} vẫn không tồn tại trong Loyalty API`,
           );
         }
       } catch (error: any) {
         failCount++;
         this.logger.error(
-          `[syncErrorOrderByDocCode] âŒ Lá»—i khi check sale ${sale.id}: ${error?.message || error}`,
+          `[syncErrorOrderByDocCode] ❌ Lỗi khi check sale ${sale.id}: ${error?.message || error}`,
         );
       }
     }
 
     const message =
       successCount > 0
-        ? `Äá»“ng bá»™ thÃ nh cÃ´ng: ${successCount} dÃ²ng Ä‘Ã£ Ä‘Æ°á»£c cáº­p nháº­t${failCount > 0 ? `, ${failCount} dÃ²ng váº«n lá»—i` : ''}`
-        : `KhÃ´ng cÃ³ dÃ²ng nÃ o Ä‘Æ°á»£c cáº­p nháº­t. ${failCount} dÃ²ng váº«n khÃ´ng tÃ¬m tháº¥y trong Loyalty API`;
+        ? `Đồng bộ thành công: ${successCount} dòng đã được cập nhật${failCount > 0 ? `, ${failCount} dòng vẫn lỗi` : ''}`
+        : `Không có dòng nào được cập nhật. ${failCount} dòng vẫn không tìm thấy trong Loyalty API`;
 
     return {
       success: successCount > 0,
@@ -275,7 +265,7 @@ export class SalesSyncService {
   }
 
   /**
-   * Äá»“ng bá»™ sales theo khoáº£ng thá»i gian cho táº¥t cáº£ brands
+   * Đồng bộ sales theo khoảng thời gian cho tất cả brands
    */
   async syncSalesByDateRange(
     startDate: string,
@@ -363,23 +353,23 @@ export class SalesSyncService {
       const start = parseDate(startDate);
       const end = parseDate(endDate);
 
-      // Láº·p qua tá»«ng brand
+      // Lặp qua từng brand
       for (const brand of brands) {
         this.logger.log(
-          `[syncSalesByDateRange] Báº¯t Ä‘áº§u Ä‘á»“ng bá»™ brand: ${brand}`,
+          `[syncSalesByDateRange] Bắt đầu đồng bộ brand: ${brand}`,
         );
         let brandOrdersCount = 0;
         let brandSalesCount = 0;
         let brandCustomersCount = 0;
         const brandErrors: string[] = [];
 
-        // Láº·p qua tá»«ng ngÃ y trong khoáº£ng thá»i gian
+        // Lặp qua từng ngày trong khoảng thời gian
         const currentDate = new Date(start);
         while (currentDate <= end) {
           const dateStr = formatDate(currentDate);
           try {
             this.logger.log(
-              `[syncSalesByDateRange] Äá»“ng bá»™ ${brand} - ngÃ y ${dateStr}`,
+              `[syncSalesByDateRange] Đồng bộ ${brand} - ngày ${dateStr}`,
             );
             const result = await this.syncFromZappy(dateStr, brand);
 
@@ -393,7 +383,7 @@ export class SalesSyncService {
               );
             }
           } catch (error: any) {
-            const errorMsg = `[${brand}] Lá»—i khi Ä‘á»“ng bá»™ ngÃ y ${dateStr}: ${error?.message || error}`;
+            const errorMsg = `[${brand}] Lỗi khi đồng bộ ngày ${dateStr}: ${error?.message || error}`;
             this.logger.error(errorMsg);
             brandErrors.push(errorMsg);
           }
@@ -418,13 +408,13 @@ export class SalesSyncService {
         }
 
         this.logger.log(
-          `[syncSalesByDateRange] HoÃ n thÃ nh Ä‘á»“ng bá»™ brand: ${brand} - ${brandOrdersCount} Ä‘Æ¡n, ${brandSalesCount} sale`,
+          `[syncSalesByDateRange] Hoàn thành đồng bộ brand: ${brand} - ${brandOrdersCount} đơn, ${brandSalesCount} sale`,
         );
       }
 
       return {
         success: allErrors.length === 0,
-        message: `Äá»“ng bá»™ thÃ nh cÃ´ng tá»« ${startDate} Ä‘áº¿n ${endDate}: ${totalOrdersCount} Ä‘Æ¡n hÃ ng, ${totalSalesCount} sale, ${totalCustomersCount} khÃ¡ch hÃ ng`,
+        message: `Đồng bộ thành công từ ${startDate} đến ${endDate}: ${totalOrdersCount} đơn hàng, ${totalSalesCount} sale, ${totalCustomersCount} khách hàng`,
         totalOrdersCount,
         totalSalesCount,
         totalCustomersCount,
@@ -433,16 +423,16 @@ export class SalesSyncService {
       };
     } catch (error: any) {
       this.logger.error(
-        `Lá»—i khi Ä‘á»“ng bá»™ sale theo khoáº£ng thá»i gian: ${error?.message || error}`,
+        `Lỗi khi đồng bộ sale theo khoảng thời gian: ${error?.message || error}`,
       );
       throw error;
     }
   }
 
   /**
-   * Äá»“ng bá»™ sales tá»« Zappy API cho má»™t ngÃ y cá»¥ thá»ƒ
-   * NOTE: Method nÃ y ráº¥t dÃ i (~400 dÃ²ng), cáº§n refactor thÃªm
-   * TODO: TÃ¡ch thÃ nh cÃ¡c private helper methods
+   * Đồng bộ sales từ Zappy API cho một ngày cụ thể
+   * NOTE: Method này rất dài (~400 dòng), cần refactor thêm
+   * TODO: Tách thành các private helper methods
    */
   async syncFromZappy(
     date: string,
@@ -503,6 +493,23 @@ export class SalesSyncService {
         brand,
       );
 
+      // --- BATCH FETCHING OPTIMIZATION ---
+      // Collect all itemCodes from ALL orders to batch fetch
+      const allItemCodes = new Set<string>();
+      orders.forEach((order) => {
+        if (order.sales) {
+          order.sales.forEach((s: any) => {
+            const code = s.itemCode?.trim();
+            if (code) allItemCodes.add(code);
+          });
+        }
+      });
+
+      // Batch fetch from Loyalty
+      const loyaltyProductMap = await this.loyaltyService.fetchProducts(
+        Array.from(allItemCodes),
+      );
+
       // 4. Process each order
       for (const order of orders) {
         try {
@@ -528,9 +535,12 @@ export class SalesSyncService {
             continue;
           }
 
-          // Check Loyalty Products
-          const notFoundItemCodes =
-            await this.getNotFoundItemCodesForOrder(order);
+          // Check Loyalty Products using Batch Map
+          // We can now determine "notFound" using the pre-fetched map
+          const notFoundItemCodes = this.getNotFoundItemCodesFromMap(
+            order,
+            loyaltyProductMap,
+          );
 
           // Process Sales
           const orderSalesCount = await this.processOrderSales(
@@ -539,6 +549,7 @@ export class SalesSyncService {
             brandFromDepartment, // Use mapped brand
             notFoundItemCodes,
             cashMapBySoCode,
+            loyaltyProductMap, // Pass the map!
             (errorMsg) => errors.push(errorMsg),
           );
           salesCount += orderSalesCount;
@@ -654,8 +665,29 @@ export class SalesSyncService {
     return customer;
   }
 
+  // OPTIMIZED: Uses Map lookup instead of API calls
+  private getNotFoundItemCodesFromMap(
+    order: any,
+    productMap: Map<string, any>,
+  ): Set<string> {
+    const notFoundItemCodes = new Set<string>();
+    if (order.sales) {
+      order.sales.forEach((s: any) => {
+        const code = s.itemCode?.trim();
+        if (code && !productMap.has(code)) {
+          notFoundItemCodes.add(code);
+        }
+      });
+    }
+    return notFoundItemCodes;
+  }
+
+  // LEGACY METHOD: Kept but unused refactoring in syncFromZappy replaces it
   private async getNotFoundItemCodesForOrder(order: any): Promise<Set<string>> {
-    const orderItemCodes = Array.from(
+    // Replaced by getNotFoundItemCodesFromMap in optimizer logic
+    // But keeping it if called elsewhere (it is private so likely safe to remove if unused)
+    // For now, let's optimize it too just in case
+    const orderItemCodes: string[] = Array.from(
       new Set(
         (order.sales || [])
           .map((s: any) => s.itemCode?.trim())
@@ -665,15 +697,14 @@ export class SalesSyncService {
 
     const notFoundItemCodes = new Set<string>();
     if (orderItemCodes.length > 0) {
-      await Promise.all(
-        orderItemCodes.map(async (trimmedItemCode: string) => {
-          const product =
-            await this.loyaltyService.checkProduct(trimmedItemCode);
-          if (!product) {
-            notFoundItemCodes.add(trimmedItemCode);
-          }
-        }),
-      );
+      // BATCH FETCHING FIX
+      const productMap =
+        await this.loyaltyService.fetchProducts(orderItemCodes);
+      orderItemCodes.forEach((code: string) => {
+        if (!productMap.has(code)) {
+          notFoundItemCodes.add(code);
+        }
+      });
     }
     return notFoundItemCodes;
   }
@@ -684,6 +715,7 @@ export class SalesSyncService {
     brand: string,
     notFoundItemCodes: Set<string>,
     cashMapBySoCode: Map<string, any[]>,
+    loyaltyProductMap: Map<string, any>, // Added parameter
     onError?: (msg: string) => void,
   ): Promise<number> {
     let salesCount = 0;
@@ -705,14 +737,16 @@ export class SalesSyncService {
 
           if (isNotFound) {
             this.logger.warn(
-              `[SalesSyncService] Sale item ${itemCode} trong order ${order.docCode} - Sáº£n pháº©m khÃ´ng tá»“n táº¡i trong Loyalty API (404), sáº½ lÆ°u vá»›i statusAsys = false`,
+              `[SalesSyncService] Sale item ${itemCode} trong order ${order.docCode} - Sản phẩm không tồn tại trong Loyalty API (404), sẽ lưu với statusAsys = false`,
             );
           }
 
-          const productType = await this.resolveProductType(
+          // Use Map instead of Async call
+          const productType = this.resolveProductTypeFromMap(
             saleItem,
             itemCode,
             notFoundItemCodes,
+            loyaltyProductMap,
           );
 
           // Enrich voucher data
@@ -814,7 +848,7 @@ export class SalesSyncService {
           }
           salesCount++;
         } catch (saleError: any) {
-          const errorMsg = `Lá»—i khi lÆ°u sale ${order.docCode}/${saleItem.itemCode}: ${saleError?.message || saleError}`;
+          const errorMsg = `Lỗi khi lưu sale ${order.docCode}/${saleItem.itemCode}: ${saleError?.message || saleError}`;
           if (onError) onError(errorMsg);
         }
       }
@@ -822,6 +856,28 @@ export class SalesSyncService {
     return salesCount;
   }
 
+  // OPTIMIZED: Synchronous resolution from Map
+  private resolveProductTypeFromMap(
+    saleItem: any,
+    itemCode: string,
+    notFoundItemCodes: Set<string>,
+    loyaltyProductMap: Map<string, any>,
+  ): string | null {
+    const productTypeFromZappy =
+      saleItem.producttype || saleItem.productType || null;
+    let productTypeFromLoyalty: string | null = null;
+
+    if (!productTypeFromZappy && itemCode && !notFoundItemCodes.has(itemCode)) {
+      const loyaltyProduct = loyaltyProductMap.get(itemCode);
+      if (loyaltyProduct) {
+        productTypeFromLoyalty =
+          loyaltyProduct.productType || loyaltyProduct.producttype || null;
+      }
+    }
+    return productTypeFromZappy || productTypeFromLoyalty || null;
+  }
+
+  // LEGACY: Keeping original signature just in case, but unused in main flow now
   private async resolveProductType(
     saleItem: any,
     itemCode: string,

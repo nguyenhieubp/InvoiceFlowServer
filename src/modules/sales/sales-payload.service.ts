@@ -13,6 +13,7 @@ import * as ConvertUtils from '../../utils/convert.utils';
 import * as SalesCalculationUtils from '../../utils/sales-calculation.utils';
 import { InvoiceLogicUtils } from '../../utils/invoice-logic.utils';
 import * as SalesFormattingUtils from '../../utils/sales-formatting.utils';
+import { DOC_SOURCE_TYPES } from './sales-invoice.constants';
 
 @Injectable()
 export class SalesPayloadService {
@@ -323,7 +324,8 @@ export class SalesPayloadService {
       // Nếu có stock transfer, có thể lấy từ soCode hoặc docCode
       if (stockTransfers && stockTransfers.length > 0) {
         const firstStockTransfer = stockTransfers.find(
-          (stockTransfer) => stockTransfer.doctype === 'SALE_RETURN',
+          (stockTransfer) =>
+            stockTransfer.doctype === DOC_SOURCE_TYPES.SALE_RETURN,
         );
         // soCode thường là mã đơn hàng gốc
         soCt0 = firstStockTransfer?.soCode || orderData.docCode || null;
@@ -376,7 +378,7 @@ export class SalesPayloadService {
       const stockQtyMap = new Map<string, number>();
 
       (stockTransfers || [])
-        .filter((st) => st.doctype === 'SALE_RETURN')
+        .filter((st) => st.doctype === DOC_SOURCE_TYPES.SALE_RETURN)
         .forEach((st) => {
           const maVt = st.materialCode;
           const qty = Number(st.qty || 0);
@@ -529,111 +531,115 @@ export class SalesPayloadService {
       return '1111'; // Default
     };
 
-    // Build detail items
-    const detail = await Promise.all(
-      items.map(async (item, index) => {
-        // Fetch trackSerial và trackBatch từ Loyalty API để xác định dùng ma_lo hay so_serial
-        let dvt = 'Cái'; // Default
-        let trackSerial: boolean | null = null;
-        let trackBatch: boolean | null = null;
-        let productTypeFromLoyalty: string | null = null;
+    // Batch fetch all products BEFORE the loop
+    const itemCodes = items.map((item) => item.item_code).filter(Boolean);
 
-        try {
-          const product = await this.productItemRepository.findOne({
-            where: { maERP: item.item_code },
-          });
-          if (product?.dvt) {
-            dvt = product.dvt;
-          }
-          // Fetch từ Loyalty API để lấy dvt, trackSerial, trackBatch và productType
-          const loyaltyProduct = await this.loyaltyService.checkProduct(
-            item.item_code,
-          );
-          if (loyaltyProduct) {
-            if (loyaltyProduct?.unit) {
-              dvt = loyaltyProduct.unit;
-            }
-            trackSerial = loyaltyProduct.trackSerial === true;
-            trackBatch = loyaltyProduct.trackBatch === true;
-            productTypeFromLoyalty =
-              loyaltyProduct?.productType ||
-              loyaltyProduct?.producttype ||
-              null;
-          }
-        } catch (error) {}
+    // Fetch from database
+    const dbProducts =
+      itemCodes.length > 0
+        ? await this.productItemRepository.find({
+            where: { maERP: In(itemCodes) },
+          })
+        : [];
+    const dbProductMap = new Map(dbProducts.map((p) => [p.maERP, p]));
 
-        const productTypeUpper = productTypeFromLoyalty
-          ? String(productTypeFromLoyalty).toUpperCase().trim()
-          : null;
+    // Fetch from Loyalty API (batch)
+    const loyaltyProductMap =
+      itemCodes.length > 0
+        ? await this.loyaltyService.fetchProducts(itemCodes)
+        : new Map();
 
-        // Debug log để kiểm tra trackSerial và trackBatch
-        if (index === 0) {
+    // Build detail items (now synchronous - no await in loop)
+    const detail = items.map((item, index) => {
+      // Get product info from pre-fetched maps
+      let dvt = 'Cái'; // Default
+      let trackSerial: boolean | null = null;
+      let trackBatch: boolean | null = null;
+      let productTypeFromLoyalty: string | null = null;
+
+      // Check database first
+      const dbProduct = dbProductMap.get(item.item_code);
+      if (dbProduct?.dvt) {
+        dvt = dbProduct.dvt;
+      }
+
+      // Then check Loyalty API
+      const loyaltyProduct = loyaltyProductMap.get(item.item_code);
+      if (loyaltyProduct) {
+        if (loyaltyProduct?.unit) {
+          dvt = loyaltyProduct.unit;
         }
+        trackSerial = loyaltyProduct.trackSerial === true;
+        trackBatch = loyaltyProduct.trackBatch === true;
+        productTypeFromLoyalty =
+          loyaltyProduct?.productType || loyaltyProduct?.producttype || null;
+      }
 
-        // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
-        const useBatch = SalesUtils.shouldUseBatch(trackBatch, trackSerial);
+      const productTypeUpper = productTypeFromLoyalty
+        ? String(productTypeFromLoyalty).toUpperCase().trim()
+        : null;
 
-        let maLo: string | null = null;
-        let soSerial: string | null = null;
+      // Xác định có dùng ma_lo hay so_serial dựa trên trackSerial và trackBatch từ Loyalty API
+      const useBatch = SalesUtils.shouldUseBatch(trackBatch, trackSerial);
 
-        if (useBatch) {
-          // trackBatch = true → dùng ma_lo với giá trị batchserial
-          const batchSerial = item.batchserial || null;
-          if (batchSerial) {
-            // Vẫn cần productType để quyết định cắt bao nhiêu ký tự
-            if (productTypeUpper === 'TPCN') {
-              // Nếu productType là "TPCN", cắt lấy 8 ký tự cuối
-              maLo =
-                batchSerial.length >= 8 ? batchSerial.slice(-8) : batchSerial;
-            } else if (
-              productTypeUpper === 'SKIN' ||
-              productTypeUpper === 'GIFT'
-            ) {
-              // Nếu productType là "SKIN" hoặc "GIFT", cắt lấy 4 ký tự cuối
-              maLo =
-                batchSerial.length >= 4 ? batchSerial.slice(-4) : batchSerial;
-            } else {
-              // Các trường hợp khác → giữ nguyên toàn bộ
-              maLo = batchSerial;
-            }
+      let maLo: string | null = null;
+      let soSerial: string | null = null;
+
+      if (useBatch) {
+        // trackBatch = true → dùng ma_lo với giá trị batchserial
+        const batchSerial = item.batchserial || null;
+        if (batchSerial) {
+          // Vẫn cần productType để quyết định cắt bao nhiêu ký tự
+          if (productTypeUpper === 'TPCN') {
+            // Nếu productType là "TPCN", cắt lấy 8 ký tự cuối
+            maLo =
+              batchSerial.length >= 8 ? batchSerial.slice(-8) : batchSerial;
+          } else if (
+            productTypeUpper === 'SKIN' ||
+            productTypeUpper === 'GIFT'
+          ) {
+            // Nếu productType là "SKIN" hoặc "GIFT", cắt lấy 4 ký tự cuối
+            maLo =
+              batchSerial.length >= 4 ? batchSerial.slice(-4) : batchSerial;
           } else {
-            maLo = null;
+            // Các trường hợp khác → giữ nguyên toàn bộ
+            maLo = batchSerial;
           }
-          soSerial = null;
         } else {
-          // trackSerial = true và trackBatch = false → dùng so_serial, không set ma_lo
           maLo = null;
-          soSerial = item.batchserial || null;
         }
+        soSerial = null;
+      } else {
+        // trackSerial = true và trackBatch = false → dùng so_serial, không set ma_lo
+        maLo = null;
+        soSerial = item.batchserial || null;
+      }
 
-        return {
-          ma_vt: item.item_code,
-          dvt: dvt,
-          so_serial: soSerial,
-          ma_kho: item.stock_code,
-          so_luong: Math.abs(item.qty), // Lấy giá trị tuyệt đối
-          gia_nt: 0, // Stock transfer thường không có giá
-          tien_nt: 0, // Stock transfer thường không có tiền
-          ma_lo: maLo,
-          px_gia_dd: 0, // Mặc định 0
-          ma_nx: getMaNx(item.iotype),
-          ma_vv: null,
-          ma_bp:
-            orderData?.sales?.[0]?.department?.ma_bp ||
-            item.branch_code ||
-            null,
-          so_lsx: null,
-          ma_sp: null,
-          ma_hd: null,
-          ma_phi: null,
-          ma_ku: null,
-          ma_phi_hh: null,
-          ma_phi_ttlk: null,
-          tien_hh_nt: 0,
-          tien_ttlk_nt: 0,
-        };
-      }),
-    );
+      return {
+        ma_vt: item.item_code,
+        dvt: dvt,
+        so_serial: soSerial,
+        ma_kho: item.stock_code,
+        so_luong: Math.abs(item.qty), // Lấy giá trị tuyệt đối
+        gia_nt: 0, // Stock transfer thường không có giá
+        tien_nt: 0, // Stock transfer thường không có tiền
+        ma_lo: maLo,
+        px_gia_dd: 0, // Mặc định 0
+        ma_nx: getMaNx(item.iotype),
+        ma_vv: null,
+        ma_bp:
+          orderData?.sales?.[0]?.department?.ma_bp || item.branch_code || null,
+        so_lsx: null,
+        ma_sp: null,
+        ma_hd: null,
+        ma_phi: null,
+        ma_ku: null,
+        ma_phi_hh: null,
+        ma_phi_ttlk: null,
+        tien_hh_nt: 0,
+        tien_ttlk_nt: 0,
+      };
+    });
 
     // Format date
     const formatDateISO = (date: Date | string): string => {
@@ -766,6 +772,8 @@ export class SalesPayloadService {
 
     if (isNormalOrder && allStockTransfers.length > 0) {
       transDate = allStockTransfers[0].transDate || null;
+
+      // ✅ Collect unique item codes for batch fetching
       const itemCodes = Array.from(
         new Set(
           allStockTransfers
@@ -774,10 +782,13 @@ export class SalesPayloadService {
         ),
       );
 
+      // ✅ Batch fetch all products at once (instead of in loop)
       const loyaltyMap = new Map<string, any>();
       if (itemCodes.length > 0) {
         const products = await this.loyaltyService.fetchProducts(itemCodes);
-        products.forEach((p, c) => loyaltyMap.set(c, p));
+        products.forEach((product, itemCode) => {
+          loyaltyMap.set(itemCode, product);
+        });
       }
 
       allStockTransfers.forEach((st) => {
@@ -805,15 +816,32 @@ export class SalesPayloadService {
   ): Promise<Map<string, string>> {
     const map = new Map<string, string>();
     const [dataCard] = await this.n8nService.fetchCardData(docCode);
-    if (Array.isArray(dataCard?.data)) {
-      for (const card of dataCard.data) {
-        if (!card?.service_item_name || !card?.serial) continue;
-        const product = await this.loyaltyService.checkProduct(
-          card.service_item_name,
-        );
-        if (product) map.set(product.materialCode, card.serial);
+
+    if (!Array.isArray(dataCard?.data) || dataCard.data.length === 0) {
+      return map;
+    }
+
+    // ✅ Batch fetch instead of N+1 query
+    const itemCodes = dataCard.data
+      .map((card) => card?.service_item_name)
+      .filter(Boolean);
+
+    if (itemCodes.length === 0) {
+      return map;
+    }
+
+    // Fetch all products in one batch call
+    const products = await this.loyaltyService.fetchProducts(itemCodes);
+
+    // Map serial numbers
+    for (const card of dataCard.data) {
+      if (!card?.service_item_name || !card?.serial) continue;
+      const product = products.get(card.service_item_name);
+      if (product?.materialCode) {
+        map.set(product.materialCode, card.serial);
       }
     }
+
     return map;
   }
 
