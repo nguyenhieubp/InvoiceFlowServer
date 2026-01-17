@@ -1576,17 +1576,6 @@ export class CategoriesService {
   async createPaymentMethod(
     createDto: CreatePaymentMethodDto,
   ): Promise<PaymentMethod> {
-    // Kiểm tra xem code đã tồn tại chưa
-    const existing = await this.paymentMethodRepository.findOne({
-      where: { code: createDto.code },
-    });
-
-    if (existing) {
-      throw new BadRequestException(
-        `Mã phương thức thanh toán "${createDto.code}" đã tồn tại`,
-      );
-    }
-
     const paymentMethod = this.paymentMethodRepository.create({
       ...createDto,
       trangThai: createDto.trangThai || 'active',

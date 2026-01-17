@@ -401,11 +401,7 @@ export class PaymentService {
 
         return { row, saleDept, dvcs, paymentMethod };
       })
-      .filter(
-        (item) =>
-          !!item.paymentMethod ||
-          (includeCash && item.row.fop_syscode === 'CASH'),
-      )
+
       .map(({ row, saleDept, dvcs, paymentMethod }) => {
         // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
         const periodCode = row.period_code
