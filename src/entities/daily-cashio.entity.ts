@@ -24,11 +24,23 @@ export class DailyCashio {
   @Column({ type: 'text', nullable: true })
   fop_description: string; // Mô tả
 
+  @Column({ nullable: true })
+  cat_sys_code: string;
+
+  @Column({ nullable: true })
+  shift_code: string;
+
   @Column()
   so_code: string; // SO03.01478607 - Mã đơn hàng để join với sales.docCode
 
   @Column({ nullable: true })
   master_code: string; // SI03.01478607_1 hoặc SO03.01478607 - Cũng có thể join với sales.docCode
+
+  @Column({ nullable: true })
+  invoice_no: string;
+
+  @Column({ nullable: true })
+  invoice_code: string;
 
   @Column({ type: 'timestamp' })
   docdate: Date; // 03-10-2025 10:30
@@ -41,6 +53,9 @@ export class DailyCashio {
 
   @Column({ nullable: true })
   partner_name: string; // Lê Thị Kim Hoa
+
+  @Column({ type: 'text', nullable: true })
+  description: string;
 
   @Column({ nullable: true })
   refno: string; // Số tham chiếu
@@ -66,6 +81,9 @@ export class DailyCashio {
 
   @Column({ nullable: true })
   period_code: string; // Mã kỳ
+
+  @Column({ nullable: true })
+  partner_type: string; // CUSTOMER, VENDOR, etc.
 
   @CreateDateColumn()
   createdAt: Date;
