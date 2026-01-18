@@ -9,6 +9,7 @@ import { StockTransfer } from '../../entities/stock-transfer.entity';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { N8nService } from '../../services/n8n.service';
 import { SalesPayloadService } from './sales-payload.service';
+import { SalesQueryService } from './sales-query.service';
 import { InvoicePersistenceService } from './invoice-persistence.service';
 import { PaymentService } from '../payment/payment.service';
 import { forwardRef, Inject } from '@nestjs/common';
@@ -40,6 +41,7 @@ export class SpecialOrderHandlerService {
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private n8nService: N8nService,
     private salesPayloadService: SalesPayloadService,
+    private salesQueryService: SalesQueryService,
     private invoicePersistenceService: InvoicePersistenceService,
     @Inject(forwardRef(() => PaymentService))
     private paymentService: PaymentService,
@@ -61,8 +63,12 @@ export class SpecialOrderHandlerService {
         await beforeAction();
       }
 
+      // Explode sales by Stock Transfers
+      const [enrichedOrder] =
+        await this.salesQueryService.enrichOrdersWithCashio([orderData]);
+
       const invoiceData =
-        await this.salesPayloadService.buildFastApiInvoiceData(orderData);
+        await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
 
       // Call createSalesOrder
       const result = await this.fastApiInvoiceFlowService.createSalesOrder({

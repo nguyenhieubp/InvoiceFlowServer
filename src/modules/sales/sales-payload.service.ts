@@ -71,65 +71,30 @@ export class SalesPayloadService {
             }
             return true;
           })
-          .map((sale: any, index: number) =>
-            this.mapSaleToInvoiceDetail(sale, index, orderData, {
+          .map((sale: any, index: number) => {
+            this.logger.log(
+              `[DEBUG] Mapping sale ${index + 1}: ${sale.itemCode}`,
+            );
+            return this.mapSaleToInvoiceDetail(sale, index, orderData, {
               isNormalOrder,
               stockTransferMap,
               cardSerialMap,
-            }),
-          ),
+            });
+          }),
       );
 
-      // AGGREGATE DETAIL: Group by ma_vt, ma_kho, AND serial/batch
-      // Reason: Frontend requires "Exploded" view (by Stock Transfer), but FAST ERP requires "Aggregated" view (by Product).
-      // IMPORTANT: Items with different serial/batch numbers MUST NOT be aggregated together
-      const aggregatedDetailMap = new Map<string, any>();
-
-      detail.forEach((item: any) => {
-        // Include serial/batch in key to prevent aggregating items with different serials
-        const serial = item.so_serial || '';
-        const batch = item.ma_lo || '';
-        const key = `${item.ma_vt}_${item.ma_kho}_${serial}_${batch}`;
-
-        if (!aggregatedDetailMap.has(key)) {
-          // Clone first item as base
-          aggregatedDetailMap.set(key, { ...item });
-        } else {
-          // Aggregate values
-          const existing = aggregatedDetailMap.get(key);
-          existing.so_luong += item.so_luong;
-          existing.tien_hang += item.tien_hang;
-          existing.tien_thue += item.tien_thue;
-          existing.dt_tg_nt += item.dt_tg_nt;
-
-          // Sum all discounts
-          for (let i = 1; i <= 22; i++) {
-            const field = `ck${i.toString().padStart(2, '0')}_nt`;
-            if (existing[field] !== undefined && item[field] !== undefined) {
-              existing[field] += item[field];
-            }
-          }
-        }
-      });
-
-      // Recalculate Prices for Aggregated Lines
-      const aggregatedDetail = Array.from(aggregatedDetailMap.values()).map(
-        (item, index) => {
-          if (item.so_luong > 0) {
-            item.gia_ban = item.tien_hang / item.so_luong;
-          }
-          item.dong = index + 1; // Reset line number
-          return item;
-        },
+      // DEBUG: Log detail count
+      this.logger.log(
+        `[Payload] Order ${orderData.docCode}: ${detail.length} detail items (NO AGGREGATION)`,
       );
 
-      // 5. Build summary (cbdetail)
-      const cbdetail = this.buildInvoiceCbDetail(aggregatedDetail);
+      // 5. Build summary (cbdetail) - NO AGGREGATION
+      const cbdetail = this.buildInvoiceCbDetail(detail);
 
-      // 6. Assemble final payload with AGGREGATED detail
+      // 6. Assemble final payload - Using EXPLODED detail (no aggregation)
       return this.assembleInvoicePayload(
         orderData,
-        aggregatedDetail,
+        detail, // Use original detail without aggregation
         cbdetail,
         {
           ngayCt,
