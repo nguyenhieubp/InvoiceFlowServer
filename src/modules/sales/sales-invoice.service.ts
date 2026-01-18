@@ -212,4 +212,156 @@ export class SalesInvoiceService {
     // TODO: Consider moving to SalesWarehouseService in future refactoring
     throw new Error('Not implemented - to be moved to SalesWarehouseService');
   }
+
+  /**
+   * Xử lý tạo hóa đơn cho danh sách đơn hàng trong khoảng thời gian (Phase 2)
+   */
+  async processInvoicesByDateRange(
+    startDate: string,
+    endDate: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    totalProcessed: number;
+    successCount: number;
+    failedCount: number;
+    errors: string[];
+    details: Array<{
+      date: string;
+      processed: number;
+      success: number;
+      failed: number;
+    }>;
+  }> {
+    const parseDate = (dateStr: string): Date => {
+      const day = parseInt(dateStr.substring(0, 2));
+      const monthStr = dateStr.substring(2, 5).toUpperCase();
+      const year = parseInt(dateStr.substring(5, 9));
+      const monthMap: Record<string, number> = {
+        JAN: 0,
+        FEB: 1,
+        MAR: 2,
+        APR: 3,
+        MAY: 4,
+        JUN: 5,
+        JUL: 6,
+        AUG: 7,
+        SEP: 8,
+        OCT: 9,
+        NOV: 10,
+        DEC: 11,
+      };
+      return new Date(year, monthMap[monthStr] || 0, day);
+    };
+
+    const formatDate = (date: Date): string => {
+      const day = date.getDate().toString().padStart(2, '0');
+      const months = [
+        'JAN',
+        'FEB',
+        'MAR',
+        'APR',
+        'MAY',
+        'JUN',
+        'JUL',
+        'AUG',
+        'SEP',
+        'OCT',
+        'NOV',
+        'DEC',
+      ];
+      return `${day}${months[date.getMonth()]}${date.getFullYear()}`;
+    };
+
+    const start = parseDate(startDate);
+    const end = parseDate(endDate);
+    const errors: string[] = [];
+    const details: Array<{
+      date: string;
+      processed: number;
+      success: number;
+      failed: number;
+    }> = [];
+    let totalProcessed = 0;
+    let totalSuccess = 0;
+    let totalFailed = 0;
+
+    let currentDate = new Date(start);
+    while (currentDate <= end) {
+      const dateStr = formatDate(currentDate);
+      this.logger.log(`[Phase 2] Bắt đầu xử lý hóa đơn cho ngày ${dateStr}...`);
+
+      try {
+        // Tìm các đơn hàng chưa xử lý trong ngày này
+        // Lưu ý: Cần query DB để lấy docCode.
+        // Giả sử lấy tất cả đơn trong ngày (hoặc tối ưu sau bằng cách filter Processed)
+        // Ở đây ta sẽ query Sale entity DISTINCT docCode theo ngày
+        const startOfDay = new Date(currentDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(currentDate);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        const sales = await this.saleRepository
+          .createQueryBuilder('sale')
+          .select('DISTINCT sale.docCode', 'docCode')
+          .where('sale.docDate >= :startOfDay AND sale.docDate <= :endOfDay', {
+            startOfDay,
+            endOfDay,
+          })
+          .getRawMany();
+
+        const docCodes = sales.map((s) => s.docCode);
+        this.logger.log(
+          `[Phase 2] Tìm thấy ${docCodes.length} đơn hàng cho ngày ${dateStr}`,
+        );
+
+        let daySuccess = 0;
+        let dayFailed = 0;
+
+        for (const docCode of docCodes) {
+          try {
+            // Gọi hàm processSingleOrder cho từng đơn
+            // ForceRetry = false để skip các đơn đã thành công rồi
+            const result = await this.processSingleOrder(docCode, false);
+            if (result.success || result.alreadyExists) {
+              daySuccess++;
+              totalSuccess++;
+            } else {
+              dayFailed++;
+              totalFailed++;
+              errors.push(`[${dateStr}] ${docCode}: ${result.message}`);
+            }
+          } catch (err: any) {
+            dayFailed++;
+            totalFailed++;
+            errors.push(`[${dateStr}] ${docCode}: ${err.message}`);
+          }
+          totalProcessed++;
+        }
+
+        details.push({
+          date: dateStr,
+          processed: docCodes.length,
+          success: daySuccess,
+          failed: dayFailed,
+        });
+      } catch (error: any) {
+        const msg = `Lỗi khi xử lý ngày ${dateStr}: ${error.message}`;
+        this.logger.error(msg);
+        errors.push(msg);
+      }
+
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    return {
+      success: totalFailed === 0,
+      message: `Hoàn tất xử lý hóa đơn từ ${startDate} đến ${endDate}. Tổng: ${totalProcessed}, Thành công: ${totalSuccess}, Lỗi: ${totalFailed}`,
+      totalProcessed,
+      successCount: totalSuccess,
+      failedCount: totalFailed,
+      errors,
+      details,
+    };
+  }
 }
