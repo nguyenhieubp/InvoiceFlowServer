@@ -71,25 +71,38 @@ export class SalesPayloadService {
             }
             return true;
           })
-          .map((sale: any, index: number) =>
-            this.mapSaleToInvoiceDetail(sale, index, orderData, {
+          .map((sale: any, index: number) => {
+            this.logger.log(
+              `[DEBUG] Mapping sale ${index + 1}: ${sale.itemCode}`,
+            );
+            return this.mapSaleToInvoiceDetail(sale, index, orderData, {
               isNormalOrder,
               stockTransferMap,
               cardSerialMap,
-            }),
-          ),
+            });
+          }),
       );
 
-      // 5. Build summary (cbdetail)
+      // DEBUG: Log detail count
+      this.logger.log(
+        `[Payload] Order ${orderData.docCode}: ${detail.length} detail items (NO AGGREGATION)`,
+      );
+
+      // 5. Build summary (cbdetail) - NO AGGREGATION
       const cbdetail = this.buildInvoiceCbDetail(detail);
 
-      // 6. Assemble final payload (Using exploded detail, NO aggregation)
-      return this.assembleInvoicePayload(orderData, detail, cbdetail, {
-        ngayCt,
-        ngayLct,
-        transDate,
-        maBp: detail[0]?.ma_bp || '',
-      });
+      // 6. Assemble final payload - Using EXPLODED detail (no aggregation)
+      return this.assembleInvoicePayload(
+        orderData,
+        detail, // Use original detail without aggregation
+        cbdetail,
+        {
+          ngayCt,
+          ngayLct,
+          transDate,
+          maBp: detail[0]?.ma_bp || '',
+        },
+      );
     } catch (error: any) {
       this.logInvoiceError(error, orderData);
       throw new Error(

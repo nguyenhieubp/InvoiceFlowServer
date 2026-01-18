@@ -4,6 +4,7 @@ import { Repository, In } from 'typeorm';
 import { StockTransfer } from '../../entities/stock-transfer.entity';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { SalesPayloadService } from './sales-payload.service';
+import { SalesQueryService } from './sales-query.service';
 import { PaymentService } from '../payment/payment.service';
 import { forwardRef, Inject } from '@nestjs/common';
 import * as SalesUtils from '../../utils/sales.utils';
@@ -20,6 +21,7 @@ export class NormalOrderHandlerService {
     private stockTransferRepository: Repository<StockTransfer>,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private salesPayloadService: SalesPayloadService,
+    private salesQueryService: SalesQueryService,
     @Inject(forwardRef(() => PaymentService))
     private paymentService: PaymentService,
   ) {}
@@ -55,8 +57,13 @@ export class NormalOrderHandlerService {
       });
     }
 
+    // Explode sales by Stock Transfers (1 sale with 2 STs → 2 exploded sales)
+    const [enrichedOrder] = await this.salesQueryService.enrichOrdersWithCashio(
+      [orderData],
+    );
+
     const invoiceData =
-      await this.salesPayloadService.buildFastApiInvoiceData(orderData);
+      await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
 
     // 2. Create Sales Order
     const soResult = await this.fastApiInvoiceFlowService.createSalesOrder({

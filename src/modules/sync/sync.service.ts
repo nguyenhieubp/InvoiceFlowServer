@@ -137,6 +137,7 @@ export class SyncService {
   async syncStockTransfer(
     date: string,
     brand: string,
+    options?: { skipWarehouseProcessing?: boolean },
   ): Promise<{
     success: boolean;
     message: string;
@@ -361,13 +362,16 @@ export class SyncService {
       );
 
       // Tự động xử lý warehouse cho các stock transfers mới (chỉ cho các docCode chưa được xử lý)
-      try {
-        await this.processWarehouseForStockTransfers(date, brand);
-      } catch (warehouseError: any) {
-        this.logger.warn(
-          `[Stock Transfer] Lỗi khi xử lý warehouse tự động cho brand ${brand} ngày ${date}: ${warehouseError?.message || warehouseError}`,
-        );
-        // Không throw error để không chặn flow sync chính
+      // Nếu skipWarehouseProcessing = true thì bỏ qua bước này
+      if (!options?.skipWarehouseProcessing) {
+        try {
+          await this.processWarehouseForStockTransfers(date, brand);
+        } catch (warehouseError: any) {
+          this.logger.warn(
+            `[Stock Transfer] Lỗi khi xử lý warehouse tự động cho brand ${brand} ngày ${date}: ${warehouseError?.message || warehouseError}`,
+          );
+          // Không throw error để không chặn flow sync chính
+        }
       }
 
       return {
@@ -890,18 +894,26 @@ export class SyncService {
         updatedCount: number;
       }> = [];
 
-      // Lặp qua từng ngày
+      // Phase 1: Đồng bộ dữ liệu từ Zappy (Bỏ qua xử lý Warehouse)
+      const dateList: string[] = [];
       const currentDate = new Date(startDate.getTime());
       while (currentDate <= endDate) {
-        const dateStr = formatToDDMMMYYYY(currentDate);
+        dateList.push(formatToDDMMMYYYY(currentDate));
+        // Tăng 1 ngày
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
 
-        // Đồng bộ cho từng brand
+      // Loop qua từng ngày để sync từ Zappy
+      for (const dateStr of dateList) {
         for (const brandItem of brands) {
           try {
             this.logger.log(
-              `[Stock Transfer Range] Đang đồng bộ brand ${brandItem} cho ngày ${dateStr}`,
+              `[Stock Transfer Range] Phase 1: Đang đồng bộ Zappy brand ${brandItem} cho ngày ${dateStr}`,
             );
-            const result = await this.syncStockTransfer(dateStr, brandItem);
+            // Gọi sync với skipWarehouseProcessing = true
+            const result = await this.syncStockTransfer(dateStr, brandItem, {
+              skipWarehouseProcessing: true,
+            });
 
             totalRecordsCount += result.recordsCount;
             totalSavedCount += result.savedCount;
@@ -918,19 +930,35 @@ export class SyncService {
             if (result.errors && result.errors.length > 0) {
               errors.push(...result.errors);
             }
-
-            this.logger.log(
-              `[Stock Transfer Range] Hoàn thành đồng bộ brand ${brandItem} cho ngày ${dateStr}`,
-            );
           } catch (error: any) {
-            const errorMsg = `Lỗi khi đồng bộ stock transfer cho brand ${brandItem} ngày ${dateStr}: ${error?.message || error}`;
+            const errorMsg = `Lỗi khi đồng bộ stock transfer (Phase 1) cho brand ${brandItem} ngày ${dateStr}: ${error?.message || error}`;
             this.logger.error(`[Stock Transfer Range] ${errorMsg}`);
             errors.push(errorMsg);
           }
         }
+      }
 
-        // Tăng 1 ngày
-        currentDate.setDate(currentDate.getDate() + 1);
+      this.logger.log(
+        `[Stock Transfer Range] Phase 1 hoàn tất. Bắt đầu Phase 2: Xử lý Warehouse...`,
+      );
+
+      // Phase 2: Xử lý Warehouse (Sau khi đã có đủ dữ liệu)
+      for (const dateStr of dateList) {
+        for (const brandItem of brands) {
+          try {
+            this.logger.log(
+              `[Stock Transfer Range] Phase 2: Đang xử lý Warehouse brand ${brandItem} cho ngày ${dateStr}`,
+            );
+            await this.processWarehouseForStockTransfers(dateStr, brandItem);
+            this.logger.log(
+              `[Stock Transfer Range] Phase 2: Hoàn thành xử lý Warehouse brand ${brandItem} cho ngày ${dateStr}`,
+            );
+          } catch (error: any) {
+            const errorMsg = `Lỗi khi xử lý warehouse (Phase 2) cho brand ${brandItem} ngày ${dateStr}: ${error?.message || error}`;
+            this.logger.error(`[Stock Transfer Range] ${errorMsg}`);
+            errors.push(errorMsg);
+          }
+        }
       }
 
       this.logger.log(

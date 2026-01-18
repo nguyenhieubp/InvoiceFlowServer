@@ -189,8 +189,41 @@ export class SalesService {
       errors?: string[];
     }>;
     errors?: string[];
+    invoiceProcessing?: {
+      success: boolean;
+      totalProcessed: number;
+      successCount: number;
+      failedCount: number;
+      errors: string[];
+      details: Array<any>;
+    };
   }> {
-    return this.salesSyncService.syncSalesByDateRange(startDate, endDate);
+    this.logger.log(
+      `[Two-Phase Sync] Bắt đầu đồng bộ Sales từ ${startDate} đến ${endDate}`,
+    );
+
+    // Phase 1: Sync from Zappy
+    this.logger.log(`[Two-Phase Sync] Phase 1: Syncing from Zappy...`);
+    const syncResult = await this.salesSyncService.syncSalesByDateRange(
+      startDate,
+      endDate,
+    );
+
+    // Phase 2: Process Invoices
+    this.logger.log(
+      `[Two-Phase Sync] Phase 2: Processing Fast API Invoices...`,
+    );
+    const invoiceResult =
+      await this.salesInvoiceService.processInvoicesByDateRange(
+        startDate,
+        endDate,
+      );
+
+    return {
+      ...syncResult,
+      message: `${syncResult.message}. Phase 2: ${invoiceResult.message}`,
+      invoiceProcessing: invoiceResult,
+    };
   }
 
   async findOne(id: string) {

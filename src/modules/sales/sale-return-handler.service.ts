@@ -4,6 +4,7 @@ import { Repository, In } from 'typeorm';
 import { StockTransfer } from '../../entities/stock-transfer.entity';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { SalesPayloadService } from './sales-payload.service';
+import { SalesQueryService } from './sales-query.service';
 import { InvoicePersistenceService } from './invoice-persistence.service';
 import { PaymentService } from '../payment/payment.service';
 import { forwardRef, Inject } from '@nestjs/common';
@@ -19,6 +20,7 @@ export class SaleReturnHandlerService {
     private stockTransferRepository: Repository<StockTransfer>,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private salesPayloadService: SalesPayloadService,
+    private salesQueryService: SalesQueryService,
     private invoicePersistenceService: InvoicePersistenceService,
     @Inject(forwardRef(() => PaymentService))
     private paymentService: PaymentService,
@@ -179,9 +181,14 @@ export class SaleReturnHandlerService {
       `[SaleOrderWithX] Bắt đầu xử lý đơn có đuôi _X: ${docCode}, action: ${action}`,
     );
 
+    // Explode sales by Stock Transfers
+    const [enrichedOrder] = await this.salesQueryService.enrichOrdersWithCashio(
+      [orderData],
+    );
+
     // Đơn có đuôi _X → Gọi API salesOrder với action: 1
     const invoiceData =
-      await this.salesPayloadService.buildFastApiInvoiceData(orderData);
+      await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
 
     const docCodeWithoutX = this.removeSuffixX(docCode);
 
