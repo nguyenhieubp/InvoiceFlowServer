@@ -80,12 +80,16 @@ export class SalesPayloadService {
           ),
       );
 
-      // AGGREGATE DETAIL: Group by ma_vt (and ma_kho)
+      // AGGREGATE DETAIL: Group by ma_vt, ma_kho, AND serial/batch
       // Reason: Frontend requires "Exploded" view (by Stock Transfer), but FAST ERP requires "Aggregated" view (by Product).
+      // IMPORTANT: Items with different serial/batch numbers MUST NOT be aggregated together
       const aggregatedDetailMap = new Map<string, any>();
 
       detail.forEach((item: any) => {
-        const key = `${item.ma_vt}_${item.ma_kho}`;
+        // Include serial/batch in key to prevent aggregating items with different serials
+        const serial = item.so_serial || '';
+        const batch = item.ma_lo || '';
+        const key = `${item.ma_vt}_${item.ma_kho}_${serial}_${batch}`;
 
         if (!aggregatedDetailMap.has(key)) {
           // Clone first item as base
