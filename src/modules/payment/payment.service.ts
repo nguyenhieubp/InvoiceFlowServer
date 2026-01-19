@@ -21,6 +21,7 @@ export interface PaymentData {
   bank_code: string; // Ngân hàng
   period_code: string; // Kỳ hạn
   ma_doi_tac_payment?: string; // Mã đối tác từ PaymentMethod
+  company?: string; // Nhãn hàng/Company
 
   // From sales (s)
   docDate: Date; // Ngày hóa đơn (from sales)
@@ -53,8 +54,17 @@ export class PaymentService {
     dateFrom?: string;
     dateTo?: string;
     brand?: string;
+    fopSyscode?: string;
   }) {
-    const { page = 1, limit = 10, search, dateFrom, dateTo, brand } = options;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      dateFrom,
+      dateTo,
+      brand,
+      fopSyscode,
+    } = options;
 
     const query = this.createBasePaymentQuery();
 
@@ -75,7 +85,13 @@ export class PaymentService {
     }
 
     if (brand) {
-      query.andWhere('ds.brand = :brand', { brand });
+      query.andWhere('ds.brand ILIKE :brand', { brand: `%${brand}%` });
+    }
+
+    if (fopSyscode) {
+      query.andWhere('ds.fop_syscode ILIKE :fopSyscode', {
+        fopSyscode: `%${fopSyscode}%`,
+      });
     }
 
     query.offset((page - 1) * limit).limit(limit);
@@ -102,7 +118,12 @@ export class PaymentService {
       countQuery.andWhere('ds.docdate <= :dateTo', { dateTo });
     }
     if (brand) {
-      countQuery.andWhere('ds.brand = :brand', { brand });
+      countQuery.andWhere('ds.brand ILIKE :brand', { brand: `%${brand}%` });
+    }
+    if (fopSyscode) {
+      countQuery.andWhere('ds.fop_syscode ILIKE :fopSyscode', {
+        fopSyscode: `%${fopSyscode}%`,
+      });
     }
 
     const totalResult = await countQuery
@@ -413,6 +434,7 @@ export class PaymentService {
           period_code: periodCode,
           ma_dvcs_cashio: paymentMethod?.bankUnit || null,
           ma_dvcs_sale: dvcs,
+          company: saleDept?.company || null,
           ma_doi_tac_payment: getSupplierCode(paymentMethod?.maDoiTac) || null,
         };
       });

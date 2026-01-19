@@ -33,6 +33,7 @@ export class PaymentController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('brand') brand?: string,
+    @Query('fopSyscode') fopSyscode?: string,
   ) {
     return this.paymentService.findAll({
       page: page ? parseInt(page) : 1,
@@ -41,6 +42,7 @@ export class PaymentController {
       dateFrom,
       dateTo,
       brand,
+      fopSyscode,
     });
   }
 
