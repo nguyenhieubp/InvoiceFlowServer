@@ -220,7 +220,7 @@ export class LoyaltyService {
   async fetchMaDvcs(branchCode: string): Promise<string> {
     if (!branchCode) return '';
     try {
-      const url = `${this.LOYALTY_API_BASE_URL}/departments?page=1&limit=25&branchcode=${branchCode}`;
+      const url = `${this.LOYALTY_API_BASE_URL}/departments?page=1&limit=25&ma_bp=${branchCode}`;
       const response = await this.httpService.axiosRef.get(url, {
         headers: { accept: 'application/json' },
         timeout: this.REQUEST_TIMEOUT,

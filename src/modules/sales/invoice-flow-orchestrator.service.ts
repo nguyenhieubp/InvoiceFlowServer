@@ -51,13 +51,9 @@ export class InvoiceFlowOrchestratorService {
       let maDvcs = orderData.branchCode || '';
 
       // Skip API call if branchCode already exists
+      // Skip API call if branchCode already exists
       if (!maDvcs) {
-        try {
-          const fetchedDvcs = await this.loyaltyService.fetchMaDvcs('');
-          if (fetchedDvcs) maDvcs = fetchedDvcs;
-        } catch (e) {
-          // Ignore error
-        }
+        maDvcs = '';
       }
 
       // ============================================

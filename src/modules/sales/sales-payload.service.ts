@@ -1382,7 +1382,7 @@ export class SalesPayloadService {
     return detailItem;
   }
 
-  private assembleInvoicePayload(
+  private async assembleInvoicePayload(
     orderData: any,
     detail: any[],
     cbdetail: any[],
@@ -1391,14 +1391,12 @@ export class SalesPayloadService {
     const { ngayCt, ngayLct, transDate, maBp } = context;
     const firstSale = orderData.sales?.[0];
 
+    const maDvcs = await this.loyaltyService.fetchMaDvcs(maBp);
+
+    // not ma_dvcs_ ???pedding
     return {
       action: 0,
-      ma_dvcs:
-        firstSale?.department?.ma_dvcs ||
-        firstSale?.department?.ma_dvcs_ht ||
-        orderData.customer?.brand ||
-        orderData.branchCode ||
-        '',
+      ma_dvcs: maDvcs,
       ma_kh: this.resolveInvoiceMaKhHeader(orderData),
       ong_ba: orderData.customer?.name || null,
       ma_gd: '1',

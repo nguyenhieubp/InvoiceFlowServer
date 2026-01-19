@@ -244,6 +244,7 @@ export class SaleReturnHandlerService {
       // Xử lý cashio payment (Phiếu thu tiền mặt/Giấy báo có) nếu salesOrder thành công
       let cashioResult: any = null;
       let paymentResult: any = null;
+      /*
       if (responseStatus === 1) {
         this.logger.log(
           `[Cashio] Bắt đầu xử lý cashio payment cho đơn hàng ${docCode} (đơn có đuôi _X)`,
@@ -347,6 +348,7 @@ export class SaleReturnHandlerService {
           );
         }
       }
+      */
 
       return {
         success: responseStatus === 1,
