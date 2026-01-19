@@ -176,12 +176,24 @@ export class SalesQueryService {
 
           // Find matching sale to get price/info
           // Match by itemCode (case insensitive)
-          const sale = (order.sales || []).find(
+          // Prioritize finding an unused sale first
+          let sale = (order.sales || []).find(
             (s: any) =>
-              s.itemCode === st.itemCode ||
-              s.itemCode?.toLowerCase().trim() ===
-                st.itemCode?.toLowerCase().trim(),
+              !usedSalesIds.has(s.id) &&
+              (s.itemCode === st.itemCode ||
+                s.itemCode?.toLowerCase().trim() ===
+                  st.itemCode?.toLowerCase().trim()),
           );
+
+          // If no unused sale found, fallback to any matching sale (legacy behavior for 1 sale -> N splits)
+          if (!sale) {
+            sale = (order.sales || []).find(
+              (s: any) =>
+                s.itemCode === st.itemCode ||
+                s.itemCode?.toLowerCase().trim() ===
+                  st.itemCode?.toLowerCase().trim(),
+            );
+          }
 
           if (sale) {
             usedSalesIds.add(sale.id);
