@@ -228,7 +228,11 @@ export class SalesPayloadService {
     );
 
     // Helper để build detail/ndetail item
-    const buildLineItem = async (sale: any, index: number) => {
+    const buildLineItem = async (
+      sale: any,
+      index: number,
+      linkedDong?: number,
+    ) => {
       const { qty } = this.calculateInvoiceQty(
         sale,
         orderData.docCode,
@@ -270,6 +274,11 @@ export class SalesPayloadService {
         isTachThe,
       );
 
+      // Rule đánh số dòng (Dong):
+      // - Nếu là Import Line (Service): Tự tăng (index + 1)
+      // - Nếu là Export Line (Item): Lấy theo Dong của Import Line tương ứng (linkedDong)
+      const dong = linkedDong ? linkedDong : index + 1;
+
       return {
         ma_kho_n: lineMaKho,
         ma_kho_x: lineMaKho,
@@ -281,20 +290,59 @@ export class SalesPayloadService {
         tien_nt2: Number(tienNt2),
         ma_nx: 'NX01', // Fix cứng theo yêu cầu
         ma_bp: limitString(maBp, 8),
-        dong: index + 1, // Số thứ tự dòng tăng dần (1, 2, 3...)
-        dong_vt_goc: 1, // Dòng vật tư gốc luôn là 1
+        dong: dong,
+        dong_vt_goc: 1, // Dòng vật tư gốc luôn là 1 (theo yêu cầu cũ, user chỉ yêu cầu sửa dong)
+        _materialCode: materialCode, // Internal use for mapping
+        _itemCode: sale.itemCode, // Internal use for mapping
       };
     };
 
-    // Build detail (xuất - productType = 'I')
-    const detail = await Promise.all(
-      exportLines.map((sale, index) => buildLineItem(sale, index)),
-    );
-
-    // Build ndetail (nhập - productType = 'S')
+    // 1. Build ndetail (nhập - productType = 'S') FIRST
     const ndetail = await Promise.all(
       importLines.map((sale, index) => buildLineItem(sale, index)),
     );
+
+    // 2. Map Import Lines for Linking: Map both itemCode and materialCode -> Dong
+    const svcCodeToDongMap = new Map<string, number>();
+    ndetail.forEach((item) => {
+      // Map materialCode -> dong
+      if (item._materialCode) {
+        svcCodeToDongMap.set(item._materialCode, item.dong);
+      }
+      // Map itemCode -> dong (often the svc code)
+      if (item._itemCode) {
+        svcCodeToDongMap.set(item._itemCode, item.dong);
+      }
+    });
+
+    // 3. Build detail (xuất - productType = 'I') matching svc_code
+    const detail = await Promise.all(
+      exportLines.map(async (sale, index) => {
+        // Find corresponding Import line using svc_code
+        // sale.svc_code (on Export Item) works as key to find Import Line
+        // We match against either materialCode OR itemCode of the Import Line
+        let linkedDong = 1;
+        if (sale.svc_code && svcCodeToDongMap.has(sale.svc_code)) {
+          linkedDong = svcCodeToDongMap.get(sale.svc_code)!;
+        } else if (ndetail.length > 0) {
+          // Fallback: Default to first line if no match found
+          linkedDong = ndetail[0].dong;
+        }
+
+        const item = await buildLineItem(sale, index, linkedDong);
+
+        // Remove internal properties before returning
+        delete (item as any)._materialCode;
+        delete (item as any)._itemCode;
+        return item;
+      }),
+    );
+
+    // Clean up ndetail internal properties
+    ndetail.forEach((item) => {
+      delete (item as any)._materialCode;
+      delete (item as any)._itemCode;
+    });
 
     // Helper resolve cho sale đầu tiên nếu list detail rỗng
     const getFirstMaKho = async (sale: any) => {
