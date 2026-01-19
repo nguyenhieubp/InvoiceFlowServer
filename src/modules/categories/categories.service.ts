@@ -1564,6 +1564,14 @@ export class CategoriesService {
     return paymentMethod;
   }
 
+  async getGiayBaoCoPaymentMethodCodes(): Promise<string[]> {
+    const paymentMethods = await this.paymentMethodRepository.find({
+      where: { documentType: 'Giấy báo có', trangThai: 'active' },
+      select: ['code'],
+    });
+    return paymentMethods.map((pm) => pm.code);
+  }
+
   async findPaymentMethodByCode(
     code: string,
     dvcs: string,

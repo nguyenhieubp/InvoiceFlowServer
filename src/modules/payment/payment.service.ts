@@ -67,7 +67,25 @@ export class PaymentService {
       fopSyscode,
     } = options;
 
+    // Get valid payment method codes regarding 'Giấy báo có'
+    const validCodes =
+      await this.categoryService.getGiayBaoCoPaymentMethodCodes();
+
     const query = this.createBasePaymentQuery();
+
+    // Filter by valid codes
+    if (validCodes.length > 0) {
+      query.andWhere('ds.fop_syscode IN (:...validCodes)', { validCodes });
+    } else {
+      // If no valid codes found, return empty result to avoid showing wrong data
+      return {
+        data: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 0,
+      };
+    }
 
     // Filters
     if (search) {
@@ -98,13 +116,18 @@ export class PaymentService {
     query.offset((page - 1) * limit).limit(limit);
 
     const results = await query.getRawMany();
+    // Pass true to skip filtering inside enrich, since we already filtered by code
+    // However, enrich logic also checks ma_dvcs which is safer.
+    // Let's keep enrich logic as double check, or optimize it.
+    // For now, keep it as is.
     const enrichedResults = await this.enrichPaymentResults(results, false);
 
     // Get total count
     const countQuery = this.dailyCashioRepository
       .createQueryBuilder('ds')
       .leftJoin(Sale, 's', 'ds.so_code = s.docCode')
-      .where('ds.fop_syscode != :voucherCode', { voucherCode: 'VOUCHER' });
+      .where('ds.fop_syscode != :voucherCode', { voucherCode: 'VOUCHER' })
+      .andWhere('ds.fop_syscode IN (:...validCodes)', { validCodes });
 
     if (search) {
       countQuery.andWhere(
@@ -412,9 +435,11 @@ export class PaymentService {
             dvcs || '',
           );
 
-          if (pm && pm.documentType === 'Giấy báo có') {
-            paymentMethodMap.set(`${code}|${dvcs}`, pm);
+          if (!pm || pm.documentType !== 'Giấy báo có') {
+            return;
           }
+
+          paymentMethodMap.set(`${code}|${dvcs}`, pm);
         }),
       );
     }
@@ -430,6 +455,7 @@ export class PaymentService {
 
         return { row, saleDept, dvcs, paymentMethod };
       })
+      .filter((item) => item.paymentMethod) // Filter only valid 'Giấy báo có' items
 
       .map(({ row, saleDept, dvcs, paymentMethod }) => {
         // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
