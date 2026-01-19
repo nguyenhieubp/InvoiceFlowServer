@@ -275,9 +275,12 @@ export class SalesPayloadService {
       );
 
       // Rule đánh số dòng (Dong):
-      // - Nếu là Import Line (Service): Tự tăng (index + 1)
-      // - Nếu là Export Line (Item): Lấy theo Dong của Import Line tương ứng (linkedDong)
-      const dong = linkedDong ? linkedDong : index + 1;
+      // - dong: Tự tăng (index + 1) cho cả 2 loại
+      // - dong_vt_goc:
+      //    + Import Line: 1
+      //    + Export Line: Dong của Import Line tương ứng (linkedDong)
+      const dong = index + 1;
+      const dongVtGoc = linkedDong ? linkedDong : dong;
 
       return {
         ma_kho_n: lineMaKho,
@@ -291,7 +294,7 @@ export class SalesPayloadService {
         ma_nx: 'NX01', // Fix cứng theo yêu cầu
         ma_bp: limitString(maBp, 8),
         dong: dong,
-        dong_vt_goc: 1, // Dòng vật tư gốc luôn là 1 (theo yêu cầu cũ, user chỉ yêu cầu sửa dong)
+        dong_vt_goc: dongVtGoc, // Link với dòng Import
         _materialCode: materialCode, // Internal use for mapping
         _itemCode: sale.itemCode, // Internal use for mapping
       };
