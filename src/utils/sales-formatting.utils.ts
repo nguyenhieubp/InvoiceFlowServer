@@ -317,9 +317,10 @@ export async function formatSaleForFrontend(
   let finalPromCodeDisplay = calculatedFields.promCodeDisplay;
   if (isDoiDiem) finalPromCodeDisplay = '1';
 
-  const other_discamt = isDoiDiem
-    ? 0
-    : (sale.other_discamt ?? sale.chietKhauMuaHangGiamGia ?? 0);
+  const other_discamt = InvoiceLogicUtils.resolveChietKhauMuaHangGiamGia(
+    sale,
+    isDoiDiem,
+  );
 
   // 7. Wholesale Promotion Code Mapping
   // Áp dụng cho đơn hàng bán buôn khi dist_tm > 0

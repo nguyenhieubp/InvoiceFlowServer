@@ -957,7 +957,10 @@ export class SalesPayloadService {
       tienThue: this.toNumber(sale.tienThue, 0),
       dtTgNt: this.toNumber(sale.dtTgNt, 0),
       ck01_nt: this.toNumber(
-        sale.other_discamt || sale.chietKhauMuaHangGiamGia,
+        InvoiceLogicUtils.resolveChietKhauMuaHangGiamGia(
+          sale,
+          orderTypes.isDoiDiem || headerOrderTypes.isDoiDiem,
+        ),
         0,
       ),
       ck02_nt:

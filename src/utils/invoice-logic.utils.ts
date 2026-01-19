@@ -533,4 +533,44 @@ export class InvoiceLogicUtils {
 
     return mappedCode;
   }
+  /**
+   * Resolve "Chiết khấu mua hàng giảm giá" (other_discamt)
+   * - Nếu là đơn bán buôn (WHOLESALE): trả về "" (rỗng)
+   * - Nếu là đơn đổi điểm: trả về 0
+   * - Còn lại: trả về other_discamt hoặc chietKhauMuaHangGiamGia
+   */
+  static resolveChietKhauMuaHangGiamGia(
+    sale: any,
+    isDoiDiem: boolean,
+  ): number | string {
+    const typeSale = (sale.type_sale || '').toUpperCase().trim();
+    // Check wholesale alias defined in system
+    const isWholesale = typeSale === 'WHOLESALE' || typeSale === 'WS';
+
+    if (isWholesale) {
+      return '';
+    }
+
+    if (isDoiDiem) {
+      return '-';
+    }
+
+    let val = sale.other_discamt;
+    if (val === null || val === undefined) {
+      val = sale.chietKhauMuaHangGiamGia;
+    }
+
+    // Explicit 0 check (number or string)
+    if (
+      val === null ||
+      val === undefined ||
+      val === 0 ||
+      val === '0' ||
+      Number(val) === 0
+    ) {
+      return '-';
+    }
+
+    return val;
+  }
 }
