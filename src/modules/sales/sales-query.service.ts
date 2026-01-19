@@ -214,6 +214,55 @@ export class SalesQueryService {
               chietKhauMuaHangGiamGia:
                 Number(sale.chietKhauMuaHangGiamGia || 0) * ratio,
               other_discamt: Number(sale.other_discamt || 0) * ratio,
+              disc_amt: Number(sale.disc_amt || 0) * ratio,
+              disc_tm: Number(sale.disc_tm || 0) * ratio,
+              grade_discamt: Number(sale.grade_discamt || 0) * ratio,
+              revenue_wsale: Number(sale.revenue_wsale || 0) * ratio,
+              revenue_retail: Number(sale.revenue_retail || 0) * ratio,
+              itemcost: Number(sale.itemcost || 0) * ratio,
+              totalcost: Number(sale.totalcost || 0) * ratio,
+              ck_tm: Number(sale.ck_tm || 0) * ratio,
+              ck_dly: Number(sale.ck_dly || 0) * ratio,
+              paid_by_voucher_ecode_ecoin_bp:
+                Number(sale.paid_by_voucher_ecode_ecoin_bp || 0) * ratio,
+              chietKhauCkTheoChinhSach:
+                Number(sale.chietKhauCkTheoChinhSach || 0) * ratio,
+              chietKhauMuaHangCkVip:
+                Number(sale.chietKhauMuaHangCkVip || 0) * ratio,
+              chietKhauThanhToanCoupon:
+                Number(sale.chietKhauThanhToanCoupon || 0) * ratio,
+              chietKhauThanhToanVoucher:
+                Number(sale.chietKhauThanhToanVoucher || 0) * ratio,
+              chietKhauDuPhong1: Number(sale.chietKhauDuPhong1 || 0) * ratio,
+              chietKhauDuPhong2: Number(sale.chietKhauDuPhong2 || 0) * ratio,
+              chietKhauDuPhong3: Number(sale.chietKhauDuPhong3 || 0) * ratio,
+              chietKhauHang: Number(sale.chietKhauHang || 0) * ratio,
+              chietKhauThuongMuaBangHang:
+                Number(sale.chietKhauThuongMuaBangHang || 0) * ratio,
+              chietKhauThanhToanTkTienAo:
+                Number(sale.chietKhauThanhToanTkTienAo || 0) * ratio,
+              chietKhauThem1: Number(sale.chietKhauThem1 || 0) * ratio,
+              chietKhauThem2: Number(sale.chietKhauThem2 || 0) * ratio,
+              chietKhauThem3: Number(sale.chietKhauThem3 || 0) * ratio,
+              chietKhauVoucherDp1:
+                Number(sale.chietKhauVoucherDp1 || 0) * ratio,
+              chietKhauVoucherDp2:
+                Number(sale.chietKhauVoucherDp2 || 0) * ratio,
+              chietKhauVoucherDp3:
+                Number(sale.chietKhauVoucherDp3 || 0) * ratio,
+              chietKhauVoucherDp4:
+                Number(sale.chietKhauVoucherDp4 || 0) * ratio,
+              chietKhauVoucherDp5:
+                Number(sale.chietKhauVoucherDp5 || 0) * ratio,
+              chietKhauVoucherDp6:
+                Number(sale.chietKhauVoucherDp6 || 0) * ratio,
+              chietKhauVoucherDp7:
+                Number(sale.chietKhauVoucherDp7 || 0) * ratio,
+              chietKhauVoucherDp8:
+                Number(sale.chietKhauVoucherDp8 || 0) * ratio,
+              troGia: Number(sale.troGia || 0) * ratio,
+              tienThue: Number(sale.tienThue || 0) * ratio,
+              dtTgNt: Number(sale.dtTgNt || 0) * ratio,
 
               maKho: st.stockCode, // ST Stock Code
               // Logic check trackBatch/trackSerial
