@@ -14,6 +14,7 @@ export interface PaymentData {
   fop_syscode: string; // Mã hình thức thanh toán
   docdate: Date; // Ngày (from daily_cashio)
   total_in: number; // Tiền thu
+  total_out: number; // Tiền chi
   so_code: string; // Mã đơn hàng
   branch_code_cashio: string; // Mã chi nhánh (from daily_cashio)
   ma_dvcs_cashio: string; // Mã ĐVCS từ cashio branch
@@ -102,7 +103,7 @@ export class PaymentService {
     // Get total count
     const countQuery = this.dailyCashioRepository
       .createQueryBuilder('ds')
-      .innerJoin(Sale, 's', 'ds.so_code = s.docCode')
+      .leftJoin(Sale, 's', 'ds.so_code = s.docCode')
       .where('ds.fop_syscode != :voucherCode', { voucherCode: 'VOUCHER' });
 
     if (search) {
@@ -331,23 +332,25 @@ export class PaymentService {
         'ds.fop_syscode as fop_syscode',
         'ds.docdate as docdate',
         'ds.total_in as total_in',
+        'ds.total_out as total_out',
         'ds.so_code as so_code',
         'ds.branch_code as branch_code_cashio',
         'ds.refno as refno',
         'ds.bank_code as bank_code',
         'ds.period_code as period_code',
-        'MAX(s.docDate) as "docDate"',
+        'COALESCE(MAX(s.docDate), ds.docdate) as "docDate"', // Fallback to cashio date
         'SUM(s.revenue) as revenue',
-        'MAX(s.branchCode) as "branchCode"',
-        'MAX(s.branchCode) as "boPhan"',
-        'MAX(s.maCa) as "maCa"',
-        'MAX(s.partnerCode) as "partnerCode"',
+        'COALESCE(MAX(s.branchCode), ds.branch_code) as "branchCode"', // Fallback to cashio branch
+        'COALESCE(MAX(s.maCa), \'\') as "maCa"',
+        'COALESCE(MAX(s.partnerCode), \'\') as "partnerCode"',
+        'MAX(s.branchCode) as "boPhan"', // Keep original for reference if needed
       ])
-      .innerJoin(Sale, 's', 'ds.so_code = s.docCode')
+      .leftJoin(Sale, 's', 'ds.so_code = s.docCode')
       .groupBy('ds.id')
       .addGroupBy('ds.fop_syscode')
       .addGroupBy('ds.docdate')
       .addGroupBy('ds.total_in')
+      .addGroupBy('ds.total_out')
       .addGroupBy('ds.so_code')
       .addGroupBy('ds.branch_code')
       .addGroupBy('ds.refno')
@@ -368,8 +371,9 @@ export class PaymentService {
     // Fetch ma_dvcs for all branch codes
     const branchCodes = new Set<string>();
     results.forEach((row: any) => {
-      if (row.branch_code_cashio) branchCodes.add(row.branch_code_cashio);
-      if (row.branchCode) branchCodes.add(row.branchCode);
+      // Prioritize branchCode from sales, fallback to cashio branch code
+      const code = row.branchCode || row.branch_code_cashio;
+      if (code) branchCodes.add(code);
     });
 
     const departmentMap =
@@ -388,8 +392,11 @@ export class PaymentService {
     results.forEach((row: any) => {
       if (!row.fop_syscode || row.fop_syscode === 'VOUCHER') return;
 
-      const saleDept = departmentMap.get(row.branchCode);
+      // Resolve effective branch code
+      const effectiveBranch = row.branchCode || row.branch_code_cashio;
+      const saleDept = departmentMap.get(effectiveBranch);
       const dvcs = saleDept?.ma_dvcs || null;
+
       const key = `${row.fop_syscode}|${dvcs}`;
       if (!paymentTasks.has(key)) {
         paymentTasks.set(key, { code: row.fop_syscode, dvcs });
@@ -415,7 +422,8 @@ export class PaymentService {
     // Map ma_dvcs and payment info to results
     return results
       .map((row: any) => {
-        const saleDept = departmentMap.get(row.branchCode);
+        const effectiveBranch = row.branchCode || row.branch_code_cashio;
+        const saleDept = departmentMap.get(effectiveBranch);
         const dvcs = saleDept?.ma_dvcs || null;
         const key = `${row.fop_syscode}|${dvcs}`;
         const paymentMethod = paymentMethodMap.get(key);
