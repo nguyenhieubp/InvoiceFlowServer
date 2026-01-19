@@ -646,6 +646,16 @@ export class SalesQueryService {
           .filter((code): code is string => !!code && code.trim() !== ''),
       ),
     );
+
+    // Collect all svc_codes for batch lookup
+    const svcCodes = Array.from(
+      new Set(
+        allSalesData
+          .map((sale) => sale.svc_code)
+          .filter((code): code is string => !!code && code.trim() !== ''),
+      ),
+    );
+
     const allItemCodes = Array.from(
       new Set([...itemCodes, ...stockTransferItemCodes]),
     );
@@ -657,6 +667,25 @@ export class SalesQueryService {
         this.loyaltyService.fetchLoyaltyDepartments(branchCodes),
         this.categoriesService.getWarehouseCodeMap(),
       ]);
+
+    // Batch lookup svc_code -> materialCode
+    const svcCodeMap = new Map<string, string>();
+    if (svcCodes.length > 0) {
+      // Parallelize lookups since we don't have a bulk API endpoint yet
+      await Promise.all(
+        svcCodes.map(async (code) => {
+          try {
+            const materialCode =
+              await this.loyaltyService.getMaterialCodeBySvcCode(code);
+            if (materialCode) {
+              svcCodeMap.set(code, materialCode);
+            }
+          } catch (error) {
+            // Ignore error
+          }
+        }),
+      );
+    }
 
     // Build Stock Transfer Maps
     const { stockTransferMap, stockTransferByDocCodeMap } =
@@ -763,6 +792,13 @@ export class SalesQueryService {
         this.loyaltyService,
         saleStockTransfers,
       );
+
+      // [NEW] Override svcCode with looked-up materialCode if available
+      // The frontend uses 'svcCode' from the response. We keep original svc_code in DB.
+      // But for display, we check the map.
+      if (sale.svc_code) {
+        enrichedSale.svcCode = svcCodeMap.get(sale.svc_code);
+      }
 
       // Map stock transfers to simple Frontend format
       // (Lines removed to avoid attaching full list)

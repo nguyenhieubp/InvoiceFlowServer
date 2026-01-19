@@ -149,6 +149,31 @@ export class InvoiceDataEnrichmentService {
       });
     }
 
+    // [New] Batch lookup svc_code -> materialCode for FAST API
+    const svcCodes = Array.from(
+      new Set(
+        sales
+          .map((sale) => sale.svc_code)
+          .filter((code): code is string => !!code && code.trim() !== ''),
+      ),
+    );
+    const svcCodeMap = new Map<string, string>();
+    if (svcCodes.length > 0) {
+      await Promise.all(
+        svcCodes.map(async (code) => {
+          try {
+            const materialCode =
+              await this.loyaltyService.getMaterialCodeBySvcCode(code);
+            if (materialCode) {
+              svcCodeMap.set(code, materialCode);
+            }
+          } catch (error) {
+            // Ignore
+          }
+        }),
+      );
+    }
+
     // Fetch stock transfers để lấy ma_nx (ST* và RT* từ stock transfer)
     // Xử lý đặc biệt cho đơn trả lại: fetch cả theo mã đơn gốc (SO)
     const docCodesForStockTransfer =
@@ -269,9 +294,16 @@ export class InvoiceDataEnrichmentService {
       const loyaltyProduct = sale.itemCode
         ? loyaltyProductMap.get(sale.itemCode)
         : null;
+
+      // Determine materialCode: Prefer lookup from svc_code, then loyaltyProduct, then existing
+      let materialCode = loyaltyProduct?.materialCode || null;
+      if (sale.svc_code && svcCodeMap.has(sale.svc_code)) {
+        materialCode = svcCodeMap.get(sale.svc_code) || materialCode;
+      }
+
       return {
         ...sale,
-        materialCode: loyaltyProduct?.materialCode || null,
+        materialCode: materialCode,
         dvt: sale.dvt || loyaltyProduct?.unit || null,
       };
     });

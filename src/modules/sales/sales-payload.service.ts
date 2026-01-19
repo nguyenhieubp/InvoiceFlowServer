@@ -58,6 +58,33 @@ export class SalesPayloadService {
         orderData.docCode,
       );
 
+      // [New] Batch lookup svc_code -> materialCode for FAST API
+      const svcCodes = Array.from(
+        new Set(
+          allSales
+            .map((sale: any) => sale.svc_code)
+            .filter(
+              (code: any): code is string => !!code && code.trim() !== '',
+            ),
+        ),
+      ) as string[];
+      const svcCodeMap = new Map<string, string>();
+      if (svcCodes.length > 0) {
+        await Promise.all(
+          svcCodes.map(async (code) => {
+            try {
+              const materialCode =
+                await this.loyaltyService.getMaterialCodeBySvcCode(code);
+              if (materialCode) {
+                svcCodeMap.set(code, materialCode);
+              }
+            } catch (error) {
+              // Ignore
+            }
+          }),
+        );
+      }
+
       // 4. Transform sales to details (Filter out TRUTONKEEP items)
       const detail = await Promise.all(
         allSales
@@ -73,12 +100,13 @@ export class SalesPayloadService {
           })
           .map((sale: any, index: number) => {
             this.logger.log(
-              `[DEBUG] Mapping sale ${index + 1}: ${sale.itemCode}`,
+              `[DEBUG] Mapping sale ${index + 1}: ${String(sale.itemCode)}`,
             );
             return this.mapSaleToInvoiceDetail(sale, index, orderData, {
               isNormalOrder,
               stockTransferMap,
               cardSerialMap,
+              svcCodeMap,
             });
           }),
       );
@@ -134,6 +162,7 @@ export class SalesPayloadService {
           isNormalOrder,
           stockTransferMap: new Map(), // Service orders don't use stock transfers usually
           cardSerialMap: new Map(),
+          svcCodeMap: new Map(), // Service lines typically use 'service items', but if they have svc_code we could support it. For now empty map.
         }),
       ),
     );
@@ -164,9 +193,12 @@ export class SalesPayloadService {
 
     // Lấy ma_dvcs
     const maDvcs =
-      orderData.branchCode ||
-      orderData.customer?.brand ||
       importLines[0]?.department?.ma_dvcs ||
+      importLines[0]?.department?.ma_dvcs_ht ||
+      exportLines[0]?.department?.ma_dvcs ||
+      exportLines[0]?.department?.ma_dvcs_ht ||
+      orderData.customer?.brand ||
+      orderData.branchCode ||
       '';
 
     const firstSale = importLines[0] || exportLines[0];
@@ -182,6 +214,13 @@ export class SalesPayloadService {
     };
 
     const toString = (val: any, def: string) => (val ? String(val) : def);
+
+    // Helper để lấy ma_kho theo ưu tiên: Department > Sale > Branch
+    const getMaKho = (sale: any) => {
+      return (
+        sale?.department?.ma_kho || sale?.maKho || orderData.branchCode || ''
+      );
+    };
 
     // Helper để build detail/ndetail item
     const buildLineItem = async (sale: any, index: number) => {
@@ -216,9 +255,12 @@ export class SalesPayloadService {
         '',
       );
 
+      // Resolve ma_kho for this line
+      const lineMaKho = getMaKho(sale);
+
       return {
-        ma_kho_n: firstSale?.maKho || '',
-        ma_kho_x: firstSale?.maKho || '',
+        ma_kho_n: lineMaKho,
+        ma_kho_x: lineMaKho,
         ma_vt: limitString(materialCode, 16),
         dvt: limitString(dvt, 32),
         ma_lo: limitString(maLo, 16),
@@ -242,10 +284,11 @@ export class SalesPayloadService {
       importLines.map((sale, index) => buildLineItem(sale, index)),
     );
 
-    // Lấy kho nhập và kho xuất (có thể cần map từ branch/department)
-    // Tạm thời dùng branchCode làm kho mặc định
-    const maKhoN = firstSale?.maKho || '';
-    const maKhoX = firstSale?.maKho || '';
+    // Lấy kho nhập và kho xuất (ưu tiên từ item đầu tiên của mỗi loại)
+    const maKhoN =
+      importLines.length > 0 ? getMaKho(importLines[0]) : getMaKho(firstSale);
+    const maKhoX =
+      exportLines.length > 0 ? getMaKho(exportLines[0]) : getMaKho(firstSale);
 
     return {
       ma_dvcs: maDvcs,
@@ -790,7 +833,7 @@ export class SalesPayloadService {
       return map;
     }
 
-    // ✅ Batch fetch instead of N+1 query
+    // Batch fetch instead of N+1 query
     const itemCodes = dataCard.data
       .map((card) => card?.service_item_name)
       .filter(Boolean);
@@ -1232,8 +1275,10 @@ export class SalesPayloadService {
     orderData: any,
     context: any,
   ): Promise<any> {
-    const { isNormalOrder, stockTransferMap, cardSerialMap } = context;
+    const { isNormalOrder, stockTransferMap, cardSerialMap, svcCodeMap } =
+      context;
     const saleMaterialCode =
+      sale.product?.materialCode ||
       sale.product?.materialCode ||
       sale.product?.maVatTu ||
       sale.product?.maERP;
@@ -1265,7 +1310,9 @@ export class SalesPayloadService {
 
     // 4. Resolve Codes & Accounts
     const materialCode =
-      SalesUtils.getMaterialCode(sale, sale.product) || sale.itemCode;
+      (sale.svc_code && svcCodeMap?.get(sale.svc_code)) ||
+      SalesUtils.getMaterialCode(sale, sale.product) ||
+      sale.itemCode;
     const loyaltyProduct = await this.loyaltyService.checkProduct(materialCode);
 
     const { maCk01, maCtkmTangHang } = await this.resolveInvoicePromotionCodes(

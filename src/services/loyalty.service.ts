@@ -237,4 +237,62 @@ export class LoyaltyService {
       return '';
     }
   }
+
+  /**
+   * Lấy materialCode từ svcCode (Mã dịch vụ)
+   * Thử endpoint /material-catalogs/code/ trước, sau đó là /material-catalogs/old-code/
+   * @param svcCode - Mã dịch vụ cần tra cứu
+   * @returns materialCode nếu tìm thấy, null nếu không
+   */
+  async getMaterialCodeBySvcCode(svcCode: string): Promise<string | null> {
+    if (!svcCode) return null;
+    const trimmedCode = svcCode.trim();
+    if (!trimmedCode) return null;
+
+    // 1. Thử endpoint chính: /material-catalogs/code/:code
+    try {
+      const url = `${this.LOYALTY_API_BASE_URL}/material-catalogs/code/${encodeURIComponent(trimmedCode)}`;
+      const response = await this.httpService.axiosRef.get(url, {
+        headers: { accept: 'application/json' },
+        timeout: this.REQUEST_TIMEOUT,
+      });
+
+      // Response format: { data: { item: { materialCode: "..." } } }
+      const item = response?.data?.data?.item;
+      if (item && item.materialCode) {
+        return item.materialCode;
+      }
+    } catch (error: any) {
+      // 404 is expected if not found, ignore
+      if (error?.response?.status !== 404) {
+        this.logger.warn(
+          `[LoyaltyService] Error fetching materialCode for svcCode ${trimmedCode} (primary): ${error?.message || error}`,
+        );
+      }
+    }
+
+    // 2. Thử endpoint fallback: /material-catalogs/old-code/:code
+    try {
+      const url = `${this.LOYALTY_API_BASE_URL}/material-catalogs/old-code/${encodeURIComponent(trimmedCode)}`;
+      const response = await this.httpService.axiosRef.get(url, {
+        headers: { accept: 'application/json' },
+        timeout: this.REQUEST_TIMEOUT,
+      });
+
+      // Response format: { data: { item: { materialCode: "..." } } }
+      const item = response?.data?.data?.item;
+      if (item && item.materialCode) {
+        return item.materialCode;
+      }
+    } catch (error: any) {
+      // 404 is expected if not found, ignore
+      if (error?.response?.status !== 404) {
+        this.logger.warn(
+          `[LoyaltyService] Error fetching materialCode for svcCode ${trimmedCode} (fallback): ${error?.message || error}`,
+        );
+      }
+    }
+
+    return null;
+  }
 }
