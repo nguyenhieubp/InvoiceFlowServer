@@ -376,7 +376,7 @@ export class SalesPayloadService {
       ma_kho_n: maKhoN,
       ma_kho_x: maKhoX,
       ong_ba: orderData.customer?.name || '',
-      ma_gd: '2', // 1 = Tạo gộp, 2 = Xuất tách (có thể thay đổi theo rule)
+      ma_gd: '1', // 1 = Tạo gộp, 2 = Xuất tách (có thể thay đổi theo rule)
       ngay_ct: ngayCt,
       ngay_lct: ngayLct,
       so_ct: orderData.docCode || '',
@@ -1010,13 +1010,7 @@ export class SalesPayloadService {
     amounts.ck11_nt = ck11_nt;
 
     // Allocation
-    if (
-      isNormalOrder &&
-      allocationRatio !== 1 &&
-      allocationRatio > 0 &&
-      !orderTypes.isDoiDiem &&
-      !headerOrderTypes.isDoiDiem
-    ) {
+    if (allocationRatio !== 1 && allocationRatio > 0) {
       Object.keys(amounts).forEach((k) => {
         if (k.endsWith('_nt') || k === 'tienThue' || k === 'dtTgNt') {
           amounts[k] *= allocationRatio;
@@ -1154,7 +1148,7 @@ export class SalesPayloadService {
     const saleQty = this.toNumber(sale.qty, 0);
     let allocationRatio = 1;
 
-    if (isNormalOrder && saleMaterialCode) {
+    if (saleMaterialCode) {
       const key = `${docCode}_${saleMaterialCode}`;
       const firstSt = stockTransferMap.get(key)?.st?.[0];
       if (firstSt && saleQty !== 0) {
