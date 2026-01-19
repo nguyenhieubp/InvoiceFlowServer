@@ -215,12 +215,17 @@ export class SalesPayloadService {
 
     const toString = (val: any, def: string) => (val ? String(val) : def);
 
-    // Helper để lấy ma_kho theo ưu tiên: Department > Sale > Branch
-    const getMaKho = (sale: any) => {
-      return (
-        sale?.department?.ma_kho || sale?.maKho || orderData.branchCode || ''
+    // Determine order type for StockTransfer lookup
+    const { isThuong: isNormalOrder, isTachThe } =
+      InvoiceLogicUtils.getOrderTypes(
+        firstSale?.ordertypeName || firstSale?.ordertype || '',
       );
-    };
+
+    // Load Stock Transfer Map (Sync logic with SalesInvoice)
+    const { stockTransferMap } = await this.getInvoiceStockTransferMap(
+      orderData.docCode,
+      isNormalOrder,
+    );
 
     // Helper để build detail/ndetail item
     const buildLineItem = async (sale: any, index: number) => {
@@ -255,8 +260,15 @@ export class SalesPayloadService {
         '',
       );
 
-      // Resolve ma_kho for this line
-      const lineMaKho = getMaKho(sale);
+      // Resolve ma_kho using standard Invoice Logic (StockTransfer support)
+      const lineMaKho = await this.resolveInvoiceMaKho(
+        sale,
+        materialCode,
+        stockTransferMap,
+        orderData.docCode,
+        maBp,
+        isTachThe,
+      );
 
       return {
         ma_kho_n: lineMaKho,
@@ -284,11 +296,29 @@ export class SalesPayloadService {
       importLines.map((sale, index) => buildLineItem(sale, index)),
     );
 
-    // Lấy kho nhập và kho xuất (ưu tiên từ item đầu tiên của mỗi loại)
+    // Helper resolve cho sale đầu tiên nếu list detail rỗng
+    const getFirstMaKho = async (sale: any) => {
+      if (!sale) return '';
+      const mCode =
+        SalesUtils.getMaterialCode(sale, sale.product) || sale.itemCode || '';
+      const mBp = toString(
+        sale.department?.ma_bp || sale.branchCode || orderData.branchCode,
+        '',
+      );
+      return await this.resolveInvoiceMaKho(
+        sale,
+        mCode,
+        stockTransferMap,
+        orderData.docCode,
+        mBp,
+        isTachThe,
+      );
+    };
+
     const maKhoN =
-      importLines.length > 0 ? getMaKho(importLines[0]) : getMaKho(firstSale);
+      ndetail.length > 0 ? ndetail[0].ma_kho_n : await getFirstMaKho(firstSale);
     const maKhoX =
-      exportLines.length > 0 ? getMaKho(exportLines[0]) : getMaKho(firstSale);
+      detail.length > 0 ? detail[0].ma_kho_x : await getFirstMaKho(firstSale);
 
     return {
       ma_dvcs: maDvcs,
