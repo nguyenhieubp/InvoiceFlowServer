@@ -1248,8 +1248,7 @@ export class SalesPayloadService {
         if (isWholesale && distTm > 0) {
           detailItem[maKey] = this.val(
             InvoiceLogicUtils.resolveWholesalePromotionCode({
-              groupProductType: loyaltyProduct?.productType,
-              productTypeCode: loyaltyProduct?.materialCode,
+              product: loyaltyProduct,
               distTm: distTm,
             }),
             32,

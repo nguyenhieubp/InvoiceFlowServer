@@ -335,8 +335,7 @@ export async function formatSaleForFrontend(
   if (isWholesale && isAgencyChannel && distTm > 0) {
     // Gọi hàm map mã CTKM cho bán buôn
     const wholesalePromoCode = InvoiceLogicUtils.resolveWholesalePromotionCode({
-      groupProductType: groupProductType,
-      productTypeCode: productTypeCode,
+      product: loyaltyProduct,
       distTm: distTm,
     });
 

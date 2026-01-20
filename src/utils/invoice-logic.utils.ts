@@ -427,7 +427,7 @@ export class InvoiceLogicUtils {
     const isWholesale = sale.type_sale === 'WHOLESALE';
 
     if (isWholesale) {
-      if (loyaltyProduct?.materialCode?.startsWith('E.')) {
+      if (loyaltyProduct?.materialType === '94') {
         return '04';
       }
     }
@@ -457,21 +457,23 @@ export class InvoiceLogicUtils {
    * Áp dụng khi: type_sale = WHOLESALE, ordertypeName = "Bán buôn kênh Đại lý", dist_tm > 0
    */
   static resolveWholesalePromotionCode(params: {
-    groupProductType: string | null;
-    productTypeCode: string | null;
+    product: any;
     distTm: number;
   }): string {
-    const { groupProductType, productTypeCode, distTm } = params;
+    const { product, distTm } = params;
 
     // Chỉ áp dụng khi dist_tm > 0
     if (!distTm || distTm <= 0) {
       return '';
     }
 
+    // Determine groupProductType from product object
+    const groupProductType = product?.productType || '';
+
     // Xác định loại hàng (0 hoặc 1)
-    // Loại hàng = 1 (Ecode) nếu productType bắt đầu bằng "E."
+    // Loại hàng = 1 (Ecode) nếu materialType === '94'
     // Loại hàng = 0 cho các trường hợp còn lại
-    const isEcode = productTypeCode?.startsWith('E.') || false;
+    const isEcode = product?.materialType === '94';
 
     // Xác định nhóm sản phẩm dựa trên productType
     // Mỹ phẩm: 01SKIN, 02MAKE, 04BODY, 05HAIR, 06FRAG, 07PROF, 10GIFT
