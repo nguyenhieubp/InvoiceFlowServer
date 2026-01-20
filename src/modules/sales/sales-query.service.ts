@@ -832,6 +832,16 @@ export class SalesQueryService {
       );
       calculatedFields.maKho = maKhoFromStockTransfer;
 
+      // Cache materialType for later use in verification loop
+      if (sale.itemCode && loyaltyProduct?.materialType) {
+        loyaltyProductMap.set(sale.itemCode, loyaltyProduct);
+      } else if (sale.itemCode && loyaltyProduct?.productType) {
+        // Fallback or explicit handling if needed
+        if (!loyaltyProductMap.has(sale.itemCode)) {
+          loyaltyProductMap.set(sale.itemCode, loyaltyProduct);
+        }
+      }
+
       const order = orderMap.get(sale.docCode);
       const enrichedSale = await SalesFormattingUtils.formatSaleForFrontend(
         sale,
@@ -913,22 +923,33 @@ export class SalesQueryService {
           const itemCode = sale.itemCode; // Initially set to itemCode
 
           if (itemCode && saleSerial) {
-            verificationTasks.push(
-              (async () => {
-                try {
-                  const ecode =
-                    await this.voucherIssueService.findEcodeBySerialAndItemCode(
-                      itemCode,
-                      saleSerial,
-                    );
-                  if (ecode) {
-                    sale.ma_vt_ref = ecode;
+            // Check conditions: WHOLESALE and materialType '94'
+            const isWholesale =
+              sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS';
+
+            // Retrieve materialType from map
+            // @ts-ignore
+            const loyaltyP = loyaltyProductMap.get(itemCode);
+            const isMaterialType94 = loyaltyP?.materialType === '94';
+
+            if (isWholesale && isMaterialType94) {
+              verificationTasks.push(
+                (async () => {
+                  try {
+                    const ecode =
+                      await this.voucherIssueService.findEcodeBySerialAndItemCode(
+                        itemCode,
+                        saleSerial,
+                      );
+                    if (ecode) {
+                      sale.ma_vt_ref = ecode;
+                    }
+                  } catch (e) {
+                    /* ignore */
                   }
-                } catch (e) {
-                  /* ignore */
-                }
-              })(),
-            );
+                })(),
+              );
+            }
           }
         }
 

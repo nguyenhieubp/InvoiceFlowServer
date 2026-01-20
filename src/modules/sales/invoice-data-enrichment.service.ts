@@ -316,7 +316,14 @@ export class InvoiceDataEnrichmentService {
       const saleSerial = sale.maSerial;
       const itemCode = sale.itemCode; // Use itemCode from sale
 
-      if (itemCode && saleSerial) {
+      // Check conditions: WHOLESALE and materialType '94'
+      const isWholesale =
+        sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS';
+      // @ts-ignore
+      const loyaltyProduct = loyaltyProductMap.get(itemCode);
+      const isMaterialType94 = loyaltyProduct?.materialType === '94';
+
+      if (isWholesale && isMaterialType94 && itemCode && saleSerial) {
         verificationTasks.push(
           (async () => {
             try {

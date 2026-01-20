@@ -405,6 +405,15 @@ export class InvoiceLogicUtils {
       return qty < 0 ? '11' : '12';
     }
 
+    // Check wholesale from sale.type_sale OR orderTypes
+    const isWholesale = sale.type_sale === 'WHOLESALE';
+
+    if (isWholesale) {
+      if (loyaltyProduct?.materialType === '94') {
+        return '04';
+      }
+    }
+
     if (isThuong) {
       if (sale.productType === 'I') {
         return '01';
@@ -420,15 +429,6 @@ export class InvoiceLogicUtils {
         return '01';
       } else if (sale.productType === 'S' && Number(sale.giaBan) === 0) {
         return '06';
-      }
-    }
-
-    // Check wholesale from sale.type_sale OR orderTypes
-    const isWholesale = sale.type_sale === 'WHOLESALE';
-
-    if (isWholesale) {
-      if (loyaltyProduct?.materialType === '94') {
-        return '04';
       }
     }
 
