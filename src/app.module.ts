@@ -20,6 +20,7 @@ import { OrderFeeModule } from './modules/order-fee/order-fee.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { SyncTask } from './tasks/sync.task';
 import { Sale } from './entities/sale.entity';
+import { VoucherIssueModule } from './modules/voucher-issue/voucher-issue.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { Sale } from './entities/sale.entity';
     PlatformFeeModule,
     OrderFeeModule,
     PaymentModule,
+    VoucherIssueModule,
     TypeOrmModule.forFeature([Sale]),
   ],
   controllers: [AppController],
