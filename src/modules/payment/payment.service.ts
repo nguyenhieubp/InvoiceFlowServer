@@ -72,6 +72,11 @@ export class PaymentService {
     const validCodes =
       await this.categoryService.getGiayBaoCoPaymentMethodCodes();
 
+    // [Manual] Allow CASH despite not being a "Giay bao co"
+    if (!validCodes.includes('CASH')) {
+      validCodes.push('CASH');
+    }
+
     const query = this.createBasePaymentQuery();
 
     // Filter by valid codes
@@ -101,7 +106,7 @@ export class PaymentService {
     }
 
     if (dateTo) {
-      query.andWhere('ds.docdate <= :dateTo', { dateTo });
+      query.andWhere('ds.docdate <= :dateTo', { dateTo: `${dateTo} 23:59:59` });
     }
 
     if (brand) {
@@ -140,7 +145,9 @@ export class PaymentService {
       countQuery.andWhere('ds.docdate >= :dateFrom', { dateFrom });
     }
     if (dateTo) {
-      countQuery.andWhere('ds.docdate <= :dateTo', { dateTo });
+      countQuery.andWhere('ds.docdate <= :dateTo', {
+        dateTo: `${dateTo} 23:59:59`,
+      });
     }
     if (brand) {
       countQuery.andWhere('ds.brand ILIKE :brand', { brand: `%${brand}%` });
@@ -178,6 +185,11 @@ export class PaymentService {
     const validCodes =
       await this.categoryService.getGiayBaoCoPaymentMethodCodes();
 
+    // [Manual] Allow CASH
+    if (!validCodes.includes('CASH')) {
+      validCodes.push('CASH');
+    }
+
     const query = this.createBasePaymentQuery();
 
     // Filter by valid codes
@@ -204,7 +216,7 @@ export class PaymentService {
       query.andWhere('ds.docdate >= :dateFrom', { dateFrom });
     }
     if (dateTo) {
-      query.andWhere('ds.docdate <= :dateTo', { dateTo });
+      query.andWhere('ds.docdate <= :dateTo', { dateTo: `${dateTo} 23:59:59` });
     }
     if (brand) {
       query.andWhere('ds.brand ILIKE :brand', { brand: `%${brand}%` });
@@ -277,7 +289,9 @@ export class PaymentService {
     }
 
     if (dateTo) {
-      query.andWhere('cashio.docdate <= :dateTo', { dateTo });
+      query.andWhere('cashio.docdate <= :dateTo', {
+        dateTo: `${dateTo} 23:59:59`,
+      });
     }
 
     if (brand) {
@@ -315,7 +329,9 @@ export class PaymentService {
     }
 
     if (dateTo) {
-      query.andWhere('cashio.docdate <= :dateTo', { dateTo });
+      query.andWhere('cashio.docdate <= :dateTo', {
+        dateTo: `${dateTo} 23:59:59`,
+      });
     }
 
     if (brand) {
