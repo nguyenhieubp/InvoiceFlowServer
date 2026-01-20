@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, IsNull, Like } from 'typeorm';
 import { Sale } from '../../entities/sale.entity';
 import { StockTransfer } from '../../entities/stock-transfer.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
@@ -1089,5 +1089,65 @@ export class SalesQueryService {
       );
       throw error;
     }
+  }
+  /**
+   * Get incorrect stock transfers (missing materialCode)
+   */
+  async getIncorrectStockTransfers(
+    page: number,
+    limit: number,
+    search?: string,
+  ) {
+    const skip = (page - 1) * limit;
+
+    const whereCondition: any[] = [
+      { materialCode: IsNull() },
+      { materialCode: '' },
+    ];
+
+    if (search) {
+      // If search is provided, we need to combine it with the materialCode condition
+      // AND (materialCode IS NULL OR materialCode = '') AND (docCode LIKE %search% OR itemCode LIKE %search%)
+      // TypeORM's array syntax for `where` is OR. To do (A OR B) AND (C OR D), we might need QueryBuilder or careful object construction.
+      // Simpler approach with find options is harder for complex AND/OR mix.
+      // Let's use QueryBuilder for clarity and correctness.
+      const qb = this.stockTransferRepository.createQueryBuilder('st');
+      qb.where('(st.materialCode IS NULL OR st.materialCode = :empty)', {
+        empty: '',
+      });
+
+      qb.andWhere(
+        '(st.docCode LIKE :search OR st.itemCode LIKE :search OR st.itemName LIKE :search)',
+        { search: `%${search}%` },
+      );
+
+      qb.orderBy('st.transDate', 'DESC');
+      qb.skip(skip).take(limit);
+
+      const [data, total] = await qb.getManyAndCount();
+
+      return {
+        data,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      };
+    }
+
+    const [data, total] = await this.stockTransferRepository.findAndCount({
+      where: [{ materialCode: IsNull() }, { materialCode: '' }],
+      order: { transDate: 'DESC' },
+      skip,
+      take: limit,
+    });
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 }
