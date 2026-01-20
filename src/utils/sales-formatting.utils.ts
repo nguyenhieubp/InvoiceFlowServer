@@ -349,7 +349,6 @@ export async function formatSaleForFrontend(
     ...sale,
     itemName: sale.itemName || loyaltyProduct?.name || null,
     maKho: maKho,
-    ma_vt_ref: sale.itemCode,
     maCtkmTangHang: maCtkmTangHang,
     muaHangCkVip: calculatedFields.muaHangCkVip,
     maLo: maLo,
