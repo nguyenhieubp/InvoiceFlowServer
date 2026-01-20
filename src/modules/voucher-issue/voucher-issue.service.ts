@@ -661,4 +661,54 @@ export class VoucherIssueService {
       return null;
     }
   }
+  /**
+   * Centralized logic to enrich sales with ma_vt_ref (Ecode Item Code)
+   * Condition: Wholesale (WHOLESALE/WS) AND Product materialType == '94'
+   */
+  async enrichSalesWithMaVtRef(
+    sales: any[],
+    loyaltyProductMap: Map<string, any>,
+  ): Promise<void> {
+    const verificationTasks: Promise<void>[] = [];
+
+    for (const sale of sales) {
+      const saleSerial = sale.maSerial || sale.serial; // Prioritize maSerial (enriched) or fallback to serial
+      const itemCode = sale.itemCode;
+
+      if (!itemCode || !saleSerial) continue;
+
+      // 1. Check Wholesale Condition
+      const typeSale = (sale.type_sale || '').toUpperCase();
+      const isWholesale = typeSale === 'WHOLESALE' || typeSale === 'WS';
+
+      if (!isWholesale) continue;
+
+      // 2. Check Product Material Type '94'
+      const loyaltyProduct = loyaltyProductMap.get(itemCode);
+      const isMaterialType94 = loyaltyProduct?.materialType === '94';
+
+      if (!isMaterialType94) continue;
+
+      // 3. Resolve Ecode
+      verificationTasks.push(
+        (async () => {
+          try {
+            const ecode = await this.findEcodeBySerialAndItemCode(
+              itemCode,
+              saleSerial,
+            );
+            if (ecode) {
+              sale.ma_vt_ref = ecode;
+            }
+          } catch (e) {
+            // internal log if needed, or swallow
+          }
+        })(),
+      );
+    }
+
+    if (verificationTasks.length > 0) {
+      await Promise.all(verificationTasks);
+    }
+  }
 }

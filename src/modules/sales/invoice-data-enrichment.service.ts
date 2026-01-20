@@ -310,43 +310,11 @@ export class InvoiceDataEnrichmentService {
       };
     });
 
-    // Validating ma_vt_ref
-    const verificationTasks: Promise<void>[] = [];
-    for (const sale of formattedSales) {
-      const saleSerial = sale.maSerial;
-      const itemCode = sale.itemCode; // Use itemCode from sale
-
-      // Check conditions: WHOLESALE and materialType '94'
-      const isWholesale =
-        sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS';
-      // @ts-ignore
-      const loyaltyProduct = loyaltyProductMap.get(itemCode);
-      const isMaterialType94 = loyaltyProduct?.materialType === '94';
-
-      if (isWholesale && isMaterialType94 && itemCode && saleSerial) {
-        verificationTasks.push(
-          (async () => {
-            try {
-              const ecode =
-                await this.voucherIssueService.findEcodeBySerialAndItemCode(
-                  itemCode,
-                  saleSerial,
-                );
-              if (ecode) {
-                // @ts-ignore
-                sale.ma_vt_ref = ecode;
-              }
-            } catch (e) {
-              /* ignore */
-            }
-          })(),
-        );
-      }
-    }
-
-    if (verificationTasks.length > 0) {
-      await Promise.all(verificationTasks);
-    }
+    // Validating ma_vt_ref (Refactored to use centralized logic)
+    await this.voucherIssueService.enrichSalesWithMaVtRef(
+      formattedSales,
+      loyaltyProductMap,
+    );
 
     // Tạo order data object
     const orderData = {

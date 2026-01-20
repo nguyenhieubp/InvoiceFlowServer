@@ -917,41 +917,13 @@ export class SalesQueryService {
           this.n8nService.mapIssuePartnerCodeToSales(sales, cardData);
         }
 
-        // [NEW] Resolve ma_vt_ref using updated serials (e.g. from cardData)
-        for (const sale of sales) {
-          const saleSerial = sale.maSerial; // Prioritize maSerial (updated by TachThe)
-          const itemCode = sale.itemCode; // Initially set to itemCode
-
-          if (itemCode && saleSerial) {
-            // Check conditions: WHOLESALE and materialType '94'
-            const isWholesale =
-              sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS';
-
-            // Retrieve materialType from map
-            // @ts-ignore
-            const loyaltyP = loyaltyProductMap.get(itemCode);
-            const isMaterialType94 = loyaltyP?.materialType === '94';
-
-            if (isWholesale && isMaterialType94) {
-              verificationTasks.push(
-                (async () => {
-                  try {
-                    const ecode =
-                      await this.voucherIssueService.findEcodeBySerialAndItemCode(
-                        itemCode,
-                        saleSerial,
-                      );
-                    if (ecode) {
-                      sale.ma_vt_ref = ecode;
-                    }
-                  } catch (e) {
-                    /* ignore */
-                  }
-                })(),
-              );
-            }
-          }
-        }
+        // [NEW] Resolve ma_vt_ref using centralized logic from VoucherIssueService
+        verificationTasks.push(
+          this.voucherIssueService.enrichSalesWithMaVtRef(
+            sales,
+            loyaltyProductMap,
+          ),
+        );
 
         order.sales = sales;
       }
