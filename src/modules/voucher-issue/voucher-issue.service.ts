@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { VoucherIssue } from '../../entities/voucher-issue.entity';
 import { ZappyApiService } from '../../services/zappy-api.service';
+import { LoyaltyService } from '../../services/loyalty.service';
 
 @Injectable()
 export class VoucherIssueService {
@@ -12,6 +13,7 @@ export class VoucherIssueService {
     @InjectRepository(VoucherIssue)
     private voucherIssueRepository: Repository<VoucherIssue>,
     private zappyApiService: ZappyApiService,
+    private loyaltyService: LoyaltyService,
   ) {}
 
   /**
@@ -582,6 +584,31 @@ export class VoucherIssueService {
       // Get data
       const data = await queryBuilder.getMany();
 
+      // Enrich voucher_item_code using LoyaltyService
+      if (data.length > 0) {
+        const itemCodes = data
+          .map((item) => item.voucher_item_code)
+          .filter((code) => code) as string[];
+
+        // Deduplicate
+        const uniqueCodes = [...new Set(itemCodes)];
+
+        if (uniqueCodes.length > 0) {
+          const productMap =
+            await this.loyaltyService.fetchProducts(uniqueCodes);
+
+          for (const item of data) {
+            if (item.voucher_item_code) {
+              const product = productMap.get(item.voucher_item_code);
+              // If found, override voucher_item_code with materialCode
+              if (product && product.materialCode) {
+                item.voucher_item_code = product.materialCode;
+              }
+            }
+          }
+        }
+      }
+
       const totalPages = Math.ceil(total / limit);
 
       return {
@@ -599,6 +626,39 @@ export class VoucherIssueService {
         `Error getting voucher issue: ${error?.message || error}`,
       );
       throw error;
+    }
+  }
+
+  /**
+   * Tìm ecode_item_code dựa trên serial và itemCode
+   * Logic:
+   * 1. Tìm voucher theo serial
+   * 2. Resolve voucher_item_code -> product.materialCode (qua Loyalty)
+   * 3. Nếu input itemCode trùng với product.materialCode thì trả về voucher.ecode_item_code
+   */
+  async findEcodeBySerialAndItemCode(
+    itemCode: string,
+    serial: string,
+  ): Promise<string | null> {
+    if (!itemCode || !serial) return null;
+
+    try {
+      const voucher = await this.voucherIssueRepository.findOne({
+        where: { serial, voucher_item_code: itemCode },
+      });
+
+      if (!voucher || !voucher.ecode_item_code) return null;
+
+      const product = await this.loyaltyService.fetchProduct(
+        voucher.ecode_item_code,
+      );
+
+      return product?.materialCode || null;
+    } catch (error) {
+      this.logger.error(
+        `Error finding ecode by serial ${serial} and itemCode ${itemCode}: ${error}`,
+      );
+      return null;
     }
   }
 }

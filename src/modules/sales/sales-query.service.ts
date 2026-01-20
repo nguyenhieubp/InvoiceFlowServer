@@ -11,6 +11,7 @@ import * as SalesUtils from '../../utils/sales.utils';
 import * as SalesCalculationUtils from '../../utils/sales-calculation.utils';
 import * as SalesFormattingUtils from '../../utils/sales-formatting.utils';
 import * as StockTransferUtils from '../../utils/stock-transfer.utils';
+import { VoucherIssueService } from '../voucher-issue/voucher-issue.service';
 
 /**
  * SalesQueryService
@@ -30,6 +31,7 @@ export class SalesQueryService {
     private loyaltyService: LoyaltyService,
     private categoriesService: CategoriesService,
     private n8nService: N8nService,
+    private voucherIssueService: VoucherIssueService,
   ) {}
 
   /**
@@ -894,6 +896,8 @@ export class SalesQueryService {
     }
 
     // Apply card data and build final orders
+    const verificationTasks: Promise<void>[] = []; // Collect tasks for parallel execution
+
     for (const [docCode, sales] of enrichedSalesMap.entries()) {
       const order = orderMap.get(docCode);
       if (order) {
@@ -903,8 +907,38 @@ export class SalesQueryService {
           this.n8nService.mapIssuePartnerCodeToSales(sales, cardData);
         }
 
+        // [NEW] Resolve ma_vt_ref using updated serials (e.g. from cardData)
+        for (const sale of sales) {
+          const saleSerial = sale.maSerial; // Prioritize maSerial (updated by TachThe)
+          const itemCode = sale.itemCode; // Initially set to itemCode
+
+          if (itemCode && saleSerial) {
+            verificationTasks.push(
+              (async () => {
+                try {
+                  const ecode =
+                    await this.voucherIssueService.findEcodeBySerialAndItemCode(
+                      itemCode,
+                      saleSerial,
+                    );
+                  if (ecode) {
+                    sale.ma_vt_ref = ecode;
+                  }
+                } catch (e) {
+                  /* ignore */
+                }
+              })(),
+            );
+          }
+        }
+
         order.sales = sales;
       }
+    }
+
+    // Wait for all verification tasks to complete
+    if (verificationTasks.length > 0) {
+      await Promise.all(verificationTasks);
     }
 
     // 9. Sort and return

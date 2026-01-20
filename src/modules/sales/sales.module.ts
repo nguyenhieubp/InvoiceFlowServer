@@ -33,6 +33,7 @@ import { InvoicesModule } from '../invoices/invoices.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { SyncModule } from '../sync/sync.module';
 import { PaymentModule } from '../payment/payment.module';
+import { VoucherIssueModule } from '../voucher-issue/voucher-issue.module';
 
 import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
 
@@ -55,6 +56,7 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
     CategoriesModule,
     forwardRef(() => SyncModule),
     forwardRef(() => PaymentModule),
+    VoucherIssueModule,
   ],
   controllers: [SalesController],
   providers: [

@@ -9,6 +9,7 @@ import { StockTransfer } from '../../entities/stock-transfer.entity';
 import { LoyaltyService } from '../../services/loyalty.service';
 import { N8nService } from '../../services/n8n.service';
 import { SalesQueryService } from './sales-query.service';
+import { VoucherIssueService } from '../voucher-issue/voucher-issue.service';
 import * as SalesUtils from '../../utils/sales.utils';
 import * as StockTransferUtils from '../../utils/stock-transfer.utils';
 import * as SalesFormattingUtils from '../../utils/sales-formatting.utils';
@@ -34,6 +35,7 @@ export class InvoiceDataEnrichmentService {
     private loyaltyService: LoyaltyService,
     private n8nService: N8nService,
     private salesQueryService: SalesQueryService,
+    private voucherIssueService: VoucherIssueService,
   ) {}
 
   /**
@@ -307,6 +309,37 @@ export class InvoiceDataEnrichmentService {
         dvt: sale.dvt || loyaltyProduct?.unit || null,
       };
     });
+
+    // Validating ma_vt_ref
+    const verificationTasks: Promise<void>[] = [];
+    for (const sale of formattedSales) {
+      const saleSerial = sale.maSerial;
+      const itemCode = sale.itemCode; // Use itemCode from sale
+
+      if (itemCode && saleSerial) {
+        verificationTasks.push(
+          (async () => {
+            try {
+              const ecode =
+                await this.voucherIssueService.findEcodeBySerialAndItemCode(
+                  itemCode,
+                  saleSerial,
+                );
+              if (ecode) {
+                // @ts-ignore
+                sale.ma_vt_ref = ecode;
+              }
+            } catch (e) {
+              /* ignore */
+            }
+          })(),
+        );
+      }
+    }
+
+    if (verificationTasks.length > 0) {
+      await Promise.all(verificationTasks);
+    }
 
     // Tạo order data object
     const orderData = {

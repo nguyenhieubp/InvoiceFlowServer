@@ -540,6 +540,7 @@ export class SalesPayloadService {
             dong: index + 1,
             id_goc_so: item.id_goc_so || 0,
             id_goc_ngay: item.id_goc_ngay || formatDateISO(new Date()),
+            ma_vt_ref: item.ma_vt_ref || '',
           };
 
           return detailItem;
@@ -1493,6 +1494,7 @@ export class SalesPayloadService {
         : maLo && maLo.trim() !== ''
           ? { ma_lo: this.limitString(maLo, 16) }
           : {}),
+      ma_vt_ref: this.val(sale.ma_vt_ref, 32),
     });
 
     this.fillInvoiceChietKhauFields(
