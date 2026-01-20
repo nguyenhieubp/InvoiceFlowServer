@@ -1,4 +1,5 @@
-import { Controller, Get, Query, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Query, Post, Body, Param, Res } from '@nestjs/common';
+import express from 'express';
 import { PaymentService } from './payment.service';
 
 @Controller('payments')
@@ -44,6 +45,39 @@ export class PaymentController {
       brand,
       fopSyscode,
     });
+  }
+
+  @Get('export')
+  async exportPaymentsExcel(
+    @Query('search') search?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('brand') brand?: string,
+    @Query('fopSyscode') fopSyscode?: string,
+    @Res() res?: express.Response,
+  ) {
+    const buffer = await this.paymentService.exportPaymentsToExcel({
+      search,
+      dateFrom,
+      dateTo,
+      brand,
+      fopSyscode,
+    });
+
+    const fileName = `PaymentDocuments_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+    if (res) {
+      res.set({
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${fileName}"`,
+        'Content-Length': buffer.length,
+      });
+
+      res.send(buffer);
+    }
+
+    return buffer;
   }
 
   @Post('fast')

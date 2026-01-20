@@ -10,7 +10,9 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  Res,
 } from '@nestjs/common';
+import express from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CategoriesService } from './categories.service';
 import {
@@ -374,6 +376,21 @@ export class CategoriesController {
       limit: limit ? parseInt(limit) : 50,
       search,
     });
+  }
+
+  @Get('payment-methods/export')
+  async exportPaymentMethodsExcel(@Res() res: express.Response) {
+    const buffer = await this.categoriesService.exportPaymentMethodsToExcel();
+    const fileName = `PaymentMethods_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+      'Content-Length': buffer.length,
+    });
+
+    res.send(buffer);
   }
 
   @Get('payment-methods/code/:code/:dvcs')

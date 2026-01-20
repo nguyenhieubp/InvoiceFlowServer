@@ -8,6 +8,7 @@ import { LoyaltyService } from 'src/services/loyalty.service';
 import { CategoriesService } from '../categories/categories.service';
 import { getSupplierCode } from '../../utils/payment-supplier.util';
 import { FastApiInvoiceFlowService } from 'src/services/fast-api-invoice-flow.service';
+import * as XLSX from 'xlsx';
 
 export interface PaymentData {
   // From daily_cashio (ds)
@@ -162,6 +163,92 @@ export class PaymentService {
       limit,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  async exportPaymentsToExcel(options: {
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    brand?: string;
+    fopSyscode?: string;
+  }): Promise<Buffer> {
+    const { search, dateFrom, dateTo, brand, fopSyscode } = options;
+
+    // Get valid payment method codes regarding 'Giấy báo có'
+    const validCodes =
+      await this.categoryService.getGiayBaoCoPaymentMethodCodes();
+
+    const query = this.createBasePaymentQuery();
+
+    // Filter by valid codes
+    if (validCodes.length > 0) {
+      query.andWhere('ds.fop_syscode IN (:...validCodes)', { validCodes });
+    } else {
+      return XLSX.write(XLSX.utils.book_new(), {
+        type: 'buffer',
+        bookType: 'xlsx',
+      });
+    }
+
+    // Add sort
+    query.orderBy('ds.docdate', 'DESC');
+
+    // Filter
+    if (search) {
+      query.andWhere(
+        '(ds.so_code ILIKE :search OR s.partnerCode ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+    if (dateFrom) {
+      query.andWhere('ds.docdate >= :dateFrom', { dateFrom });
+    }
+    if (dateTo) {
+      query.andWhere('ds.docdate <= :dateTo', { dateTo });
+    }
+    if (brand) {
+      query.andWhere('ds.brand ILIKE :brand', { brand: `%${brand}%` });
+    }
+    if (fopSyscode) {
+      query.andWhere('ds.fop_syscode ILIKE :fopSyscode', {
+        fopSyscode: `%${fopSyscode}%`,
+      });
+    }
+
+    const results = await query.getRawMany();
+    const enrichedResults = await this.enrichPaymentResults(results, false);
+
+    const data = enrichedResults.map((item) => ({
+      'Mã HTTT': item.fop_syscode,
+      'Ngày (Cashio)': item.docdate
+        ? new Date(item.docdate).toLocaleDateString('vi-VN')
+        : '',
+      'Tiền thu': item.total_in,
+      'Tiền chi': item.total_out,
+      'Tiền tệ': 'VNĐ',
+      'Tỷ giá': 1,
+      'Số hóa đơn': item.so_code,
+      'Ngày hóa đơn': item.docDate
+        ? new Date(item.docDate).toLocaleDateString('vi-VN')
+        : '',
+      'Tiền trên hóa đơn': item.revenue,
+      'Mã bộ phận': item.branch_code_cashio,
+      'Mã đơn vị nhận tiền': item.ma_dvcs_cashio,
+      'Mã đơn vị bán hàng': item.ma_dvcs_sale,
+      'Nhãn hàng': item.company,
+      'Mã ca': item.maCa,
+      'Mã khách hàng': item.partnerCode,
+      'Mã đối tác': item.ma_doi_tac_payment,
+      'Mã tham chiếu': item.refno,
+      'Ngân hàng': item.bank_code,
+      'Kỳ hạn': item.period_code,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Payments');
+
+    return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
   }
 
   async findPaymentByDocCode(docCode: string): Promise<PaymentData[]> {
@@ -455,8 +542,6 @@ export class PaymentService {
 
         return { row, saleDept, dvcs, paymentMethod };
       })
-      .filter((item) => item.paymentMethod) // Filter only valid 'Giấy báo có' items
-
       .map(({ row, saleDept, dvcs, paymentMethod }) => {
         // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
         const periodCode = row.period_code

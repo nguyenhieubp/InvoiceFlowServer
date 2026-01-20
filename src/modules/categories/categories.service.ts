@@ -1880,6 +1880,30 @@ export class CategoriesService {
     }
   }
 
+  async exportPaymentMethodsToExcel(): Promise<Buffer> {
+    const paymentMethods = await this.paymentMethodRepository.find({
+      order: { ngayTao: 'DESC' },
+    });
+
+    const data = paymentMethods.map((item) => ({
+      Id: item.externalId,
+      Mã: item.code,
+      'Diễn giải': item.description,
+      'Mã hệ thống': item.systemCode,
+      'Loại chứng từ': item.documentType,
+      ERP: item.erp,
+      'Đơn vị ngân hàng': item.bankUnit,
+      'Trạng thái': item.trangThai,
+      'Mã đối tác': item.maDoiTac,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'PaymentMethods');
+
+    return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+  }
+
   // ========== CUSTOMER METHODS ==========
 
   async findAllCustomers(options: {
