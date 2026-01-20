@@ -464,7 +464,7 @@ export class PaymentService {
         'ds.refno as refno',
         'ds.bank_code as bank_code',
         'ds.period_code as period_code',
-        'COALESCE(MAX(s.docDate), ds.docdate) as "docDate"', // Fallback to cashio date
+        'MAX(s.docDate) as "docDate"', // Only from Sale
         'SUM(s.revenue) as revenue',
         'COALESCE(MAX(s.branchCode), ds.branch_code) as "branchCode"', // Fallback to cashio branch
         'COALESCE(MAX(s.maCa), \'\') as "maCa"',
