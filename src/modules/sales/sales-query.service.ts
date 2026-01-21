@@ -578,14 +578,49 @@ export class SalesQueryService {
 
     const isSearchMode = !!search && totalOrders < 2000;
 
-    if (!isExport && !isSearchMode) {
-      const offset = (page - 1) * limit;
-      // Fetch more sale items to ensure we have enough orders after grouping
-      // Multiply by 3 to account for orders with multiple sale items
-      fullQuery.skip(offset).take(limit * 3);
-    }
+    let allSales: Sale[];
 
-    const allSales = await fullQuery.getMany();
+    if (!isExport && !isSearchMode) {
+      // FIXED PAGINATION: Get exact limit number of orders
+      // Step 1: Get distinct docCodes with pagination
+      const docCodeSubquery = this.saleRepository
+        .createQueryBuilder('sale')
+        .select('sale.docCode', 'docCode')
+        .addSelect('MAX(sale.docDate)', 'docDate') // Need this for ORDER BY
+        .groupBy('sale.docCode')
+        .orderBy('MAX(sale.docDate)', 'DESC')
+        .addOrderBy('sale.docCode', 'ASC');
+
+      // Apply same filters to subquery
+      this.applySaleFilters(docCodeSubquery, {
+        brand,
+        isProcessed,
+        statusAsys,
+        typeSale,
+        date,
+        dateFrom,
+        dateTo,
+        search,
+      });
+
+      // Paginate at order level
+      const offset = (page - 1) * limit;
+      docCodeSubquery.skip(offset).take(limit);
+
+      const docCodeResults = await docCodeSubquery.getRawMany();
+      const docCodes = docCodeResults.map((r) => r.docCode);
+
+      if (docCodes.length === 0) {
+        allSales = [];
+      } else {
+        // Step 2: Fetch all sales for these docCodes
+        fullQuery.andWhere('sale.docCode IN (:...docCodes)', { docCodes });
+        allSales = await fullQuery.getMany();
+      }
+    } else {
+      // Search mode or export: fetch all
+      allSales = await fullQuery.getMany();
+    }
 
     // 3. Export Logic (Early Return)
     if (isExport) {
