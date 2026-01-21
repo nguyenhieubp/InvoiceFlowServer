@@ -21,6 +21,7 @@ import { PaymentModule } from './modules/payment/payment.module';
 import { SyncTask } from './tasks/sync.task';
 import { Sale } from './entities/sale.entity';
 import { VoucherIssueModule } from './modules/voucher-issue/voucher-issue.module';
+import { StockTransferModule } from './modules/stock-transfer/stock-transfer.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { VoucherIssueModule } from './modules/voucher-issue/voucher-issue.module
     OrderFeeModule,
     PaymentModule,
     VoucherIssueModule,
+    StockTransferModule,
     TypeOrmModule.forFeature([Sale]),
   ],
   controllers: [AppController],
