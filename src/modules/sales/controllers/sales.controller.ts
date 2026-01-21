@@ -9,8 +9,8 @@ import {
   NotFoundException,
   Res,
 } from '@nestjs/common';
-import { SalesService } from './sales.service';
-import type { CreateStockTransferDto } from '../../dto/create-stock-transfer.dto';
+import { SalesService } from '../services/sales.service';
+import type { CreateStockTransferDto } from '../../../dto/create-stock-transfer.dto';
 import type { Response } from 'express';
 
 @Controller('sales')

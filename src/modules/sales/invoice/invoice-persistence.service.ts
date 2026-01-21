@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
-import { Sale } from '../../entities/sale.entity';
-import { Invoice } from '../../entities/invoice.entity';
+import { FastApiInvoice } from '../../../entities/fast-api-invoice.entity';
+import { Sale } from '../../../entities/sale.entity';
+import { Invoice } from '../../../entities/invoice.entity';
 
 /**
  * InvoicePersistenceService

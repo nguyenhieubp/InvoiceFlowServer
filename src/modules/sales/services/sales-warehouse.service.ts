@@ -6,10 +6,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
-import { StockTransfer } from '../../entities/stock-transfer.entity';
-import { WarehouseProcessed } from '../../entities/warehouse-processed.entity';
-import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
-import * as SalesUtils from '../../utils/sales.utils';
+import { StockTransfer } from '../../../entities/stock-transfer.entity';
+import { WarehouseProcessed } from '../../../entities/warehouse-processed.entity';
+import { FastApiInvoiceFlowService } from '../../../services/fast-api-invoice-flow.service';
+import * as SalesUtils from '../../../utils/sales.utils';
 
 /**
  * SalesWarehouseService

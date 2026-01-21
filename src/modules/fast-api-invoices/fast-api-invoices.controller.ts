@@ -10,7 +10,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FastApiInvoiceService } from './fast-api-invoice.service';
-import { SalesService } from '../sales/sales.service';
+import { SalesService } from 'src/modules/sales/services/sales.service';
 
 @Controller('fast-api-invoices')
 export class FastApiInvoicesController {

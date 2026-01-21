@@ -23,9 +23,9 @@ import { PromotionLine } from '../../entities/promotion-line.entity';
 
 import { ZappyApiService } from '../../services/zappy-api.service';
 import { LoyaltyService } from '../../services/loyalty.service';
-import { SalesSyncService } from '../sales/sales-sync.service';
+import { SalesSyncService } from '../sales/services/sales-sync.service';
 
-import { SalesService } from '../sales/sales.service';
+import { SalesService } from '../sales/services/sales.service';
 import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
 import { FastApiClientService } from '../../services/fast-api-client.service';
 import { Order } from 'src/types/order.types';

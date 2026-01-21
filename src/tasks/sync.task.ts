@@ -1,9 +1,9 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SyncService } from '../modules/sync/sync.service';
-import { SalesService } from '../modules/sales/sales.service';
+import { SalesService } from '../modules/sales/services/sales.service';
 import { FastApiInvoiceFlowService } from '../services/fast-api-invoice-flow.service';
-import { SalesInvoiceService } from '../modules/sales/sales-invoice.service';
+import { SalesInvoiceService } from '../modules/sales/invoice/sales-invoice.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Sale } from '../entities/sale.entity';

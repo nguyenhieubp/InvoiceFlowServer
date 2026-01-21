@@ -2,11 +2,11 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { Sale } from '../../entities/sale.entity';
-import { StockTransfer } from '../../entities/stock-transfer.entity';
+import { Sale } from '../../../entities/sale.entity';
+import { StockTransfer } from '../../../entities/stock-transfer.entity';
 
 import { SalesQueryService } from './sales-query.service';
-import { SalesInvoiceService } from './sales-invoice.service';
+import { SalesInvoiceService } from '../invoice/sales-invoice.service';
 import { SalesWarehouseService } from './sales-warehouse.service';
 import { SalesSyncService } from './sales-sync.service';
 

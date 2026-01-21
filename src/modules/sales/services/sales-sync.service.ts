@@ -2,11 +2,11 @@
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull, In } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
-import { Sale } from '../../entities/sale.entity';
-import { Customer } from '../../entities/customer.entity';
-import { ZappyApiService } from '../../services/zappy-api.service';
-import { LoyaltyService } from '../../services/loyalty.service';
-import * as SalesUtils from '../../utils/sales.utils';
+import { Sale } from '../../../entities/sale.entity';
+import { Customer } from '../../../entities/customer.entity';
+import { ZappyApiService } from '../../../services/zappy-api.service';
+import { LoyaltyService } from '../../../services/loyalty.service';
+import * as SalesUtils from '../../../utils/sales.utils';
 
 /**
  * SalesSyncService

@@ -1,15 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
-import { StockTransfer } from '../../entities/stock-transfer.entity';
-import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
-import { SalesPayloadService } from './sales-payload.service';
-import { SalesQueryService } from './sales-query.service';
-import { InvoicePersistenceService } from './invoice-persistence.service';
-import { PaymentService } from '../payment/payment.service';
+import { StockTransfer } from '../../../entities/stock-transfer.entity';
+import { FastApiInvoiceFlowService } from '../../../services/fast-api-invoice-flow.service';
+import { SalesPayloadService } from '../invoice/sales-payload.service';
+import { SalesQueryService } from '../services/sales-query.service';
+import { InvoicePersistenceService } from '../invoice/invoice-persistence.service';
+import { PaymentService } from '../../payment/payment.service';
 import { forwardRef, Inject } from '@nestjs/common';
-import * as StockTransferUtils from '../../utils/stock-transfer.utils';
-import { DOC_SOURCE_TYPES, STATUS, ACTION } from './sales-invoice.constants';
+import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
+import {
+  DOC_SOURCE_TYPES,
+  STATUS,
+  ACTION,
+} from '../constants/sales-invoice.constants';
 
 @Injectable()
 export class SaleReturnHandlerService {
@@ -244,111 +248,6 @@ export class SaleReturnHandlerService {
       // Xử lý cashio payment (Phiếu thu tiền mặt/Giấy báo có) nếu salesOrder thành công
       let cashioResult: any = null;
       let paymentResult: any = null;
-      /*
-      if (responseStatus === 1) {
-        this.logger.log(
-          `[Cashio] Bắt đầu xử lý cashio payment cho đơn hàng ${docCode} (đơn có đuôi _X)`,
-        );
-        cashioResult = {
-          cashReceiptResults: [],
-          creditAdviceResults: [],
-        };
-
-        try {
-          const paymentDataList =
-            await this.paymentService.findPaymentByDocCode(docCode);
-          if (paymentDataList && paymentDataList.length > 0) {
-            this.logger.log(
-              `[Cashio] Found ${paymentDataList.length} payment records for order ${docCode}. Processing...`,
-            );
-            for (const paymentData of paymentDataList) {
-              await this.fastApiInvoiceFlowService.processCashioPayment(
-                paymentData,
-              );
-            }
-            this.logger.log(
-              `[Cashio] Successfully triggered payment sync for order ${docCode}`,
-            );
-          } else {
-            this.logger.log(
-              `[Cashio] No payment records found for order ${docCode}`,
-            );
-          }
-        } catch (err) {
-          this.logger.error(
-            `[Cashio] Error processing payment sync for order ${docCode}: ${err?.message || err}`,
-          );
-        }
-
-        if (
-          cashioResult.cashReceiptResults &&
-          cashioResult.cashReceiptResults.length > 0
-        ) {
-          this.logger.log(
-            `[Cashio] Đã tạo ${cashioResult.cashReceiptResults.length} cashReceipt thành công cho đơn hàng ${docCode} (đơn có đuôi _X)`,
-          );
-        }
-        if (
-          cashioResult.creditAdviceResults &&
-          cashioResult.creditAdviceResults.length > 0
-        ) {
-          this.logger.log(
-            `[Cashio] Đã tạo ${cashioResult.creditAdviceResults.length} creditAdvice thành công cho đơn hàng ${docCode} (đơn có đuôi _X)`,
-          );
-        }
-
-        // Xử lý Payment (Phiếu chi tiền mặt/Giấy báo nợ) cho đơn hủy (_X) - cho phép không có mã kho
-        try {
-          // Kiểm tra có stock transfer không
-          const docCodesForStockTransfer =
-            StockTransferUtils.getDocCodesForStockTransfer([docCode]);
-          const stockTransfers = await this.stockTransferRepository.find({
-            where: { soCode: In(docCodesForStockTransfer) },
-          });
-          const stockCodes = Array.from(
-            new Set(stockTransfers.map((st) => st.stockCode).filter(Boolean)),
-          );
-
-          // Cho đơn _X: Gọi payment ngay cả khi không có mã kho (đơn hủy không có khái niệm xuất kho)
-          const allowWithoutStockCodes = stockCodes.length === 0;
-
-          if (allowWithoutStockCodes || stockCodes.length > 0) {
-            this.logger.log(
-              `[Payment] Bắt đầu xử lý payment cho đơn hàng ${docCode} (đơn có đuôi _X) - ${allowWithoutStockCodes ? 'không có mã kho' : `với ${stockCodes.length} mã kho`}`,
-            );
-            paymentResult = await this.fastApiInvoiceFlowService.processPayment(
-              docCode,
-              orderData,
-              invoiceData,
-              stockCodes,
-              allowWithoutStockCodes, // Cho phép gọi payment ngay cả khi không có mã kho
-            );
-
-            if (
-              paymentResult.paymentResults &&
-              paymentResult.paymentResults.length > 0
-            ) {
-              this.logger.log(
-                `[Payment] Đã tạo ${paymentResult.paymentResults.length} payment thành công cho đơn hàng ${docCode} (đơn có đuôi _X)`,
-              );
-            }
-            if (
-              paymentResult.debitAdviceResults &&
-              paymentResult.debitAdviceResults.length > 0
-            ) {
-              this.logger.log(
-                `[Payment] Đã tạo ${paymentResult.debitAdviceResults.length} debitAdvice thành công cho đơn hàng ${docCode} (đơn có đuôi _X)`,
-              );
-            }
-          }
-        } catch (paymentError: any) {
-          // Log lỗi nhưng không fail toàn bộ flow
-          this.logger.warn(
-            `[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode} (đơn có đuôi _X): ${paymentError?.message || paymentError}`,
-          );
-        }
-      }
-      */
 
       return {
         success: responseStatus === 1,

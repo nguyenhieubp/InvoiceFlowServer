@@ -1,21 +1,21 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
-import { StockTransfer } from '../../entities/stock-transfer.entity';
-import { InvoiceValidationService } from '../../services/invoice-validation.service';
-import { LoyaltyService } from '../../services/loyalty.service';
+import { StockTransfer } from '../../../entities/stock-transfer.entity';
+import { InvoiceValidationService } from '../../../services/invoice-validation.service';
+import { LoyaltyService } from '../../../services/loyalty.service';
 import { SpecialOrderHandlerService } from './special-order-handler.service';
 import { NormalOrderHandlerService } from './normal-order-handler.service';
 import { SaleReturnHandlerService } from './sale-return-handler.service';
-import { InvoicePersistenceService } from './invoice-persistence.service';
-import * as SalesUtils from '../../utils/sales.utils';
-import * as StockTransferUtils from '../../utils/stock-transfer.utils';
+import { InvoicePersistenceService } from '../invoice/invoice-persistence.service';
+import * as SalesUtils from '../../../utils/sales.utils';
+import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
 import {
   DOC_SOURCE_TYPES,
   ORDER_TYPES,
   STATUS,
   isServiceOrder,
-} from './sales-invoice.constants';
+} from '../constants/sales-invoice.constants';
 
 @Injectable()
 export class InvoiceFlowOrchestratorService {

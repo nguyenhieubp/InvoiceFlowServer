@@ -1,16 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
-import { StockTransfer } from '../../entities/stock-transfer.entity';
-import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.service';
-import { SalesPayloadService } from './sales-payload.service';
-import { SalesQueryService } from './sales-query.service';
-import { PaymentService } from '../payment/payment.service';
+import { StockTransfer } from '../../../entities/stock-transfer.entity';
+import { FastApiInvoiceFlowService } from '../../../services/fast-api-invoice-flow.service';
+import { SalesPayloadService } from '../invoice/sales-payload.service';
+import { SalesQueryService } from '../services/sales-query.service';
+import { PaymentService } from '../../payment/payment.service';
 import { forwardRef, Inject } from '@nestjs/common';
-import * as SalesUtils from '../../utils/sales.utils';
-import * as ConvertUtils from '../../utils/convert.utils';
-import * as StockTransferUtils from '../../utils/stock-transfer.utils';
-import { STATUS } from './sales-invoice.constants';
+import * as SalesUtils from '../../../utils/sales.utils';
+import * as ConvertUtils from '../../../utils/convert.utils';
+import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
+import { STATUS } from '../constants/sales-invoice.constants';
 
 @Injectable()
 export class NormalOrderHandlerService {

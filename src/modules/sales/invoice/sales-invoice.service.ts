@@ -1,14 +1,14 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
-import { Sale } from '../../entities/sale.entity';
-import { StockTransfer } from '../../entities/stock-transfer.entity';
-import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
+import { Sale } from '../../../entities/sale.entity';
+import { StockTransfer } from '../../../entities/stock-transfer.entity';
+import { FastApiInvoice } from '../../../entities/fast-api-invoice.entity';
 import { InvoiceDataEnrichmentService } from './invoice-data-enrichment.service';
 import { InvoicePersistenceService } from './invoice-persistence.service';
-import { InvoiceFlowOrchestratorService } from './invoice-flow-orchestrator.service';
-import { SaleReturnHandlerService } from './sale-return-handler.service';
-import * as StockTransferUtils from '../../utils/stock-transfer.utils';
+import { InvoiceFlowOrchestratorService } from '../flows/invoice-flow-orchestrator.service';
+import { SaleReturnHandlerService } from '../flows/sale-return-handler.service';
+import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
 import * as _ from 'lodash';
 
 @Injectable()
