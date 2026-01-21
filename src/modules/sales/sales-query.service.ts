@@ -88,14 +88,16 @@ export class SalesQueryService {
       .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
       .getMany();
 
+    // OPTIMIZED: Build map in single pass O(m) instead of nested loop O(n×m)
     const cashioMap = new Map<string, DailyCashio[]>();
-    docCodes.forEach((docCode) => {
-      const matchingCashios = cashioRecords.filter(
-        (c) => c.so_code === docCode || c.master_code === docCode,
-      );
-      if (matchingCashios.length > 0) {
-        cashioMap.set(docCode, matchingCashios);
+    cashioRecords.forEach((cashio) => {
+      const docCode = cashio.so_code || cashio.master_code;
+      if (!docCode) return;
+
+      if (!cashioMap.has(docCode)) {
+        cashioMap.set(docCode, []);
       }
+      cashioMap.get(docCode)!.push(cashio);
     });
 
     // Fetch stock transfers để thêm thông tin stock transfer
@@ -762,31 +764,34 @@ export class SalesQueryService {
         this.categoriesService.getWarehouseCodeMap(),
       ]);
 
-    // Debug: Log department fetching
-    this.logger.debug(
-      `[DEBUG] Fetched departments for ${branchCodes.length} branchCodes: ${JSON.stringify(Array.from(branchCodes))}`,
-    );
-    this.logger.debug(
-      `[DEBUG] DepartmentMap size: ${departmentMap.size}, keys: ${JSON.stringify(Array.from(departmentMap.keys()))}`,
-    );
-
-    // Batch lookup svc_code -> materialCode
+    // Batch lookup svc_code -> materialCode with concurrency limit
     const svcCodeMap = new Map<string, string>();
     if (svcCodes.length > 0) {
-      // Parallelize lookups since we don't have a bulk API endpoint yet
-      await Promise.all(
-        svcCodes.map(async (code) => {
-          try {
-            const materialCode =
-              await this.loyaltyService.getMaterialCodeBySvcCode(code);
-            if (materialCode) {
-              svcCodeMap.set(code, materialCode);
+      // OPTIMIZED: Add concurrency limit to prevent API overload
+      const MAX_CONCURRENT = 5;
+      const chunks: string[][] = [];
+      for (let i = 0; i < svcCodes.length; i += MAX_CONCURRENT) {
+        chunks.push(svcCodes.slice(i, i + MAX_CONCURRENT));
+      }
+
+      for (const chunk of chunks) {
+        await Promise.all(
+          chunk.map(async (code) => {
+            try {
+              const materialCode =
+                await this.loyaltyService.getMaterialCodeBySvcCode(code);
+              if (materialCode) {
+                svcCodeMap.set(code, materialCode);
+              }
+            } catch (error) {
+              // Log error instead of silently ignoring
+              this.logger.warn(
+                `Failed to fetch materialCode for svc_code ${code}: ${error.message}`,
+              );
             }
-          } catch (error) {
-            // Ignore error
-          }
-        }),
-      );
+          }),
+        );
+      }
     }
 
     // Build Stock Transfer Maps
@@ -796,6 +801,16 @@ export class SalesQueryService {
         loyaltyProductMap,
         docCodes,
       );
+
+    // OPTIMIZED: Pre-build map for O(1) lookup instead of filter in loop
+    const stockTransferByItemCodeMap = new Map<string, StockTransfer[]>();
+    stockTransfers.forEach((st) => {
+      const key = `${st.soCode}_${st.itemCode}`;
+      if (!stockTransferByItemCodeMap.has(key)) {
+        stockTransferByItemCodeMap.set(key, []);
+      }
+      stockTransferByItemCodeMap.get(key)!.push(st);
+    });
 
     // 6. Fix N+1: Batch Fetch Card Data Logic
     // Identify orders that need card data (Tach The orders)
@@ -845,84 +860,113 @@ export class SalesQueryService {
       if (!enrichedSalesMap.has(docCode)) {
         enrichedSalesMap.set(docCode, []);
       }
+      // Temporarily store raw sales in enrichedSalesMap for later processing
+      enrichedSalesMap.get(docCode)!.push(sale);
+    }
 
-      const loyaltyProduct = sale.itemCode
-        ? loyaltyProductMap.get(sale.itemCode)
-        : null;
-      const department = sale.branchCode
-        ? departmentMap.get(sale.branchCode) || null
-        : null;
+    // 7. Format Sales for Frontend
+    // OPTIMIZED: Parallelize formatSaleForFrontend calls instead of sequential
+    const formatPromises: Promise<any>[] = []; // Changed to any[] to hold enrichedSale objects
 
-      // Debug: Log when department is missing
-      if (!department && sale.branchCode) {
-        this.logger.warn(
-          `[DEBUG] Department not found for branchCode: ${sale.branchCode}, docCode: ${docCode}`,
-        );
+    // Iterate over the temporarily stored raw sales
+    for (const [docCode, sales] of enrichedSalesMap.entries()) {
+      for (const sale of sales) {
+        const promise = (async () => {
+          const loyaltyProduct = sale.itemCode
+            ? loyaltyProductMap.get(sale.itemCode)
+            : null;
+          const department = sale.branchCode
+            ? departmentMap.get(sale.branchCode) || null
+            : null;
+
+          // Debug: Log when department is missing
+          if (!department && sale.branchCode) {
+            this.logger.warn(
+              `[DEBUG] Department not found for branchCode: ${sale.branchCode}, docCode: ${docCode}`,
+            );
+          }
+
+          const maThe = getMaThe.get(loyaltyProduct?.materialCode || '') || '';
+          sale.maThe = maThe;
+          const saleMaterialCode = loyaltyProduct?.materialCode;
+
+          let saleStockTransfers: StockTransfer[] = [];
+          if (saleMaterialCode) {
+            const stockTransferKey = `${docCode}_${saleMaterialCode}`;
+            saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
+          }
+          // OPTIMIZED: Use map lookup O(1) instead of filter O(m)
+          if (saleStockTransfers.length === 0 && sale.itemCode) {
+            const key = `${docCode}_${sale.itemCode}`;
+            saleStockTransfers = stockTransferByItemCodeMap.get(key) || [];
+          }
+
+          const maKhoFromStockTransfer = this.getMaKhoFromStockTransfer(
+            sale,
+            docCode,
+            stockTransfers,
+            saleMaterialCode,
+            stockTransferMap,
+            warehouseCodeMap,
+          );
+          const calculatedFields = SalesCalculationUtils.calculateSaleFields(
+            sale,
+            loyaltyProduct,
+            department,
+            sale.branchCode,
+          );
+          calculatedFields.maKho = maKhoFromStockTransfer;
+
+          // Cache materialType for later use in verification loop
+          if (sale.itemCode && loyaltyProduct?.materialType) {
+            loyaltyProductMap.set(sale.itemCode, loyaltyProduct);
+          } else if (sale.itemCode && loyaltyProduct?.productType) {
+            // Fallback or explicit handling if needed
+            if (!loyaltyProductMap.has(sale.itemCode)) {
+              loyaltyProductMap.set(sale.itemCode, loyaltyProduct);
+            }
+          }
+
+          const order = orderMap.get(sale.docCode);
+          const enrichedSale = await SalesFormattingUtils.formatSaleForFrontend(
+            sale,
+            loyaltyProduct,
+            department,
+            calculatedFields,
+            order,
+            this.categoriesService,
+            this.loyaltyService,
+            saleStockTransfers,
+          );
+
+          // [NEW] Override svcCode with looked-up materialCode if available
+          // The frontend uses 'svcCode' from the response. We keep original svc_code in DB.
+          // But for display, we check the map.
+          if (sale.svc_code) {
+            enrichedSale.svcCode = svcCodeMap.get(sale.svc_code);
+          }
+
+          // Store enriched sale (will be pushed in order after Promise.all)
+          enrichedSale._docCode = docCode; // Temporary marker for grouping
+          return enrichedSale;
+        })();
+
+        formatPromises.push(promise);
       }
+    }
 
-      const maThe = getMaThe.get(loyaltyProduct?.materialCode || '') || '';
-      sale.maThe = maThe;
-      const saleMaterialCode = loyaltyProduct?.materialCode;
+    // Wait for all formatting to complete in parallel
+    const allEnrichedSales = await Promise.all(formatPromises);
 
-      let saleStockTransfers: StockTransfer[] = [];
-      if (saleMaterialCode) {
-        const stockTransferKey = `${docCode}_${saleMaterialCode}`;
-        saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
+    // Clear and repopulate enrichedSalesMap with formatted sales
+    enrichedSalesMap.clear();
+    for (const enrichedSale of allEnrichedSales) {
+      const docCode = enrichedSale._docCode;
+      if (!enrichedSalesMap.has(docCode)) {
+        enrichedSalesMap.set(docCode, []);
       }
-      if (saleStockTransfers.length === 0 && sale.itemCode) {
-        saleStockTransfers = stockTransfers.filter(
-          (st) => st.soCode === docCode && st.itemCode === sale.itemCode,
-        );
-      }
-
-      const maKhoFromStockTransfer = this.getMaKhoFromStockTransfer(
-        sale,
-        docCode,
-        stockTransfers,
-        saleMaterialCode,
-        stockTransferMap,
-        warehouseCodeMap,
-      );
-      const calculatedFields = SalesCalculationUtils.calculateSaleFields(
-        sale,
-        loyaltyProduct,
-        department,
-        sale.branchCode,
-      );
-      calculatedFields.maKho = maKhoFromStockTransfer;
-
-      // Cache materialType for later use in verification loop
-      if (sale.itemCode && loyaltyProduct?.materialType) {
-        loyaltyProductMap.set(sale.itemCode, loyaltyProduct);
-      } else if (sale.itemCode && loyaltyProduct?.productType) {
-        // Fallback or explicit handling if needed
-        if (!loyaltyProductMap.has(sale.itemCode)) {
-          loyaltyProductMap.set(sale.itemCode, loyaltyProduct);
-        }
-      }
-
-      const order = orderMap.get(sale.docCode);
-      const enrichedSale = await SalesFormattingUtils.formatSaleForFrontend(
-        sale,
-        loyaltyProduct,
-        department,
-        calculatedFields,
-        order,
-        this.categoriesService,
-        this.loyaltyService,
-        saleStockTransfers,
-      );
-
-      // [NEW] Override svcCode with looked-up materialCode if available
-      // The frontend uses 'svcCode' from the response. We keep original svc_code in DB.
-      // But for display, we check the map.
-      if (sale.svc_code) {
-        enrichedSale.svcCode = svcCodeMap.get(sale.svc_code);
-      }
-
-      // Map stock transfers to simple Frontend format
-      // (Lines removed to avoid attaching full list)
       enrichedSalesMap.get(docCode)!.push(enrichedSale);
+      delete enrichedSale._docCode; // Clean up temporary marker
     }
 
     // 8. Final Grouping & N+1 Fix for 'Tach The'
@@ -939,29 +983,38 @@ export class SalesQueryService {
       }
     }
 
-    // Execute parallel requests for card data
+    // Execute parallel requests for card data with concurrency limit
     const cardDataMap = new Map<string, any>(); // Map<docCode, cardData>
     if (docCodesNeedingCardData.length > 0) {
-      // Limit concurrency if needed, but for now Promise.all is fine for reasonable page sizes (e.g. 50)
-      // If limit is large (e.g. 200), we might want to use a concurrency limiter (like p-limit)
-      // but adding a library might be overkill. Let's stick to Promise.all for pagination limits.
-      const cardDataPromises = docCodesNeedingCardData.map(async (docCode) => {
-        try {
-          const cardResponse =
-            await this.n8nService.fetchCardDataWithRetry(docCode);
-          const cardData = this.n8nService.parseCardData(cardResponse);
-          return { docCode, cardData };
-        } catch (e) {
-          return { docCode, cardData: null };
-        }
-      });
+      // OPTIMIZED: Add concurrency limit to prevent overwhelming N8N service
+      const MAX_CONCURRENT = 5;
+      const chunks: string[][] = [];
+      for (let i = 0; i < docCodesNeedingCardData.length; i += MAX_CONCURRENT) {
+        chunks.push(docCodesNeedingCardData.slice(i, i + MAX_CONCURRENT));
+      }
 
-      const results = await Promise.all(cardDataPromises);
-      results.forEach((res) => {
-        if (res.cardData) {
-          cardDataMap.set(res.docCode, res.cardData);
-        }
-      });
+      for (const chunk of chunks) {
+        const cardDataPromises = chunk.map(async (docCode) => {
+          try {
+            const cardResponse =
+              await this.n8nService.fetchCardDataWithRetry(docCode);
+            const cardData = this.n8nService.parseCardData(cardResponse);
+            return { docCode, cardData };
+          } catch (e) {
+            this.logger.warn(
+              `Failed to fetch card data for ${docCode}: ${e.message}`,
+            );
+            return { docCode, cardData: null };
+          }
+        });
+
+        const results = await Promise.all(cardDataPromises);
+        results.forEach((res) => {
+          if (res.cardData) {
+            cardDataMap.set(res.docCode, res.cardData);
+          }
+        });
+      }
     }
 
     // Apply card data and build final orders
@@ -1000,10 +1053,6 @@ export class SalesQueryService {
     });
 
     const enrichedOrders = await this.enrichOrdersWithCashio(orders);
-
-    this.logger.debug(
-      `[findAllOrders] isSearchMode: ${isSearchMode}, totalOrders: ${totalOrders}, enrichedOrders: ${enrichedOrders.length}`,
-    );
 
     if (isSearchMode) {
       // In-Memory Pagination Logic for Search Mode (Exploded Lines)
