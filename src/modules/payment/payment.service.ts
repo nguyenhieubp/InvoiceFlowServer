@@ -96,7 +96,7 @@ export class PaymentService {
     // Filters
     if (search) {
       query.andWhere(
-        '(ds.so_code ILIKE :search OR s.partnerCode ILIKE :search)',
+        '(ds.so_code ILIKE :search OR s.partnerCode ILIKE :search OR ds.partner_code ILIKE :search)',
         { search: `%${search}%` },
       );
     }
@@ -137,7 +137,7 @@ export class PaymentService {
 
     if (search) {
       countQuery.andWhere(
-        '(ds.so_code ILIKE :search OR s.partnerCode ILIKE :search)',
+        '(ds.so_code ILIKE :search OR s.partnerCode ILIKE :search OR ds.partner_code ILIKE :search)',
         { search: `%${search}%` },
       );
     }
@@ -208,7 +208,7 @@ export class PaymentService {
     // Filter
     if (search) {
       query.andWhere(
-        '(ds.so_code ILIKE :search OR s.partnerCode ILIKE :search)',
+        '(ds.so_code ILIKE :search OR s.partnerCode ILIKE :search OR ds.partner_code ILIKE :search)',
         { search: `%${search}%` },
       );
     }
@@ -461,6 +461,7 @@ export class PaymentService {
         'ds.total_out as total_out',
         'ds.so_code as so_code',
         'ds.branch_code as branch_code_cashio',
+        'ds.partner_code as partner_code_cashio', // Add cashio partner_code for fallback
         'ds.refno as refno',
         'ds.bank_code as bank_code',
         'ds.period_code as period_code',
@@ -468,7 +469,8 @@ export class PaymentService {
         'SUM(s.revenue) as revenue',
         'COALESCE(MAX(s.branchCode), ds.branch_code) as "branchCode"', // Fallback to cashio branch
         'COALESCE(MAX(s.maCa), \'\') as "maCa"',
-        'COALESCE(MAX(s.partnerCode), \'\') as "partnerCode"',
+        // Fallback: sale.partnerCode -> cashio.partner_code -> empty string
+        "COALESCE(NULLIF(MAX(s.partnerCode), ''), ds.partner_code, '') as \"partnerCode\"",
         'MAX(s.branchCode) as "boPhan"', // Keep original for reference if needed
       ])
       .leftJoin(Sale, 's', 'ds.so_code = s.docCode')
@@ -479,6 +481,7 @@ export class PaymentService {
       .addGroupBy('ds.total_out')
       .addGroupBy('ds.so_code')
       .addGroupBy('ds.branch_code')
+      .addGroupBy('ds.partner_code') // Add to GROUP BY since we're selecting it
       .addGroupBy('ds.refno')
       .addGroupBy('ds.bank_code')
       .addGroupBy('ds.period_code')
