@@ -124,31 +124,40 @@ export class InvoiceDataEnrichmentService {
     // Fetch departments để lấy ma_dvcs
     const branchCodes = SalesUtils.extractUniqueBranchCodes(sales);
 
+    // Fetch departments parallel để tối ưu performance với concurrency limit
     const departmentMap = new Map<string, any>();
-    // Fetch departments parallel để tối ưu performance
     if (branchCodes.length > 0) {
-      const departmentPromises = branchCodes.map(async (branchCode) => {
-        try {
-          const response = await this.httpService.axiosRef.get(
-            `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-            { headers: { accept: 'application/json' } },
-          );
-          const department = response?.data?.data?.items?.[0];
-          return { branchCode, department };
-        } catch (error) {
-          this.logger.warn(
-            `Failed to fetch department for branchCode ${branchCode}: ${error}`,
-          );
-          return { branchCode, department: null };
-        }
-      });
+      // OPTIMIZED: Add concurrency limit
+      const MAX_CONCURRENT = 5;
+      const chunks: string[][] = [];
+      for (let i = 0; i < branchCodes.length; i += MAX_CONCURRENT) {
+        chunks.push(branchCodes.slice(i, i + MAX_CONCURRENT));
+      }
 
-      const departmentResults = await Promise.all(departmentPromises);
-      departmentResults.forEach(({ branchCode, department }) => {
-        if (department) {
-          departmentMap.set(branchCode, department);
-        }
-      });
+      for (const chunk of chunks) {
+        const departmentPromises = chunk.map(async (branchCode) => {
+          try {
+            const response = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+              { headers: { accept: 'application/json' } },
+            );
+            const department = response?.data?.data?.items?.[0];
+            return { branchCode, department };
+          } catch (error) {
+            this.logger.warn(
+              `Failed to fetch department for branchCode ${branchCode}: ${error}`,
+            );
+            return { branchCode, department: null };
+          }
+        });
+
+        const departmentResults = await Promise.all(departmentPromises);
+        departmentResults.forEach(({ branchCode, department }) => {
+          if (department) {
+            departmentMap.set(branchCode, department);
+          }
+        });
+      }
     }
 
     // [New] Batch lookup svc_code -> materialCode for FAST API
@@ -161,19 +170,28 @@ export class InvoiceDataEnrichmentService {
     );
     const svcCodeMap = new Map<string, string>();
     if (svcCodes.length > 0) {
-      await Promise.all(
-        svcCodes.map(async (code) => {
-          try {
-            const materialCode =
-              await this.loyaltyService.getMaterialCodeBySvcCode(code);
-            if (materialCode) {
-              svcCodeMap.set(code, materialCode);
+      // OPTIMIZED: Add concurrency limit
+      const MAX_CONCURRENT = 5;
+      const chunks: string[][] = [];
+      for (let i = 0; i < svcCodes.length; i += MAX_CONCURRENT) {
+        chunks.push(svcCodes.slice(i, i + MAX_CONCURRENT));
+      }
+
+      for (const chunk of chunks) {
+        await Promise.all(
+          chunk.map(async (code) => {
+            try {
+              const materialCode =
+                await this.loyaltyService.getMaterialCodeBySvcCode(code);
+              if (materialCode) {
+                svcCodeMap.set(code, materialCode);
+              }
+            } catch (error) {
+              // Ignore
             }
-          } catch (error) {
-            // Ignore
-          }
-        }),
-      );
+          }),
+        );
+      }
     }
 
     // Fetch stock transfers để lấy ma_nx (ST* và RT* từ stock transfer)

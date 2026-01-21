@@ -70,19 +70,28 @@ export class SalesPayloadService {
       ) as string[];
       const svcCodeMap = new Map<string, string>();
       if (svcCodes.length > 0) {
-        await Promise.all(
-          svcCodes.map(async (code) => {
-            try {
-              const materialCode =
-                await this.loyaltyService.getMaterialCodeBySvcCode(code);
-              if (materialCode) {
-                svcCodeMap.set(code, materialCode);
+        // OPTIMIZED: Add concurrency limit
+        const MAX_CONCURRENT = 5;
+        const chunks: string[][] = [];
+        for (let i = 0; i < svcCodes.length; i += MAX_CONCURRENT) {
+          chunks.push(svcCodes.slice(i, i + MAX_CONCURRENT));
+        }
+
+        for (const chunk of chunks) {
+          await Promise.all(
+            chunk.map(async (code) => {
+              try {
+                const materialCode =
+                  await this.loyaltyService.getMaterialCodeBySvcCode(code);
+                if (materialCode) {
+                  svcCodeMap.set(code, materialCode);
+                }
+              } catch (error) {
+                // Ignore
               }
-            } catch (error) {
-              // Ignore
-            }
-          }),
-        );
+            }),
+          );
+        }
       }
 
       // 4. Transform sales to details (Filter out TRUTONKEEP items)

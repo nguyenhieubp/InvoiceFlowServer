@@ -584,21 +584,36 @@ export class SalesSyncService {
   ): Promise<Map<string, { company?: string }>> {
     const departmentMap = new Map<string, { company?: string }>();
     if (!targetBrand || targetBrand !== 'chando') {
-      for (const branchCode of branchCodes) {
-        try {
-          const response = await this.httpService.axiosRef.get(
-            `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
-            { headers: { accept: 'application/json' } },
-          );
-          const department = response?.data?.data?.items?.[0];
+      // OPTIMIZED: Parallelize with concurrency limit
+      const MAX_CONCURRENT = 5;
+      const chunks: string[][] = [];
+      for (let i = 0; i < branchCodes.length; i += MAX_CONCURRENT) {
+        chunks.push(branchCodes.slice(i, i + MAX_CONCURRENT));
+      }
+
+      for (const chunk of chunks) {
+        const promises = chunk.map(async (branchCode) => {
+          try {
+            const response = await this.httpService.axiosRef.get(
+              `https://loyaltyapi.vmt.vn/departments?page=1&limit=25&branchcode=${branchCode}`,
+              { headers: { accept: 'application/json' } },
+            );
+            const department = response?.data?.data?.items?.[0];
+            return { branchCode, department };
+          } catch (error) {
+            this.logger.warn(
+              `Failed to fetch department for branchCode ${branchCode}: ${error}`,
+            );
+            return { branchCode, department: null };
+          }
+        });
+
+        const results = await Promise.all(promises);
+        results.forEach(({ branchCode, department }) => {
           if (department?.company) {
             departmentMap.set(branchCode, { company: department.company });
           }
-        } catch (error) {
-          this.logger.warn(
-            `Failed to fetch department for branchCode ${branchCode}: ${error}`,
-          );
-        }
+        });
       }
     }
     return departmentMap;
@@ -720,6 +735,11 @@ export class SalesSyncService {
   ): Promise<number> {
     let salesCount = 0;
     if (order.sales && order.sales.length > 0) {
+      // OPTIMIZED: Batch fetch existing sales for this order to avoid N+1 DB calls
+      const existingSalesInDb = await this.saleRepository.find({
+        where: { docCode: order.docCode },
+      });
+
       const orderCashData = cashMapBySoCode.get(order.docCode) || [];
       const voucherData = orderCashData.filter(
         (cash) => cash.fop_syscode === 'VOUCHER',
@@ -768,21 +788,22 @@ export class SalesSyncService {
             ordertypeName.includes('08.  Tách thẻ');
 
           let existingSale: Sale | null = null;
+          // OPTIMIZED: Use in-memory lookup instead of DB query
           if (isTachThe) {
-            existingSale = await this.saleRepository.findOne({
-              where: {
-                docCode: order.docCode,
-                itemCode: saleItem.itemCode || '',
-                qty: saleItem.qty || 0,
-              },
-            });
+            existingSale =
+              existingSalesInDb.find(
+                (s) =>
+                  s.docCode === order.docCode &&
+                  s.itemCode === (saleItem.itemCode || '') &&
+                  Number(s.qty) === Number(saleItem.qty || 0),
+              ) || null;
           } else {
-            existingSale = await this.saleRepository.findOne({
-              where: {
-                docCode: order.docCode,
-                itemCode: saleItem.itemCode || '',
-              },
-            });
+            existingSale =
+              existingSalesInDb.find(
+                (s) =>
+                  s.docCode === order.docCode &&
+                  s.itemCode === (saleItem.itemCode || ''),
+              ) || null;
           }
 
           const saleData: any = {
