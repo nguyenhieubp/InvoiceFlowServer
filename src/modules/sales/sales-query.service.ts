@@ -165,9 +165,21 @@ export class SalesQueryService {
       const usedSalesIds = new Set<string>();
 
       if (uniqueStockTransfers.length > 0) {
-        this.logger.debug(
-          `[Explosion] Order ${order.docCode}: Using StockTransfers as ROOT. Total STs: ${uniqueStockTransfers.length}`,
-        );
+        // this.logger.debug(
+        //   `[Explosion] Order ${order.docCode}: Using StockTransfers as ROOT. Total STs: ${uniqueStockTransfers.length}`,
+        // );
+
+        // OPTIMIZATION: Pre-build Map for O(1) lookup instead of O(n) find()
+        // Build map: itemCode (lowercase) -> Sale[]
+        const saleByItemCodeMap = new Map<string, any[]>();
+        (order.sales || []).forEach((sale: any) => {
+          if (!sale.itemCode) return;
+          const key = sale.itemCode.toLowerCase().trim();
+          if (!saleByItemCodeMap.has(key)) {
+            saleByItemCodeMap.set(key, []);
+          }
+          saleByItemCodeMap.get(key)!.push(sale);
+        });
 
         // 1. Map Stock Transfers to Sales Lines
         uniqueStockTransfers.forEach((st) => {
@@ -176,25 +188,19 @@ export class SalesQueryService {
           const isSerial = !!product?.trackSerial;
           const isBatch = !!product?.trackBatch;
 
-          // Find matching sale to get price/info
-          // Match by itemCode (case insensitive)
-          // Prioritize finding an unused sale first
-          let sale = (order.sales || []).find(
-            (s: any) =>
-              !usedSalesIds.has(s.id) &&
-              (s.itemCode === st.itemCode ||
-                s.itemCode?.toLowerCase().trim() ===
-                  st.itemCode?.toLowerCase().trim()),
-          );
+          // OPTIMIZED: O(1) lookup instead of O(n) find()
+          const itemKey = st.itemCode?.toLowerCase().trim();
+          const matchingSales = itemKey ? saleByItemCodeMap.get(itemKey) : null;
 
-          // If no unused sale found, fallback to any matching sale (legacy behavior for 1 sale -> N splits)
-          if (!sale) {
-            sale = (order.sales || []).find(
-              (s: any) =>
-                s.itemCode === st.itemCode ||
-                s.itemCode?.toLowerCase().trim() ===
-                  st.itemCode?.toLowerCase().trim(),
-            );
+          // Find first unused sale, or fallback to any sale
+          let sale: any = null;
+          if (matchingSales && matchingSales.length > 0) {
+            // Try to find unused sale first
+            sale = matchingSales.find((s: any) => !usedSalesIds.has(s.id));
+            // If all used, take first one (legacy behavior for 1 sale -> N splits)
+            if (!sale) {
+              sale = matchingSales[0];
+            }
           }
 
           if (sale) {
@@ -549,12 +555,12 @@ export class SalesQueryService {
     });
 
     const totalResult = await countQuery.getRawOne();
-    const totalSaleItems = parseInt(totalResult?.count || '0', 10);
+    const totalOrders = parseInt(totalResult?.count || '0', 10); // Count of distinct orders
 
     // 2. Main Query
     const fullQuery = this.saleRepository
       .createQueryBuilder('sale')
-      .leftJoinAndSelect('sale.customer', 'customer')
+      .leftJoinAndSelect('sale.customer', 'customer') // Need this for order grouping logic
       .orderBy('sale.docDate', 'DESC')
       .addOrderBy('sale.docCode', 'ASC')
       .addOrderBy('sale.id', 'ASC');
@@ -570,11 +576,13 @@ export class SalesQueryService {
       search,
     });
 
-    const isSearchMode = !!search && totalSaleItems < 2000;
+    const isSearchMode = !!search && totalOrders < 2000;
 
     if (!isExport && !isSearchMode) {
       const offset = (page - 1) * limit;
-      fullQuery.skip(offset).take(limit);
+      // Fetch more sale items to ensure we have enough orders after grouping
+      // Multiply by 3 to account for orders with multiple sale items
+      fullQuery.skip(offset).take(limit * 3);
     }
 
     const allSales = await fullQuery.getMany();
@@ -605,7 +613,7 @@ export class SalesQueryService {
 
       return {
         sales: salesWithCustomer,
-        total: totalSaleItems,
+        total: totalOrders,
       };
     }
 
@@ -719,6 +727,14 @@ export class SalesQueryService {
         this.categoriesService.getWarehouseCodeMap(),
       ]);
 
+    // Debug: Log department fetching
+    this.logger.debug(
+      `[DEBUG] Fetched departments for ${branchCodes.length} branchCodes: ${JSON.stringify(Array.from(branchCodes))}`,
+    );
+    this.logger.debug(
+      `[DEBUG] DepartmentMap size: ${departmentMap.size}, keys: ${JSON.stringify(Array.from(departmentMap.keys()))}`,
+    );
+
     // Batch lookup svc_code -> materialCode
     const svcCodeMap = new Map<string, string>();
     if (svcCodes.length > 0) {
@@ -801,6 +817,14 @@ export class SalesQueryService {
       const department = sale.branchCode
         ? departmentMap.get(sale.branchCode) || null
         : null;
+
+      // Debug: Log when department is missing
+      if (!department && sale.branchCode) {
+        this.logger.warn(
+          `[DEBUG] Department not found for branchCode: ${sale.branchCode}, docCode: ${docCode}`,
+        );
+      }
+
       const maThe = getMaThe.get(loyaltyProduct?.materialCode || '') || '';
       sale.maThe = maThe;
       const saleMaterialCode = loyaltyProduct?.materialCode;
@@ -943,7 +967,7 @@ export class SalesQueryService {
     const enrichedOrders = await this.enrichOrdersWithCashio(orders);
 
     this.logger.debug(
-      `[findAllOrders] isSearchMode: ${isSearchMode}, totalSaleItems: ${totalSaleItems}, enrichedOrders: ${enrichedOrders.length}`,
+      `[findAllOrders] isSearchMode: ${isSearchMode}, totalOrders: ${totalOrders}, enrichedOrders: ${enrichedOrders.length}`,
     );
 
     if (isSearchMode) {
@@ -1006,15 +1030,34 @@ export class SalesQueryService {
       };
     }
 
-    const maxOrders = limit * 2;
+    const maxOrders = limit; // Take exactly limit number of orders
     const limitedOrders = enrichedOrders.slice(0, maxOrders);
 
+    // FIX: Only return first sale per order to match expected format sales: [1 sale]
+    // Prioritize real sales (with id) over pseudo-sales created from stock transfers
+    const ordersWithSingleSale = limitedOrders.map((order) => {
+      if (!order.sales || order.sales.length === 0) {
+        return { ...order, sales: [] };
+      }
+
+      // Find first real sale (has id field) or fallback to first sale
+      const realSale = order.sales.find((s: any) => s.id) || order.sales[0];
+
+      return {
+        ...order,
+        sales: [realSale],
+      };
+    });
+
+    // Use totalOrders from count query, not enrichedOrders.length
+    // enrichedOrders.length is limited by query, not total count
+
     return {
-      data: limitedOrders,
-      total: totalSaleItems,
+      data: ordersWithSingleSale,
+      total: totalOrders, // Return total orders, not sale items
       page,
       limit,
-      totalPages: Math.ceil(totalSaleItems / limit),
+      totalPages: Math.ceil(totalOrders / limit),
     };
   }
 

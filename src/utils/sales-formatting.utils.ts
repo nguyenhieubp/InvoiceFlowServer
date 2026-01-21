@@ -347,6 +347,7 @@ export async function formatSaleForFrontend(
 
   return {
     ...sale,
+    customer: undefined, // Remove customer from sale - it's already at order level
     itemName: sale.itemName || loyaltyProduct?.name || null,
     maKho: maKho,
     maCtkmTangHang: maCtkmTangHang,
@@ -373,18 +374,33 @@ export async function formatSaleForFrontend(
         : sale.partnerCode || sale.partner_code || null,
     ...displayFields,
     productType: productType,
+    // Optimized: Only return fields actually used by frontend
     product: loyaltyProduct
       ? {
-          ...loyaltyProduct,
           productType: productType,
           dvt: loyaltyProduct.unit || null,
           maVatTu: loyaltyProduct.materialCode || sale.itemCode,
+          tenVatTu: loyaltyProduct.name || null,
           trackInventory: loyaltyProduct.trackInventory ?? null,
           trackSerial: trackSerial,
           trackBatch: trackBatch,
+          tkChietKhau: loyaltyProduct.tkChietKhau || null,
+          tkDoanhThuBanLe: loyaltyProduct.tkDoanhThuBanLe || null,
+          tkDoanhThuBanBuon: loyaltyProduct.tkDoanhThuBanBuon || null,
+          tkGiaVonBanLe: loyaltyProduct.tkGiaVonBanLe || null,
+          tkGiaVonBanBuon: loyaltyProduct.tkGiaVonBanBuon || null,
         }
       : null,
-    department: department,
+    // Optimized: Only return fields actually used by frontend
+    department: department
+      ? {
+          ma_bp: department.ma_bp || null,
+          branchcode: department.branchcode || null,
+          ma_dvcs: department.ma_dvcs || null,
+          ma_dvcs_ht: department.ma_dvcs_ht || null,
+          type: department.type || null,
+        }
+      : null,
     dvt: loyaltyProduct?.unit || sale.dvt || null,
     tkChietKhau,
     tkChiPhi,
