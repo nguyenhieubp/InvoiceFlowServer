@@ -361,16 +361,19 @@ export class SyncService {
 
       // Tự động xử lý warehouse cho các stock transfers mới (chỉ cho các docCode chưa được xử lý)
       // Nếu skipWarehouseProcessing = true thì bỏ qua bước này
-      if (!options?.skipWarehouseProcessing) {
-        try {
-          await this.processWarehouseForStockTransfers(date, brand);
-        } catch (warehouseError: any) {
-          this.logger.warn(
-            `[Stock Transfer] Lỗi khi xử lý warehouse tự động cho brand ${brand} ngày ${date}: ${warehouseError?.message || warehouseError}`,
-          );
-          // Không throw error để không chặn flow sync chính
-        }
-      }
+      // Tự động xử lý warehouse cho các stock transfers mới (chỉ cho các docCode chưa được xử lý)
+      // Nếu skipWarehouseProcessing = true thì bỏ qua bước này
+      // DISABLED per user request: Không tự động tạo phiếu nhập/xuất kho khi sync
+      // if (!options?.skipWarehouseProcessing) {
+      //   try {
+      //     await this.processWarehouseForStockTransfers(date, brand);
+      //   } catch (warehouseError: any) {
+      //     this.logger.warn(
+      //       `[Stock Transfer] Lỗi khi xử lý warehouse tự động cho brand ${brand} ngày ${date}: ${warehouseError?.message || warehouseError}`,
+      //     );
+      //     // Không throw error để không chặn flow sync chính
+      //   }
+      // }
 
       return {
         success: errors.length === 0,
@@ -941,23 +944,24 @@ export class SyncService {
       );
 
       // Phase 2: Xử lý Warehouse (Sau khi đã có đủ dữ liệu)
-      for (const dateStr of dateList) {
-        for (const brandItem of brands) {
-          try {
-            this.logger.log(
-              `[Stock Transfer Range] Phase 2: Đang xử lý Warehouse brand ${brandItem} cho ngày ${dateStr}`,
-            );
-            await this.processWarehouseForStockTransfers(dateStr, brandItem);
-            this.logger.log(
-              `[Stock Transfer Range] Phase 2: Hoàn thành xử lý Warehouse brand ${brandItem} cho ngày ${dateStr}`,
-            );
-          } catch (error: any) {
-            const errorMsg = `Lỗi khi xử lý warehouse (Phase 2) cho brand ${brandItem} ngày ${dateStr}: ${error?.message || error}`;
-            this.logger.error(`[Stock Transfer Range] ${errorMsg}`);
-            errors.push(errorMsg);
-          }
-        }
-      }
+      // DISABLED per user request: Không tự động xử lý warehouse (Push to Fast)
+      // for (const dateStr of dateList) {
+      //   for (const brandItem of brands) {
+      //     try {
+      //       this.logger.log(
+      //         `[Stock Transfer Range] Phase 2: Đang xử lý Warehouse brand ${brandItem} cho ngày ${dateStr}`,
+      //       );
+      //       await this.processWarehouseForStockTransfers(dateStr, brandItem);
+      //       this.logger.log(
+      //         `[Stock Transfer Range] Phase 2: Hoàn thành xử lý Warehouse brand ${brandItem} cho ngày ${dateStr}`,
+      //       );
+      //     } catch (error: any) {
+      //       const errorMsg = `Lỗi khi xử lý warehouse (Phase 2) cho brand ${brandItem} ngày ${dateStr}: ${error?.message || error}`;
+      //       this.logger.error(`[Stock Transfer Range] ${errorMsg}`);
+      //       errors.push(errorMsg);
+      //     }
+      //   }
+      // }
 
       this.logger.log(
         `[Stock Transfer Range] Hoàn thành đồng bộ dữ liệu xuất kho từ ${dateFrom} đến ${dateTo}. Tổng: ${totalRecordsCount} records, ${totalSavedCount} mới, ${totalUpdatedCount} cập nhật`,

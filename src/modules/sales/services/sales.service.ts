@@ -210,19 +210,20 @@ export class SalesService {
     );
 
     // Phase 2: Process Invoices
-    this.logger.log(
-      `[Two-Phase Sync] Phase 2: Processing Fast API Invoices...`,
-    );
-    const invoiceResult =
-      await this.salesInvoiceService.processInvoicesByDateRange(
-        startDate,
-        endDate,
-      );
+    // this.logger.log(
+    //   `[Two-Phase Sync] Phase 2: Processing Fast API Invoices...`,
+    // );
+    // const invoiceResult =
+    //   await this.salesInvoiceService.processInvoicesByDateRange(
+    //     startDate,
+    //     endDate,
+    //   );
 
     return {
       ...syncResult,
-      message: `${syncResult.message}. Phase 2: ${invoiceResult.message}`,
-      invoiceProcessing: invoiceResult,
+      // message: `${syncResult.message}. Phase 2: ${invoiceResult.message}`,
+      message: `${syncResult.message}. Phase 2 (Auto Invoice) DISABLED per user request.`,
+      // invoiceProcessing: invoiceResult,
     };
   }
 
