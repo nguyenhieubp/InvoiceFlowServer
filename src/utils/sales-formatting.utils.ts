@@ -59,6 +59,7 @@ export async function calculateDisplayFields(
   let thanhToanVoucherDisplay: string | null = null;
   let thanhToanVoucher: number | null = null;
 
+  // Force voucher discount to 0 if order is Point Exchange (isDoiDiem)
   if (!isDoiDiem && !hasEcoin(order)) {
     const ecommerce = await categoriesService.findActiveEcommerceCustomerByCode(
       sale.partnerCode,
@@ -407,5 +408,10 @@ export async function formatSaleForFrontend(
     maPhi,
     brand: sale?.brand?.toUpperCase() || null,
     type_sale: sale?.type_sale || null,
+    // Force voucher discount to 0 if order is Point Exchange (isDoiDiem)
+    paid_by_voucher_ecode_ecoin_bp: isDoiDiem
+      ? 0
+      : sale.paid_by_voucher_ecode_ecoin_bp,
+    chietKhauThanhToanVoucher: isDoiDiem ? 0 : sale.chietKhauThanhToanVoucher,
   };
 }
