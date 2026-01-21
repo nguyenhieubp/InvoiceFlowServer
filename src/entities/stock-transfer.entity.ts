@@ -13,6 +13,9 @@ import {
 @Index(['branchCode']) // Index cho filter branch
 @Index(['brandCode']) // Index cho filter brand
 @Index(['soCode']) // Index cho filter so_code
+@Index(['itemCode']) // Index cho filter item code
+@Index(['docCode']) // Index cho filter document code
+@Index(['brand']) // Index cho filter brand name
 export class StockTransfer {
   @PrimaryGeneratedColumn('uuid')
   id: string;

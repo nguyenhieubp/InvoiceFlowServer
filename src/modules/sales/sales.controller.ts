@@ -253,19 +253,4 @@ export class SalesController {
       );
     }
   }
-
-  @Get('stock-transfer/incorrect')
-  async getIncorrectStockTransfers(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('search') search?: string,
-  ) {
-    const pageNum = page ? parseInt(page) : 1;
-    const limitNum = limit ? parseInt(limit) : 50;
-    return this.salesService.getIncorrectStockTransfers(
-      pageNum,
-      limitNum,
-      search,
-    );
-  }
 }

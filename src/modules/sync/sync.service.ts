@@ -30,6 +30,7 @@ import { FastApiInvoiceFlowService } from '../../services/fast-api-invoice-flow.
 import { FastApiClientService } from '../../services/fast-api-client.service';
 import { Order } from 'src/types/order.types';
 import { formatZappyDate, parseZappyDate } from 'src/utils/convert.utils';
+import { parseDDMMMYYYY } from '../../utils/date-parser.util';
 
 @Injectable()
 export class SyncService {
@@ -1019,85 +1020,44 @@ export class SyncService {
         });
       }
       if (params.itemCode) {
+        // Use prefix search instead of full-text search to utilize index
+        // Changed from LIKE '%value%' to LIKE 'value%'
         queryBuilder.andWhere('st.itemCode LIKE :itemCode', {
-          itemCode: `%${params.itemCode}%`,
+          itemCode: `${params.itemCode}%`,
         });
       }
       if (params.soCode) {
         queryBuilder.andWhere('st.soCode = :soCode', { soCode: params.soCode });
       }
       if (params.docCode) {
-        // Use POSITION function instead of LIKE to avoid escaping issues with _ and %
-        // POSITION returns > 0 if substring is found
-        queryBuilder.andWhere('POSITION(:docCode IN st.docCode) > 0', {
-          docCode: params.docCode,
+        // Use prefix LIKE instead of POSITION to utilize index
+        // Changed from POSITION(:docCode IN st.docCode) > 0 to LIKE 'value%'
+        queryBuilder.andWhere('st.docCode LIKE :docCode', {
+          docCode: `${params.docCode}%`,
         });
       }
       if (params.dateFrom) {
-        // Parse DDMMMYYYY to Date
-        const parseDate = (dateStr: string): Date => {
-          const day = parseInt(dateStr.substring(0, 2));
-          const monthStr = dateStr.substring(2, 5).toUpperCase();
-          const year = parseInt(dateStr.substring(5, 9));
-          const monthMap: Record<string, number> = {
-            JAN: 0,
-            FEB: 1,
-            MAR: 2,
-            APR: 3,
-            MAY: 4,
-            JUN: 5,
-            JUL: 6,
-            AUG: 7,
-            SEP: 8,
-            OCT: 9,
-            NOV: 10,
-            DEC: 11,
-          };
-          const month = monthMap[monthStr] || 0;
-          return new Date(year, month, day);
-        };
-        const fromDate = parseDate(params.dateFrom);
+        // Use date-parser utility instead of inline function
+        const fromDate = parseDDMMMYYYY(params.dateFrom);
         queryBuilder.andWhere('st.transDate >= :dateFrom', {
           dateFrom: fromDate,
         });
       }
       if (params.dateTo) {
-        const parseDate = (dateStr: string): Date => {
-          const day = parseInt(dateStr.substring(0, 2));
-          const monthStr = dateStr.substring(2, 5).toUpperCase();
-          const year = parseInt(dateStr.substring(5, 9));
-          const monthMap: Record<string, number> = {
-            JAN: 0,
-            FEB: 1,
-            MAR: 2,
-            APR: 3,
-            MAY: 4,
-            JUN: 5,
-            JUL: 6,
-            AUG: 7,
-            SEP: 8,
-            OCT: 9,
-            NOV: 10,
-            DEC: 11,
-          };
-          const month = monthMap[monthStr] || 0;
-          return new Date(year, month, day, 23, 59, 59);
-        };
-        const toDate = parseDate(params.dateTo);
+        // Use date-parser utility with endOfDay flag
+        const toDate = parseDDMMMYYYY(params.dateTo, true);
         queryBuilder.andWhere('st.transDate <= :dateTo', { dateTo: toDate });
       }
 
       // Order by transDate DESC
       queryBuilder.orderBy('st.transDate', 'DESC');
 
-      // Get total count
-      const total = await queryBuilder.getCount();
-
       // Apply pagination
       queryBuilder.skip(skip).take(limit);
 
-      // Get data
-      const data = await queryBuilder.getMany();
+      // Use getManyAndCount() instead of separate getCount() and getMany()
+      // This executes a single optimized query instead of two separate queries
+      const [data, total] = await queryBuilder.getManyAndCount();
 
       const totalPages = Math.ceil(total / limit);
 

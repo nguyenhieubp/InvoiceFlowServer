@@ -263,16 +263,4 @@ export class SalesService {
   async createStockTransfer(createDto: any) {
     return this.salesInvoiceService.createStockTransfer(createDto);
   }
-
-  async getIncorrectStockTransfers(
-    page: number,
-    limit: number,
-    search?: string,
-  ) {
-    return this.salesQueryService.getIncorrectStockTransfers(
-      page,
-      limit,
-      search,
-    );
-  }
 }
