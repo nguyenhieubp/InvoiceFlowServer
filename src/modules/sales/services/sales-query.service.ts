@@ -418,13 +418,13 @@ export class SalesQueryService {
     }
 
     if (brand) {
-      // Check if we need to join customer (if not already joined in calling code)
-      // Assuming 'customer' alias is used for sale.customer join
-      query.andWhere('customer.brand = :brand', { brand });
+      // Use sale.brand directly instead of joining customer
+      query.andWhere('sale.brand = :brand', { brand });
     }
 
     if (search && search.trim() !== '') {
       const searchPattern = `%${search.trim().toLowerCase()}%`;
+      // Searching by customer fields requires customer join
       query.andWhere(
         "(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, '')) LIKE :search OR LOWER(COALESCE(customer.code, '')) LIKE :search OR LOWER(COALESCE(customer.mobile, '')) LIKE :search)",
         { search: searchPattern },
@@ -539,10 +539,12 @@ export class SalesQueryService {
     // 1. Initial Count Query
     const countQuery = this.saleRepository
       .createQueryBuilder('sale')
-      .select('COUNT(sale.id)', 'count');
+      .select('COUNT(DISTINCT sale.docCode)', 'count'); // Use COUNT(DISTINCT) for accurate order count
 
-    // Join customer for search/brand filtering
-    countQuery.leftJoin('sale.customer', 'customer');
+    // Join customer ONLY if searching by customer fields
+    if (search && search.trim() !== '') {
+      countQuery.leftJoin('sale.customer', 'customer');
+    }
 
     // Apply shared filters
     this.applySaleFilters(countQuery, {
@@ -562,7 +564,7 @@ export class SalesQueryService {
     // 2. Main Query
     const fullQuery = this.saleRepository
       .createQueryBuilder('sale')
-      .leftJoinAndSelect('sale.customer', 'customer') // Need this for order grouping logic
+      .leftJoinAndSelect('sale.customer', 'customer') // Need this for order grouping logic and response
       .orderBy('sale.docDate', 'DESC')
       .addOrderBy('sale.docCode', 'ASC')
       .addOrderBy('sale.id', 'ASC');
@@ -592,6 +594,11 @@ export class SalesQueryService {
         .groupBy('sale.docCode')
         .orderBy('MAX(sale.docDate)', 'DESC')
         .addOrderBy('sale.docCode', 'ASC');
+
+      // Join customer IF searching (needed for filter)
+      if (search && search.trim() !== '') {
+        docCodeSubquery.leftJoin('sale.customer', 'customer');
+      }
 
       // Apply same filters to subquery
       this.applySaleFilters(docCodeSubquery, {
