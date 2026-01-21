@@ -1140,6 +1140,11 @@ export class SalesPayloadService {
       if (sts?.[0]?.batchSerial) batchSerial = sts[0].batchSerial;
     }
 
+    // [Fix] Fallback for Voucher (Type 94) - use ma_vt_ref (Ecode) as serial if not found in ST
+    if (!batchSerial && loyaltyProduct?.materialType === '94') {
+      batchSerial = sale.ma_vt_ref || sale.serial || sale.soSerial;
+    }
+
     return InvoiceLogicUtils.resolveBatchSerial({
       batchSerialFromST: batchSerial,
       trackBatch: loyaltyProduct?.trackBatch === true,
@@ -1438,6 +1443,11 @@ export class SalesPayloadService {
       ma_phi: this.val(maPhi, 16),
       tien_hang: Number(sale.qty) * Number(sale.giaBan),
       so_luong: Number(sale.qty),
+      ...(soSerial && soSerial.trim() !== ''
+        ? { so_serial: this.limitString(soSerial, 64) }
+        : maLo && maLo.trim() !== ''
+          ? { ma_lo: this.limitString(maLo, 16) }
+          : {}),
       ma_kh_i: this.val(sale.issuePartnerCode, 16),
       ma_vt: this.val(
         loyaltyProduct?.materialCode || sale.product?.maVatTu || '',
@@ -1486,7 +1496,12 @@ export class SalesPayloadService {
       tk_thue: this.val(sale.tkThueCo, 16),
       tk_cpbh: this.val(sale.tkCpbh, 16),
       ma_bp: maBp,
-      ma_the: this.val(cardSerialMap.get(saleMaterialCode), 256),
+      ma_the: this.val(
+        loyaltyProduct?.materialType === '94' && soSerial
+          ? soSerial
+          : cardSerialMap.get(saleMaterialCode),
+        256,
+      ),
       dong: index + 1,
       id_goc_ngay: sale.idGocNgay
         ? this.formatDateISO(new Date(sale.idGocNgay))
@@ -1498,11 +1513,6 @@ export class SalesPayloadService {
       ma_combo: this.val(sale.maCombo, 16),
       ma_nx_st: this.val(sale.ma_nx_st, 32),
       ma_nx_rt: this.val(sale.ma_nx_rt, 32),
-      ...(soSerial && soSerial.trim() !== ''
-        ? { so_serial: this.limitString(soSerial, 64) }
-        : maLo && maLo.trim() !== ''
-          ? { ma_lo: this.limitString(maLo, 16) }
-          : {}),
       ma_vt_ref: this.val(sale.ma_vt_ref, 32),
     });
 

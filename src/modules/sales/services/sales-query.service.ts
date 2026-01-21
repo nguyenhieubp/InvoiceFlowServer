@@ -699,6 +699,27 @@ export class SalesQueryService {
     });
     if (postExplosionEnrichmentTasks.length > 0) {
       await Promise.all(postExplosionEnrichmentTasks);
+
+      // [New] Override maThe for Voucher items (Type 94) with Ecode (ma_vt_ref)
+      // Frontend requires maThe to show the serial/ecode
+      enrichedOrders.forEach((order) => {
+        if (order.sales) {
+          order.sales.forEach((sale: any) => {
+            const product =
+              loyaltyProductMap.get(sale.itemCode) ||
+              loyaltyProductMap.get(sale.materialCode);
+            if (product?.materialType === '94') {
+              // User request: maThe must take value from soSerial
+              // Helper: Ensure soSerial is populated (fallback to ma_vt_ref)
+              if (!sale.soSerial && sale.ma_vt_ref) {
+                sale.soSerial = sale.ma_vt_ref;
+              }
+              // Assign soSerial to maThe
+              sale.maThe = sale.soSerial;
+            }
+          });
+        }
+      });
     }
 
     if (isSearchMode) {

@@ -71,6 +71,7 @@ export class FastApiPayloadHelper {
           // Giữ lại ma_lo và so_serial (kể cả null)
           if ('ma_lo' in item) result.ma_lo = item.ma_lo;
           if ('so_serial' in item) result.so_serial = item.so_serial;
+          if ('ma_serial' in item) result.ma_serial = item.ma_serial; // Add mapping for ma_serial
           // Giữ lại ma_bp nếu có (không loại bỏ)
           if ('ma_bp' in item) result.ma_bp = item.ma_bp;
           return result;
@@ -107,6 +108,7 @@ export class FastApiPayloadHelper {
         // Giữ lại ma_lo và so_serial (kể cả null)
         if ('ma_lo' in item) result.ma_lo = item.ma_lo;
         if ('so_serial' in item) result.so_serial = item.so_serial;
+        if ('ma_serial' in item) result.ma_serial = item.ma_serial; // Add mapping for ma_serial
         // Giữ lại ma_bp nếu có (không loại bỏ)
         if ('ma_bp' in item) result.ma_bp = item.ma_bp;
         return result;
