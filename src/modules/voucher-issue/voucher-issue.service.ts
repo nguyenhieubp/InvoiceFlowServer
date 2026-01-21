@@ -672,7 +672,7 @@ export class VoucherIssueService {
     const verificationTasks: Promise<void>[] = [];
 
     for (const sale of sales) {
-      const saleSerial = sale.maSerial || sale.serial; // Prioritize maSerial (enriched) or fallback to serial
+      const saleSerial = sale.maSerial || sale.soSerial || sale.serial; // Check soSerial for exploded sales
       const itemCode = sale.itemCode;
 
       if (!itemCode || !saleSerial) continue;
@@ -689,12 +689,17 @@ export class VoucherIssueService {
 
       if (!isMaterialType94) continue;
 
-      // 3. Resolve Ecode
+      // 3. Use originalItemCode from StockTransfer if available (for exploded sales)
+      // Otherwise use materialCode from loyaltyProduct, fallback to itemCode
+      const lookupCode =
+        sale.originalItemCode || loyaltyProduct?.materialCode || itemCode;
+
+      // 4. Resolve Ecode
       verificationTasks.push(
         (async () => {
           try {
             const ecode = await this.findEcodeBySerialAndItemCode(
-              itemCode,
+              lookupCode,
               saleSerial,
             );
             if (ecode) {

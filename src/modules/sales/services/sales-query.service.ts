@@ -287,6 +287,8 @@ export class SalesQueryService {
               // Logic check trackBatch/trackSerial
               maLo: isBatch ? st.batchSerial : undefined,
               soSerial: isSerial ? st.batchSerial : undefined,
+              // Store original itemCode from StockTransfer for voucher lookup
+              originalItemCode: st.itemCode,
 
               isStockTransferLine: true,
               stockTransferId: st.id,
@@ -1069,6 +1071,24 @@ export class SalesQueryService {
     });
 
     const enrichedOrders = await this.enrichOrdersWithCashio(orders);
+    // CX4772
+    // [CRITICAL] Re-enrich ma_vt_ref AFTER explosion
+    // enrichOrdersWithCashio creates new sale lines from stock transfers
+    // These new lines need ma_vt_ref to be populated based on their serial numbers
+    const postExplosionEnrichmentTasks: Promise<void>[] = [];
+    enrichedOrders.forEach((order) => {
+      if (order.sales && order.sales.length > 0) {
+        postExplosionEnrichmentTasks.push(
+          this.voucherIssueService.enrichSalesWithMaVtRef(
+            order.sales,
+            loyaltyProductMap,
+          ),
+        );
+      }
+    });
+    if (postExplosionEnrichmentTasks.length > 0) {
+      await Promise.all(postExplosionEnrichmentTasks);
+    }
 
     if (isSearchMode) {
       // In-Memory Pagination Logic for Search Mode (Exploded Lines)
