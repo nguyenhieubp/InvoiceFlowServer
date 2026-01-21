@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HttpModule } from '@nestjs/axios';
 import { SyncService } from './sync.service';
+import { StockTransferSyncService } from './stock-transfer-sync.service';
 import { SyncController } from './sync.controller';
 import { SyncTask } from '../../tasks/sync.task';
 import { ZappyApiService } from '../../services/zappy-api.service';
@@ -41,12 +42,13 @@ import { PromotionLine } from '../../entities/promotion-line.entity';
   controllers: [SyncController],
   providers: [
     SyncService,
+    StockTransferSyncService,
     SyncTask,
     ZappyApiService,
     LoyaltyService,
     FastApiClientService,
   ],
-  exports: [SyncService],
+  exports: [SyncService, StockTransferSyncService],
   // Import SalesModule để có thể inject FastApiInvoiceFlowService (đã export từ SalesModule)
 })
 export class SyncModule {}

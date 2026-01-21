@@ -10,11 +10,15 @@ import {
   Res,
 } from '@nestjs/common';
 import { SyncService } from './sync.service';
+import { StockTransferSyncService } from './stock-transfer-sync.service';
 import type { Response } from 'express';
 
 @Controller('sync')
 export class SyncController {
-  constructor(private readonly syncService: SyncService) {}
+  constructor(
+    private readonly syncService: SyncService,
+    private readonly stockTransferSyncService: StockTransferSyncService,
+  ) {}
 
   @Post('brand/:brandName')
   async syncBrand(
@@ -94,7 +98,7 @@ export class SyncController {
     }
 
     try {
-      const result = await this.syncService.syncStockTransferRange(
+      const result = await this.stockTransferSyncService.syncStockTransferRange(
         dateFrom,
         dateTo,
         brand,
@@ -108,6 +112,51 @@ export class SyncController {
         {
           success: false,
           message: 'Lỗi khi đồng bộ stock transfer range',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Retry/Repair stock transfer materialCode by soCode
+   */
+  @Post('stock-transfer/retry')
+  async retryStockTransferMaterialCode(@Body('soCode') soCode: string) {
+    if (!soCode) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Tham số soCode là bắt buộc',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const result =
+        await this.stockTransferSyncService.syncErrorStockTransferBySoCode(
+          soCode,
+        );
+
+      if (!result.success) {
+        throw new HttpException(
+          {
+            success: false,
+            message: result.message,
+            details: result.details,
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      return result;
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Lỗi khi xử lý retry stock transfer',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -139,7 +188,10 @@ export class SyncController {
     }
 
     try {
-      const result = await this.syncService.syncStockTransfer(date, brandName);
+      const result = await this.stockTransferSyncService.syncStockTransfer(
+        date,
+        brandName,
+      );
       return {
         ...result,
         brand: brandName,
@@ -553,7 +605,7 @@ export class SyncController {
     @Query('docCode') docCode?: string,
   ) {
     try {
-      const result = await this.syncService.getStockTransfers({
+      const result = await this.stockTransferSyncService.getStockTransfers({
         page: page ? parseInt(page, 10) : 1,
         limit: limit ? parseInt(limit, 10) : 10,
         brand,
@@ -712,7 +764,7 @@ export class SyncController {
     @Query('docCode') docCode?: string,
   ) {
     try {
-      const result = await this.syncService.getWarehouseProcessed({
+      const result = await this.stockTransferSyncService.getWarehouseProcessed({
         page: page ? parseInt(page, 10) : 1,
         limit: limit ? parseInt(limit, 10) : 10,
         dateFrom,

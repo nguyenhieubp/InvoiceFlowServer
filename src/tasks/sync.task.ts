@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SyncService } from '../modules/sync/sync.service';
+import { StockTransferSyncService } from '../modules/sync/stock-transfer-sync.service';
 import { SalesService } from '../modules/sales/services/sales.service';
 import { FastApiInvoiceFlowService } from '../services/fast-api-invoice-flow.service';
 import { SalesInvoiceService } from '../modules/sales/invoice/sales-invoice.service';
@@ -15,6 +16,7 @@ export class SyncTask {
 
   constructor(
     private readonly syncService: SyncService,
+    private readonly stockTransferSyncService: StockTransferSyncService,
     private readonly salesInvoiceService: SalesInvoiceService,
     @InjectRepository(Sale)
     private saleRepository: Repository<Sale>,
@@ -66,7 +68,10 @@ export class SyncTask {
           this.logger.log(
             `[Scheduled Stock Transfer] Đang đồng bộ xuất kho brand ${brand} cho ngày ${date}`,
           );
-          const result = await this.syncService.syncStockTransfer(date, brand);
+          const result = await this.stockTransferSyncService.syncStockTransfer(
+            date,
+            brand,
+          );
           if (result.success) {
             this.logger.log(
               `[Scheduled Stock Transfer] Hoàn thành đồng bộ xuất kho brand ${brand}: ${result.message}`,
