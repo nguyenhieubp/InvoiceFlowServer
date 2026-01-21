@@ -191,8 +191,17 @@ export class SalesQueryService {
           const isBatch = !!product?.trackBatch;
 
           // OPTIMIZED: O(1) lookup instead of O(n) find()
+          // Try matching by itemCode first
           const itemKey = st.itemCode?.toLowerCase().trim();
-          const matchingSales = itemKey ? saleByItemCodeMap.get(itemKey) : null;
+          let matchingSales = itemKey ? saleByItemCodeMap.get(itemKey) : null;
+
+          // If no match and materialCode exists, try matching by materialCode
+          // This handles vouchers where Sale.itemCode = materialCode (e.g., E.M00033A)
+          // but StockTransfer.itemCode = original code (e.g., E_JUPTD011A)
+          if (!matchingSales && st.materialCode) {
+            const materialKey = st.materialCode.toLowerCase().trim();
+            matchingSales = saleByItemCodeMap.get(materialKey);
+          }
 
           // Find first unused sale, or fallback to any sale
           let sale: any = null;
