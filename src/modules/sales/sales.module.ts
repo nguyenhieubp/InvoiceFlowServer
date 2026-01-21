@@ -5,6 +5,8 @@ import { SalesController } from './controllers/sales.controller';
 import { SalesService } from './services/sales.service';
 import { SalesQueryService } from './services/sales-query.service';
 import { SalesSyncService } from './services/sales-sync.service';
+import { SalesExplosionService } from './services/sales-explosion.service';
+import { SalesFilterService } from './services/sales-filter.service';
 import { SalesInvoiceService } from './invoice/sales-invoice.service';
 import { SalesPayloadService } from './invoice/sales-payload.service';
 import { SalesWarehouseService } from './services/sales-warehouse.service';
@@ -65,6 +67,8 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
     // New specialized services
     SalesQueryService,
     SalesSyncService,
+    SalesExplosionService,
+    SalesFilterService,
     SalesInvoiceService,
     SalesPayloadService,
     SalesWarehouseService,
@@ -89,6 +93,8 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
     // Export specialized services để có thể sử dụng ở module khác
     SalesQueryService,
     SalesSyncService,
+    SalesExplosionService,
+    SalesFilterService,
     SalesInvoiceService,
     SalesPayloadService,
     SalesWarehouseService,
