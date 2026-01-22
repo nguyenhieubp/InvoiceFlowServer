@@ -158,6 +158,10 @@ export class SalesSyncService {
   /**
    * Đồng bộ lại một đơn hàng cụ thể - check lại với Loyalty API
    */
+  /**
+   * Đồng bộ lại một đơn hàng cụ thể - check lại với Loyalty API
+   * Cập nhật Material Code nếu tìm thấy
+   */
   async syncErrorOrderByDocCode(docCode: string): Promise<{
     success: boolean;
     message: string;
@@ -168,19 +172,18 @@ export class SalesSyncService {
       itemCode: string;
       oldItemCode: string;
       newItemCode: string;
+      maDvcs?: string;
     }>;
   }> {
-    const errorSales = await this.saleRepository.find({
-      where: [
-        { docCode, statusAsys: false },
-        { docCode, statusAsys: IsNull() },
-      ],
+    // 1. Fetch ALL sales for docCode (Ignore statusAsys)
+    const sales = await this.saleRepository.find({
+      where: { docCode },
     });
 
-    if (errorSales.length === 0) {
+    if (sales.length === 0) {
       return {
-        success: true,
-        message: `Đơn hàng ${docCode} không có dòng nào cần đồng bộ`,
+        success: true, // No sales found is technically strict success (nothing to do)
+        message: `Không tìm thấy đơn hàng ${docCode}`,
         updated: 0,
         failed: 0,
         details: [],
@@ -194,53 +197,76 @@ export class SalesSyncService {
       itemCode: string;
       oldItemCode: string;
       newItemCode: string;
+      maDvcs?: string;
     }> = [];
 
-    // --- BATCH FETCHING FIX ---
+    // --- BATCH FETCHING OPTIMIZATION ---
     // 1. Collect unique item codes
     const itemCodes = Array.from(
       new Set(
-        errorSales
+        sales
           .map((s) => s.itemCode?.trim())
           .filter((code): code is string => !!code && code !== ''),
       ),
     );
 
-    // 2. Batch fetch from Loyalty API
+    // 2. Batch fetch Product & Branch Map
     const productMap = await this.loyaltyService.fetchProducts(itemCodes);
 
-    // 3. Process using Map
-    for (const sale of errorSales) {
+    // Also fetch DVCS for branches involved
+    const branchCodes = Array.from(
+      new Set(sales.map((s) => s.branchCode).filter((b) => !!b)),
+    );
+    const dvcsMap = new Map<string, string>();
+    for (const branchCode of branchCodes) {
+      const maDvcs = await this.loyaltyService.fetchMaDvcs(branchCode);
+      if (maDvcs) {
+        dvcsMap.set(branchCode, maDvcs);
+      }
+    }
+
+    // 3. Process
+    for (const sale of sales) {
       try {
         const itemCode = sale.itemCode || '';
         if (!itemCode) {
-          failCount++;
+          // Skip empty itemCode
           continue;
         }
 
         const product = productMap.get(itemCode);
+        let updatedItem = false;
+        let newItemCode = itemCode;
 
-        if (product && product.materialCode) {
-          const newItemCode = product.materialCode;
-          const oldItemCode = itemCode;
+        // A. Cập nhật Material Code
+        if (
+          product &&
+          product.materialCode &&
+          product.materialCode !== itemCode
+        ) {
+          newItemCode = product.materialCode;
 
           await this.saleRepository.update(sale.id, {
             itemCode: newItemCode,
-            statusAsys: true,
+            // statusAsys: true, // User requested REMOVE statusAsys usage
           });
-
+          updatedItem = true;
           successCount++;
+        }
+
+        // B. Check DVCS (Verify only, cannot save as no column exists)
+        const maDvcs = sale.branchCode
+          ? dvcsMap.get(sale.branchCode)
+          : undefined;
+
+        if (updatedItem) {
           details.push({
             id: sale.id,
             itemCode: sale.itemCode || '',
-            oldItemCode,
-            newItemCode,
+            oldItemCode: itemCode,
+            newItemCode: newItemCode,
+            maDvcs,
           });
-        } else {
-          failCount++;
-          this.logger.warn(
-            `[syncErrorOrderByDocCode] ❌ Sale ${sale.id} (${docCode}): itemCode ${itemCode} vẫn không tồn tại trong Loyalty API`,
-          );
         }
       } catch (error: any) {
         failCount++;
@@ -252,11 +278,11 @@ export class SalesSyncService {
 
     const message =
       successCount > 0
-        ? `Đồng bộ thành công: ${successCount} dòng đã được cập nhật${failCount > 0 ? `, ${failCount} dòng vẫn lỗi` : ''}`
-        : `Không có dòng nào được cập nhật. ${failCount} dòng vẫn không tìm thấy trong Loyalty API`;
+        ? `Đồng bộ thành công: ${successCount} dòng đã được cập nhật Material Code.`
+        : `Kiểm tra hoàn tất. Không có dữ liệu Material Code mới để cập nhật.`;
 
     return {
-      success: successCount > 0,
+      success: true,
       message,
       updated: successCount,
       failed: failCount,

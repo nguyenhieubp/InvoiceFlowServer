@@ -28,6 +28,15 @@ export class SalesWarehouseService {
   ) {}
 
   /**
+   * Get stock transfer by ID
+   */
+  async getStockTransferById(id: string): Promise<StockTransfer | null> {
+    return await this.stockTransferRepository.findOne({
+      where: { id },
+    });
+  }
+
+  /**
    * Process warehouse from stock transfer by docCode
    */
   async processWarehouseFromStockTransferByDocCode(

@@ -19,8 +19,16 @@ export class StockTransferController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
     @Query('search') search?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
   ) {
-    return this.stockTransferService.findMissingMaterial(page, limit, search);
+    return this.stockTransferService.findMissingMaterial(
+      page,
+      limit,
+      search,
+      dateFrom,
+      dateTo,
+    );
   }
 
   @Put(':id')

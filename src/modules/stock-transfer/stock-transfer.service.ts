@@ -14,6 +14,8 @@ export class StockTransferService {
     page: number = 1,
     limit: number = 10,
     search?: string,
+    dateFrom?: string,
+    dateTo?: string,
   ) {
     const queryBuilder = this.stockTransferRepo.createQueryBuilder('st');
 
@@ -35,6 +37,18 @@ export class StockTransferService {
       const searchTerm = search.trim().toLowerCase();
       queryBuilder.andWhere('LOWER(st.soCode) LIKE :search', {
         search: `%${searchTerm}%`,
+      });
+    }
+
+    if (dateFrom) {
+      queryBuilder.andWhere('st.transDate >= :dateFrom', {
+        dateFrom: `${dateFrom} 00:00:00`,
+      });
+    }
+
+    if (dateTo) {
+      queryBuilder.andWhere('st.transDate <= :dateTo', {
+        dateTo: `${dateTo} 23:59:59`,
       });
     }
 
