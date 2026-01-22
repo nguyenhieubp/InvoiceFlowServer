@@ -491,6 +491,7 @@ export class SyncService {
                   type_sale: 'WHOLESALE',
                   disc_tm: saleItem.disc_tm,
                   disc_ctkm: saleItem.disc_ctkm,
+                  disc_reasons: saleItem.disc_reasons,
                 } as Partial<Sale>);
                 await this.saleRepository.save(newSale);
                 salesCount++;

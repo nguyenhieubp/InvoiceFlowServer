@@ -566,6 +566,7 @@ export class ZappyApiService {
         disc_tm: zappySale.disc_tm,
         disc_ctkm: zappySale.disc_ctkm,
         svc_code: zappySale.svc_code,
+        disc_reasons: zappySale.disc_reasons,
       };
 
       const docDate = this.parseZappyDate(zappySale.docdate);
