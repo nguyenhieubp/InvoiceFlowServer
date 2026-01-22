@@ -1074,11 +1074,12 @@ export class SalesPayloadService {
       sale.department?.ma_dvcs || sale.department?.ma_dvcs_ht || '',
       '',
     );
-    const productType =
-      sale.productType ||
-      sale.product?.productType ||
-      sale.product?.producttype ||
-      '';
+    const productType = sale.productType || '';
+    const loaiVt = sale.product.materialType || '';
+    const maHangGiamGia = SalesFormattingUtils.calcCodeDisCount(
+      sale.product?.productType,
+      loaiVt,
+    );
     const productTypeUpper = String(productType).toUpperCase().trim();
 
     return InvoiceLogicUtils.resolvePromotionCodes({
@@ -1088,6 +1089,7 @@ export class SalesPayloadService {
       maDvcs,
       productTypeUpper,
       promCode: sale.promCode || sale.prom_code, // Pass RAW code to let Utils handle PRMN logic consistently
+      maHangGiamGia: maHangGiamGia,
     });
   }
 

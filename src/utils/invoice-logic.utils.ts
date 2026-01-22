@@ -257,26 +257,36 @@ export class InvoiceLogicUtils {
     maDvcs: string;
     productTypeUpper: string | null;
     promCode: string | null;
+    maHangGiamGia: any;
   }) {
-    const { sale, orderTypes, isTangHang, maDvcs, productTypeUpper, promCode } =
-      params;
+    const {
+      sale,
+      orderTypes,
+      isTangHang,
+      maDvcs,
+      productTypeUpper,
+      promCode,
+      maHangGiamGia,
+    } = params;
     const { isDoiDiem, isDauTu, isThuong, isBanTaiKhoan, isSanTmdt } =
       orderTypes;
 
     // Safety: Re-derive productTypeUpper if missing (Robust Check V9)
     let effectiveProductType = productTypeUpper;
     // Xác định productType an toàn (ưu tiên loyaltyProduct)
-    const productType =
-      sale.productType ||
-      sale.producttype ||
-      sale.product?.productType ||
-      sale.product?.producttype ||
-      '';
+    const productType = sale.productType || '';
     if (!effectiveProductType) {
       effectiveProductType = String(productType).toUpperCase().trim();
     }
 
-    let maCk01 = sale.muaHangGiamGiaDisplay || '';
+    const isWholesale = sale.type_sale;
+    let maCk01;
+    if (isWholesale && sale.disc_reasons) {
+      maCk01 = `${sale.disc_reasons}.${maHangGiamGia}` || '';
+    } else {
+      maCk01 = sale.muaHangGiamGiaDisplay || '';
+    }
+
     let maCtkmTangHang = sale.maCtkmTangHang || '';
 
     // FIX V8.1: Handle PRMN vs Raw RMN consistent logic
@@ -313,7 +323,7 @@ export class InvoiceLogicUtils {
       }
     }
 
-    if (!isDoiDiem && !isTangHang) {
+    if (!isDoiDiem && !isTangHang && !isWholesale) {
       // 3. Standard Case: Assign + Add Suffix if missing
       if (!maCk01) {
         maCk01 = SalesUtils.getPromotionDisplayCode(code) || code || '';
@@ -631,8 +641,8 @@ export class InvoiceLogicUtils {
     // Check wholesale alias defined in system
     const isWholesale = typeSale === 'WHOLESALE' || typeSale === 'WS';
 
-    if (isWholesale) {
-      return '';
+    if (isWholesale && sale.disc_tm > 0) {
+      return sale.disc_tm;
     }
 
     if (isDoiDiem) {

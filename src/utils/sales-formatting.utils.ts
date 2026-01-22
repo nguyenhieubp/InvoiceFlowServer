@@ -275,18 +275,14 @@ export async function formatSaleForFrontend(
   }
 
   // 5. Codes & Accounts Resolution
-  const productType =
-    sale.productType ||
-    sale.producttype ||
-    loyaltyProduct?.producttype ||
-    loyaltyProduct?.productType ||
-    null;
+  const productType = sale?.productType || null;
   const productTypeUpper = productType
     ? String(productType).toUpperCase().trim()
     : null;
 
   const groupProductType = loyaltyProduct?.productType;
-  const productTypeCode = loyaltyProduct?.materialCode;
+  const loaiVt = loyaltyProduct?.materialType;
+  const maHangGiamGia = this.calcCodeDisCount(groupProductType, loaiVt) || '';
 
   const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht || '';
   // isTangHang is already calculated above (V7 Fix)
@@ -298,6 +294,7 @@ export async function formatSaleForFrontend(
     maDvcs,
     productTypeUpper,
     promCode: sale.promCode,
+    maHangGiamGia: maHangGiamGia,
   });
 
   const { tkChietKhau, tkChiPhi, maPhi } =
@@ -425,4 +422,56 @@ export async function formatSaleForFrontend(
       : sale.paid_by_voucher_ecode_ecoin_bp,
     chietKhauThanhToanVoucher: isDoiDiem ? 0 : sale.chietKhauThanhToanVoucher,
   };
+}
+
+/**
+ * Mã mua hàng giảm giá
+ */
+
+export function calcCodeDisCount(productType, loaiVt) {
+  let isEcode;
+  if (loaiVt === '94') {
+    isEcode = true;
+  } else {
+    isEcode = false;
+  }
+
+  const SP = [
+    '01SKIN',
+    '02MAKE',
+    '04BODY',
+    '05HAIR',
+    '06FRAG',
+    '07PROF',
+    '03TPCN',
+    '11MMOC',
+    '10GIFT',
+  ];
+
+  const EC = [
+    '01SKIN',
+    '02MAKE',
+    '04BODY',
+    '05HAIR',
+    '06FRAG',
+    '07PROF',
+    '03TPCN',
+    '11MMOC',
+  ];
+
+  const ECG = ['10GIFT'];
+
+  if (!isEcode) {
+    if (SP.includes(productType)) {
+      return 'SP';
+    }
+  } else {
+    if (EC.includes(productType)) {
+      return 'EC';
+    } else if (ECG.includes(productType)) {
+      return 'ECG';
+    }
+  }
+
+  return '';
 }
