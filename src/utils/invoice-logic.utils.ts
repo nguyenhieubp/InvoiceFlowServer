@@ -111,14 +111,14 @@ export class InvoiceLogicUtils {
     let tkChiPhi: string | null = null;
     let maPhi: string | null = null;
 
-    const productType =
-      sale.productType ||
-      sale.producttype ||
-      loyaltyProduct?.producttype ||
-      loyaltyProduct?.productType ||
-      null;
+    const productType = sale.productType || null;
+    const productTypeWholesale = loyaltyProduct?.productType || null;
+
     const productTypeUpper = productType
       ? String(productType).toUpperCase().trim()
+      : null;
+    const productTypeWholesaleUpper = productTypeWholesale
+      ? String(productTypeWholesale).toUpperCase().trim()
       : null;
     const isKmVip = Number(
       sale.grade_discamt || sale.chietKhauMuaHangCkVip || 0,
@@ -132,39 +132,110 @@ export class InvoiceLogicUtils {
       loyaltyProduct?.productType === 'GIFT' ||
       loyaltyProduct?.producttype === 'GIFT';
 
-    if (isDoiVo || isDoiDiem || isDauTu) {
-      tkChiPhi = '64191';
-      maPhi = '161010';
-    } else if (isSinhNhat) {
-      tkChiPhi = '64192';
-      maPhi = '162010';
-    } else if (hasMaCtkmTangHang && isTangHang) {
-      tkChiPhi = '64191';
-      maPhi = '161010';
-      tkChietKhau = sale.tkChietKhau || null;
-    } else if (isKmVip > 0 && productTypeUpper === 'I') {
-      tkChietKhau = '521113';
-    } else if (isKmVip > 0 && productTypeUpper === 'S') {
-      tkChietKhau = '521132';
-    } else if (hasVoucher > 0 && isTangSP) {
-      tkChietKhau = '5211631';
-    } else if (hasVoucher > 0 && productTypeUpper === 'I') {
-      tkChietKhau = '5211611';
-    } else if (hasVoucher > 0 && productTypeUpper === 'S') {
-      tkChietKhau = '5211621';
-    } else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
-      tkChietKhau = '521131';
-    } else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'I') {
-      tkChietKhau = '521111';
-    } else if (hasMaCtkm && !(hasMaCtkmTangHang && isTangHang)) {
-      tkChietKhau = productTypeUpper === 'S' ? '521131' : '521111';
+    // Check wholesale alias defined in system
+    const typeSale = (sale.type_sale || '').toUpperCase().trim();
+    const isWholesale = typeSale === 'WHOLESALE' || typeSale === 'WS';
+    const isEcode = loyaltyProduct?.materialType === '94';
+
+    if (isWholesale) {
+      // === LOGIC BÁN BUÔN (WHOLESALE) ===
+      const wholesaleAccounts = InvoiceLogicUtils.getWholesaleAccounts(
+        isWholesale,
+        productTypeWholesaleUpper,
+        isEcode,
+      );
+
+      if (wholesaleAccounts) {
+        tkChietKhau = wholesaleAccounts.tkChietKhau || null;
+        maPhi = wholesaleAccounts.maPhi || null;
+      } else {
+        // Fallback if not matched
+        tkChietKhau = sale.tkChietKhau || null;
+        tkChiPhi = sale.tkChiPhi || null;
+        maPhi = sale.maPhi || null;
+      }
     } else {
-      tkChietKhau = sale.tkChietKhau || null;
-      tkChiPhi = sale.tkChiPhi || null;
-      maPhi = sale.maPhi || null;
+      // === LOGIC BÁN LẺ (RETAIL / NORMAL) ===
+
+      if (isDoiVo || isDoiDiem || isDauTu) {
+        tkChiPhi = '64191';
+        maPhi = '161010';
+      } else if (isSinhNhat) {
+        tkChiPhi = '64192';
+        maPhi = '162010';
+      } else if (hasMaCtkmTangHang && isTangHang) {
+        tkChiPhi = '64191';
+        maPhi = '161010';
+        tkChietKhau = sale.tkChietKhau || null;
+      } else if (isKmVip > 0 && productTypeUpper === 'I') {
+        tkChietKhau = '521113';
+      } else if (isKmVip > 0 && productTypeUpper === 'S') {
+        tkChietKhau = '521132';
+      } else if (hasVoucher > 0 && isTangSP) {
+        tkChietKhau = '5211631';
+      } else if (hasVoucher > 0 && productTypeUpper === 'I') {
+        tkChietKhau = '5211611';
+      } else if (hasVoucher > 0 && productTypeUpper === 'S') {
+        tkChietKhau = '5211621';
+      } else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'S') {
+        tkChietKhau = '521131';
+      } else if (hasChietKhauMuaHangGiamGia && productTypeUpper === 'I') {
+        tkChietKhau = '521111';
+      } else if (hasMaCtkm && !(hasMaCtkmTangHang && isTangHang)) {
+        tkChietKhau = productTypeUpper === 'S' ? '521131' : '521111';
+      } else {
+        // Default Retail
+        tkChietKhau = sale.tkChietKhau || null;
+        tkChiPhi = sale.tkChiPhi || null;
+        maPhi = sale.maPhi || null;
+      }
     }
 
     return { tkChietKhau, tkChiPhi, maPhi };
+  }
+
+  /**
+   * Helper xác định tài khoản cho đơn bán buôn (Wholesale)
+   */
+  static getWholesaleAccounts(
+    isWholesale: boolean,
+    productType: string | null,
+    isEcode: boolean,
+  ): Partial<AccountingAccounts> | null {
+    if (!isWholesale) return null;
+
+    const category = InvoiceLogicUtils.getWholesaleCategory(
+      String(productType || ''),
+    );
+
+    if (isEcode) {
+      // Ecode Logic
+      if (category === 'MP') {
+        // CKCSBH.E.MP
+        return { tkChietKhau: '5211612', maPhi: '130031' };
+      }
+      if (category === 'TPCN') {
+        // CKCSBH.E.TPCN (Mã phí left blank in req)
+        return { tkChietKhau: '5211612', maPhi: null };
+      }
+      if (category === 'CCDC') {
+        // CKCSBH.E.CCDC
+        return { tkChietKhau: '5211612', maPhi: '130033' };
+      }
+    } else {
+      // Non-Ecode Logic
+      if (category === 'MP') {
+        return { tkChietKhau: '521112', maPhi: '130011' };
+      }
+      if (category === 'TPCN') {
+        return { tkChietKhau: '521112', maPhi: '130021' };
+      }
+      if (category === 'CCDC') {
+        return { tkChietKhau: '521112', maPhi: '130031' };
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -453,6 +524,36 @@ export class InvoiceLogicUtils {
   }
 
   /**
+   * Helper xác định Category cho Wholesale (MP, TPCN, CCDC)
+   */
+  static getWholesaleCategory(productType: string): string {
+    if (!productType) return 'MP';
+
+    const groupProductType = productType.toUpperCase();
+    const mpCategories = [
+      '01SKIN',
+      '02MAKE',
+      '04BODY',
+      '05HAIR',
+      '06FRAG',
+      '07PROF',
+      '10GIFT',
+    ];
+    const tpcnCategories = ['03TPCN'];
+    const ccdcCategories = ['11MMOC'];
+
+    if (mpCategories.some((cat) => groupProductType.includes(cat))) {
+      return 'MP';
+    } else if (tpcnCategories.some((cat) => groupProductType.includes(cat))) {
+      return 'TPCN';
+    } else if (ccdcCategories.some((cat) => groupProductType.includes(cat))) {
+      return 'CCDC';
+    }
+
+    return 'MP'; // Default
+  }
+
+  /**
    * Xác định mã CTKM cho đơn hàng bán buôn (WHOLESALE)
    * Áp dụng khi: type_sale = WHOLESALE, ordertypeName = "Bán buôn kênh Đại lý", dist_tm > 0
    */
@@ -479,36 +580,8 @@ export class InvoiceLogicUtils {
     // Mỹ phẩm: 01SKIN, 02MAKE, 04BODY, 05HAIR, 06FRAG, 07PROF, 10GIFT
     // TPCN: 03TPCN
     // CCDC: 11MMOC
-    let category = '';
-
-    if (groupProductType) {
-      const mpCategories = [
-        '01SKIN',
-        '02MAKE',
-        '04BODY',
-        '05HAIR',
-        '06FRAG',
-        '07PROF',
-        '10GIFT',
-      ];
-      const tpcnCategories = ['03TPCN'];
-      const ccdcCategories = ['11MMOC'];
-
-      // Kiểm tra xem productType có chứa các mã nhóm không
-      if (mpCategories.some((cat) => groupProductType.includes(cat))) {
-        category = 'MP'; // Mỹ phẩm
-      } else if (tpcnCategories.some((cat) => groupProductType.includes(cat))) {
-        category = 'TPCN'; // Thực phẩm chức năng
-      } else if (ccdcCategories.some((cat) => groupProductType.includes(cat))) {
-        category = 'CCDC'; // Công cụ dụng cụ
-      } else {
-        // Mặc định là Mỹ phẩm nếu không xác định được
-        category = 'MP';
-      }
-    } else {
-      // Mặc định là Mỹ phẩm nếu không có productType
-      category = 'MP';
-    }
+    // Determine category using helper
+    const category = InvoiceLogicUtils.getWholesaleCategory(groupProductType);
 
     // Map mã CTKM theo quy tắc
     let mappedCode = '';

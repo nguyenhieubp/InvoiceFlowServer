@@ -158,12 +158,6 @@ export class SalesQueryService {
       typeSale,
     } = options;
 
-    // START PERFORMANCE LOGGING
-    const startTotal = Date.now();
-    this.logger.log(`[findAllOrders] Start...`);
-
-    // 1. Initial Count Query
-    const startCount = Date.now();
     const countQuery = this.saleRepository
       .createQueryBuilder('sale')
       .select('COUNT(DISTINCT sale.docCode)', 'count'); // Use COUNT(DISTINCT) for accurate order count
