@@ -23,7 +23,6 @@ export class LoyaltyService {
 
     // 1. Thử endpoint /material-catalogs/code/
     try {
-      this.logger.debug(`[LoyaltyService] Check 1: /code/${trimmedItemCode}`);
       const response = await this.httpService.axiosRef.get(
         `${this.LOYALTY_API_BASE_URL}/material-catalogs/code/${encodeURIComponent(trimmedItemCode)}`,
         {
@@ -38,9 +37,6 @@ export class LoyaltyService {
       if (product && (product.id || product.code)) {
         return product;
       }
-      this.logger.warn(
-        `[LoyaltyService] /code/ returned 200 but no valid product. Fallback...`,
-      );
     } catch (error: any) {
       if (error?.response?.status !== 404) {
         this.logger.warn(`[LoyaltyService] /code/ error: ${error?.message}`);
@@ -50,9 +46,6 @@ export class LoyaltyService {
 
     // 2. Thử endpoint /material-catalogs/old-code/
     try {
-      this.logger.debug(
-        `[LoyaltyService] Check 2: /old-code/${trimmedItemCode}`,
-      );
       const response = await this.httpService.axiosRef.get(
         `${this.LOYALTY_API_BASE_URL}/material-catalogs/old-code/${encodeURIComponent(trimmedItemCode)}`,
         {
@@ -71,9 +64,6 @@ export class LoyaltyService {
 
     // 3. Thử endpoint /material-catalogs/material-code/
     try {
-      this.logger.debug(
-        `[LoyaltyService] Check 3: /material-code/${trimmedItemCode}`,
-      );
       const response = await this.httpService.axiosRef.get(
         `${this.LOYALTY_API_BASE_URL}/material-catalogs/material-code/${encodeURIComponent(trimmedItemCode)}`,
         {
@@ -90,9 +80,6 @@ export class LoyaltyService {
       // All failed
     }
 
-    this.logger.debug(
-      `[LoyaltyService] Product ${trimmedItemCode} NOT FOUND in all endpoints.`,
-    );
     return null;
   }
 
@@ -117,26 +104,32 @@ export class LoyaltyService {
       return productMap;
     }
 
-    // Fetch tất cả products song song
-    const productPromises = itemCodes.map(async (itemCode) => {
-      try {
-        const loyaltyProduct = await this.checkProduct(itemCode);
-        return { itemCode, loyaltyProduct };
-      } catch (error) {
-        this.logger.warn(
-          `[LoyaltyService] Failed to fetch product ${itemCode} from Loyalty API: ${error}`,
-        );
-        return { itemCode, loyaltyProduct: null };
-      }
-    });
+    // Limit concurrency to avoid overloading the API
+    const CONCURRENCY_LIMIT = 5;
+    const chunks: string[][] = [];
 
-    const results = await Promise.all(productPromises);
+    for (let i = 0; i < itemCodes.length; i += CONCURRENCY_LIMIT) {
+      chunks.push(itemCodes.slice(i, i + CONCURRENCY_LIMIT));
+    }
 
-    results.forEach(({ itemCode, loyaltyProduct }) => {
-      if (loyaltyProduct) {
-        productMap.set(itemCode, loyaltyProduct);
-      }
-    });
+    for (const chunk of chunks) {
+      const chunkPromises = chunk.map(async (itemCode) => {
+        try {
+          const loyaltyProduct = await this.checkProduct(itemCode);
+          return { itemCode, loyaltyProduct };
+        } catch (error) {
+          return { itemCode, loyaltyProduct: null };
+        }
+      });
+
+      const chunkResults = await Promise.all(chunkPromises);
+
+      chunkResults.forEach(({ itemCode, loyaltyProduct }) => {
+        if (loyaltyProduct) {
+          productMap.set(itemCode, loyaltyProduct);
+        }
+      });
+    }
 
     return productMap;
   }
@@ -197,6 +190,8 @@ export class LoyaltyService {
    */
   async fetchMaDvcs(branchCode: string): Promise<string> {
     if (!branchCode) return '';
+
+    // 1. Try by ma_bp (existing logic)
     try {
       const url = `${this.LOYALTY_API_BASE_URL}/departments?page=1&limit=25&ma_bp=${branchCode}`;
       const response = await this.httpService.axiosRef.get(url, {
@@ -207,13 +202,31 @@ export class LoyaltyService {
       if (Array.isArray(data) && data.length > 0) {
         return data[0].ma_dvcs || '';
       }
-      return '';
+    } catch (error) {
+      // Log warning but continue to fallback
+      this.logger.warn(
+        `[LoyaltyService] Failed to fetch ma_dvcs by ma_bp=${branchCode}: ${error}`,
+      );
+    }
+
+    // 2. Fallback: Try by branchcode
+    try {
+      const url = `${this.LOYALTY_API_BASE_URL}/departments?page=1&limit=25&branchcode=${branchCode}`;
+      const response = await this.httpService.axiosRef.get(url, {
+        headers: { accept: 'application/json' },
+        timeout: this.REQUEST_TIMEOUT,
+      });
+      const data = response?.data?.data?.items || [];
+      if (Array.isArray(data) && data.length > 0) {
+        return data[0].ma_dvcs || '';
+      }
     } catch (error) {
       this.logger.warn(
-        `[LoyaltyService] Failed to fetch ma_dvcs for branch ${branchCode}: ${error}`,
+        `[LoyaltyService] Failed to fetch ma_dvcs by branchcode=${branchCode}: ${error}`,
       );
-      return '';
     }
+
+    return '';
   }
 
   /**

@@ -62,90 +62,102 @@ export class SalesService {
     dateTo?: string,
     search?: string,
   ) {
-    this.logger.log('Scanning for error orders (Missing Material/DVCS)...');
+    try {
+      this.logger.log('Scanning for error orders (Missing Material/DVCS)...');
 
-    // 1. Get candidates (isProcessed = false)
-    const query = this.saleRepository.createQueryBuilder('sale');
-    query.where('sale.isProcessed = :isProcessed', { isProcessed: false });
-    query.andWhere("(sale.itemCode IS NOT NULL AND sale.itemCode != '')");
-    query.leftJoinAndSelect('sale.customer', 'customer');
+      // 1. Get candidates (isProcessed = false)
+      const query = this.saleRepository.createQueryBuilder('sale');
+      query.where('sale.isProcessed = :isProcessed', { isProcessed: false });
+      query.andWhere("(sale.itemCode IS NOT NULL AND sale.itemCode != '')");
+      query.leftJoinAndSelect('sale.customer', 'customer');
 
-    if (brand) query.andWhere('sale.brand = :brand', { brand });
+      if (brand) query.andWhere('sale.brand = :brand', { brand });
 
-    if (search && search.trim() !== '') {
-      const searchPattern = `%${search.trim().toLowerCase()}%`;
-      query.andWhere(
-        "(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, '')) LIKE :search OR LOWER(COALESCE(customer.code, '')) LIKE :search)",
-        { search: searchPattern },
-      );
-    }
+      if (search && search.trim() !== '') {
+        const searchPattern = `%${search.trim().toLowerCase()}%`;
+        query.andWhere(
+          "(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, '')) LIKE :search OR LOWER(COALESCE(customer.code, '')) LIKE :search)",
+          { search: searchPattern },
+        );
+      }
 
-    // Date logic (Simplified from SalesFilterService)
-    if (dateFrom) {
-      query.andWhere('sale.docDate >= :dateFrom', {
-        dateFrom: `${dateFrom} 00:00:00`,
-      });
-    }
-    if (dateTo) {
-      query.andWhere('sale.docDate <= :dateTo', {
-        dateTo: `${dateTo} 23:59:59`,
-      });
-    }
+      // Date logic (Simplified from SalesFilterService)
+      if (dateFrom) {
+        query.andWhere('sale.docDate >= :dateFrom', {
+          dateFrom: `${dateFrom} 00:00:00`,
+        });
+      }
+      if (dateTo) {
+        query.andWhere('sale.docDate <= :dateTo', {
+          dateTo: `${dateTo} 23:59:59`,
+        });
+      }
 
-    query.orderBy('sale.docDate', 'DESC');
+      query.orderBy('sale.docDate', 'DESC');
 
-    // Scan Limit
-    const SCAN_LIMIT = 200; // Scan latest 200 items to check for errors
-    query.take(SCAN_LIMIT);
+      // Scan Limit
+      const SCAN_LIMIT = 200; // Scan latest 200 items to check for errors
+      query.take(SCAN_LIMIT);
 
-    const candidates = await query.getMany();
-    const errors: any[] = [];
-    const branchCache = new Map<string, string>();
+      const candidates = await query.getMany();
+      const errors: any[] = [];
+      const branchCache = new Map<string, string>();
+      const productCache = new Map<string, any>();
 
-    // Sequential Check (safer for rate limits than Promise.all(200))
-    // Could optimize with batches of 10 if needed
-    for (const sale of candidates) {
-      let isError = false;
+      // Sequential Check (safer for rate limits than Promise.all(200))
+      // Could optimize with batches of 10 if needed
+      for (const sale of candidates) {
+        let isError = false;
 
-      // Check Product (Missing Material?)
-      const product = await this.loyaltyService.checkProduct(sale.itemCode);
-      if (!product) {
-        isError = true;
-      } else {
-        // Check DVCS (Missing Branch Mapping?)
-        if (sale.branchCode) {
-          let maDvcs = branchCache.get(sale.branchCode);
-          if (maDvcs === undefined) {
-            maDvcs = await this.loyaltyService.fetchMaDvcs(sale.branchCode);
-            branchCache.set(sale.branchCode, maDvcs);
+        // Check Product (Missing Material?)
+        let product = productCache.get(sale.itemCode);
+        if (product === undefined) {
+          product = await this.loyaltyService.checkProduct(sale.itemCode);
+          productCache.set(sale.itemCode, product);
+        }
+
+        if (!product) {
+          isError = true;
+        } else {
+          // Check DVCS (Missing Branch Mapping?)
+          if (sale.branchCode) {
+            let maDvcs = branchCache.get(sale.branchCode);
+            if (maDvcs === undefined) {
+              maDvcs = await this.loyaltyService.fetchMaDvcs(sale.branchCode);
+              branchCache.set(sale.branchCode, maDvcs);
+            }
+            if (!maDvcs) {
+              isError = true;
+            }
           }
-          if (!maDvcs) {
-            isError = true;
-          }
+        }
+
+        if (isError) {
+          errors.push({
+            ...sale,
+            statusAsys: false, // Mark as error for frontend
+            materialCode: product?.materialCode || null, // Enrich with found materialCode
+          });
         }
       }
 
-      if (isError) {
-        errors.push({
-          ...sale,
-          statusAsys: false, // Mark as error for frontend
-        });
-      }
+      // Pagination in memory
+      const total = errors.length;
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedItems = errors.slice(startIndex, endIndex);
+
+      return {
+        data: paginatedItems,
+        total: total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      };
+    } catch (error) {
+      this.logger.error('Error scanning for error orders', error);
+      throw error;
     }
-
-    // Pagination in memory
-    const total = errors.length;
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedItems = errors.slice(startIndex, endIndex);
-
-    return {
-      data: paginatedItems,
-      total: total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
   }
 
   /**
