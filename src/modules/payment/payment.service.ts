@@ -245,7 +245,8 @@ export class PaymentService {
         : '',
       'Tiền trên hóa đơn': item.revenue,
       'Mã bộ phận': item.branch_code_cashio,
-      'Mã đơn vị nhận tiền': item.ma_dvcs_cashio,
+      'Mã đơn vị nhận tiền':
+        item.fop_syscode === 'CASH' ? item.ma_dvcs_sale : item.ma_dvcs_cashio,
       'Mã đơn vị bán hàng': item.ma_dvcs_sale,
       'Nhãn hàng': item.company,
       'Mã ca': item.maCa,
@@ -567,10 +568,14 @@ export class PaymentService {
           ? row.period_code.split('/').pop()
           : null;
 
+        // If CASH, use ma_dvcs_sale for ma_dvcs_cashio
+        const maDvcsCashio =
+          row.fop_syscode === 'CASH' ? dvcs : paymentMethod?.bankUnit || null;
+
         return {
           ...row,
           period_code: periodCode,
-          ma_dvcs_cashio: paymentMethod?.bankUnit || null,
+          ma_dvcs_cashio: maDvcsCashio,
           ma_dvcs_sale: dvcs,
           company: saleDept?.company || null,
           ma_doi_tac_payment: getSupplierCode(paymentMethod?.maDoiTac) || null,
