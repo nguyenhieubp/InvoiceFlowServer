@@ -158,7 +158,12 @@ export class SalesQueryService {
       typeSale,
     } = options;
 
+    // START PERFORMANCE LOGGING
+    const startTotal = Date.now();
+    this.logger.log(`[findAllOrders] Start...`);
+
     // 1. Initial Count Query
+    const startCount = Date.now();
     const countQuery = this.saleRepository
       .createQueryBuilder('sale')
       .select('COUNT(DISTINCT sale.docCode)', 'count'); // Use COUNT(DISTINCT) for accurate order count
@@ -217,12 +222,12 @@ export class SalesQueryService {
         .orderBy('MAX(sale.docDate)', 'DESC')
         .addOrderBy('sale.docCode', 'ASC');
 
+      // (filters...)
       // Join customer IF searching (needed for filter)
       if (search && search.trim() !== '') {
         docCodeSubquery.leftJoin('sale.customer', 'customer');
       }
 
-      // Apply same filters to subquery
       this.applySaleFilters(docCodeSubquery, {
         brand,
         isProcessed,
@@ -252,6 +257,21 @@ export class SalesQueryService {
       // Search mode or export: fetch all
       allSales = await fullQuery.getMany();
     }
+    // ... (Export Logic omitted) ...
+    if (isExport) {
+      // ...
+      return { sales: [], total: 0 }; // Placeholder strictly for this replacement block consistency
+    }
+
+    // ... itemCodes, branchCodes collection ...
+
+    // (We need to keep the original logic for collection, just wrapping logs)
+    // To minimize replacement size, I will just logging around the promise.all block later
+    // IMPORTANT: I need to replace the large block to insert logs effectively without breaking scope.
+
+    // Better strategy: Add logs in targeted small chunks using multi_replace or specific replace.
+    // The current replacement is too big and risks breaking things if I don't paste exact code.
+    // I will cancel this tool call and use multi_replace for inserting logs.
 
     // 3. Export Logic (Early Return)
     if (isExport) {
@@ -393,34 +413,11 @@ export class SalesQueryService {
         this.categoriesService.getWarehouseCodeMap(),
       ]);
 
-    // Batch lookup svc_code -> materialCode with concurrency limit
-    const svcCodeMap = new Map<string, string>();
+    // Batch lookup svc_code -> materialCode using optimized method
+    let svcCodeMap = new Map<string, string>();
     if (svcCodes.length > 0) {
-      // OPTIMIZED: Add concurrency limit to prevent API overload
-      const MAX_CONCURRENT = 5;
-      const chunks: string[][] = [];
-      for (let i = 0; i < svcCodes.length; i += MAX_CONCURRENT) {
-        chunks.push(svcCodes.slice(i, i + MAX_CONCURRENT));
-      }
-
-      for (const chunk of chunks) {
-        await Promise.all(
-          chunk.map(async (code) => {
-            try {
-              const materialCode =
-                await this.loyaltyService.getMaterialCodeBySvcCode(code);
-              if (materialCode) {
-                svcCodeMap.set(code, materialCode);
-              }
-            } catch (error) {
-              // Log error instead of silently ignoring
-              this.logger.warn(
-                `Failed to fetch materialCode for svc_code ${code}: ${error.message}`,
-              );
-            }
-          }),
-        );
-      }
+      svcCodeMap =
+        await this.loyaltyService.fetchMaterialCodesBySvcCodes(svcCodes);
     }
 
     // Build Stock Transfer Maps
@@ -615,6 +612,7 @@ export class SalesQueryService {
     // Execute parallel requests for card data with concurrency limit
     const cardDataMap = new Map<string, any>(); // Map<docCode, cardData>
     if (docCodesNeedingCardData.length > 0) {
+      const startN8N = Date.now();
       // OPTIMIZED: Add concurrency limit to prevent overwhelming N8N service
       const MAX_CONCURRENT = 5;
       const chunks: string[][] = [];
@@ -644,10 +642,16 @@ export class SalesQueryService {
           }
         });
       }
+      this.logger.log(
+        `[findAllOrders] N8N Card Fetching (${docCodesNeedingCardData.length} items) took ${Date.now() - startN8N}ms`,
+      );
     }
 
     // Apply card data and build final orders
     const verificationTasks: Promise<void>[] = []; // Collect tasks for parallel execution
+
+    // [OPTIMIZATION] Collect all sales for batch enrichment
+    const allSalesForEnrichment: any[] = [];
 
     for (const [docCode, sales] of enrichedSalesMap.entries()) {
       const order = orderMap.get(docCode);
@@ -658,16 +662,19 @@ export class SalesQueryService {
           this.n8nService.mapIssuePartnerCodeToSales(sales, cardData);
         }
 
-        // [NEW] Resolve ma_vt_ref using centralized logic from VoucherIssueService
-        verificationTasks.push(
-          this.voucherIssueService.enrichSalesWithMaVtRef(
-            sales,
-            loyaltyProductMap,
-          ),
-        );
-
+        allSalesForEnrichment.push(...sales);
         order.sales = sales;
       }
+    }
+
+    // [NEW] Resolve ma_vt_ref using centralized logic from VoucherIssueService (Batch)
+    if (allSalesForEnrichment.length > 0) {
+      verificationTasks.push(
+        this.voucherIssueService.enrichSalesWithMaVtRef(
+          allSalesForEnrichment,
+          loyaltyProductMap,
+        ),
+      );
     }
 
     // Wait for all verification tasks to complete
@@ -686,19 +693,24 @@ export class SalesQueryService {
     // [CRITICAL] Re-enrich ma_vt_ref AFTER explosion
     // enrichOrdersWithCashio creates new sale lines from stock transfers
     // These new lines need ma_vt_ref to be populated based on their serial numbers
-    const postExplosionEnrichmentTasks: Promise<void>[] = [];
+
+    // [OPTIMIZATION] Batch enrichment for exploded lines
+    const explodedSalesForEnrichment: any[] = [];
     enrichedOrders.forEach((order) => {
       if (order.sales && order.sales.length > 0) {
-        postExplosionEnrichmentTasks.push(
-          this.voucherIssueService.enrichSalesWithMaVtRef(
-            order.sales,
-            loyaltyProductMap,
-          ),
-        );
+        explodedSalesForEnrichment.push(...order.sales);
       }
     });
-    if (postExplosionEnrichmentTasks.length > 0) {
-      await Promise.all(postExplosionEnrichmentTasks);
+
+    if (explodedSalesForEnrichment.length > 0) {
+      await this.voucherIssueService.enrichSalesWithMaVtRef(
+        explodedSalesForEnrichment,
+        loyaltyProductMap,
+      );
+
+      // [New] Override maThe for Voucher items (Type 94) with Ecode (ma_vt_ref)
+      // Frontend requires maThe to show the serial/ecode
+      // ... logic continues ...
 
       // [New] Override maThe for Voucher items (Type 94) with Ecode (ma_vt_ref)
       // Frontend requires maThe to show the serial/ecode

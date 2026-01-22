@@ -318,25 +318,45 @@ export class SalesInvoiceService {
         let daySuccess = 0;
         let dayFailed = 0;
 
-        for (const docCode of docCodes) {
-          try {
-            // Gọi hàm processSingleOrder cho từng đơn
-            // ForceRetry = false để skip các đơn đã thành công rồi
-            const result = await this.processSingleOrder(docCode, false);
-            if (result.success || result.alreadyExists) {
-              daySuccess++;
-              totalSuccess++;
-            } else {
+        // OPTIMIZED: Parallelize with Concurrency Limit
+        const CONCURRENCY_LIMIT = 5;
+        const chunks: string[][] = [];
+        for (let i = 0; i < docCodes.length; i += CONCURRENCY_LIMIT) {
+          chunks.push(docCodes.slice(i, i + CONCURRENCY_LIMIT));
+        }
+
+        for (const chunk of chunks) {
+          const chunkPromises = chunk.map(async (docCode) => {
+            try {
+              // Gọi hàm processSingleOrder cho từng đơn
+              // ForceRetry = false để skip các đơn đã thành công rồi
+              const result = await this.processSingleOrder(docCode, false);
+              return { docCode, result, error: null };
+            } catch (err: any) {
+              return { docCode, result: null, error: err };
+            }
+          });
+
+          const chunkResults = await Promise.all(chunkPromises);
+
+          for (const res of chunkResults) {
+            totalProcessed++;
+            if (res.error) {
               dayFailed++;
               totalFailed++;
-              errors.push(`[${dateStr}] ${docCode}: ${result.message}`);
+              errors.push(`[${dateStr}] ${res.docCode}: ${res.error.message}`);
+            } else if (res.result) {
+              const result = res.result;
+              if (result.success || result.alreadyExists) {
+                daySuccess++;
+                totalSuccess++;
+              } else {
+                dayFailed++;
+                totalFailed++;
+                errors.push(`[${dateStr}] ${res.docCode}: ${result.message}`);
+              }
             }
-          } catch (err: any) {
-            dayFailed++;
-            totalFailed++;
-            errors.push(`[${dateStr}] ${docCode}: ${err.message}`);
           }
-          totalProcessed++;
         }
 
         details.push({

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { VoucherIssue } from '../../entities/voucher-issue.entity';
 import { ZappyApiService } from '../../services/zappy-api.service';
 import { LoyaltyService } from '../../services/loyalty.service';
@@ -665,55 +665,99 @@ export class VoucherIssueService {
    * Centralized logic to enrich sales with ma_vt_ref (Ecode Item Code)
    * Condition: Wholesale (WHOLESALE/WS) AND Product materialType == '94'
    */
+  /**
+   * Centralized logic to enrich sales with ma_vt_ref (Ecode Item Code)
+   * Condition: Wholesale (WHOLESALE/WS) AND Product materialType == '94'
+   * OPTIMIZED: Batch fetching to eliminate N+1 queries
+   */
   async enrichSalesWithMaVtRef(
     sales: any[],
     loyaltyProductMap: Map<string, any>,
   ): Promise<void> {
-    const verificationTasks: Promise<void>[] = [];
+    const candidateSales: any[] = [];
+    const serials = new Set<string>();
 
+    // 1. Identify candidates & collect serials
     for (const sale of sales) {
-      const saleSerial = sale.maSerial || sale.soSerial || sale.serial; // Check soSerial for exploded sales
+      const saleSerial = sale.maSerial || sale.soSerial || sale.serial;
       const itemCode = sale.itemCode;
 
       if (!itemCode || !saleSerial) continue;
 
-      // 1. Check Wholesale Condition
+      // Check Wholesale Condition
       const typeSale = (sale.type_sale || '').toUpperCase();
       const isWholesale = typeSale === 'WHOLESALE' || typeSale === 'WS';
-
       if (!isWholesale) continue;
 
-      // 2. Check Product Material Type '94'
+      // Check Product Material Type '94'
       const loyaltyProduct = loyaltyProductMap.get(itemCode);
       const isMaterialType94 = loyaltyProduct?.materialType === '94';
 
       if (!isMaterialType94) continue;
 
-      // 3. Use originalItemCode from StockTransfer if available (for exploded sales)
-      // Otherwise use materialCode from loyaltyProduct, fallback to itemCode
-      const lookupCode =
+      // Store candidate for processing
+      sale.lookupSerial = saleSerial;
+      sale.lookupCode =
         sale.originalItemCode || loyaltyProduct?.materialCode || itemCode;
 
-      // 4. Resolve Ecode
-      verificationTasks.push(
-        (async () => {
-          try {
-            const ecode = await this.findEcodeBySerialAndItemCode(
-              lookupCode,
-              saleSerial,
-            );
-            if (ecode) {
-              sale.ma_vt_ref = ecode;
-            }
-          } catch (e) {
-            // internal log if needed, or swallow
-          }
-        })(),
-      );
+      candidateSales.push(sale);
+      serials.add(saleSerial);
     }
 
-    if (verificationTasks.length > 0) {
-      await Promise.all(verificationTasks);
+    if (serials.size === 0) return;
+
+    // 2. Batch Fetch Vouchers (One DB Query)
+    const vouchers = await this.voucherIssueRepository.find({
+      where: { serial: In(Array.from(serials)) },
+    });
+
+    if (vouchers.length === 0) return;
+
+    // 3. Batch Fetch Loyalty Products for found ecodes
+    const ecodeItemCodes = new Set<string>();
+    vouchers.forEach((v) => {
+      if (v.ecode_item_code) ecodeItemCodes.add(v.ecode_item_code);
+    });
+
+    const ecodeProductMap = await this.loyaltyService.fetchProducts(
+      Array.from(ecodeItemCodes),
+    );
+
+    // 4. Build Map: serial -> Voucher[]
+    // (A serial might have multiple records if different item codes, though unlikely for unique serials)
+    const voucherMap = new Map<string, VoucherIssue[]>();
+    vouchers.forEach((v) => {
+      if (!v.serial) return;
+      if (!voucherMap.has(v.serial)) {
+        voucherMap.set(v.serial, []);
+      }
+      voucherMap.get(v.serial)!.push(v);
+    });
+
+    // 5. Match and Assign
+    for (const sale of candidateSales) {
+      const serial = sale.lookupSerial;
+      const lookupCode = sale.lookupCode;
+
+      const potentialVouchers = voucherMap.get(serial);
+      if (potentialVouchers) {
+        // Find matching voucher by item code
+        const match = potentialVouchers.find(
+          (v) => v.voucher_item_code === lookupCode,
+        );
+
+        if (match && match.ecode_item_code) {
+          const product = ecodeProductMap.get(match.ecode_item_code);
+          const materialCode = product?.materialCode;
+          if (materialCode) {
+            sale.ma_vt_ref = materialCode;
+          }
+        }
+      }
+
+      // Cleanup temporary properties
+      delete sale.lookupSerial;
+      delete sale.lookupCode;
     }
   }
 }

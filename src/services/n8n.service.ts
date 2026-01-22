@@ -39,6 +39,9 @@ export class N8nService {
     }
   }
 
+  // In-memory cache for card data
+  private readonly cardCache = new Map<string, any>();
+
   /**
    * Fetch card data với retry logic (GET -> POST fallback)
    * Dùng cho đơn "08. Tách thẻ" để lấy issue_partner_code
@@ -46,6 +49,12 @@ export class N8nService {
    * @returns Card response data
    */
   async fetchCardDataWithRetry(docCode: string): Promise<any> {
+    // Check cache
+    if (this.cardCache.has(docCode)) {
+      // this.logger.debug(`[N8nService] Cache hit for ${docCode}`);
+      return this.cardCache.get(docCode);
+    }
+
     const apiUrl = `${this.baseUrl}/get_card`;
     const requestBody = { doccode: docCode };
 
@@ -58,9 +67,11 @@ export class N8nService {
           'Content-Type': 'application/json',
         },
         data: requestBody,
-        timeout: 30000,
+        timeout: 10000, // Reduced from 30s to 10s to fail faster if stuck
       });
-      return response.data;
+      const data = response.data;
+      if (data) this.cardCache.set(docCode, data);
+      return data;
     } catch (getError: any) {
       // Nếu GET fail với 404 hoặc 405, thử POST
       if (
@@ -75,10 +86,12 @@ export class N8nService {
               headers: {
                 'Content-Type': 'application/json',
               },
-              timeout: 30000,
+              timeout: 10000, // Reduced from 30s to 10s
             },
           );
-          return response.data;
+          const data = response.data;
+          if (data) this.cardCache.set(docCode, data);
+          return data;
         } catch (postError: any) {
           this.logger.error(
             `Error fetching card data (POST fallback) for ${docCode}: ${postError?.message || postError}`,

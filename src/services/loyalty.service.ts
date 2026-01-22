@@ -286,4 +286,32 @@ export class LoyaltyService {
 
     return null;
   }
+
+  /**
+   * Batch fetch material codes from svcCodes
+   */
+  async fetchMaterialCodesBySvcCodes(
+    svcCodes: string[],
+  ): Promise<Map<string, string>> {
+    const resultMap = new Map<string, string>();
+    if (svcCodes.length === 0) return resultMap;
+
+    const CONCURRENCY_LIMIT = 5;
+    const chunks: string[][] = [];
+    for (let i = 0; i < svcCodes.length; i += CONCURRENCY_LIMIT) {
+      chunks.push(svcCodes.slice(i, i + CONCURRENCY_LIMIT));
+    }
+
+    for (const chunk of chunks) {
+      await Promise.all(
+        chunk.map(async (code) => {
+          const materialCode = await this.getMaterialCodeBySvcCode(code);
+          if (materialCode) {
+            resultMap.set(code, materialCode);
+          }
+        }),
+      );
+    }
+    return resultMap;
+  }
 }

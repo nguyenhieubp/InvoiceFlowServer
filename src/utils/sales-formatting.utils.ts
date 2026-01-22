@@ -238,8 +238,18 @@ export async function formatSaleForFrontend(
   let isTangHang = giaBan === 0 && tienHang === 0;
   if (isDichVu) isTangHang = false;
   const materialCode = saleMaterialCode || sale.itemCode;
-  const loyaltyProductForTracking =
-    await loyaltyService.checkProduct(materialCode);
+
+  // OPTIMIZATION: Use passed loyaltyProduct if available and matches
+  let loyaltyProductForTracking = loyaltyProduct;
+  if (
+    !loyaltyProductForTracking ||
+    (loyaltyProductForTracking.materialCode !== materialCode &&
+      loyaltyProductForTracking.code !== materialCode)
+  ) {
+    // Only fetch if strictly necessary (different code or missing)
+    loyaltyProductForTracking = await loyaltyService.checkProduct(materialCode);
+  }
+
   const trackSerial = loyaltyProductForTracking?.trackSerial === true;
   const trackBatch = loyaltyProductForTracking?.trackBatch === true;
 

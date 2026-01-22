@@ -68,6 +68,11 @@ export class CategoriesService {
     private httpService: HttpService,
   ) {}
 
+  // Cache for ecommerce customers
+  private ecommerceCache: Map<string, EcommerceCustomer> | null = null;
+  private readonly CACHE_TTL = 300000; // 5 minutes
+  private lastCacheTime = 0;
+
   async findAll(options: { page?: number; limit?: number; search?: string }) {
     const { page = 1, limit = 50, search } = options;
 
@@ -2151,15 +2156,28 @@ export class CategoriesService {
   async findActiveEcommerceCustomerByCode(
     code: string,
   ): Promise<EcommerceCustomer | null> {
-    const ec = await this.ecommerceCustomerRepository.findOne({
-      where: { customerCode: code, trangThai: 'active' },
-    });
+    const now = Date.now();
 
-    if (!ec) {
-      return null;
+    // Refresh cache if needed
+    if (!this.ecommerceCache || now - this.lastCacheTime > this.CACHE_TTL) {
+      const activeCustomers = await this.ecommerceCustomerRepository.find({
+        where: { trangThai: 'active' },
+      });
+
+      this.ecommerceCache = new Map<string, EcommerceCustomer>();
+      for (const ec of activeCustomers) {
+        // Map by customerCode
+        if (ec.customerCode) {
+          this.ecommerceCache.set(ec.customerCode.trim(), ec);
+        }
+      }
+      this.lastCacheTime = now;
     }
 
-    return ec;
+    const trimmedCode = code?.trim();
+    if (!trimmedCode) return null;
+
+    return this.ecommerceCache.get(trimmedCode) || null;
   }
 
   async createEcommerceCustomer(
@@ -2170,7 +2188,9 @@ export class CategoriesService {
       trangThai: createDto.trangThai || 'active',
     });
 
-    return await this.ecommerceCustomerRepository.save(ec);
+    const saved = await this.ecommerceCustomerRepository.save(ec);
+    this.ecommerceCache = null; // Invalidate cache
+    return saved;
   }
 
   async updateEcommerceCustomer(
@@ -2181,12 +2201,15 @@ export class CategoriesService {
 
     Object.assign(ec, updateDto);
 
-    return await this.ecommerceCustomerRepository.save(ec);
+    const saved = await this.ecommerceCustomerRepository.save(ec);
+    this.ecommerceCache = null; // Invalidate cache
+    return saved;
   }
 
   async deleteEcommerceCustomer(id: string): Promise<void> {
     const ec = await this.findOneEcommerceCustomer(id);
     await this.ecommerceCustomerRepository.remove(ec);
+    this.ecommerceCache = null; // Invalidate cache
   }
 
   async importEcommerceCustomersFromExcel(file: Express.Multer.File): Promise<{

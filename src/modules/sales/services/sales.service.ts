@@ -101,8 +101,18 @@ export class SalesService {
 
       const candidates = await query.getMany();
       const errors: any[] = [];
-      const branchCache = new Map<string, string>();
       const productCache = new Map<string, any>();
+
+      // 1. Batch Fetch Departments (Optimization)
+      const uniqueBranchCodes = Array.from(
+        new Set(
+          candidates
+            .map((s) => s.branchCode)
+            .filter((b) => !!b && b.trim() !== ''),
+        ),
+      );
+      const departmentMap =
+        await this.loyaltyService.fetchLoyaltyDepartments(uniqueBranchCodes);
 
       // Sequential Check (safer for rate limits than Promise.all(200))
       // Could optimize with batches of 10 if needed
@@ -121,11 +131,15 @@ export class SalesService {
         } else {
           // Check DVCS (Missing Branch Mapping?)
           if (sale.branchCode) {
-            let maDvcs = branchCache.get(sale.branchCode);
-            if (maDvcs === undefined) {
+            // Check in batch map first
+            const department = departmentMap.get(sale.branchCode);
+            let maDvcs = department?.ma_dvcs;
+
+            // Fallback: If not in batch map (rare), try single fetch
+            if (!maDvcs) {
               maDvcs = await this.loyaltyService.fetchMaDvcs(sale.branchCode);
-              branchCache.set(sale.branchCode, maDvcs);
             }
+
             if (!maDvcs) {
               isError = true;
             }

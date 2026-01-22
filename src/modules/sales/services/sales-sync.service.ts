@@ -531,10 +531,32 @@ export class SalesSyncService {
         }
       });
 
-      // Batch fetch from Loyalty
+      // Batch fetch from Loyalty (Products)
       const loyaltyProductMap = await this.loyaltyService.fetchProducts(
         Array.from(allItemCodes),
       );
+
+      // Batch Fetch Customers (NEW)
+      const customerCodes = Array.from(
+        new Set(orders.map((o) => o.customer.code)),
+      );
+      const existingCustomers = await this.customerRepository.find({
+        where: { code: In(customerCodes) },
+      });
+      const customerMap = new Map<string, Customer>();
+      existingCustomers.forEach((c) => customerMap.set(c.code, c));
+
+      // Batch Fetch Existing Sales (NEW)
+      // Note: We only need to check existing sales if we need to update/skip them
+      const docCodes = orders.map((o) => o.docCode);
+      const allExistingSales = await this.saleRepository.find({
+        where: { docCode: In(docCodes) },
+      });
+      const salesMap = new Map<string, Sale[]>();
+      allExistingSales.forEach((s) => {
+        if (!salesMap.has(s.docCode)) salesMap.set(s.docCode, []);
+        salesMap.get(s.docCode)!.push(s);
+      });
 
       // 4. Process each order
       for (const order of orders) {
@@ -549,6 +571,7 @@ export class SalesSyncService {
           const customer = await this.processCustomer(
             order,
             brandFromDepartment,
+            customerMap, // Pass Map
             (isNew) => {
               if (isNew) customersCount++;
             },
@@ -576,6 +599,7 @@ export class SalesSyncService {
             notFoundItemCodes,
             cashMapBySoCode,
             loyaltyProductMap, // Pass the map!
+            salesMap, // Pass sales map
             (errorMsg) => errors.push(errorMsg),
           );
           salesCount += orderSalesCount;
@@ -662,13 +686,14 @@ export class SalesSyncService {
   private async processCustomer(
     order: any,
     brandFromDepartment: string,
+    customerMap: Map<string, Customer>,
     onNewCustomer?: (isNew: boolean) => void,
   ): Promise<Customer | null> {
-    let customer = await this.customerRepository.findOne({
-      where: { code: order.customer.code },
-    });
+    // Check Map first
+    let customer = customerMap.get(order.customer.code);
 
     if (!customer) {
+      // Create new
       const newCustomer = this.customerRepository.create({
         code: order.customer.code,
         name: order.customer.name,
@@ -691,8 +716,13 @@ export class SalesSyncService {
       customer = (await this.customerRepository.save(
         newCustomer,
       )) as unknown as Customer;
+
+      // Update Map
+      customerMap.set(customer.code, customer);
+
       if (onNewCustomer) onNewCustomer(true);
     } else {
+      // Update existing
       customer.name = order.customer.name || customer.name;
       customer.mobile = order.customer.mobile || customer.mobile;
       customer.grade_name = order.customer.grade_name || customer.grade_name;
@@ -702,6 +732,9 @@ export class SalesSyncService {
       customer = (await this.customerRepository.save(
         customer,
       )) as unknown as Customer;
+
+      // Update Map
+      customerMap.set(customer.code, customer);
     }
     return customer;
   }
@@ -757,14 +790,13 @@ export class SalesSyncService {
     notFoundItemCodes: Set<string>,
     cashMapBySoCode: Map<string, any[]>,
     loyaltyProductMap: Map<string, any>, // Added parameter
+    salesMap: Map<string, Sale[]>, // Added sales map
     onError?: (msg: string) => void,
   ): Promise<number> {
     let salesCount = 0;
     if (order.sales && order.sales.length > 0) {
-      // OPTIMIZED: Batch fetch existing sales for this order to avoid N+1 DB calls
-      const existingSalesInDb = await this.saleRepository.find({
-        where: { docCode: order.docCode },
-      });
+      // OPTIMIZED: Use Map lookup instead of DB call
+      const existingSalesInDb = salesMap.get(order.docCode) || [];
 
       const orderCashData = cashMapBySoCode.get(order.docCode) || [];
       const voucherData = orderCashData.filter(
