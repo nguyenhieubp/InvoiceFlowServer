@@ -89,14 +89,15 @@ export class InvoiceLogicUtils {
   /**
    * Tính toán các tài khoản hạch toán (Source of Truth)
    */
-  static resolveAccountingAccounts(params: {
+  static async resolveAccountingAccounts(params: {
     sale: any;
     loyaltyProduct: any;
     orderTypes: OrderTypes;
     isTangHang: boolean;
     hasMaCtkm: boolean;
     hasMaCtkmTangHang: boolean;
-  }): AccountingAccounts {
+    loyaltyService?: any; // Allow injecting service
+  }): Promise<AccountingAccounts> {
     const {
       sale,
       loyaltyProduct,
@@ -104,6 +105,7 @@ export class InvoiceLogicUtils {
       isTangHang,
       hasMaCtkm,
       hasMaCtkmTangHang,
+      loyaltyService,
     } = params;
     const { isDoiVo, isDoiDiem, isDauTu, isSinhNhat, isThuong } = orderTypes;
 
@@ -139,10 +141,11 @@ export class InvoiceLogicUtils {
 
     if (isWholesale) {
       // === LOGIC BÁN BUÔN (WHOLESALE) ===
-      const wholesaleAccounts = InvoiceLogicUtils.getWholesaleAccounts(
+      const wholesaleAccounts = await InvoiceLogicUtils.getWholesaleAccounts(
         isWholesale,
         productTypeWholesaleUpper,
         isEcode,
+        loyaltyService,
       );
 
       if (wholesaleAccounts) {
@@ -197,41 +200,47 @@ export class InvoiceLogicUtils {
   /**
    * Helper xác định tài khoản cho đơn bán buôn (Wholesale)
    */
-  static getWholesaleAccounts(
+  static async getWholesaleAccounts(
     isWholesale: boolean,
     productType: string | null,
     isEcode: boolean,
-  ): Partial<AccountingAccounts> | null {
+    loyaltyService?: any,
+  ): Promise<Partial<AccountingAccounts> | null> {
     if (!isWholesale) return null;
 
     const category = InvoiceLogicUtils.getWholesaleCategory(
       String(productType || ''),
     );
 
+    let promotionCode = '';
+
     if (isEcode) {
       // Ecode Logic
-      if (category === 'MP') {
-        // CKCSBH.E.MP
-        return { tkChietKhau: '5211612', maPhi: '130031' };
-      }
-      if (category === 'TPCN') {
-        // CKCSBH.E.TPCN (Mã phí left blank in req)
-        return { tkChietKhau: '5211612', maPhi: null };
-      }
-      if (category === 'CCDC') {
-        // CKCSBH.E.CCDC
-        return { tkChietKhau: '5211612', maPhi: '130033' };
-      }
+      if (category === 'MP') promotionCode = 'CKCSBH.E.MP';
+      else if (category === 'TPCN') promotionCode = 'CKCSBH.E.TPCN';
+      else if (category === 'CCDC') promotionCode = 'CKCSBH.E.CCDC';
     } else {
       // Non-Ecode Logic
-      if (category === 'MP') {
-        return { tkChietKhau: '521112', maPhi: '130011' };
-      }
-      if (category === 'TPCN') {
-        return { tkChietKhau: '521112', maPhi: '130021' };
-      }
-      if (category === 'CCDC') {
-        return { tkChietKhau: '521112', maPhi: '130031' };
+      if (category === 'MP') promotionCode = 'CKCSBH.MP';
+      else if (category === 'TPCN') promotionCode = 'CKCSBH.TPCN';
+      else if (category === 'CCDC') promotionCode = 'CKCSBH.CCDC';
+    }
+
+    if (promotionCode && loyaltyService) {
+      try {
+        const config = await loyaltyService.fetchPromotionConfig(promotionCode);
+        if (config) {
+          return {
+            tkChietKhau: config.tk_ck || null,
+            maPhi: config.ma_phi || null,
+            tkChiPhi: config.tk_cpkm || null,
+          };
+        }
+      } catch (error) {
+        console.warn(
+          `[InvoiceLogicUtils] Failed to fetch config for ${promotionCode}`,
+          error,
+        );
       }
     }
 

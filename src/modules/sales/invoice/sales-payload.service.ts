@@ -1091,7 +1091,7 @@ export class SalesPayloadService {
     });
   }
 
-  private resolveInvoiceAccounts(
+  private async resolveInvoiceAccounts(
     sale: any,
     loyaltyProduct: any,
     giaBan: number,
@@ -1112,6 +1112,7 @@ export class SalesPayloadService {
       isTangHang,
       hasMaCtkm: !!(maCk01 || maCtkmTangHang),
       hasMaCtkmTangHang: !!maCtkmTangHang,
+      loyaltyService: this.loyaltyService,
     });
   }
 
@@ -1414,7 +1415,7 @@ export class SalesPayloadService {
       amounts.promCode,
     );
 
-    const { tkChietKhau, tkChiPhi, maPhi } = this.resolveInvoiceAccounts(
+    const { tkChietKhau, tkChiPhi, maPhi } = await this.resolveInvoiceAccounts(
       sale,
       loyaltyProduct,
       giaBan,

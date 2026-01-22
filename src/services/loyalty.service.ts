@@ -314,4 +314,32 @@ export class LoyaltyService {
     }
     return resultMap;
   }
+
+  /**
+   * Lấy cấu hình khuyến mãi (tk_ck, tk_cpkm, ma_phi) theo mã CTKM
+   * API: /promotional?page=1&limit=10&ma_ctkm=TT
+   */
+  async fetchPromotionConfig(maCtkm: string): Promise<any | null> {
+    if (!maCtkm) return null;
+    const trimmedCode = maCtkm.trim();
+
+    try {
+      const url = `${this.LOYALTY_API_BASE_URL}/promotional?page=1&limit=10&ma_ctkm=${encodeURIComponent(trimmedCode)}`;
+      const response = await this.httpService.axiosRef.get(url, {
+        headers: { accept: 'application/json' },
+        timeout: this.REQUEST_TIMEOUT,
+      });
+
+      // Response structure: { data: [ { id, ma_ctkm, tk_ck, tk_cpkm, ma_phi } ], total... }
+      const items = response?.data?.data;
+      if (Array.isArray(items) && items.length > 0) {
+        return items[0];
+      }
+    } catch (error) {
+      this.logger.warn(
+        `[LoyaltyService] Failed to fetch promotion config for code ${trimmedCode}: ${error}`,
+      );
+    }
+    return null;
+  }
 }

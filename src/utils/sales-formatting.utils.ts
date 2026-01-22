@@ -301,13 +301,14 @@ export async function formatSaleForFrontend(
   });
 
   const { tkChietKhau, tkChiPhi, maPhi } =
-    InvoiceLogicUtils.resolveAccountingAccounts({
+    await InvoiceLogicUtils.resolveAccountingAccounts({
       sale,
       loyaltyProduct,
       orderTypes,
       isTangHang,
       hasMaCtkm: !!(sale.promCode || maCk01 || maCtkmTangHang),
       hasMaCtkmTangHang: !!maCtkmTangHang,
+      loyaltyService,
     });
 
   const loaiGd = InvoiceLogicUtils.resolveLoaiGd({
