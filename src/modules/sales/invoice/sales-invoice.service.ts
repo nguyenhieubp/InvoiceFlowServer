@@ -10,6 +10,7 @@ import { InvoiceFlowOrchestratorService } from '../flows/invoice-flow-orchestrat
 import { SaleReturnHandlerService } from '../flows/sale-return-handler.service';
 import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
 import * as _ from 'lodash';
+import { FastApiInvoiceFlowService } from '../../../services/fast-api-invoice-flow.service';
 
 @Injectable()
 export class SalesInvoiceService {
@@ -26,6 +27,7 @@ export class SalesInvoiceService {
     private invoicePersistenceService: InvoicePersistenceService,
     private invoiceFlowOrchestratorService: InvoiceFlowOrchestratorService,
     private saleReturnHandlerService: SaleReturnHandlerService,
+    private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
   ) {}
 
   /**
@@ -34,12 +36,13 @@ export class SalesInvoiceService {
   async createInvoiceViaFastApi(
     docCode: string,
     forceRetry: boolean = false,
+    options?: { onlySalesOrder?: boolean },
   ): Promise<any> {
     try {
       // ============================================
       // 1. CHECK INVOICE ĐÃ TẠO
       // ============================================
-      if (!forceRetry) {
+      if (!forceRetry && !options?.onlySalesOrder) {
         const existingInvoice = await this.fastApiInvoiceRepository.findOne({
           where: { docCode },
         });
@@ -91,7 +94,7 @@ export class SalesInvoiceService {
       }
 
       // Có stock transfer (hoặc trường hợp còn lại) -> xử lý bình thường
-      return await this.processSingleOrder(docCode, forceRetry);
+      return await this.processSingleOrder(docCode, forceRetry, options);
     } catch (error: any) {
       this.logger.error(
         `Lỗi khi tạo hóa đơn cho ${docCode}: ${error?.message || error}`,
@@ -103,11 +106,12 @@ export class SalesInvoiceService {
   async processSingleOrder(
     docCode: string,
     forceRetry: boolean = false,
+    options?: { onlySalesOrder?: boolean },
   ): Promise<any> {
     try {
       // Kiểm tra xem đơn hàng đã có trong bảng kê hóa đơn chưa (đã tạo thành công)
       // Nếu forceRetry = true, bỏ qua check này để cho phép retry
-      if (!forceRetry) {
+      if (!forceRetry && !options?.onlySalesOrder) {
         const existingInvoice = await this.fastApiInvoiceRepository.findOne({
           where: { docCode },
         });
@@ -131,6 +135,18 @@ export class SalesInvoiceService {
         throw new NotFoundException(
           `Order ${docCode} not found or has no sales`,
         );
+      }
+
+      // [NEW] Handle onlySalesOrder option
+      if (options?.onlySalesOrder) {
+        const result =
+          await this.fastApiInvoiceFlowService.createSalesOrder(orderData);
+        // We might want to persist partial status or return immediately
+        return {
+          success: true, // Assuming result check handles status
+          message: 'Tạo Sales Order thành công (Sales Order Only mode)',
+          result: result,
+        };
       }
 
       // Delegate to orchestrator

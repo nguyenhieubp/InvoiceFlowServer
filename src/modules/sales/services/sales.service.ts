@@ -26,6 +26,10 @@ export class SalesService {
     return this.salesQueryService.findAllOrders(options);
   }
 
+  async findAllAggregatedOrders(options: any) {
+    return this.salesQueryService.findAllAggregatedOrders(options);
+  }
+
   // Warehouse Method Delegation
 
   async getStockTransferById(id: string) {
@@ -317,10 +321,15 @@ export class SalesService {
     return this.salesInvoiceService.markProcessedOrdersFromInvoices();
   }
 
-  async createInvoiceViaFastApi(docCode: string, forceRetry: boolean = false) {
+  async createInvoiceViaFastApi(
+    docCode: string,
+    forceRetry: boolean = false,
+    options?: { onlySalesOrder?: boolean },
+  ) {
     return this.salesInvoiceService.createInvoiceViaFastApi(
       docCode,
       forceRetry,
+      options,
     );
   }
 

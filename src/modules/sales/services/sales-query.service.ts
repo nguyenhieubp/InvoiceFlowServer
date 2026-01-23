@@ -819,6 +819,323 @@ export class SalesQueryService {
     };
   }
 
+  /**
+   * Find all orders with aggregated sales (no stock transfer explosion)
+   * This method query sales and enrich them, but skip the step of exploding sales based on stock transfers
+   */
+  async findAllAggregatedOrders(options: {
+    brand?: string;
+    isProcessed?: boolean;
+    page?: number;
+    limit?: number;
+    date?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    search?: string;
+    statusAsys?: boolean;
+    typeSale?: string;
+  }) {
+    const {
+      brand,
+      isProcessed,
+      page = 1,
+      limit = 10,
+      date,
+      dateFrom,
+      dateTo,
+      search,
+      statusAsys,
+      typeSale,
+    } = options;
+
+    // --- Query Logic (Same as findAllOrders) ---
+    const countQuery = this.saleRepository
+      .createQueryBuilder('sale')
+      .select('COUNT(DISTINCT sale.docCode)', 'count');
+
+    if (search && search.trim() !== '') {
+      countQuery.leftJoin('sale.customer', 'customer');
+    }
+
+    this.applySaleFilters(countQuery, {
+      brand,
+      isProcessed,
+      statusAsys,
+      typeSale,
+      date,
+      dateFrom,
+      dateTo,
+      search,
+    });
+
+    const totalResult = await countQuery.getRawOne();
+    const totalOrders = parseInt(totalResult?.count || '0', 10);
+
+    const fullQuery = this.saleRepository
+      .createQueryBuilder('sale')
+      .leftJoinAndSelect('sale.customer', 'customer')
+      .orderBy('sale.docDate', 'DESC')
+      .addOrderBy('sale.docCode', 'ASC')
+      .addOrderBy('sale.id', 'ASC');
+
+    this.applySaleFilters(fullQuery, {
+      brand,
+      isProcessed,
+      statusAsys,
+      typeSale,
+      date,
+      dateFrom,
+      dateTo,
+      search,
+    });
+
+    const isSearchMode = !!search && totalOrders < 2000;
+    let allSales: Sale[];
+
+    if (!isSearchMode) {
+      // Pagination Logic (Same as findAllOrders)
+      const docCodeSubquery = this.saleRepository
+        .createQueryBuilder('sale')
+        .select('sale.docCode', 'docCode')
+        .addSelect('MAX(sale.docDate)', 'docDate')
+        .groupBy('sale.docCode')
+        .orderBy('MAX(sale.docDate)', 'DESC')
+        .addOrderBy('sale.docCode', 'ASC');
+
+      if (search && search.trim() !== '') {
+        docCodeSubquery.leftJoin('sale.customer', 'customer');
+      }
+
+      this.applySaleFilters(docCodeSubquery, {
+        brand,
+        isProcessed,
+        statusAsys,
+        typeSale,
+        date,
+        dateFrom,
+        dateTo,
+        search,
+      });
+
+      const offset = (page - 1) * limit;
+      docCodeSubquery.skip(offset).take(limit);
+
+      const docCodeResults = await docCodeSubquery.getRawMany();
+      const docCodes = docCodeResults.map((r) => r.docCode);
+
+      if (docCodes.length === 0) {
+        allSales = [];
+      } else {
+        fullQuery.andWhere('sale.docCode IN (:...docCodes)', { docCodes });
+        allSales = await fullQuery.getMany();
+      }
+    } else {
+      allSales = await fullQuery.getMany();
+    }
+
+    const orderMap = new Map<string, any>();
+    const allSalesData: any[] = [];
+
+    for (const sale of allSales) {
+      const docCode = sale.docCode;
+
+      if (!orderMap.has(docCode)) {
+        orderMap.set(docCode, {
+          docCode: sale.docCode,
+          docDate: sale.docDate,
+          branchCode: sale.branchCode,
+          docSourceType: sale.docSourceType,
+          customer: sale.customer
+            ? {
+                code: sale.customer.code || sale.partnerCode || null,
+                brand: sale.customer.brand || null,
+                name: sale.customer.name || null,
+                mobile: sale.customer.mobile || null,
+              }
+            : sale.partnerCode
+              ? {
+                  code: sale.partnerCode || null,
+                  brand: null,
+                  name: null,
+                  mobile: null,
+                  id: null,
+                }
+              : null,
+          totalRevenue: 0,
+          totalQty: 0,
+          totalItems: 0,
+          isProcessed: sale.isProcessed,
+          sales: [],
+        });
+      }
+
+      const order = orderMap.get(docCode)!;
+      order.totalRevenue += Number(sale.revenue || 0);
+      order.totalQty += Number(sale.qty || 0);
+      order.totalItems += 1;
+
+      if (!sale.isProcessed) {
+        order.isProcessed = false;
+      }
+
+      allSalesData.push(sale);
+    }
+
+    // --- Enrichment Logic ---
+    const itemCodes = Array.from(
+      new Set(
+        allSalesData
+          .filter((sale) => sale.statusAsys !== false)
+          .map((sale) => sale.itemCode)
+          .filter((code): code is string => !!code && code.trim() !== ''),
+      ),
+    );
+    const branchCodes = Array.from(
+      new Set(
+        allSalesData
+          .map((sale) => sale.branchCode)
+          .filter((code): code is string => !!code && code.trim() !== ''),
+      ),
+    );
+    const docCodes = Array.from(
+      new Set(allSalesData.map((sale) => sale.docCode).filter(Boolean)),
+    );
+    const svcCodes = Array.from(
+      new Set(
+        allSalesData
+          .map((sale) => sale.svc_code)
+          .filter((code): code is string => !!code && code.trim() !== ''),
+      ),
+    );
+    const allItemCodes = Array.from(new Set([...itemCodes]));
+
+    const [loyaltyProductMap, departmentMap] = await Promise.all([
+      this.loyaltyService.fetchProducts(allItemCodes),
+      this.loyaltyService.fetchLoyaltyDepartments(branchCodes),
+    ]);
+    let svcCodeMap = new Map<string, string>();
+    if (svcCodes.length > 0) {
+      svcCodeMap =
+        await this.loyaltyService.fetchMaterialCodesBySvcCodes(svcCodes);
+    }
+
+    // Fetch Cards (Tach The)
+    const getMaThe = new Map<string, string>();
+    if (docCodes.length > 0) {
+      try {
+        const [dataCard] = await this.n8nService.fetchCardData(docCodes[0]);
+        if (dataCard && dataCard.data) {
+          for (const card of dataCard.data) {
+            if (!card?.service_item_name || !card?.serial) continue;
+            const itemProduct = await this.loyaltyService.checkProduct(
+              card.service_item_name,
+            );
+            if (itemProduct) {
+              getMaThe.set(itemProduct.materialCode, card.serial);
+            }
+          }
+        }
+      } catch (e) {
+        // Ignore error
+      }
+    }
+
+    // --- Format Sales (Parallel) ---
+    const formatPromises: Promise<any>[] = [];
+
+    for (const sale of allSalesData) {
+      const promise = (async () => {
+        const loyaltyProduct = sale.itemCode
+          ? loyaltyProductMap.get(sale.itemCode)
+          : null;
+        const department = sale.branchCode
+          ? departmentMap.get(sale.branchCode) || null
+          : null;
+
+        const maThe = getMaThe.get(loyaltyProduct?.materialCode || '') || '';
+        sale.maThe = maThe;
+
+        const calculatedFields = SalesCalculationUtils.calculateSaleFields(
+          sale,
+          loyaltyProduct,
+          department,
+          sale.branchCode,
+        );
+
+        const order = orderMap.get(sale.docCode);
+
+        // Use empty stock transfers for this aggregation view
+        const enrichedSale = await SalesFormattingUtils.formatSaleForFrontend(
+          sale,
+          loyaltyProduct,
+          department,
+          calculatedFields,
+          order,
+          this.categoriesService,
+          this.loyaltyService,
+          [], // No stock transfers
+        );
+
+        if (sale.svc_code) {
+          enrichedSale.svcCode = svcCodeMap.get(sale.svc_code);
+        }
+
+        enrichedSale._itemCode = sale.itemCode; // Pass for batch
+
+        return enrichedSale;
+      })();
+      formatPromises.push(promise);
+    }
+
+    const enrichedSales = await Promise.all(formatPromises);
+
+    // Group back to orders
+    for (const enrichedSale of enrichedSales) {
+      const docCode = enrichedSale.docCode;
+      if (orderMap.has(docCode)) {
+        orderMap.get(docCode).sales.push(enrichedSale);
+      }
+    }
+
+    // --- SKIP EXPLOSION ---
+    if (enrichedSales.length > 0) {
+      await this.voucherIssueService.enrichSalesWithMaVtRef(
+        enrichedSales,
+        loyaltyProductMap,
+      );
+    }
+
+    // Sort orders
+    const orders = Array.from(orderMap.values()).sort((a, b) => {
+      return new Date(b.docDate).getTime() - new Date(a.docDate).getTime();
+    });
+
+    // Manual maThe overrides (Voucher Item Type 94)
+    orders.forEach((order) => {
+      if (order.sales) {
+        order.sales.forEach((sale: any) => {
+          const product =
+            loyaltyProductMap.get(sale.itemCode) ||
+            loyaltyProductMap.get(sale.materialCode);
+          if (product?.materialType === '94') {
+            if (!sale.soSerial && sale.ma_vt_ref) {
+              sale.soSerial = sale.ma_vt_ref;
+            }
+            sale.maThe = sale.soSerial;
+          }
+        });
+      }
+    });
+
+    return {
+      data: orders,
+      total: totalOrders,
+      page,
+      limit,
+      totalPages: Math.ceil(totalOrders / limit),
+    };
+  }
+
   async getStatusAsys(
     statusAsys?: string,
     page?: number,

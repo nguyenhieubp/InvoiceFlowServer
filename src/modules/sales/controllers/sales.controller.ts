@@ -17,6 +17,32 @@ import type { Response } from 'express';
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
+  @Get('aggregated')
+  async findAllAggregated(
+    @Query('brand') brand?: string,
+    @Query('processed') processed?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('date') date?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('search') search?: string,
+    @Query('typeSale') typeSale?: string,
+  ) {
+    return this.salesService.findAllAggregatedOrders({
+      brand,
+      isProcessed:
+        processed === 'true' ? true : processed === 'false' ? false : undefined,
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 50,
+      date,
+      dateFrom,
+      dateTo,
+      search,
+      typeSale,
+    });
+  }
+
   @Get()
   async findAll(
     @Query('brand') brand?: string,
@@ -124,11 +150,12 @@ export class SalesController {
   @Post('order/:docCode/create-invoice-fast')
   async createInvoiceViaFastApi(
     @Param('docCode') docCode: string,
-    @Body() body: { forceRetry?: boolean },
+    @Body() body: { forceRetry?: boolean; onlySalesOrder?: boolean },
   ) {
     return this.salesService.createInvoiceViaFastApi(
       docCode,
       body?.forceRetry || false,
+      { onlySalesOrder: body?.onlySalesOrder },
     );
   }
 

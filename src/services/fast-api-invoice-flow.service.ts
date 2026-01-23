@@ -796,6 +796,9 @@ export class FastApiInvoiceFlowService {
 
           // Trường hợp 2: fop_syscode != "CASH" → Kiểm tra payment method
           if (cashioData.fop_syscode && cashioData.fop_syscode !== 'CASH') {
+            if (cashioData.fop_syscode === 'VOUCHER') {
+              continue;
+            }
             // [NEW] Get dvcs from map
             const saleDept = departmentMap.get(cashioData.branch_code);
             const dvcs = saleDept?.ma_dvcs || '';
