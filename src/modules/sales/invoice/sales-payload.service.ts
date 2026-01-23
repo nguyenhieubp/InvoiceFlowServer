@@ -56,6 +56,8 @@ export class SalesPayloadService {
       const orderFee = await this.orderFeeRepository.findOne({
         where: { erpOrderCode: orderData.docCode },
       });
+      const isPlatformOrder = !!orderFee; // [NEW] Detect platform order
+      const platformBrand = orderFee?.brand; // [NEW] Catch brand from OrderFee
       if (orderFee?.rawData?.raw_data?.voucher_from_seller) {
         const voucherAmount = Number(
           orderFee.rawData.raw_data.voucher_from_seller || 0,
@@ -140,6 +142,8 @@ export class SalesPayloadService {
               cardSerialMap,
               svcCodeMap,
               onlySalesOrder: options?.onlySalesOrder,
+              isPlatformOrder, // [NEW] Pass flag
+              platformBrand, // [NEW] Pass brand
             });
           }),
       );
@@ -977,6 +981,7 @@ export class SalesPayloadService {
     orderData: any,
     allocationRatio: number,
     isNormalOrder: boolean,
+    isPlatformOrder?: boolean, // [NEW]
   ) {
     const orderTypes = InvoiceLogicUtils.getOrderTypes(
       sale.ordertypeName || sale.ordertype,
@@ -1024,8 +1029,18 @@ export class SalesPayloadService {
       const saleKey = `chietKhau${i.toString().padStart(2, '0')}`;
       amounts[key] = this.toNumber(sale[saleKey] || sale[key], 0);
     }
-    // Map platform voucher (VC CTKM SÀN) to ck06
-    amounts.ck06_nt = this.toNumber(sale.chietKhauVoucherDp1, 0);
+    // Map platform voucher (VC CTKM SÀN) to ck06 => REQ: Map to ck15 for Platform Order
+    if (isPlatformOrder) {
+      // FIX: Use paid_by_voucher_ecode_ecoin_bp as the source value (same as ck05)
+      amounts.ck15_nt =
+        this.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
+          ? this.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0)
+          : this.toNumber(sale.chietKhauVoucherDp1, 0); // Fallback to OrderFee enrichment
+      amounts.ck05_nt = 0; // Clear ck05
+      amounts.ck06_nt = 0; // Clear ck06
+    } else {
+      amounts.ck06_nt = this.toNumber(sale.chietKhauVoucherDp1, 0);
+    }
 
     // ck11 (ECOIN) logic
     let ck11_nt = this.toNumber(
@@ -1088,6 +1103,7 @@ export class SalesPayloadService {
     orderData: any,
     giaBan: number,
     promCode: string | null,
+    isPlatformOrder?: boolean, // [NEW]
   ) {
     const orderTypes = InvoiceLogicUtils.getOrderTypes(
       sale.ordertypeName || sale.ordertype,
@@ -1115,6 +1131,7 @@ export class SalesPayloadService {
       productTypeUpper,
       promCode: sale.promCode || sale.prom_code, // Pass RAW code to let Utils handle PRMN logic consistently
       maHangGiamGia: maHangGiamGia,
+      isSanTmdtOverride: isPlatformOrder, // [NEW] Pass override
     });
   }
 
@@ -1273,6 +1290,7 @@ export class SalesPayloadService {
     sale: any,
     orderData: any,
     loyaltyProduct: any,
+    isPlatformOrder?: boolean, // [NEW]
   ) {
     for (let i = 1; i <= 22; i++) {
       const idx = i.toString().padStart(2, '0');
@@ -1362,8 +1380,12 @@ export class SalesPayloadService {
       } else {
         // Default mapping for other ma_ck fields
         if (i !== 1) {
-          const saleMaKey = `maCk${idx}`;
-          detailItem[maKey] = this.val(sale[saleMaKey] || '', 32);
+          if (i === 15 && isPlatformOrder) {
+            detailItem[maKey] = 'VC CTKM SÀN'; // [NEW] Platform Order Voucher Name
+          } else {
+            const saleMaKey = `maCk${idx}`;
+            detailItem[maKey] = this.val(sale[saleMaKey] || '', 32);
+          }
         }
       }
     }
@@ -1401,7 +1423,14 @@ export class SalesPayloadService {
       cardSerialMap,
       svcCodeMap,
       onlySalesOrder, // [NEW] Option to skip inventory fields
+      isPlatformOrder, // [NEW]
+      platformBrand, // [NEW]
     } = context;
+
+    // [NEW] Patch brand from Platform info if available
+    if (isPlatformOrder && platformBrand) {
+      sale.brand = platformBrand;
+    }
     const saleMaterialCode =
       sale.product?.materialCode ||
       sale.product?.materialCode ||
@@ -1431,6 +1460,7 @@ export class SalesPayloadService {
       orderData,
       allocationRatio,
       isNormalOrder,
+      isPlatformOrder, // [NEW] Pass flag
     );
 
     // 4. Resolve Codes & Accounts
@@ -1445,6 +1475,7 @@ export class SalesPayloadService {
       orderData,
       giaBan,
       amounts.promCode,
+      isPlatformOrder, // [NEW]
     );
 
     const { tkChietKhau, tkChiPhi, maPhi } = await this.resolveInvoiceAccounts(
@@ -1574,6 +1605,7 @@ export class SalesPayloadService {
       sale,
       orderData,
       loyaltyProduct,
+      isPlatformOrder, // [NEW]
     );
 
     return detailItem;

@@ -258,6 +258,7 @@ export class InvoiceLogicUtils {
     productTypeUpper: string | null;
     promCode: string | null;
     maHangGiamGia: any;
+    isSanTmdtOverride?: boolean;
   }) {
     const {
       sale,
@@ -270,6 +271,10 @@ export class InvoiceLogicUtils {
     } = params;
     const { isDoiDiem, isDauTu, isThuong, isBanTaiKhoan, isSanTmdt } =
       orderTypes;
+
+    // [NEW] Allow override for platform orders (detected by OrderFee)
+    const effectiveIsSanTmdt =
+      params.isSanTmdtOverride === true ? true : isSanTmdt;
 
     // Safety: Re-derive productTypeUpper if missing (Robust Check V9)
     let effectiveProductType = productTypeUpper;
@@ -327,6 +332,16 @@ export class InvoiceLogicUtils {
     }
 
     if (!isDoiDiem && !isTangHang && !isWholesale) {
+      // [NEW] Platform Order (Đơn sàn) Logic
+      if (effectiveIsSanTmdt) {
+        const brand = (sale.brand || '').trim().toLowerCase();
+        if (brand === 'menard') {
+          maCk01 = 'TTM.R601ECOM';
+        } else if (brand === 'yaman') {
+          maCk01 = 'BTH.R601ECOM';
+        }
+      }
+
       // 3. Standard Case: Assign + Add Suffix if missing
       if (!maCk01) {
         maCk01 = SalesUtils.getPromotionDisplayCode(code) || code || '';
@@ -335,7 +350,8 @@ export class InvoiceLogicUtils {
       // FIX V8.1: Add suffix if NOT PRMN-derived.
       // E.g: Input 'RMN...' -> isPRMNDerived=false -> Adds Suffix.
       //      Input 'PRMN...' -> isPRMNDerived=true -> Skips Suffix.
-      if (maCk01 && effectiveProductType) {
+      // [NEW] Skip suffix for Platform Orders (Sàn TMĐT)
+      if (maCk01 && effectiveProductType && !effectiveIsSanTmdt) {
         let suffix = '';
         if (effectiveProductType === 'I') suffix = '.I';
         else if (effectiveProductType === 'S') suffix = '.S';

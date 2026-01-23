@@ -174,6 +174,8 @@ export async function formatSaleForFrontend(
   categoriesService: any,
   loyaltyService: any,
   stockTransfers?: any[],
+  isPlatformOrderOverride?: boolean, // [NEW]
+  platformBrandOverride?: string, // [NEW]
 ): Promise<any> {
   const saleMaterialCode =
     sale.product?.materialCode ||
@@ -182,7 +184,16 @@ export async function formatSaleForFrontend(
     loyaltyProduct?.materialCode;
 
   const ordertypeName = sale.ordertypeName || sale.ordertype || '';
-  const orderTypes = InvoiceLogicUtils.getOrderTypes(ordertypeName);
+  let orderTypes = InvoiceLogicUtils.getOrderTypes(ordertypeName);
+
+  // [NEW] Override isSanTmdt if detected via OrderFee
+  if (isPlatformOrderOverride) {
+    orderTypes = {
+      ...orderTypes,
+      isSanTmdt: true,
+    };
+  }
+
   const {
     isDoiDiem,
     isDoiVo,
@@ -367,7 +378,10 @@ export async function formatSaleForFrontend(
     isDichVu: calculatedFields.isDichVu,
     promCodeDisplay: finalPromCodeDisplay,
     promotionDisplayCode:
-      maCk01 || SalesUtils.getPromotionDisplayCode(sale.promCode),
+      maCk01 ||
+      SalesUtils.getPromotionDisplayCode(sale.promCode) ||
+      (isSanTmdt ? '' : displayFields.thanhToanVoucherDisplay) || // [Unified] Clear voucher display for Platform Order
+      '',
     other_discamt: other_discamt,
     chietKhauMuaHangGiamGia: other_discamt,
     maCkTheoChinhSach: maCkTheoChinhSach, // Mã CTKM cho bán buôn
@@ -382,6 +396,10 @@ export async function formatSaleForFrontend(
         ? sale.issuePartnerCode
         : sale.partnerCode || sale.partner_code || null,
     ...displayFields,
+    thanhToanVoucherDisplay: isSanTmdt
+      ? null
+      : displayFields.thanhToanVoucherDisplay,
+    thanhToanVoucher: isSanTmdt ? 0 : displayFields.thanhToanVoucher,
     productType: productType,
     // Optimized: Only return fields actually used by frontend
     product: loyaltyProduct
@@ -414,13 +432,13 @@ export async function formatSaleForFrontend(
     tkChietKhau,
     tkChiPhi,
     maPhi,
-    brand: sale?.brand?.toUpperCase() || null,
+    brand: (platformBrandOverride || sale?.brand)?.toUpperCase() || null, // [NEW] Use override
     type_sale: sale?.type_sale || null,
-    // Force voucher discount to 0 if order is Point Exchange (isDoiDiem)
-    paid_by_voucher_ecode_ecoin_bp: isDoiDiem
-      ? 0
-      : sale.paid_by_voucher_ecode_ecoin_bp,
-    chietKhauThanhToanVoucher: isDoiDiem ? 0 : sale.chietKhauThanhToanVoucher,
+    // Force voucher discount to 0 if order is Point Exchange (isDoiDiem) OR Platform Order (isSanTmdt)
+    paid_by_voucher_ecode_ecoin_bp:
+      isDoiDiem || isSanTmdt ? 0 : sale.paid_by_voucher_ecode_ecoin_bp,
+    chietKhauThanhToanVoucher:
+      isDoiDiem || isSanTmdt ? 0 : sale.chietKhauThanhToanVoucher,
   };
 }
 

@@ -100,6 +100,13 @@ export class SalesQueryService {
       where: { soCode: In(docCodesForStockTransfer) },
     });
 
+    // 4.1. Order Fee (for Platform Order detection)
+    const orderFee = await this.orderFeeRepository.findOne({
+      where: { erpOrderCode: docCode },
+    });
+    const isPlatformOrder = !!orderFee;
+    const platformBrand = orderFee?.brand;
+
     const { stockTransferMap, stockTransferByDocCodeMap } =
       StockTransferUtils.buildStockTransferMaps(
         stockTransfers,
@@ -192,6 +199,8 @@ export class SalesQueryService {
           this.categoriesService,
           this.loyaltyService,
           saleStockTransfers,
+          isPlatformOrder, // [NEW]
+          platformBrand, // [NEW]
         );
         return enriched;
       }),
@@ -725,6 +734,8 @@ export class SalesQueryService {
             this.categoriesService,
             this.loyaltyService,
             saleStockTransfers,
+            !!orderFeeMap.get(sale.docCode), // [NEW] isPlatformOrderOverride
+            orderFeeMap.get(sale.docCode)?.brand, // [NEW] platformBrandOverride
           );
 
           // [NEW] Override svcCode with looked-up materialCode if available
