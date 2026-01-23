@@ -23,6 +23,21 @@ export class OrderFeeController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
+    // Default brand = 'menard'
+    if (!brand) brand = 'menard';
+
+    // Default date range = last 30 days
+    if (!startDate || !endDate) {
+      const now = new Date();
+      if (!endDate) {
+        endDate = now.toISOString().split('T')[0];
+      }
+      if (!startDate) {
+        const thirtyDaysAgo = new Date(now);
+        thirtyDaysAgo.setDate(now.getDate() - 30);
+        startDate = thirtyDaysAgo.toISOString().split('T')[0];
+      }
+    }
     const skip = (page - 1) * limit;
     const queryBuilder = this.orderFeeRepository.createQueryBuilder('orderFee');
 
@@ -52,14 +67,34 @@ export class OrderFeeController {
     // Filter chỉ lấy đơn bên bán (is_customer_pay = false trong rawData)
     queryBuilder.andWhere("orderFee.rawData ->> 'is_customer_pay' = 'false'");
 
-    // Get total count
-    const total = await queryBuilder.getCount();
+    // Get data and total count in one go
+    const [data, total] = await queryBuilder
+      .skip(skip)
+      .take(limit)
+      .getManyAndCount();
 
-    // Get paginated data
-    const data = await queryBuilder.skip(skip).take(limit).getMany();
+    // Map data to extract fields
+    // Map data to extract fields
+    const mappedData = data.map((item) => {
+      const raw = item.rawData || {};
+      const details = raw.raw_data || {};
+
+      const result: any = { ...item };
+      delete result.rawData; // Explicitly remove rawData
+
+      return {
+        ...result,
+        orderCode: raw.order_sn,
+        orderCreatedAt: raw.created_at, // Extract date from rawData
+        voucherShop: details.voucher_from_seller || 0,
+        commissionFee: details.commission_fee || 0, // Phí cố định
+        serviceFee: details.service_fee || 0, // Phí dịch vụ
+        paymentFee: details.credit_card_transaction_fee || 0, // Phí thanh toán
+      };
+    });
 
     return {
-      data,
+      data: mappedData,
       meta: {
         total,
         page: Number(page),

@@ -17,6 +17,7 @@ export class OrderFee {
   feeId: string;
 
   @Column({ name: 'brand', length: 50, nullable: true })
+  @Index()
   brand: string;
 
   @Column({ name: 'erp_order_code', length: 100 })
@@ -31,6 +32,7 @@ export class OrderFee {
   rawData: any;
 
   @Column({ name: 'synced_at', type: 'timestamp' })
+  @Index()
   syncedAt: Date;
 
   @CreateDateColumn({ name: 'created_at' })
