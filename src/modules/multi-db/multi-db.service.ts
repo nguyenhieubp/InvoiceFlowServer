@@ -106,6 +106,7 @@ export class MultiDbService {
       tableLogs: '"menard_erp_order_logs"',
       tableDetail: 'public.menard_ecommer_detail_order',
       tableFee: 'public.menard_ecommer_detail_order_fee',
+      tableOrders: 'public.menard_orders', // [NEW] Table to check Source
       detailIdColumn: 'menard_ecommer_detail_order_id',
     },
     {
@@ -113,6 +114,7 @@ export class MultiDbService {
       tableLogs: '"erp_order_logs"',
       tableDetail: 'public.yaman_ecommer_detail_order',
       tableFee: 'public.yaman_ecommer_detail_order_fee',
+      tableOrders: '"yaman_orders"',
       detailIdColumn: 'yaman_ecommer_detail_order_id',
     },
   ];
@@ -185,11 +187,6 @@ export class MultiDbService {
    * Sync all order fees from external databases to primary database
    * This method is called by cronjob at 1 AM daily
    */
-  /**
-   * Sync all order fees from external databases to primary database
-   * Can optionally filter by date range (createdAt of log)
-   * This method is called by cronjob at 1 AM daily
-   */
   async syncAllOrderFees(startAt?: string, endAt?: string) {
     this.logger.log(
       `Starting order fee sync...${startAt ? ` (From: ${startAt} To: ${endAt})` : ''}`,
@@ -249,70 +246,133 @@ export class MultiDbService {
       for (let i = 0; i < erpLogs.length; i += batchSize) {
         const batch = erpLogs.slice(i, i + batchSize);
 
-        for (const erpLog of batch) {
-          try {
-            // Use specific brand config method
-            const fees = await this.getOrderFeesByBrandConfig(
-              erpLog.erpOrderCode,
+        try {
+          // Identify TikTok vs Shopee Logic
+          const tiktokIds = await this.checkTikTokSource(
+            brandConfig,
+            batch.map((l) => l.pancakeOrderId),
+          );
+
+          // Group by platform
+          const tiktokLogs = batch.filter((l) =>
+            tiktokIds.has(l.pancakeOrderId),
+          );
+          const shopeeLogs = batch.filter(
+            (l) => !tiktokIds.has(l.pancakeOrderId),
+          );
+
+          // --- 1. Process TikTok Orders ---
+          if (tiktokLogs.length > 0) {
+            const details = await this.getTikTokDetails(
               brandConfig,
+              tiktokLogs.map((l) => l.pancakeOrderId),
             );
 
-            for (const fee of fees) {
-              // 1. Save Raw Order Fee
-              await this.orderFeeRepository.upsert(
-                {
-                  feeId: fee.rawData?.id,
-                  brand: fee.brand,
-                  erpOrderCode: fee.erpOrderCode,
-                  platform: 'shopee', // Sàn TMĐT
-                  rawData: fee.rawData,
-                  syncedAt: new Date(),
-                },
-                ['feeId'],
+            for (const log of tiktokLogs) {
+              const detail = details.find(
+                (d) => d.order_sn === log.pancakeOrderId,
               );
+              if (detail && detail.order_data) {
+                // TikTok time is in seconds
+                const createTime =
+                  detail.order_data.create_time ||
+                  detail.order_data.createTime ||
+                  0;
+                const orderDate = createTime
+                  ? new Date(createTime * 1000)
+                  : new Date();
 
-              // 2. Calculate and Save Platform Fee (if applicable)
-              if (
-                fee.rawData?.fee_type === 'order_income' &&
-                fee.rawData?.raw_data
-              ) {
-                const raw = fee.rawData.raw_data;
-                const orderSellingPrice = Number(raw.order_selling_price || 0);
-                const voucherFromSeller = Number(raw.voucher_from_seller || 0);
-                const escrowAmount = Number(raw.escrow_amount || 0);
-
-                const platformFeeAmount =
-                  orderSellingPrice - voucherFromSeller - escrowAmount;
-
-                // User requested "create_at" from detail_order_fee
-                const feeCreatedAt =
-                  fee.rawData?.create_at ||
-                  fee.rawData?.created_at ||
-                  new Date();
-
-                await this.platformFeeRepository.upsert(
+                await this.orderFeeRepository.upsert(
                   {
-                    brand: fee.brand,
-                    erpOrderCode: fee.erpOrderCode,
-                    pancakeOrderId: fee.pancakeOrderId,
-                    amount: platformFeeAmount,
-                    formulaDescription: `(${orderSellingPrice} - ${voucherFromSeller}) - ${escrowAmount}`,
-                    orderFeeCreatedAt: feeCreatedAt,
+                    feeId: `${log.erpOrderCode}_TIKTOK`,
+                    brand: brandConfig.name,
+                    erpOrderCode: log.erpOrderCode,
+                    platform: 'tiktok',
+                    rawData: detail.order_data,
+                    orderCreatedAt: orderDate, // [NEW] Save order date
                     syncedAt: new Date(),
                   },
-                  ['erpOrderCode', 'pancakeOrderId'],
+                  ['feeId'],
                 );
+                synced++;
               }
-
-              synced++;
             }
-          } catch (error) {
-            this.logger.error(
-              `Failed to sync order ${erpLog.erpOrderCode} for brand ${brandConfig.name}`,
-              error,
-            );
-            failed++;
           }
+
+          // --- 2. Process Shopee Orders (Existing Logic) ---
+          if (shopeeLogs.length > 0) {
+            for (const erpLog of shopeeLogs) {
+              try {
+                const fees = await this.getOrderFeesByBrandConfig(
+                  erpLog.erpOrderCode,
+                  brandConfig,
+                );
+
+                for (const fee of fees) {
+                  // Determine creation date early
+                  const feeCreatedAt =
+                    fee.rawData?.create_at ||
+                    fee.rawData?.created_at ||
+                    new Date();
+
+                  // 1. Save Raw Order Fee
+                  await this.orderFeeRepository.upsert(
+                    {
+                      feeId: fee.rawData?.id,
+                      brand: fee.brand,
+                      erpOrderCode: fee.erpOrderCode,
+                      platform: 'shopee',
+                      rawData: fee.rawData,
+                      orderCreatedAt: feeCreatedAt, // [NEW] Save order date
+                      syncedAt: new Date(),
+                    },
+                    ['feeId'],
+                  );
+
+                  // 2. Calculate and Save Platform Fee (if applicable)
+                  if (
+                    fee.rawData?.fee_type === 'order_income' &&
+                    fee.rawData?.raw_data
+                  ) {
+                    const raw = fee.rawData.raw_data;
+                    const orderSellingPrice = Number(
+                      raw.order_selling_price || 0,
+                    );
+                    const voucherFromSeller = Number(
+                      raw.voucher_from_seller || 0,
+                    );
+                    const escrowAmount = Number(raw.escrow_amount || 0);
+
+                    const platformFeeAmount =
+                      orderSellingPrice - voucherFromSeller - escrowAmount;
+
+                    await this.platformFeeRepository.upsert(
+                      {
+                        brand: fee.brand,
+                        erpOrderCode: fee.erpOrderCode,
+                        pancakeOrderId: fee.pancakeOrderId,
+                        amount: platformFeeAmount,
+                        formulaDescription: `(${orderSellingPrice} - ${voucherFromSeller}) - ${escrowAmount}`,
+                        orderFeeCreatedAt: feeCreatedAt,
+                        syncedAt: new Date(),
+                      },
+                      ['erpOrderCode', 'pancakeOrderId'],
+                    );
+                  }
+
+                  synced++;
+                }
+              } catch (e) {
+                // Ignore individual shopee validation errors to keep sync running
+              }
+            }
+          }
+        } catch (error) {
+          this.logger.error(
+            `Failed to sync batch for brand ${brandConfig.name}`,
+            error,
+          );
+          failed += batch.length;
         }
 
         this.logger.log(
@@ -324,6 +384,57 @@ export class MultiDbService {
     } catch (error) {
       this.logger.error(`❌ Sync failed for brand ${brandConfig.name}`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Helper: Check if orders are TikTok source
+   */
+  private async checkTikTokSource(
+    brandConfig: any,
+    pancakeOrderIds: string[],
+  ): Promise<Set<string>> {
+    if (!brandConfig.tableOrders) return new Set();
+
+    try {
+      const tiktokOrders = await this.secondaryDataSource.query(
+        `
+        SELECT "pancakeOrderId"
+        FROM ${brandConfig.tableOrders}
+        WHERE "pancakeOrderId" = ANY($1)
+        AND "orderSourceName" = 'Tiktok'
+        `,
+        [pancakeOrderIds],
+      );
+      return new Set(tiktokOrders.map((o) => o.pancakeOrderId));
+    } catch (error) {
+      this.logger.error(
+        `Failed to check TikTok source for ${brandConfig.name}`,
+        error,
+      );
+      return new Set();
+    }
+  }
+
+  private async getTikTokDetails(brandConfig: any, pancakeOrderIds: string[]) {
+    if (!pancakeOrderIds.length) return [];
+
+    try {
+      const details = await this.thirdDataSource.query(
+        `
+        SELECT *
+        FROM ${brandConfig.tableDetail}
+        WHERE "order_sn" = ANY($1)
+        `,
+        [pancakeOrderIds],
+      );
+      return details;
+    } catch (error) {
+      this.logger.error(
+        `Failed to get TikTok details for ${brandConfig.name}`,
+        error,
+      );
+      return [];
     }
   }
 

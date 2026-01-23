@@ -35,6 +35,10 @@ export class OrderFee {
   @Index()
   syncedAt: Date;
 
+  @Column({ name: 'order_created_at', type: 'timestamp', nullable: true })
+  @Index()
+  orderCreatedAt: Date; // Ngày tạo đơn hàng từ sàn (create_time / created_at)
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

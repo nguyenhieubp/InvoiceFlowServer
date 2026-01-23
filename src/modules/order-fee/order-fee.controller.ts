@@ -22,6 +22,7 @@ export class OrderFeeController {
     @Query('search') search?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('platform') platform?: string, // [NEW] Platform filter
   ) {
     // Default brand = 'menard'
     if (!brand) brand = 'menard';
@@ -46,6 +47,11 @@ export class OrderFeeController {
       queryBuilder.andWhere('orderFee.brand = :brand', { brand });
     }
 
+    // Filter by platform
+    if (platform) {
+      queryBuilder.andWhere('orderFee.platform = :platform', { platform });
+    }
+
     // Search by ERP order code
     if (search) {
       queryBuilder.andWhere('orderFee.erpOrderCode ILIKE :search', {
@@ -53,19 +59,27 @@ export class OrderFeeController {
       });
     }
 
-    // Filter by date range (syncedAt)
+    // Filter by Order Date
     if (startDate) {
-      queryBuilder.andWhere('orderFee.syncedAt >= :startDate', { startDate });
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0); // Start of day (Local)
+      queryBuilder.andWhere('orderFee.orderCreatedAt >= :start', {
+        start,
+      });
     }
     if (endDate) {
-      queryBuilder.andWhere('orderFee.syncedAt <= :endDate', { endDate });
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999); // End of day (Local)
+      queryBuilder.andWhere('orderFee.orderCreatedAt <= :end', {
+        end,
+      });
     }
 
-    // Order by syncedAt descending
-    queryBuilder.orderBy('orderFee.syncedAt', 'DESC');
+    // Order by Order Date descending
+    queryBuilder.orderBy('orderFee.orderCreatedAt', 'DESC');
 
     // Filter chỉ lấy đơn bên bán (is_customer_pay = false trong rawData)
-    queryBuilder.andWhere("orderFee.rawData ->> 'is_customer_pay' = 'false'");
+    // queryBuilder.andWhere("orderFee.rawData ->> 'is_customer_pay' = 'false'");
 
     // Get data and total count in one go
     const [data, total] = await queryBuilder
@@ -78,18 +92,33 @@ export class OrderFeeController {
     const mappedData = data.map((item) => {
       const raw = item.rawData || {};
       const details = raw.raw_data || {};
+      const isTikTok = item.platform === 'tiktok';
 
       const result: any = { ...item };
       delete result.rawData; // Explicitly remove rawData
 
+      // Mapping logic based on Platform
+      if (isTikTok) {
+        return {
+          ...result,
+          orderCode: raw.order_sn || raw.id, // User: order_sn (or id)
+          orderCreatedAt: raw.create_time || raw.created_at,
+          voucherShop: raw.payment?.sellerDiscount || 0, // User: payment.sellerDiscount
+          commissionFee: 0, // User: Chưa có trong JSON này
+          serviceFee: 0, // User: Chưa có trong JSON này
+          paymentFee: 0, // User: Chưa có trong JSON này
+        };
+      }
+
+      // Shopee (Default)
       return {
         ...result,
         orderCode: raw.order_sn,
-        orderCreatedAt: raw.created_at, // Extract date from rawData
+        orderCreatedAt: raw.created_at,
         voucherShop: details.voucher_from_seller || 0,
-        commissionFee: details.commission_fee || 0, // Phí cố định
-        serviceFee: details.service_fee || 0, // Phí dịch vụ
-        paymentFee: details.credit_card_transaction_fee || 0, // Phí thanh toán
+        commissionFee: details.commission_fee || 0,
+        serviceFee: details.service_fee || 0,
+        paymentFee: details.credit_card_transaction_fee || 0,
       };
     });
 
