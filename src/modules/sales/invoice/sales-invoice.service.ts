@@ -11,6 +11,9 @@ import { SaleReturnHandlerService } from '../flows/sale-return-handler.service';
 import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
 import * as _ from 'lodash';
 import { FastApiInvoiceFlowService } from '../../../services/fast-api-invoice-flow.service';
+import { SalesPayloadService } from './sales-payload.service';
+import * as SalesUtils from '../../../utils/sales.utils';
+import * as ConvertUtils from '../../../utils/convert.utils';
 
 @Injectable()
 export class SalesInvoiceService {
@@ -28,6 +31,7 @@ export class SalesInvoiceService {
     private invoiceFlowOrchestratorService: InvoiceFlowOrchestratorService,
     private saleReturnHandlerService: SaleReturnHandlerService,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
+    private salesPayloadService: SalesPayloadService,
   ) {}
 
   /**
@@ -139,8 +143,30 @@ export class SalesInvoiceService {
 
       // [NEW] Handle onlySalesOrder option
       if (options?.onlySalesOrder) {
-        const result =
-          await this.fastApiInvoiceFlowService.createSalesOrder(orderData);
+        // [FIX] Build invoice data using Payload Service to ensure 'detail' is populated correctly
+        const invoiceData =
+          await this.salesPayloadService.buildFastApiInvoiceData(orderData);
+
+        await this.fastApiInvoiceFlowService.createOrUpdateCustomer({
+          ma_kh: SalesUtils.normalizeMaKh(orderData.customer?.code),
+          ten_kh: orderData.customer?.name || '',
+          dia_chi: orderData.customer?.address || undefined,
+          dien_thoai:
+            orderData.customer?.mobile ||
+            orderData.customer?.phone ||
+            undefined,
+          so_cccd: orderData.customer?.idnumber || undefined,
+          ngay_sinh: orderData.customer?.birthday
+            ? ConvertUtils.formatDateYYYYMMDD(orderData.customer.birthday)
+            : undefined,
+          gioi_tinh: orderData.customer?.sexual || undefined,
+        });
+
+        const result = await this.fastApiInvoiceFlowService.createSalesOrder({
+          ...invoiceData,
+          customer: orderData.customer,
+          ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+        });
         // We might want to persist partial status or return immediately
         return {
           success: true, // Assuming result check handles status
