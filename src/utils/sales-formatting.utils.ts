@@ -366,14 +366,14 @@ export async function formatSaleForFrontend(
     isTangHang,
     isDichVu: calculatedFields.isDichVu,
     promCodeDisplay: finalPromCodeDisplay,
-    muaHangGiamGiaDisplay: maCk01,
+    promotionDisplayCode:
+      maCk01 || SalesUtils.getPromotionDisplayCode(sale.promCode),
     other_discamt: other_discamt,
     chietKhauMuaHangGiamGia: other_discamt,
     maCkTheoChinhSach: maCkTheoChinhSach, // Mã CTKM cho bán buôn
     giaBan: giaBan,
     tienHang: tienHang,
     linetotal: isDoiDiem ? 0 : (sale.linetotal ?? tienHang),
-    promotionDisplayCode: SalesUtils.getPromotionDisplayCode(sale.promCode),
     ordertypeName: ordertypeName,
     loaiGd: loaiGd,
     issuePartnerCode: sale.issuePartnerCode || null,

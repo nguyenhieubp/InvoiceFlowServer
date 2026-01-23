@@ -58,6 +58,7 @@ export class SalesQueryService {
    * Find sales by order code (docCode)
    */
   async findByOrderCode(docCode: string) {
+    // 1. Fetch Sales
     const sales = await this.saleRepository.find({
       where: { docCode },
       relations: ['customer'],
@@ -68,7 +69,146 @@ export class SalesQueryService {
       throw new NotFoundException(`Order with code "${docCode}" not found`);
     }
 
-    return sales;
+    // 2. Prepare Data for Enrichment
+    const itemCodes = Array.from(
+      new Set(
+        sales
+          .map((s) => s.itemCode)
+          .filter((c): c is string => !!c && c.trim() !== ''),
+      ),
+    );
+    const branchCodes = Array.from(
+      new Set(
+        sales
+          .map((s) => s.branchCode)
+          .filter((c): c is string => !!c && c.trim() !== ''),
+      ),
+    );
+
+    // 3. Batch Fetch Supporting Data
+    const [loyaltyProductMap, departmentMap, warehouseCodeMap] =
+      await Promise.all([
+        this.loyaltyService.fetchProducts(itemCodes),
+        this.loyaltyService.fetchLoyaltyDepartments(branchCodes),
+        this.categoriesService.getWarehouseCodeMap(),
+      ]);
+
+    // 4. Stock Transfers
+    const docCodesForStockTransfer =
+      StockTransferUtils.getDocCodesForStockTransfer([docCode]);
+    const stockTransfers = await this.stockTransferRepository.find({
+      where: { soCode: In(docCodesForStockTransfer) },
+    });
+
+    const { stockTransferMap, stockTransferByDocCodeMap } =
+      StockTransferUtils.buildStockTransferMaps(
+        stockTransfers,
+        loyaltyProductMap,
+        [docCode],
+      );
+
+    // Pre-build map for ItemCode lookup (fallback)
+    const stockTransferByItemCodeMap = new Map<string, StockTransfer[]>();
+    stockTransfers.forEach((st) => {
+      const key = `${st.soCode}_${st.itemCode}`;
+      if (!stockTransferByItemCodeMap.has(key)) {
+        stockTransferByItemCodeMap.set(key, []);
+      }
+      stockTransferByItemCodeMap.get(key)!.push(st);
+    });
+
+    // 5. Card Data (for Tach The orders)
+    const hasTachThe = sales.some((s) =>
+      SalesUtils.isTachTheOrder(s.ordertype, s.ordertypeName),
+    );
+    let cardData: any = null;
+    if (hasTachThe) {
+      try {
+        const cardResponse =
+          await this.n8nService.fetchCardDataWithRetry(docCode);
+        cardData = this.n8nService.parseCardData(cardResponse);
+      } catch (e) {
+        this.logger.warn(
+          `Failed to fetch card data for ${docCode}: ${e.message}`,
+        );
+      }
+    }
+
+    // 6. Format Sales
+    const enrichedSales = await Promise.all(
+      sales.map(async (sale) => {
+        const loyaltyProduct = sale.itemCode
+          ? loyaltyProductMap.get(sale.itemCode)
+          : null;
+        const department = sale.branchCode
+          ? departmentMap.get(sale.branchCode)
+          : null;
+
+        const saleMaterialCode = loyaltyProduct?.materialCode;
+        let saleStockTransfers: StockTransfer[] = [];
+
+        if (saleMaterialCode) {
+          const stockTransferKey = `${docCode}_${saleMaterialCode}`;
+          saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
+        }
+
+        // Fallback: lookup by itemCode
+        if (saleStockTransfers.length === 0 && sale.itemCode) {
+          const key = `${docCode}_${sale.itemCode}`;
+          saleStockTransfers = stockTransferByItemCodeMap.get(key) || [];
+        }
+
+        const maKhoFromStockTransfer = this.getMaKhoFromStockTransfer(
+          sale,
+          docCode,
+          stockTransfers,
+          saleMaterialCode,
+          stockTransferMap,
+          warehouseCodeMap,
+        );
+
+        const calculatedFields = SalesCalculationUtils.calculateSaleFields(
+          sale,
+          loyaltyProduct,
+          department,
+          sale.branchCode,
+        );
+        calculatedFields.maKho = maKhoFromStockTransfer;
+
+        // Mock Order Object (partial) for formatting utils if needed
+        const mockOrder = {
+          docCode,
+          docDate: sale.docDate,
+          customer: sale.customer,
+          // Add other fields if FormatUtils needs them from order
+        };
+
+        const enriched = await SalesFormattingUtils.formatSaleForFrontend(
+          sale,
+          loyaltyProduct,
+          department,
+          calculatedFields,
+          mockOrder, // Pass mock order
+          this.categoriesService,
+          this.loyaltyService,
+          saleStockTransfers,
+        );
+        return enriched;
+      }),
+    );
+
+    // 7. Apply Card Data (Group Level logic applied to list)
+    if (cardData) {
+      this.n8nService.mapIssuePartnerCodeToSales(enrichedSales, cardData);
+    }
+
+    // 8. Enrich ma_vt_ref (Voucher logic)
+    await this.voucherIssueService.enrichSalesWithMaVtRef(
+      enrichedSales,
+      loyaltyProductMap,
+    );
+
+    return enrichedSales;
   }
 
   /**

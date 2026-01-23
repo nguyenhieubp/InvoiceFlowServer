@@ -279,12 +279,15 @@ export class InvoiceLogicUtils {
       effectiveProductType = String(productType).toUpperCase().trim();
     }
 
-    const isWholesale = sale.type_sale;
+    const isWholesale =
+      sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS';
     let maCk01;
     if (isWholesale && sale.disc_reasons && sale.disc_ctkm > 0) {
       maCk01 = `${sale.disc_reasons}.${maHangGiamGia}` || '';
     } else {
-      maCk01 = sale.muaHangGiamGiaDisplay || '';
+      // [FIX] Don't rely on display fields that might not exist yet.
+      // Calculate from promCode later if not wholesale.
+      maCk01 = '';
     }
 
     let maCtkmTangHang = sale.maCtkmTangHang || '';
