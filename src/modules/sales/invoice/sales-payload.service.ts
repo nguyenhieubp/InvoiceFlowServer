@@ -35,7 +35,10 @@ export class SalesPayloadService {
   /**
    * Build invoice data cho Fast API (format mới)
    */
-  async buildFastApiInvoiceData(orderData: any): Promise<any> {
+  async buildFastApiInvoiceData(
+    orderData: any,
+    options?: { onlySalesOrder?: boolean },
+  ): Promise<any> {
     try {
       // 1. Initialize and validate date
       const docDate = this.parseInvoiceDate(orderData.docDate);
@@ -136,6 +139,7 @@ export class SalesPayloadService {
               stockTransferMap,
               cardSerialMap,
               svcCodeMap,
+              onlySalesOrder: options?.onlySalesOrder,
             });
           }),
       );
@@ -1391,8 +1395,13 @@ export class SalesPayloadService {
     orderData: any,
     context: any,
   ): Promise<any> {
-    const { isNormalOrder, stockTransferMap, cardSerialMap, svcCodeMap } =
-      context;
+    const {
+      isNormalOrder,
+      stockTransferMap,
+      cardSerialMap,
+      svcCodeMap,
+      onlySalesOrder, // [NEW] Option to skip inventory fields
+    } = context;
     const saleMaterialCode =
       sale.product?.materialCode ||
       sale.product?.materialCode ||
@@ -1452,14 +1461,39 @@ export class SalesPayloadService {
       8,
     );
     const loaiGd = this.resolveInvoiceLoaiGd(sale, loyaltyProduct);
-    const { maLo, soSerial } = await this.resolveInvoiceBatchSerial(
-      sale,
-      saleMaterialCode,
-      cardSerialMap,
-      stockTransferMap,
-      orderData.docCode,
-      loyaltyProduct,
-    );
+
+    // [NEW] Skip batch/serial/warehouse if onlySalesOrder is true (Sales Order Only mode)
+    let maLo = '';
+    let soSerial = '';
+    let finalMaKho = '';
+
+    if (!onlySalesOrder) {
+      const batchSerialResult = await this.resolveInvoiceBatchSerial(
+        sale,
+        saleMaterialCode,
+        cardSerialMap,
+        stockTransferMap,
+        orderData.docCode,
+        loyaltyProduct,
+      );
+      maLo = batchSerialResult.maLo || '';
+      soSerial = batchSerialResult.soSerial || '';
+
+      finalMaKho = await this.resolveInvoiceMaKho(
+        sale,
+        saleMaterialCode,
+        stockTransferMap,
+        orderData.docCode,
+        maBp,
+        loaiGd === '11' || loaiGd === '12',
+      );
+    } else {
+      // In Sales Order Only mode, we skip these inventory fields
+      // But we still might need ma_kho? User requested "bỏ mấy cái lô serial liên quan để kho đi"
+      // Assuming warehouse mapping is also skipped or simplified?
+      // User said "bắn sang fast cũng không cần lô và searril và liên quan đến kho đâu"
+      // So finalMaKho should also be empty/skipped.
+    }
 
     const detailItem: any = {
       tk_chiet_khau: this.val(tkChietKhau, 16),
@@ -1467,6 +1501,7 @@ export class SalesPayloadService {
       ma_phi: this.val(maPhi, 16),
       tien_hang: Number(sale.qty) * Number(sale.giaBan),
       so_luong: Number(sale.qty),
+      // Logic for ma_lo/so_serial is now handled above conditionally
       ...(soSerial && soSerial.trim() !== ''
         ? { so_serial: this.limitString(soSerial, 64) }
         : maLo && maLo.trim() !== ''
@@ -1487,14 +1522,6 @@ export class SalesPayloadService {
       ma_ctkm_th: this.val(maCtkmTangHang, 32),
     };
 
-    const finalMaKho = await this.resolveInvoiceMaKho(
-      sale,
-      saleMaterialCode,
-      stockTransferMap,
-      orderData.docCode,
-      maBp,
-      loaiGd === '11' || loaiGd === '12',
-    );
     if (finalMaKho && finalMaKho.trim() !== '') {
       detailItem.ma_kho = this.limitString(finalMaKho, 16);
     }

@@ -145,7 +145,9 @@ export class SalesInvoiceService {
       if (options?.onlySalesOrder) {
         // [FIX] Build invoice data using Payload Service to ensure 'detail' is populated correctly
         const invoiceData =
-          await this.salesPayloadService.buildFastApiInvoiceData(orderData);
+          await this.salesPayloadService.buildFastApiInvoiceData(orderData, {
+            onlySalesOrder: true,
+          });
 
         await this.fastApiInvoiceFlowService.createOrUpdateCustomer({
           ma_kh: SalesUtils.normalizeMaKh(orderData.customer?.code),
