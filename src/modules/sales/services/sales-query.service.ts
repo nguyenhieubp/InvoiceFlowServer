@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, IsNull, Like } from 'typeorm';
 import { Sale } from '../../../entities/sale.entity';
 import { StockTransfer } from '../../../entities/stock-transfer.entity';
+import { OrderFee } from '../../../entities/order-fee.entity';
 import { LoyaltyService } from '../../../services/loyalty.service';
 import { CategoriesService } from '../../categories/categories.service';
 import { N8nService } from '../../../services/n8n.service';
@@ -27,6 +28,8 @@ export class SalesQueryService {
     private saleRepository: Repository<Sale>,
     @InjectRepository(StockTransfer)
     private stockTransferRepository: Repository<StockTransfer>,
+    @InjectRepository(OrderFee)
+    private orderFeeRepository: Repository<OrderFee>,
     private loyaltyService: LoyaltyService,
     private categoriesService: CategoriesService,
     private n8nService: N8nService,
@@ -413,6 +416,31 @@ export class SalesQueryService {
       svcCodeMap =
         await this.loyaltyService.fetchMaterialCodesBySvcCodes(svcCodes);
     }
+
+    // [NEW] Batch fetch OrderFees for platform voucher enrichment
+    let orderFeeMap = new Map<string, OrderFee>();
+    if (docCodes.length > 0) {
+      const orderFees = await this.orderFeeRepository.find({
+        where: { erpOrderCode: In(docCodes) },
+      });
+      orderFees.forEach((fee) => {
+        orderFeeMap.set(fee.erpOrderCode, fee);
+      });
+    }
+
+    // [NEW] Enrich sales with platform voucher data (VC CTKM SÀN)
+    allSalesData.forEach((sale) => {
+      const orderFee = orderFeeMap.get(sale.docCode);
+      if (orderFee?.rawData?.raw_data?.voucher_from_seller) {
+        const voucherAmount = Number(
+          orderFee.rawData.raw_data.voucher_from_seller || 0,
+        );
+        if (voucherAmount > 0) {
+          sale.voucherDp1 = 'VC CTKM SÀN';
+          sale.chietKhauVoucherDp1 = voucherAmount;
+        }
+      }
+    });
 
     // Build Stock Transfer Maps
     const { stockTransferMap, stockTransferByDocCodeMap } =

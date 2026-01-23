@@ -31,6 +31,7 @@ import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
 import { StockTransfer } from '../../entities/stock-transfer.entity';
 import { WarehouseProcessed } from '../../entities/warehouse-processed.entity';
+import { OrderFee } from '../../entities/order-fee.entity';
 import { InvoicesModule } from '../invoices/invoices.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { SyncModule } from '../sync/sync.module';
@@ -51,6 +52,7 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
       DailyCashio,
       StockTransfer,
       WarehouseProcessed,
+      OrderFee,
       PaymentSyncLog,
     ]),
     HttpModule,

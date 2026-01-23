@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { ProductItem } from '../../../entities/product-item.entity';
 import { StockTransfer } from '../../../entities/stock-transfer.entity';
+import { OrderFee } from '../../../entities/order-fee.entity';
 import { LoyaltyService } from '../../../services/loyalty.service';
 import { N8nService } from '../../../services/n8n.service';
 import { CategoriesService } from '../../categories/categories.service';
@@ -24,6 +25,8 @@ export class SalesPayloadService {
     private productItemRepository: Repository<ProductItem>,
     @InjectRepository(StockTransfer)
     private stockTransferRepository: Repository<StockTransfer>,
+    @InjectRepository(OrderFee)
+    private orderFeeRepository: Repository<OrderFee>,
     private loyaltyService: LoyaltyService,
     private n8nService: N8nService,
     private categoriesService: CategoriesService,
@@ -44,6 +47,23 @@ export class SalesPayloadService {
         throw new Error(
           `Đơn hàng ${orderData.docCode} không có sale item nào, bỏ qua không đồng bộ`,
         );
+      }
+
+      // [NEW] Enrich sales with platform voucher data from OrderFee
+      const orderFee = await this.orderFeeRepository.findOne({
+        where: { erpOrderCode: orderData.docCode },
+      });
+      if (orderFee?.rawData?.raw_data?.voucher_from_seller) {
+        const voucherAmount = Number(
+          orderFee.rawData.raw_data.voucher_from_seller || 0,
+        );
+        if (voucherAmount > 0) {
+          // Enrich all sales in this order with platform voucher
+          allSales.forEach((sale: any) => {
+            sale.voucherDp1 = 'VC CTKM SÀN';
+            sale.chietKhauVoucherDp1 = voucherAmount;
+          });
+        }
       }
 
       // 2. Determine order type (from first sale)
@@ -1000,7 +1020,8 @@ export class SalesPayloadService {
       const saleKey = `chietKhau${i.toString().padStart(2, '0')}`;
       amounts[key] = this.toNumber(sale[saleKey] || sale[key], 0);
     }
-    amounts.ck06_nt = 0;
+    // Map platform voucher (VC CTKM SÀN) to ck06
+    amounts.ck06_nt = this.toNumber(sale.chietKhauVoucherDp1, 0);
 
     // ck11 (ECOIN) logic
     let ck11_nt = this.toNumber(
@@ -1492,6 +1513,7 @@ export class SalesPayloadService {
       trang_thai: this.val(sale.trangThai, 32),
       barcode: this.val(sale.barcode, 32),
       ma_ck01: this.val(maCk01, 32),
+      ma_ck06: this.val(sale.voucherDp1, 32), // Platform voucher (VC CTKM SÀN)
       dt_tg_nt: Number(amounts.dtTgNt),
       tien_thue: Number(amounts.tienThue),
       ma_thue: this.val(sale.maThue, 8, '00'),
