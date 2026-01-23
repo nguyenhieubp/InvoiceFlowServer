@@ -520,7 +520,7 @@ export class FastApiInvoiceFlowService {
    */
   async processCashioPayment(data: any): Promise<any> {
     try {
-      if (!data.fop_syscode) {
+      if (!data.fop_syscode || data.total_out > 0) {
         this.logger.warn(
           '[ProcessCashioPayment] Missing payment method code (fop_syscode)',
         );
@@ -538,7 +538,7 @@ export class FastApiInvoiceFlowService {
         so_hd: data.so_code || '',
         ngay_hd: data.docDate,
         tien_hd: Number(data.revenue || 0),
-        ma_bp: data.boPhan || data.branchCode || '',
+        ma_bp: data.branch_code_cashio || '',
         ma_dvcs_pt:
           data.fop_syscode === 'CASH'
             ? data.ma_dvcs_sale || ''
