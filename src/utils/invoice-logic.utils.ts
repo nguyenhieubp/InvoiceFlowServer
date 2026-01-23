@@ -281,7 +281,7 @@ export class InvoiceLogicUtils {
 
     const isWholesale = sale.type_sale;
     let maCk01;
-    if (isWholesale && sale.disc_reasons) {
+    if (isWholesale && sale.disc_reasons && sale.disc_ctkm > 0) {
       maCk01 = `${sale.disc_reasons}.${maHangGiamGia}` || '';
     } else {
       maCk01 = sale.muaHangGiamGiaDisplay || '';
@@ -628,10 +628,10 @@ export class InvoiceLogicUtils {
     return mappedCode;
   }
   /**
-   * Resolve "Chiết khấu mua hàng giảm giá" (other_discamt)
+   * Resolve "Chiết khấu mua hàng giảm giá" (disc_ctkm)
    * - Nếu là đơn bán buôn (WHOLESALE): trả về "" (rỗng)
    * - Nếu là đơn đổi điểm: trả về 0
-   * - Còn lại: trả về other_discamt hoặc chietKhauMuaHangGiamGia
+   * - Còn lại: trả về disc_ctkm hoặc chietKhauMuaHangGiamGia
    */
   static resolveChietKhauMuaHangGiamGia(
     sale: any,
@@ -641,15 +641,15 @@ export class InvoiceLogicUtils {
     // Check wholesale alias defined in system
     const isWholesale = typeSale === 'WHOLESALE' || typeSale === 'WS';
 
-    if (isWholesale && sale.disc_tm > 0) {
-      return sale.disc_tm;
+    if (isWholesale && sale.disc_ctkm > 0) {
+      return sale.disc_ctkm;
     }
 
     if (isDoiDiem) {
       return '-';
     }
 
-    let val = sale.other_discamt;
+    let val = sale.disc_ctkm;
     if (val === null || val === undefined) {
       val = sale.chietKhauMuaHangGiamGia;
     }
