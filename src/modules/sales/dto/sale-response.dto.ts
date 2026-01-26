@@ -109,6 +109,8 @@ export class SaleItemResponseDto {
   chietKhauVoucherDp1?: number;
   maThe?: string;
   maCkTheoChinhSach?: string; // Mã CK theo chính sách (bán buôn)
+  muaHangCkVip?: string; // [FIX] Add VIP classification
+  chietKhauMuaHangCkVip?: number; // [FIX] Add VIP discount amount
 
   // ========== FLAGS ==========
   isProcessed: boolean;

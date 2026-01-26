@@ -141,6 +141,9 @@ export function mapToSaleItemResponse(sale: any): SaleItemResponseDto {
     chietKhauVoucherDp1: sale.chietKhauVoucherDp1,
     maThe: sale.maThe,
     maCkTheoChinhSach: sale.maCkTheoChinhSach,
+    // [FIX] Map VIP fields
+    muaHangCkVip: sale.muaHangCkVip,
+    chietKhauMuaHangCkVip: sale.chietKhauMuaHangCkVip,
 
     // Flags
     isProcessed: sale.isProcessed,

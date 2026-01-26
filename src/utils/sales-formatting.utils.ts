@@ -391,7 +391,7 @@ export async function formatSaleForFrontend(
     itemName: sale.itemName || loyaltyProduct?.name || null,
     maKho: maKho,
     maCtkmTangHang: maCtkmTangHang,
-    muaHangCkVip: calculatedFields.muaHangCkVip,
+    // [MOVED] muaHangCkVip moved to bottom with explicit check
     maLo: maLo,
     maSerial: soSerial,
     isTangHang,
@@ -462,6 +462,12 @@ export async function formatSaleForFrontend(
       isDoiDiem || isSanTmdt ? 0 : sale.paid_by_voucher_ecode_ecoin_bp,
     chietKhauThanhToanVoucher:
       isDoiDiem || isSanTmdt ? 0 : sale.chietKhauThanhToanVoucher,
+
+    // [FIX] Explicitly return VIP discount fields
+    chietKhauMuaHangCkVip: Number(
+      sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0,
+    ),
+    muaHangCkVip: calculatedFields.muaHangCkVip || null, // Ensure not undefined
   };
 }
 
