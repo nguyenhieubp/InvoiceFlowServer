@@ -412,7 +412,7 @@ export async function formatSaleForFrontend(
     chietKhauMuaHangGiamGia: other_discamt,
     maCkTheoChinhSach: maCkTheoChinhSach, // Mã CTKM cho bán buôn
     giaBan: giaBan,
-    tienHang: tienHang,
+    tienHang: (sale.linetotal ?? 0) - (sale.disc_amt ?? 0),
     linetotal: isDoiDiem ? 0 : (sale.linetotal ?? tienHang),
     ordertypeName: ordertypeName,
     loaiGd: loaiGd,

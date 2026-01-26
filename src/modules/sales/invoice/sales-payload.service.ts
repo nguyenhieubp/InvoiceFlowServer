@@ -1530,7 +1530,9 @@ export class SalesPayloadService {
       tk_chiet_khau: this.val(tkChietKhau, 16),
       tk_chi_phi: this.val(tkChiPhi, 16),
       ma_phi: this.val(maPhi, 16),
-      tien_hang: Number(sale.qty) * Number(sale.giaBan),
+      tien_hang:
+        (Number(sale.linetotal) || Number(sale.revenue) || 0) -
+        (Number(sale.disc_amt) || 0),
       so_luong: Number(sale.qty),
       // Logic for ma_lo/so_serial is now handled above conditionally
       ...(soSerial && soSerial.trim() !== ''

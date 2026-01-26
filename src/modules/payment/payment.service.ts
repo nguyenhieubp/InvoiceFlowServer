@@ -467,7 +467,7 @@ export class PaymentService {
         'ds.bank_code as bank_code',
         'ds.period_code as period_code',
         'MAX(s.docDate) as "docDate"', // Only from Sale
-        'SUM(s.revenue) as revenue',
+        'SUM(s.linetotal - COALESCE(s.disc_amt, 0)) as revenue', // [FIX] Calculate revenue as linetotal - disc_amt
         'COALESCE(MAX(s.branchCode), ds.branch_code) as "branchCode"', // Fallback to cashio branch
         'COALESCE(MAX(s.maCa), \'\') as "maCa"',
         // Fallback: sale.partnerCode -> cashio.partner_code -> empty string
