@@ -12,10 +12,90 @@ import {
 import { SalesService } from '../services/sales.service';
 import type { CreateStockTransferDto } from '../../../dto/create-stock-transfer.dto';
 import type { Response } from 'express';
+import { mapToOrderResponse } from '../mappers/sale-response.mapper';
+import { SalesListResponseDto } from '../dto/sale-response.dto';
 
 @Controller('sales')
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
+
+  /**
+   * V2 Endpoint - Optimized Response (60-70% smaller)
+   * Chỉ trả về fields frontend thực sự cần
+   */
+  @Get('v2')
+  async findAllV2(
+    @Query('brand') brand?: string,
+    @Query('processed') processed?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('date') date?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('search') search?: string,
+    @Query('typeSale') typeSale?: string,
+  ): Promise<SalesListResponseDto> {
+    // Get data từ service (full data)
+    const result = await this.salesService.findAllOrders({
+      brand,
+      isProcessed:
+        processed === 'true' ? true : processed === 'false' ? false : undefined,
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 50,
+      date,
+      dateFrom,
+      dateTo,
+      search,
+      typeSale,
+    });
+
+    // Map to optimized DTOs
+    return {
+      data: result.data ? result.data.map(mapToOrderResponse) : [],
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+    };
+  }
+
+  /**
+   * V2 Aggregated Endpoint - Optimized Response
+   */
+  @Get('v2/aggregated')
+  async findAllAggregatedV2(
+    @Query('brand') brand?: string,
+    @Query('processed') processed?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('date') date?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('search') search?: string,
+    @Query('typeSale') typeSale?: string,
+  ): Promise<SalesListResponseDto> {
+    const result = await this.salesService.findAllAggregatedOrders({
+      brand,
+      isProcessed:
+        processed === 'true' ? true : processed === 'false' ? false : undefined,
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 50,
+      date,
+      dateFrom,
+      dateTo,
+      search,
+      typeSale,
+    });
+
+    // Map to optimized DTOs
+    return {
+      data: result.data ? result.data.map(mapToOrderResponse) : [],
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+    };
+  }
 
   @Get('aggregated')
   async findAllAggregated(

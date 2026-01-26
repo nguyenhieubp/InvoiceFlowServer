@@ -264,7 +264,7 @@ export async function formatSaleForFrontend(
   const trackSerial = loyaltyProductForTracking?.trackSerial === true;
   const trackBatch = loyaltyProductForTracking?.trackBatch === true;
 
-  const { maLo, soSerial } = InvoiceLogicUtils.resolveBatchSerial({
+  let { maLo, soSerial } = InvoiceLogicUtils.resolveBatchSerial({
     batchSerialFromST,
     trackBatch,
     trackSerial,
@@ -291,8 +291,8 @@ export async function formatSaleForFrontend(
     ? String(productType).toUpperCase().trim()
     : null;
 
-  const groupProductType = loyaltyProduct?.productType;
-  const loaiVt = loyaltyProduct?.materialType;
+  const groupProductType = loyaltyProductForTracking?.productType;
+  const loaiVt = loyaltyProductForTracking?.materialType;
   const maHangGiamGia = this.calcCodeDisCount(groupProductType, loaiVt) || '';
 
   const maDvcs = department?.ma_dvcs || department?.ma_dvcs_ht || '';
@@ -365,6 +365,26 @@ export async function formatSaleForFrontend(
     }
   }
 
+  // [NEW] Wholesale ECode Logic (FIXED)
+  // Nếu bán buôn và là ECode (loaiVt == 94), thì cột Serial lấy giá trị từ Mã thẻ
+  // Use loose equality for safety (number vs string)
+  if (isWholesale && String(loaiVt) === '94' && sale.maThe) {
+    soSerial = sale.maThe; // Override biến soSerial local (data field)
+    if (displayFields) {
+      displayFields.soSerialDisplay = sale.maThe;
+    }
+  }
+
+  // [FIX FORCE] Nếu Stock Transfer có batchSerial nhưng không hiển thị (do tracking config),
+  // FORCE hiển thị nó ở Serial nếu chưa có giá trị VÀ chưa được gán vào Mã Lô
+  // Fix: Chỉ hiển thị ở Serial nếu nó không phải là Mã Lô
+  if (!soSerial && !maLo && batchSerialFromST) {
+    soSerial = batchSerialFromST;
+    if (displayFields && !displayFields.soSerialDisplay) {
+      displayFields.soSerialDisplay = batchSerialFromST;
+    }
+  }
+
   return {
     ...sale,
     customer: undefined, // Remove customer from sale - it's already at order level
@@ -377,11 +397,12 @@ export async function formatSaleForFrontend(
     isTangHang,
     isDichVu: calculatedFields.isDichVu,
     promCodeDisplay: finalPromCodeDisplay,
-    promotionDisplayCode:
-      maCk01 ||
-      SalesUtils.getPromotionDisplayCode(sale.promCode) ||
-      (isSanTmdt ? '' : displayFields.thanhToanVoucherDisplay) || // [Unified] Clear voucher display for Platform Order
-      '',
+    promotionDisplayCode: maCtkmTangHang
+      ? ''
+      : maCk01 ||
+        SalesUtils.getPromotionDisplayCode(sale.promCode) ||
+        (isSanTmdt ? '' : displayFields.thanhToanVoucherDisplay) || // [Unified] Clear voucher display for Platform Order
+        '',
     other_discamt: other_discamt,
     chietKhauMuaHangGiamGia: other_discamt,
     maCkTheoChinhSach: maCkTheoChinhSach, // Mã CTKM cho bán buôn
@@ -400,6 +421,8 @@ export async function formatSaleForFrontend(
       ? null
       : displayFields.thanhToanVoucherDisplay,
     thanhToanVoucher: isSanTmdt ? 0 : displayFields.thanhToanVoucher,
+    // [FIX FINAL] Ensure soSerialDisplay is populated from fallback logic (stockTransfer)
+    soSerialDisplay: displayFields?.soSerialDisplay || soSerial || null,
     productType: productType,
     // Optimized: Only return fields actually used by frontend
     product: loyaltyProduct
