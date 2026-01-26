@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DailyCashio } from '../../entities/daily-cashio.entity';
@@ -269,7 +269,7 @@ export class PaymentService {
     query.andWhere('s.docCode = :docCode', { docCode });
 
     const results = await query.getRawMany();
-    return this.enrichPaymentResults(results, true);
+    return this.enrichPaymentResults(results, true, true);
   }
 
   async getStatistics(options: {
@@ -357,7 +357,7 @@ export class PaymentService {
     );
 
     const results = await query.getRawMany();
-    return this.enrichPaymentResults(results, true);
+    return this.enrichPaymentResults(results, true, true);
   }
 
   async autoLogPaymentData() {
@@ -492,7 +492,8 @@ export class PaymentService {
 
   private async enrichPaymentResults(
     results: any[],
-    includeCash: boolean = false,
+    includeCash: boolean = false, // Kept for backward compat, though unused.
+    throwOnError: boolean = false, // [NEW] Strict validation mode
   ): Promise<PaymentData[]> {
     if (!results || results.length === 0) {
       return [];
@@ -542,44 +543,74 @@ export class PaymentService {
             dvcs || '',
           );
 
-          if (!pm || pm.documentType !== 'Giấy báo có') {
-            return;
+          if (pm) {
+            paymentMethodMap.set(`${code}|${dvcs}`, pm);
           }
-
-          paymentMethodMap.set(`${code}|${dvcs}`, pm);
         }),
       );
     }
 
     // Map ma_dvcs and payment info to results
-    return results
-      .map((row: any) => {
-        const effectiveBranch = row.branchCode || row.branch_code_cashio;
-        const saleDept = departmentMap.get(effectiveBranch);
-        const dvcs = saleDept?.ma_dvcs || null;
-        const key = `${row.fop_syscode}|${dvcs}`;
-        const paymentMethod = paymentMethodMap.get(key);
+    const enriched = results.map((row: any) => {
+      const effectiveBranch = row.branchCode || row.branch_code_cashio;
+      const saleDept = departmentMap.get(effectiveBranch);
+      const dvcs = saleDept?.ma_dvcs || null;
+      const key = `${row.fop_syscode}|${dvcs}`;
+      const paymentMethod = paymentMethodMap.get(key);
 
-        return { row, saleDept, dvcs, paymentMethod };
-      })
-      .map(({ row, saleDept, dvcs, paymentMethod }) => {
-        // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
-        const periodCode = row.period_code
-          ? row.period_code.split('/').pop()
-          : null;
+      return { row, saleDept, dvcs, paymentMethod, key };
+    });
 
-        // If CASH, use ma_dvcs_sale for ma_dvcs_cashio
-        const maDvcsCashio =
-          row.fop_syscode === 'CASH' ? dvcs : paymentMethod?.bankUnit || null;
+    // Filter & Validate
+    const filtered = enriched.filter(
+      ({ row, saleDept, dvcs, paymentMethod, key }) => {
+        // Always include CASH (unless filtered earlier in findAll)
+        // Check "CASH" first to avoid PaymentMethod lookup strictness
+        if (row.fop_syscode === 'CASH') return true;
 
-        return {
-          ...row,
-          period_code: periodCode,
-          ma_dvcs_cashio: maDvcsCashio,
-          ma_dvcs_sale: dvcs,
-          company: saleDept?.company || null,
-          ma_doi_tac_payment: getSupplierCode(paymentMethod?.maDoiTac) || null,
-        };
-      });
+        if (row.fop_syscode === 'VOUCHER') return false; // Already handled
+
+        // Check validation
+        if (!paymentMethod) {
+          if (throwOnError) {
+            throw new BadRequestException(
+              `Cấu hình phương thức thanh toán không tồn tại: ${row.fop_syscode} (Đơn vị: ${dvcs})`,
+            );
+          }
+          // If not strict, just keep it (will likely display missing fields)
+          return true;
+        }
+
+        // If exists, check documentType
+        if (paymentMethod.documentType !== 'Giấy báo có') {
+          // If strict (Sync mode), SKIP non-GBC items
+          if (throwOnError) {
+            return false;
+          }
+        }
+
+        return true;
+      },
+    );
+
+    return filtered.map(({ row, saleDept, dvcs, paymentMethod }) => {
+      // Rule: cắt từ dưới lên đén / thì dừng (e.g. VIETCOMBANK/6 -> 6)
+      const periodCode = row.period_code
+        ? row.period_code.split('/').pop()
+        : null;
+
+      // If CASH, use ma_dvcs_sale for ma_dvcs_cashio
+      const maDvcsCashio =
+        row.fop_syscode === 'CASH' ? dvcs : paymentMethod?.bankUnit || null;
+
+      return {
+        ...row,
+        period_code: periodCode,
+        ma_dvcs_cashio: maDvcsCashio,
+        ma_dvcs_sale: dvcs,
+        company: saleDept?.company || null,
+        ma_doi_tac_payment: getSupplierCode(paymentMethod?.maDoiTac) || null,
+      };
+    });
   }
 }
