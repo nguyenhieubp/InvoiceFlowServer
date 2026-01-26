@@ -32,6 +32,15 @@ export function normalizeMaKh(maKh: string | null | undefined): string {
 }
 
 /**
+ * Check if code indicates Employee (starts with NV)
+ */
+export function isEmployeeCode(code: string | null | undefined): boolean {
+  if (!code) return false;
+  const trimmed = String(code).trim().toUpperCase();
+  return trimmed.startsWith('NV');
+}
+
+/**
  * Xử lý promotion code: cắt phần sau dấu "-" để lấy code hiển thị
  */
 export function getPromotionDisplayCode(

@@ -259,6 +259,7 @@ export class InvoiceLogicUtils {
     promCode: string | null;
     maHangGiamGia: any;
     isSanTmdtOverride?: boolean;
+    isEmployee?: boolean; // [NEW]
   }) {
     const {
       sale,
@@ -268,6 +269,7 @@ export class InvoiceLogicUtils {
       productTypeUpper,
       promCode,
       maHangGiamGia,
+      isEmployee,
     } = params;
     const { isDoiDiem, isDauTu, isThuong, isBanTaiKhoan, isSanTmdt } =
       orderTypes;
@@ -342,6 +344,28 @@ export class InvoiceLogicUtils {
         }
       }
 
+      // [NEW] Logic Discount for Retail Purchase (other_discamt > 0) AND Employee Order
+      const otherDiscamt = Number(
+        sale.other_discamt || sale.chietKhauMuaHangGiamGia || 0,
+      );
+      if (
+        isEmployee && // [CHECK] Only for Employee
+        otherDiscamt > 0 &&
+        !effectiveIsSanTmdt &&
+        !maCk01
+      ) {
+        if (['TTM', 'TSG', 'THP'].includes(maDvcs)) {
+          // Format: Fixed as per request
+          maCk01 = '2505MN.CK521';
+        } else if (maDvcs === 'FBV') {
+          if (effectiveProductType === 'I') maCk01 = 'SPQTNV';
+          else if (effectiveProductType === 'S') maCk01 = 'DVQTNV';
+        } else if (maDvcs === 'LHV') {
+          if (effectiveProductType === 'S') maCk01 = 'R504DICHVU';
+          else if (effectiveProductType === 'I') maCk01 = 'R504SANPHAM';
+        }
+      }
+
       // 3. Standard Case: Assign + Add Suffix if missing
       if (!maCk01) {
         maCk01 = SalesUtils.getPromotionDisplayCode(code) || code || '';
@@ -350,8 +374,20 @@ export class InvoiceLogicUtils {
       // FIX V8.1: Add suffix if NOT PRMN-derived.
       // E.g: Input 'RMN...' -> isPRMNDerived=false -> Adds Suffix.
       //      Input 'PRMN...' -> isPRMNDerived=true -> Skips Suffix.
-      // [NEW] Skip suffix for Platform Orders (Sàn TMĐT)
-      if (maCk01 && effectiveProductType && !effectiveIsSanTmdt) {
+      // [NEW] Skip suffix for Platform Orders (Sàn TMĐT) AND Retail Discount Codes (which are hardcoded)
+      // Also skip if it is one of our special Employee Discount Codes
+      const isRetailDiscountCode =
+        isEmployee && // [CHECK] Only for Employee
+        otherDiscamt > 0 &&
+        (['SPQTNV', 'DVQTNV', 'R504DICHVU', 'R504SANPHAM'].includes(maCk01) ||
+          maCk01.endsWith('.CK521'));
+
+      if (
+        maCk01 &&
+        effectiveProductType &&
+        !effectiveIsSanTmdt &&
+        !isRetailDiscountCode // Skip suffix for new custom codes
+      ) {
         let suffix = '';
         if (effectiveProductType === 'I') suffix = '.I';
         else if (effectiveProductType === 'S') suffix = '.S';
@@ -373,10 +409,17 @@ export class InvoiceLogicUtils {
     sale: any;
     customer: any;
     brand: string;
+    maDvcs?: string;
+    isEmployee?: boolean; // [NEW] added for employee check
   }): string | null {
-    const { sale, customer, brand } = params;
+    const { sale, customer, brand, maDvcs, isEmployee } = params;
     const listEcomName = ['shopee', 'lazada', 'tiktok'];
     const brandLower = brand?.toLowerCase();
+
+    // [NEW] Logic Voucher Payment Code based on Branch (maDvcs) AND Employee Order
+    if (isEmployee && maDvcs && ['TTM', 'TSG', 'THP'].includes(maDvcs)) {
+      return '2505MN.CK511';
+    }
 
     if (
       customer &&

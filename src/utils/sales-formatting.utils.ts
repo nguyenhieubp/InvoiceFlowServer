@@ -77,6 +77,8 @@ export async function calculateDisplayFields(
         sale: { ...sale, paid_by_voucher_ecode_ecoin_bp: paidByVoucher },
         customer: ecommerce,
         brand,
+        maDvcs: department?.ma_dvcs || department?.ma_dvcs_ht,
+        isEmployee: SalesUtils.isEmployeeCode(sale.partnerCode), // [NEW] Pass isEmployee
       });
     }
   }
@@ -306,6 +308,9 @@ export async function formatSaleForFrontend(
     productTypeUpper,
     promCode: sale.promCode,
     maHangGiamGia: maHangGiamGia,
+    isEmployee:
+      SalesUtils.isEmployeeCode(sale.partnerCode) ||
+      SalesUtils.isEmployeeCode(sale.issuePartnerCode), // [NEW] Pass isEmployee
   });
 
   const { tkChietKhau, tkChiPhi, maPhi } =
