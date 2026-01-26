@@ -611,27 +611,16 @@ export class InvoiceLogicUtils {
     if (!productType) return 'MP';
 
     const groupProductType = productType.toUpperCase();
-    const mpCategories = [
-      '01SKIN',
-      '02MAKE',
-      '04BODY',
-      '05HAIR',
-      '06FRAG',
-      '07PROF',
-      '10GIFT',
-    ];
     const tpcnCategories = ['03TPCN'];
     const ccdcCategories = ['11MMOC'];
 
-    if (mpCategories.some((cat) => groupProductType.includes(cat))) {
-      return 'MP';
-    } else if (tpcnCategories.some((cat) => groupProductType.includes(cat))) {
+    if (tpcnCategories.some((cat) => groupProductType.includes(cat))) {
       return 'TPCN';
     } else if (ccdcCategories.some((cat) => groupProductType.includes(cat))) {
       return 'CCDC';
+    } else {
+      return 'MP';
     }
-
-    return 'MP'; // Default
   }
 
   /**

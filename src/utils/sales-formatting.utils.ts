@@ -489,42 +489,15 @@ export function calcCodeDisCount(productType, loaiVt) {
     isEcode = false;
   }
 
-  const SP = [
-    '01SKIN',
-    '02MAKE',
-    '04BODY',
-    '05HAIR',
-    '06FRAG',
-    '07PROF',
-    '03TPCN',
-    '11MMOC',
-    '10GIFT',
-  ];
-
-  const EC = [
-    '01SKIN',
-    '02MAKE',
-    '04BODY',
-    '05HAIR',
-    '06FRAG',
-    '07PROF',
-    '03TPCN',
-    '11MMOC',
-  ];
-
   const ECG = ['10GIFT'];
 
   if (!isEcode) {
-    if (SP.includes(productType)) {
-      return 'SP';
-    }
+    return 'SP';
   } else {
-    if (EC.includes(productType)) {
-      return 'EC';
-    } else if (ECG.includes(productType)) {
+    if (ECG.includes(productType)) {
       return 'ECG';
+    } else {
+      return 'E';
     }
   }
-
-  return '';
 }
