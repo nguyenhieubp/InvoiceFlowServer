@@ -14,6 +14,8 @@ import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
 import { VoucherIssueService } from '../../voucher-issue/voucher-issue.service';
 import { SalesExplosionService } from './sales-explosion.service';
 import { SalesFilterService } from './sales-filter.service';
+import { SalesFormattingService } from './sales-formatting.service';
+import { SalesDataFetcherService } from './sales-data-fetcher.service';
 
 /**
  * SalesQueryService
@@ -36,6 +38,8 @@ export class SalesQueryService {
     private voucherIssueService: VoucherIssueService,
     private salesExplosionService: SalesExplosionService,
     private salesFilterService: SalesFilterService,
+    private salesFormattingService: SalesFormattingService,
+    private salesDataFetcherService: SalesDataFetcherService,
   ) {}
 
   /**
@@ -633,13 +637,21 @@ export class SalesQueryService {
       try {
         const [dataCard] = await this.n8nService.fetchCardData(docCodes[0]);
         if (dataCard && dataCard.data) {
+          // FIX N+1: Extract all service_item_names first
+          const serviceItemNames = dataCard.data
+            .map((card) => card?.service_item_name)
+            .filter((name): name is string => !!name && name.trim() !== '');
+
+          // Batch fetch all products at once
+          const productMap =
+            await this.loyaltyService.checkProductsBatch(serviceItemNames);
+
+          // Map products to serials
           for (const card of dataCard.data) {
             if (!card?.service_item_name || !card?.serial) {
               continue;
             }
-            const itemProduct = await this.loyaltyService.checkProduct(
-              card.service_item_name,
-            );
+            const itemProduct = productMap.get(card.service_item_name);
             if (itemProduct) {
               getMaThe.set(itemProduct.materialCode, card.serial);
             }
@@ -1204,11 +1216,19 @@ export class SalesQueryService {
       try {
         const [dataCard] = await this.n8nService.fetchCardData(docCodes[0]);
         if (dataCard && dataCard.data) {
+          // FIX N+1: Extract all service_item_names first
+          const serviceItemNames = dataCard.data
+            .map((card) => card?.service_item_name)
+            .filter((name): name is string => !!name && name.trim() !== '');
+
+          // Batch fetch all products at once
+          const productMap =
+            await this.loyaltyService.checkProductsBatch(serviceItemNames);
+
+          // Map products to serials
           for (const card of dataCard.data) {
             if (!card?.service_item_name || !card?.serial) continue;
-            const itemProduct = await this.loyaltyService.checkProduct(
-              card.service_item_name,
-            );
+            const itemProduct = productMap.get(card.service_item_name);
             if (itemProduct) {
               getMaThe.set(itemProduct.materialCode, card.serial);
             }

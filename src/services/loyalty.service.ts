@@ -93,6 +93,15 @@ export class LoyaltyService {
   }
 
   /**
+   * Batch check products - Fix N+1 query problem
+   * @param itemCodes - Array of item codes to check
+   * @returns Map<itemCode, product> with found products
+   */
+  async checkProductsBatch(itemCodes: string[]): Promise<Map<string, any>> {
+    return this.fetchProducts(itemCodes);
+  }
+
+  /**
    * Fetch nhiều products từ Loyalty API song song
    * @param itemCodes - Mảng các mã sản phẩm cần fetch
    * @returns Map<string, any> với key là itemCode và value là product object (nếu tìm thấy)

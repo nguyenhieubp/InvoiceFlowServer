@@ -7,6 +7,8 @@ import { SalesQueryService } from './services/sales-query.service';
 import { SalesSyncService } from './services/sales-sync.service';
 import { SalesExplosionService } from './services/sales-explosion.service';
 import { SalesFilterService } from './services/sales-filter.service';
+import { SalesFormattingService } from './services/sales-formatting.service';
+import { SalesDataFetcherService } from './services/sales-data-fetcher.service';
 import { SalesInvoiceService } from './invoice/sales-invoice.service';
 import { SalesPayloadService } from './invoice/sales-payload.service';
 import { SalesWarehouseService } from './services/sales-warehouse.service';
@@ -71,6 +73,8 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
     SalesSyncService,
     SalesExplosionService,
     SalesFilterService,
+    SalesFormattingService,
+    SalesDataFetcherService,
     SalesInvoiceService,
     SalesPayloadService,
     SalesWarehouseService,
@@ -97,6 +101,8 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
     SalesSyncService,
     SalesExplosionService,
     SalesFilterService,
+    SalesFormattingService,
+    SalesDataFetcherService,
     SalesInvoiceService,
     SalesPayloadService,
     SalesWarehouseService,
