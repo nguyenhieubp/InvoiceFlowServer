@@ -411,11 +411,12 @@ export async function formatSaleForFrontend(
     linetotal: isDoiDiem ? 0 : (sale.linetotal ?? tienHang),
     ordertypeName: ordertypeName,
     loaiGd: loaiGd,
-    issuePartnerCode: sale.issuePartnerCode || null,
-    partnerCode:
+    issuePartnerCode: SalesUtils.normalizeMaKh(sale.issuePartnerCode || null),
+    partnerCode: SalesUtils.normalizeMaKh(
       isTachThe && sale.issuePartnerCode
         ? sale.issuePartnerCode
         : sale.partnerCode || sale.partner_code || null,
+    ),
     ...displayFields,
     thanhToanVoucherDisplay: isSanTmdt
       ? null
