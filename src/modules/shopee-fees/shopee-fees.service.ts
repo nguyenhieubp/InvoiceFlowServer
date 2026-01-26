@@ -25,7 +25,6 @@ export class ShopeeFeesService {
   }) {
     const page = params.page || 1;
     const limit = params.limit || 10;
-    const skip = (page - 1) * limit;
 
     const queryBuilder = this.orderFeeRepository
       .createQueryBuilder('orderFee')
@@ -56,18 +55,23 @@ export class ShopeeFeesService {
       );
     }
 
-    // Get total count
-    const total = await queryBuilder.getCount();
-
-    // Get paginated results
-    const data = await queryBuilder
+    // Get all results first (we'll filter and paginate manually)
+    const allData = await queryBuilder
       .orderBy('orderFee.orderCreatedAt', 'DESC')
-      .skip(skip)
-      .take(limit)
       .getMany();
 
+    // Filter to only include seller data (order_income), exclude buyer data (buyer_payment_info)
+    const filteredData = allData.filter(
+      (fee) => fee.rawData?.fee_type === 'order_income',
+    );
+
+    // Calculate pagination after filtering
+    const total = filteredData.length;
+    const skip = (page - 1) * limit;
+    const paginatedData = filteredData.slice(skip, skip + limit);
+
     // Extract fields from rawData for display
-    const formattedData = data.map((fee) => ({
+    const formattedData = paginatedData.map((fee) => ({
       id: fee.id,
       brand: fee.brand,
       platform: fee.platform,
