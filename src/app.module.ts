@@ -22,6 +22,8 @@ import { SyncTask } from './tasks/sync.task';
 import { Sale } from './entities/sale.entity';
 import { VoucherIssueModule } from './modules/voucher-issue/voucher-issue.module';
 import { StockTransferModule } from './modules/stock-transfer/stock-transfer.module';
+import { ShopeeFeesModule } from './modules/shopee-fees/shopee-fees.module';
+import { TikTokFeesModule } from './modules/tiktok-fees/tiktok-fees.module';
 
 @Module({
   imports: [
@@ -60,6 +62,8 @@ import { StockTransferModule } from './modules/stock-transfer/stock-transfer.mod
     PaymentModule,
     VoucherIssueModule,
     StockTransferModule,
+    ShopeeFeesModule,
+    TikTokFeesModule,
     TypeOrmModule.forFeature([Sale]),
   ],
   controllers: [AppController],
