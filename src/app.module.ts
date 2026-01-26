@@ -16,6 +16,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { FastApiInvoicesModule } from './modules/fast-api-invoices/fast-api-invoices.module';
 import { MultiDbModule } from './modules/multi-db/multi-db.module';
 import { PlatformFeeModule } from './modules/platform-fee/platform-fee.module';
+import { PlatformFeeImportModule } from './modules/platform-fee-import/platform-fee-import.module';
 import { OrderFeeModule } from './modules/order-fee/order-fee.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { SyncTask } from './tasks/sync.task';
@@ -58,6 +59,7 @@ import { TikTokFeesModule } from './modules/tiktok-fees/tiktok-fees.module';
     FastApiInvoicesModule,
     MultiDbModule,
     PlatformFeeModule,
+    PlatformFeeImportModule,
     OrderFeeModule,
     PaymentModule,
     VoucherIssueModule,
