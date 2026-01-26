@@ -145,6 +145,21 @@ export class SalesQueryService {
       }
     }
 
+    // 5.1. Pre-fetch Employee Status via API
+    // Collect unique partnerCodes and issuePartnerCodes
+    const firstSale = sales[0];
+    const brand = firstSale?.customer?.brand || platformBrand || 'menard';
+    const partnerCodesToCheck = Array.from(
+      new Set(
+        sales
+          .flatMap((s) => [s.partnerCode, (s as any).issuePartnerCode])
+          .filter((c): c is string => !!c && c.trim() !== ''),
+      ),
+    ).map((partnerCode) => ({ partnerCode, sourceCompany: brand }));
+
+    const isEmployeeMap =
+      await this.n8nService.checkCustomersIsEmployee(partnerCodesToCheck);
+
     // 6. Format Sales
     const enrichedSales = await Promise.all(
       sales.map(async (sale) => {
@@ -194,6 +209,12 @@ export class SalesQueryService {
           // Add other fields if FormatUtils needs them from order
         };
 
+        // Get employee status from pre-fetched map
+        const isEmployee =
+          isEmployeeMap.get(sale.partnerCode) ||
+          isEmployeeMap.get((sale as any).issuePartnerCode) ||
+          false;
+
         const enriched = await SalesFormattingUtils.formatSaleForFrontend(
           sale,
           loyaltyProduct,
@@ -205,6 +226,7 @@ export class SalesQueryService {
           saleStockTransfers,
           isPlatformOrder, // [NEW]
           platformBrand, // [NEW]
+          isEmployee, // [API] Pre-fetched employee status
         );
         return enriched;
       }),
@@ -673,7 +695,29 @@ export class SalesQueryService {
       enrichedSalesMap.get(docCode)!.push(sale);
     }
 
-    // 7. Format Sales for Frontend
+    // 7. Pre-fetch Employee Status via API (similar to findByOrderCode)
+    // Collect unique partnerCodes from all sales
+    const firstSaleForBrand = allSalesData[0];
+    const brandForEmployeeCheck =
+      firstSaleForBrand?.customer?.brand ||
+      firstSaleForBrand?.brand ||
+      'menard';
+    const partnerCodesToCheckForAll = Array.from(
+      new Set(
+        allSalesData
+          .flatMap((s) => [s.partnerCode, (s as any).issuePartnerCode])
+          .filter((c): c is string => !!c && c.trim() !== ''),
+      ),
+    ).map((partnerCode) => ({
+      partnerCode,
+      sourceCompany: brandForEmployeeCheck,
+    }));
+
+    const isEmployeeMapForAll = await this.n8nService.checkCustomersIsEmployee(
+      partnerCodesToCheckForAll,
+    );
+
+    // 8. Format Sales for Frontend
     // OPTIMIZED: Parallelize formatSaleForFrontend calls instead of sequential
     const formatPromises: Promise<any>[] = []; // Changed to any[] to hold enrichedSale objects
 
@@ -737,6 +781,13 @@ export class SalesQueryService {
           }
 
           const order = orderMap.get(sale.docCode);
+
+          // Get employee status from pre-fetched map
+          const isEmployeeInAll =
+            isEmployeeMapForAll.get(sale.partnerCode) ||
+            isEmployeeMapForAll.get((sale as any).issuePartnerCode) ||
+            false;
+
           const enrichedSale = await SalesFormattingUtils.formatSaleForFrontend(
             sale,
             loyaltyProduct,
@@ -748,6 +799,7 @@ export class SalesQueryService {
             saleStockTransfers,
             !!orderFeeMap.get(sale.docCode), // [NEW] isPlatformOrderOverride
             orderFeeMap.get(sale.docCode)?.brand, // [NEW] platformBrandOverride
+            isEmployeeInAll, // [API] Pre-fetched employee status
           );
 
           // [NEW] Override svcCode with looked-up materialCode if available
@@ -1239,6 +1291,28 @@ export class SalesQueryService {
       }
     }
 
+    // Pre-fetch Employee Status via API (similar to getAll)
+    const firstSaleAggregated = allSalesData[0];
+    const brandForAggregated =
+      firstSaleAggregated?.customer?.brand ||
+      firstSaleAggregated?.brand ||
+      'menard';
+    const partnerCodesToCheckAggregated = Array.from(
+      new Set(
+        allSalesData
+          .flatMap((s) => [s.partnerCode, (s as any).issuePartnerCode])
+          .filter((c): c is string => !!c && c.trim() !== ''),
+      ),
+    ).map((partnerCode) => ({
+      partnerCode,
+      sourceCompany: brandForAggregated,
+    }));
+
+    const isEmployeeMapAggregated =
+      await this.n8nService.checkCustomersIsEmployee(
+        partnerCodesToCheckAggregated,
+      );
+
     // --- Format Sales (Parallel) ---
     const formatPromises: Promise<any>[] = [];
 
@@ -1263,6 +1337,12 @@ export class SalesQueryService {
 
         const order = orderMap.get(sale.docCode);
 
+        // Get employee status from pre-fetched map
+        const isEmployeeAggregated =
+          isEmployeeMapAggregated.get(sale.partnerCode) ||
+          isEmployeeMapAggregated.get((sale as any).issuePartnerCode) ||
+          false;
+
         // Use empty stock transfers for this aggregation view
         const enrichedSale = await SalesFormattingUtils.formatSaleForFrontend(
           sale,
@@ -1273,6 +1353,9 @@ export class SalesQueryService {
           this.categoriesService,
           this.loyaltyService,
           [], // No stock transfers
+          undefined, // isPlatformOrderOverride
+          undefined, // platformBrandOverride
+          isEmployeeAggregated, // [API] Pre-fetched employee status
         );
 
         if (sale.svc_code) {

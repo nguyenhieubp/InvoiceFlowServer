@@ -27,6 +27,7 @@ export async function calculateDisplayFields(
   loyaltyProduct: any,
   department: any,
   categoriesService: any,
+  isEmployee?: boolean, // [NEW] Pre-fetched employee status from API
 ): Promise<{
   thanhToanCouponDisplay: string | null;
   chietKhauThanhToanCouponDisplay: number | null;
@@ -78,7 +79,7 @@ export async function calculateDisplayFields(
         customer: ecommerce,
         brand,
         maDvcs: department?.ma_dvcs || department?.ma_dvcs_ht,
-        isEmployee: SalesUtils.isEmployeeCode(sale.partnerCode), // [NEW] Pass isEmployee
+        isEmployee: isEmployee ?? false, // [API] Use pre-fetched employee status
       });
     }
   }
@@ -178,6 +179,7 @@ export async function formatSaleForFrontend(
   stockTransfers?: any[],
   isPlatformOrderOverride?: boolean, // [NEW]
   platformBrandOverride?: string, // [NEW]
+  isEmployee?: boolean, // [NEW] Pre-fetched employee status from API
 ): Promise<any> {
   const saleMaterialCode =
     sale.product?.materialCode ||
@@ -308,9 +310,7 @@ export async function formatSaleForFrontend(
     productTypeUpper,
     promCode: sale.promCode,
     maHangGiamGia: maHangGiamGia,
-    isEmployee:
-      SalesUtils.isEmployeeCode(sale.partnerCode) ||
-      SalesUtils.isEmployeeCode(sale.issuePartnerCode), // [NEW] Pass isEmployee
+    isEmployee: isEmployee ?? false, // [API] Use pre-fetched employee status
   });
 
   const { tkChietKhau, tkChiPhi, maPhi } =
@@ -337,6 +337,7 @@ export async function formatSaleForFrontend(
     loyaltyProduct,
     department,
     categoriesService,
+    isEmployee, // [API] Pass pre-fetched employee status
   );
 
   let finalPromCodeDisplay = calculatedFields.promCodeDisplay;
@@ -346,6 +347,14 @@ export async function formatSaleForFrontend(
     sale,
     isDoiDiem,
   );
+
+  // [NEW] Resolve mã CTKM cho "Mua hàng giảm giá" (employee discount code)
+  const muaHangGiamGiaDisplay = InvoiceLogicUtils.resolveMuaHangGiamGiaCode({
+    sale,
+    maDvcs,
+    productType: productTypeUpper,
+    isEmployee: isEmployee ?? false,
+  });
 
   // 7. Wholesale Promotion Code Mapping
   // Áp dụng cho đơn hàng bán buôn khi dist_tm > 0
@@ -402,12 +411,15 @@ export async function formatSaleForFrontend(
     isTangHang,
     isDichVu: calculatedFields.isDichVu,
     promCodeDisplay: finalPromCodeDisplay,
+    // [FIX] Prioritize muaHangGiamGiaDisplay (employee discount) when available
     promotionDisplayCode: maCtkmTangHang
       ? ''
-      : maCk01 ||
+      : muaHangGiamGiaDisplay || // [NEW] Employee discount code takes priority
+        maCk01 ||
         SalesUtils.getPromotionDisplayCode(sale.promCode) ||
-        (isSanTmdt ? '' : displayFields.thanhToanVoucherDisplay) || // [Unified] Clear voucher display for Platform Order
+        (isSanTmdt ? '' : displayFields.thanhToanVoucherDisplay) ||
         '',
+    muaHangGiamGiaDisplay: muaHangGiamGiaDisplay, // [NEW] Mã CTKM cho chiết khấu mua hàng NV
     other_discamt: other_discamt,
     chietKhauMuaHangGiamGia: other_discamt,
     maCkTheoChinhSach: maCkTheoChinhSach, // Mã CTKM cho bán buôn

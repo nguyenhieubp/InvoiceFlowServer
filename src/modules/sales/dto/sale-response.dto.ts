@@ -91,6 +91,7 @@ export class SaleItemResponseDto {
   // ========== DISPLAY FIELDS (Backend calculated) ==========
   promCodeDisplay?: string | null;
   promotionDisplayCode?: string;
+  muaHangGiamGiaDisplay?: string | null; // [NEW] Mã CTKM cho chiết khấu mua hàng NV
   cucThueDisplay?: string;
   tkDoanhThuDisplay?: string;
   tkGiaVonDisplay?: string;

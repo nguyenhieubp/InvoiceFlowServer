@@ -123,6 +123,7 @@ export function mapToSaleItemResponse(sale: any): SaleItemResponseDto {
     // Display fields (backend calculated)
     promCodeDisplay: sale.promCodeDisplay,
     promotionDisplayCode: sale.promotionDisplayCode,
+    muaHangGiamGiaDisplay: sale.muaHangGiamGiaDisplay, // [NEW] Mã CTKM cho chiết khấu mua hàng NV
     cucThueDisplay: sale.cucThueDisplay,
     tkDoanhThuDisplay: sale.tkDoanhThuDisplay,
     tkGiaVonDisplay: sale.tkGiaVonDisplay,

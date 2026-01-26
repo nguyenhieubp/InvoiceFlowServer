@@ -718,4 +718,53 @@ export class InvoiceLogicUtils {
 
     return val;
   }
+
+  /**
+   * Resolve "Mua hàng giảm giá" code for Employee orders
+   * Returns specific promotion code based on company (maDvcs) and product type
+   * ONLY when other_discamt > 0 AND isEmployee
+   *
+   * Logic:
+   * - TTM, TSG, THP: 2505MN.CK521
+   * - FBV + type I: SPQTNV, FBV + type S: DVQTNV
+   * - LHV + type I: R504SANPHAM, LHV + type S: R504DICHVU
+   *
+   * @returns code string if applicable, null otherwise
+   */
+  static resolveMuaHangGiamGiaCode(params: {
+    sale: any;
+    maDvcs: string;
+    productType: string | null;
+    isEmployee: boolean;
+  }): string | null {
+    const { sale, maDvcs, productType, isEmployee } = params;
+
+    // Get other_discamt value
+    const otherDiscamt = Number(
+      sale.other_discamt || sale.chietKhauMuaHangGiamGia || 0,
+    );
+
+    // Only apply for Employee AND when other_discamt > 0
+    if (!isEmployee || otherDiscamt <= 0) {
+      return null;
+    }
+
+    // Normalize product type
+    const effectiveProductType = productType
+      ? String(productType).toUpperCase().trim()
+      : null;
+
+    // Map codes based on company
+    if (['TTM', 'TSG', 'THP'].includes(maDvcs)) {
+      return '2505MN.CK521';
+    } else if (maDvcs === 'FBV') {
+      if (effectiveProductType === 'I') return 'SPQTNV';
+      else if (effectiveProductType === 'S') return 'DVQTNV';
+    } else if (maDvcs === 'LHV') {
+      if (effectiveProductType === 'I') return 'R504SANPHAM';
+      else if (effectiveProductType === 'S') return 'R504DICHVU';
+    }
+
+    return null;
+  }
 }

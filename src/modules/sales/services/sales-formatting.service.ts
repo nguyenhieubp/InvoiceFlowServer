@@ -19,6 +19,7 @@ export interface FormattingContext {
   svcCodeMap?: Map<string, string>;
   getMaTheMap?: Map<string, string>;
   orderMap?: Map<string, any>;
+  isEmployeeMap?: Map<string, boolean>; // [NEW] Pre-fetched employee status
   includeStockTransfers?: boolean;
 }
 
@@ -66,6 +67,7 @@ export class SalesFormattingService {
       svcCodeMap,
       getMaTheMap,
       orderMap,
+      isEmployeeMap,
       includeStockTransfers = false,
     } = context;
 
@@ -130,6 +132,12 @@ export class SalesFormattingService {
     const isPlatformOrder = orderFeeMap?.has(sale.docCode) || false;
     const platformBrand = orderFeeMap?.get(sale.docCode)?.brand;
 
+    // Get employee status from pre-fetched map
+    const isEmployee =
+      isEmployeeMap?.get(sale.partnerCode) ||
+      isEmployeeMap?.get((sale as any).issuePartnerCode) ||
+      false;
+
     // Format using existing utility
     const enrichedSale = await SalesFormattingUtils.formatSaleForFrontend(
       sale,
@@ -142,6 +150,7 @@ export class SalesFormattingService {
       saleStockTransfers,
       isPlatformOrder,
       platformBrand,
+      isEmployee, // [API] Pre-fetched employee status
     );
 
     // Override svcCode with materialCode if available
@@ -168,6 +177,7 @@ export class SalesFormattingService {
     svcCodeMap?: Map<string, string>;
     getMaTheMap?: Map<string, string>;
     orderMap?: Map<string, any>;
+    isEmployeeMap?: Map<string, boolean>;
     includeStockTransfers?: boolean;
   }): FormattingContext {
     return {
@@ -179,6 +189,7 @@ export class SalesFormattingService {
       svcCodeMap: options.svcCodeMap,
       getMaTheMap: options.getMaTheMap,
       orderMap: options.orderMap,
+      isEmployeeMap: options.isEmployeeMap,
       includeStockTransfers: options.includeStockTransfers ?? false,
     };
   }
