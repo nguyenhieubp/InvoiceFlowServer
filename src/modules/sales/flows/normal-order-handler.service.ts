@@ -64,33 +64,10 @@ export class NormalOrderHandlerService {
     const invoiceData =
       await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
 
-    // 2. Create Sales Order
-    const soResult = await this.fastApiInvoiceFlowService.createSalesOrder({
-      ...invoiceData,
-      customer: orderData.customer,
-      ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-    });
+    // 2. Create Sales Order -> SKIPPED (User request: Invoice flow only triggers Invoice API)
+    // const soResult = await this.fastApiInvoiceFlowService.createSalesOrder(...)
 
-    const isSoSuccess =
-      (Array.isArray(soResult) &&
-        soResult.length > 0 &&
-        soResult[0].status === STATUS.SUCCESS) ||
-      (soResult && soResult.status === STATUS.SUCCESS);
-
-    // NOTE: We continue even if SO fails? Usually if SO fails, SI might fail too, but legacy logic might allow retries.
-    // But original code returned early if !isSoSuccess. Let's keep that.
-    if (!isSoSuccess) {
-      const message =
-        Array.isArray(soResult) && soResult[0]?.message
-          ? soResult[0].message
-          : soResult?.message || 'Tạo Sales Order thất bại';
-      return {
-        status: 0,
-        message: `Tạo Sales Order thất bại: ${message}`,
-        result: { salesOrder: soResult },
-        fastApiResponse: { salesOrder: soResult },
-      };
-    }
+    const soResult = null; // Placeholder to keep return type consistent
 
     // 3. Create Sales Invoice
     let siResult: any;

@@ -211,10 +211,18 @@ export async function formatSaleForFrontend(
     Array.isArray(availableStockTransfers)
   ) {
     const matchingST = availableStockTransfers.find(
-      (st: any) => st.materialCode === saleMaterialCode,
+      (st: any) =>
+        st.materialCode === saleMaterialCode ||
+        st.itemCode === sale.itemCode ||
+        st.materialCode === sale.itemCode,
     );
     if (matchingST) {
       maKhoFromST = matchingST.stockCode || null;
+      // [FIX] Map warehouse code immediately to match SalesQueryService logic
+      if (maKhoFromST && categoriesService) {
+        const mapped = await categoriesService.mapWarehouseCode(maKhoFromST);
+        if (mapped) maKhoFromST = mapped;
+      }
       batchSerialFromST = matchingST.batchSerial || null;
       qtyFromST = Math.abs(Number(matchingST.qty || 0));
     }
@@ -264,7 +272,7 @@ export async function formatSaleForFrontend(
   });
 
   // 4. Warehouse resolution
-  const maBp = department?.ma_bp || '';
+  const maBp = department?.ma_bp || sale.branchCode || order?.branchCode || '';
   let maKho = InvoiceLogicUtils.resolveMaKho({
     maKhoFromST,
     maKhoFromSale: sale.maKho || calculatedFields.maKho,
@@ -273,7 +281,7 @@ export async function formatSaleForFrontend(
   });
 
   // Map warehouse code if categoriesService is provided
-  if (maKho && categoriesService && !isTachThe) {
+  if (maKho && categoriesService) {
     const mapped = await categoriesService.mapWarehouseCode(maKho);
     if (mapped) maKho = mapped;
   }

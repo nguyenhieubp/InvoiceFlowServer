@@ -13,6 +13,8 @@ import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
  *
  * Logic: 1 sale item with N stock transfers → N exploded sale lines
  */
+import { CategoriesService } from 'src/modules/categories/categories.service';
+
 @Injectable()
 export class SalesExplosionService {
   private readonly logger = new Logger(SalesExplosionService.name);
@@ -23,6 +25,7 @@ export class SalesExplosionService {
     @InjectRepository(DailyCashio)
     private dailyCashioRepository: Repository<DailyCashio>,
     private loyaltyService: LoyaltyService,
+    private categoriesService: CategoriesService,
   ) {}
 
   /**
@@ -78,6 +81,26 @@ export class SalesExplosionService {
     );
     const stLoyaltyProductMap =
       await this.loyaltyService.fetchProducts(allStItemCodes);
+
+    // [FIX] Pre-fetch Warehouse Code Mappings
+    const allStockCodes = Array.from(
+      new Set(
+        stockTransfers
+          .map((st) => st.stockCode)
+          .filter((code): code is string => !!code),
+      ),
+    );
+    const warehouseCodeMap = new Map<string, string>();
+    // Note: mapWarehouseCode needs to be awaited sequentially or parallelized.
+    // Assuming we can parallelize:
+    await Promise.all(
+      allStockCodes.map(async (code) => {
+        const mapped = await this.categoriesService.mapWarehouseCode(code);
+        if (mapped) {
+          warehouseCodeMap.set(code, mapped);
+        }
+      }),
+    );
 
     return orders.map((order) => {
       const cashioRecords = cashioMap.get(order.docCode) || [];
@@ -230,7 +253,7 @@ export class SalesExplosionService {
               tienThue: Number(sale.tienThue || 0) * ratio,
               dtTgNt: Number(sale.dtTgNt || 0) * ratio,
 
-              maKho: st.stockCode, // ST Stock Code
+              maKho: warehouseCodeMap.get(st.stockCode) || st.stockCode, // [FIX] Use Mapped Code
               // Logic check trackBatch/trackSerial
               maLo: isBatch ? st.batchSerial : undefined,
               soSerial: isSerial ? st.batchSerial : undefined,
@@ -252,7 +275,7 @@ export class SalesExplosionService {
               itemCode: st.itemCode,
               itemName: st.itemName,
               qty: Math.abs(Number(st.qty || 0)),
-              maKho: st.stockCode,
+              maKho: warehouseCodeMap.get(st.stockCode) || st.stockCode, // [FIX] Use Mapped Code
 
               // Logic check trackBatch/trackSerial
               maLo: isBatch ? st.batchSerial : undefined,

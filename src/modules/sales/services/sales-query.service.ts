@@ -114,35 +114,39 @@ export class SalesQueryService {
     const platformBrand = orderFee?.brand;
 
     // [FIX] Group by ItemCode and Pre-assign to Sales (1-1 Sequential)
-    const stockTransfersByItemCode = new Map<
-      string,
-      { st: StockTransfer[]; rt: StockTransfer[] }
-    >();
-    stockTransfers.forEach((st) => {
-      const key = st.itemCode;
-      if (!key) return;
-      if (!stockTransfersByItemCode.has(key)) {
-        stockTransfersByItemCode.set(key, { st: [], rt: [] });
-      }
-      const group = stockTransfersByItemCode.get(key)!;
-      if (st.docCode.startsWith('RT')) group.rt.push(st);
-      else if (st.docCode.startsWith('ST')) group.st.push(st);
-    });
-
+    // REWRITE STRATEGY: Index Sales, iterate STs for matching
     const saleIdToStockTransferMap = new Map<
       string,
       { st: StockTransfer | null; rt: StockTransfer | null }
     >();
-    sales.forEach((sale) => {
-      const key = sale.itemCode;
-      let assignedSt: StockTransfer | null = null;
-      let assignedRt: StockTransfer | null = null;
-      const group = stockTransfersByItemCode.get(key);
-      if (group) {
-        if (group.st.length > 0) assignedSt = group.st.shift() || null;
-        if (group.rt.length > 0) assignedRt = group.rt.shift() || null;
+
+    const salesByItemCode = new Map<string, Sale[]>();
+    sales.forEach((s) => {
+      const k = s.itemCode;
+      if (!salesByItemCode.has(k)) salesByItemCode.set(k, []);
+      salesByItemCode.get(k)!.push(s);
+    });
+
+    stockTransfers.forEach((st) => {
+      // 1. Try ItemCode
+      let candidateSales = salesByItemCode.get(st.itemCode);
+      // 2. Try MaterialCode (fallback)
+      if ((!candidateSales || candidateSales.length === 0) && st.materialCode) {
+        candidateSales = salesByItemCode.get(st.materialCode);
       }
-      saleIdToStockTransferMap.set(sale.id, { st: assignedSt, rt: assignedRt });
+
+      if (candidateSales && candidateSales.length > 0) {
+        const targetSale = candidateSales.shift(); // Consume Sale!
+        if (targetSale) {
+          const split = saleIdToStockTransferMap.get(targetSale.id) || {
+            st: null,
+            rt: null,
+          };
+          if (st.docCode.startsWith('RT')) split.rt = st;
+          else if (st.docCode.startsWith('ST')) split.st = st;
+          saleIdToStockTransferMap.set(targetSale.id, split);
+        }
+      }
     });
 
     // 5. Card Data (for Tach The orders)
