@@ -180,18 +180,28 @@ export function getOrderTypePrefix(
 }
 
 /**
+ * Helper generic kiểm tra loại đơn hàng
+ */
+function checkOrderTypeMatches(
+  value: string | null | undefined,
+  keywords: string[],
+): boolean {
+  const s = value || '';
+  return keywords.some((k) => s.includes(k));
+}
+
+/**
  * Helper: Kiểm tra xem đơn hàng có phải "03. Đổi điểm" không
  */
 export function isDoiDiemOrder(
   ordertype: string | null | undefined,
   ordertypeName: string | null | undefined,
 ): boolean {
-  const ordertypeValue = ordertype || ordertypeName || '';
-  return (
-    ordertypeValue.includes('03. Đổi điểm') ||
-    ordertypeValue.includes('03.Đổi điểm') ||
-    ordertypeValue.includes('03.  Đổi điểm')
-  );
+  return checkOrderTypeMatches(ordertype || ordertypeName, [
+    '03. Đổi điểm',
+    '03.Đổi điểm',
+    '03.  Đổi điểm',
+  ]);
 }
 
 /**
@@ -201,12 +211,11 @@ export function isDoiDvOrder(
   ordertype: string | null | undefined,
   ordertypeName: string | null | undefined,
 ): boolean {
-  const ordertypeValue = ordertype || ordertypeName || '';
-  return (
-    ordertypeValue.includes('04. Đổi DV') ||
-    ordertypeValue.includes('04.Đổi DV') ||
-    ordertypeValue.includes('04.  Đổi DV')
-  );
+  return checkOrderTypeMatches(ordertype || ordertypeName, [
+    '04. Đổi DV',
+    '04.Đổi DV',
+    '04.  Đổi DV',
+  ]);
 }
 
 /**
@@ -216,12 +225,11 @@ export function isTangSinhNhatOrder(
   ordertype: string | null | undefined,
   ordertypeName: string | null | undefined,
 ): boolean {
-  const ordertypeValue = ordertype || ordertypeName || '';
-  return (
-    ordertypeValue.includes('05. Tặng sinh nhật') ||
-    ordertypeValue.includes('05.Tặng sinh nhật') ||
-    ordertypeValue.includes('05.  Tặng sinh nhật')
-  );
+  return checkOrderTypeMatches(ordertype || ordertypeName, [
+    '05. Tặng sinh nhật',
+    '05.Tặng sinh nhật',
+    '05.  Tặng sinh nhật',
+  ]);
 }
 
 /**
@@ -231,12 +239,11 @@ export function isDauTuOrder(
   ordertype: string | null | undefined,
   ordertypeName: string | null | undefined,
 ): boolean {
-  const ordertypeValue = ordertype || ordertypeName || '';
-  return (
-    ordertypeValue.includes('06. Đầu tư') ||
-    ordertypeValue.includes('06.Đầu tư') ||
-    ordertypeValue.includes('06.  Đầu tư')
-  );
+  return checkOrderTypeMatches(ordertype || ordertypeName, [
+    '06. Đầu tư',
+    '06.Đầu tư',
+    '06.  Đầu tư',
+  ]);
 }
 
 /**
@@ -246,12 +253,11 @@ export function isTachTheOrder(
   ordertype: string | null | undefined,
   ordertypeName: string | null | undefined,
 ): boolean {
-  const ordertypeValue = ordertype || ordertypeName || '';
-  return (
-    ordertypeValue.includes('08. Tách thẻ') ||
-    ordertypeValue.includes('08.Tách thẻ') ||
-    ordertypeValue.includes('08.  Tách thẻ')
-  );
+  return checkOrderTypeMatches(ordertype || ordertypeName, [
+    '08. Tách thẻ',
+    '08.Tách thẻ',
+    '08.  Tách thẻ',
+  ]);
 }
 
 /**
@@ -261,8 +267,7 @@ export function isDoiVoOrder(
   ordertype: string | null | undefined,
   ordertypeName: string | null | undefined,
 ): boolean {
-  const ordertypeValue = ordertype || ordertypeName || '';
-  return ordertypeValue.includes('Đổi vỏ');
+  return checkOrderTypeMatches(ordertype || ordertypeName, ['Đổi vỏ']);
 }
 
 /**

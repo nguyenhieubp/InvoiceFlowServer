@@ -35,11 +35,15 @@ export class InvoiceFlowOrchestratorService {
   /**
    * Main orchestrator method - điều phối flow tạo hóa đơn
    */
+  /**
+   * Main orchestrator method - điều phối flow tạo hóa đơn
+   */
   async orchestrateInvoiceCreation(
     docCode: string,
     orderData: any,
     forceRetry: boolean = false,
   ): Promise<any> {
+    const maDvcs = orderData.branchCode || '';
     try {
       if (!orderData || !orderData.sales || orderData.sales.length === 0) {
         throw new NotFoundException(
@@ -47,22 +51,10 @@ export class InvoiceFlowOrchestratorService {
         );
       }
 
-      // Fetch maDvcs from Loyalty API (only if not already provided)
-      let maDvcs = orderData.branchCode || '';
-
-      // Skip API call if branchCode already exists
-      // Skip API call if branchCode already exists
-      if (!maDvcs) {
-        maDvcs = '';
-      }
-
       // ============================================
       // BƯỚC 1: Kiểm tra docSourceType trước (ưu tiên cao nhất)
       // ============================================
-      const firstSale =
-        orderData.sales && orderData.sales.length > 0
-          ? orderData.sales[0]
-          : null;
+      const firstSale = orderData.sales?.[0];
       const docSourceTypeRaw =
         firstSale?.docSourceType ?? orderData.docSourceType ?? '';
       const docSourceType = docSourceTypeRaw
@@ -70,9 +62,7 @@ export class InvoiceFlowOrchestratorService {
         : '';
 
       // Xử lý SALE_RETURN
-      // Nhưng vẫn phải validate chỉ cho phép "01.Thường" và "01. Thường"
       if (docSourceType === DOC_SOURCE_TYPES.SALE_RETURN) {
-        // Validate chỉ cho phép "01.Thường" và "01. Thường"
         const validationResult =
           this.invoiceValidationService.validateOrderForInvoice({
             docCode,
@@ -82,19 +72,7 @@ export class InvoiceFlowOrchestratorService {
           const errorMessage =
             validationResult.message ||
             `Đơn hàng ${docCode} không đủ điều kiện tạo hóa đơn`;
-          await this.invoicePersistenceService.saveFastApiInvoice({
-            docCode,
-            maDvcs: maDvcs,
-            maKh: orderData.customer?.code || '',
-            tenKh: orderData.customer?.name || '',
-            ngayCt: orderData.docDate
-              ? new Date(orderData.docDate)
-              : new Date(),
-            status: STATUS.FAILED,
-            message: errorMessage,
-            guid: null,
-            fastApiResponse: undefined,
-          });
+          await this.recordFailure(docCode, orderData, errorMessage, maDvcs);
           return {
             success: false,
             message: errorMessage,
@@ -130,49 +108,12 @@ export class InvoiceFlowOrchestratorService {
       }
 
       // ============================================
-      // BƯỚC 2: Validate điều kiện tạo hóa đơn TRƯỚC khi xử lý các case đặc biệt
+      // BƯỚC 2: Xác định loại đơn hàng (Single Pass Loop)
       // ============================================
-      const sales = orderData.sales || [];
-      const normalizeOrderType = (
-        ordertypeName: string | null | undefined,
-      ): string => {
-        if (!ordertypeName) return '';
-        return String(ordertypeName).trim().toLowerCase();
-      };
+      const orderType = this.determineOrderType(orderData.sales);
 
-      // Kiểm tra các loại đơn đặc biệt được phép xử lý
-      const hasDoiDiemOrder = sales.some((s: any) =>
-        SalesUtils.isDoiDiemOrder(s.ordertype, s.ordertypeName),
-      );
-      const hasDoiDvOrder = sales.some((s: any) =>
-        SalesUtils.isDoiDvOrder(s.ordertype, s.ordertypeName),
-      );
-      const hasTangSinhNhatOrder = sales.some((s: any) =>
-        SalesUtils.isTangSinhNhatOrder(s.ordertype, s.ordertypeName),
-      );
-      const hasDauTuOrder = sales.some((s: any) =>
-        SalesUtils.isDauTuOrder(s.ordertype, s.ordertypeName),
-      );
-      const hasTachTheOrder = sales.some((s: any) =>
-        SalesUtils.isTachTheOrder(s.ordertype, s.ordertypeName),
-      );
-      const hasDoiVoOrder = sales.some((s: any) =>
-        SalesUtils.isDoiVoOrder(s.ordertype, s.ordertypeName),
-      );
-      const hasServiceOrder = sales.some((s: any) =>
-        isServiceOrder(s.ordertypeName || s.ordertype),
-      );
-
-      // Nếu không phải các loại đơn đặc biệt được phép, validate chỉ cho phép "01.Thường"
-      if (
-        !hasDoiDiemOrder &&
-        !hasDoiDvOrder &&
-        !hasTangSinhNhatOrder &&
-        !hasDauTuOrder &&
-        !hasTachTheOrder &&
-        !hasDoiVoOrder &&
-        !hasServiceOrder
-      ) {
+      // Nếu là đơn thường (NORMAL), validate xem có đủ điều kiện không
+      if (orderType === ORDER_TYPES.NORMAL) {
         const validationResult =
           this.invoiceValidationService.validateOrderForInvoice({
             docCode,
@@ -183,20 +124,7 @@ export class InvoiceFlowOrchestratorService {
           const errorMessage =
             validationResult.message ||
             `Đơn hàng ${docCode} không đủ điều kiện tạo hóa đơn`;
-          // Lưu vào bảng kê hóa đơn với status = 0 (thất bại)
-          await this.invoicePersistenceService.saveFastApiInvoice({
-            docCode,
-            maDvcs: maDvcs,
-            maKh: orderData.customer?.code || '',
-            tenKh: orderData.customer?.name || '',
-            ngayCt: orderData.docDate
-              ? new Date(orderData.docDate)
-              : new Date(),
-            status: 0,
-            message: errorMessage,
-            guid: null,
-            fastApiResponse: undefined,
-          });
+          await this.recordFailure(docCode, orderData, errorMessage, maDvcs);
 
           return {
             success: false,
@@ -207,11 +135,14 @@ export class InvoiceFlowOrchestratorService {
       }
 
       // ============================================
-      // BƯỚC 3: Xử lý các case đặc biệt (sau khi đã validate)
+      // BƯỚC 3: Routing xử lý theo Order Type
+      // ============================================
+      // ============================================
+      // BƯỚC 3: Routing xử lý theo Order Type
       // ============================================
 
-      // 1. Dịch vụ
-      if (hasServiceOrder) {
+      // Case 1: Service Order
+      if (orderType === ORDER_TYPES.SERVICE) {
         return await this.executeWithPersistence(
           docCode,
           orderData,
@@ -221,28 +152,15 @@ export class InvoiceFlowOrchestratorService {
               orderData,
               docCode,
             ),
-          true, // shouldMarkProcessed
-        );
-      }
-
-      // 2. Đổi điểm
-      if (hasDoiDiemOrder) {
-        return await this.executeWithPersistence(
-          docCode,
-          orderData,
-          maDvcs,
-          async () =>
-            await this.specialOrderHandlerService.handleStandardSpecialOrder(
-              orderData,
-              docCode,
-              ORDER_TYPES.LOYALTY_EXCHANGE,
-            ),
           true,
         );
       }
 
-      // 3. Đổi DV (có payment)
-      if (hasDoiDvOrder) {
+      // Case 2: Normal Order & Normal Exchange
+      if (
+        orderType === ORDER_TYPES.NORMAL ||
+        orderType === ORDER_TYPES.NORMAL_EXCHANGE
+      ) {
         return await this.executeWithPersistence(
           docCode,
           orderData,
@@ -256,56 +174,9 @@ export class InvoiceFlowOrchestratorService {
         );
       }
 
-      // 4. Tặng sinh nhật
-      if (hasTangSinhNhatOrder) {
-        return await this.executeWithPersistence(
-          docCode,
-          orderData,
-          maDvcs,
-          async () =>
-            await this.specialOrderHandlerService.handleStandardSpecialOrder(
-              orderData,
-              docCode,
-              ORDER_TYPES.BIRTHDAY_GIFT,
-            ),
-          true,
-        );
-      }
-
-      // 5. Đầu tư
-      if (hasDauTuOrder) {
-        return await this.executeWithPersistence(
-          docCode,
-          orderData,
-          maDvcs,
-          async () =>
-            await this.specialOrderHandlerService.handleStandardSpecialOrder(
-              orderData,
-              docCode,
-              ORDER_TYPES.INVESTMENT,
-            ),
-          true,
-        );
-      }
-
-      // 6. Đổi vỏ
-      if (hasDoiVoOrder) {
-        return await this.executeWithPersistence(
-          docCode,
-          orderData,
-          maDvcs,
-          async () =>
-            await this.specialOrderHandlerService.handleStandardSpecialOrder(
-              orderData,
-              docCode,
-              ORDER_TYPES.BOTTLE_EXCHANGE,
-            ),
-          true,
-        );
-      }
-
-      // 7. Tách thẻ (có fetch card)
-      if (hasTachTheOrder) {
+      // Case 3: Split Card (Tách thẻ)
+      if (orderType === ORDER_TYPES.CARD_SEPARATION) {
+        // Previously SPLIT_CARD
         return await this.executeWithPersistence(
           docCode,
           orderData,
@@ -319,38 +190,77 @@ export class InvoiceFlowOrchestratorService {
         );
       }
 
-      // 8. Đơn thường (01. Thường / 07. Bán tài khoản)
+      // Case 4: Standard Special Orders (Loyalty Exchange, Birthday, Investment, Bottle Exchange)
+      // These all share the same handler logic with different descriptions passed inside handleStandardSpecialOrder if needed,
+      // but strictly following previous logic: they call handleStandardSpecialOrder(orderData, docCode, orderType)
       return await this.executeWithPersistence(
         docCode,
         orderData,
         maDvcs,
         async () =>
-          await this.normalOrderHandlerService.handleNormalOrder(
+          await this.specialOrderHandlerService.handleStandardSpecialOrder(
             orderData,
             docCode,
+            orderType, // Pass the specific order type as description/type
           ),
         true,
       );
     } catch (error: any) {
-      this.logger.error(
-        `Unexpected error processing order ${docCode}: ${error?.message || error}`,
-      );
-      await this.invoicePersistenceService.saveFastApiInvoice({
-        docCode,
-        maDvcs: '',
-        maKh: '',
-        tenKh: '',
-        ngayCt: new Date(),
-        status: 0,
-        message: `Lỗi hệ thống: ${error?.message || error}`,
-        guid: null,
-      });
+      const errorMessage = `Lỗi hệ thống: ${error?.message || error}`;
+      await this.recordFailure(docCode, orderData, errorMessage, maDvcs);
       return {
         success: false,
-        message: `Lỗi hệ thống: ${error?.message || error}`,
+        message: errorMessage,
         result: null,
       };
     }
+  }
+
+  /**
+   * Helper: Xác định loại đơn hàng dựa trên danh sách sales
+   * Ưu tiên thứ tự check các loại đặc biệt
+   */
+  private determineOrderType(sales: any[]): string {
+    // Single pass loop could be optimization, but for readability here we use find
+    // Given the small number of items per order, multiple finds are negligible,
+    // but a manual single pass is "Senior" level optimization.
+
+    for (const s of sales) {
+      if (SalesUtils.isDoiDiemOrder(s.ordertype, s.ordertypeName))
+        return ORDER_TYPES.LOYALTY_EXCHANGE;
+      if (SalesUtils.isDoiDvOrder(s.ordertype, s.ordertypeName))
+        return ORDER_TYPES.NORMAL_EXCHANGE;
+      if (SalesUtils.isTangSinhNhatOrder(s.ordertype, s.ordertypeName))
+        return ORDER_TYPES.BIRTHDAY_GIFT;
+      if (SalesUtils.isDauTuOrder(s.ordertype, s.ordertypeName))
+        return ORDER_TYPES.INVESTMENT;
+      if (SalesUtils.isTachTheOrder(s.ordertype, s.ordertypeName))
+        return ORDER_TYPES.CARD_SEPARATION;
+      if (SalesUtils.isDoiVoOrder(s.ordertype, s.ordertypeName))
+        return ORDER_TYPES.BOTTLE_EXCHANGE;
+      if (isServiceOrder(s.ordertypeName || s.ordertype))
+        return ORDER_TYPES.SERVICE;
+    }
+    return ORDER_TYPES.NORMAL;
+  }
+
+  private async recordFailure(
+    docCode: string,
+    orderData: any,
+    message: string,
+    maDvcs: string,
+  ) {
+    this.logger.error(`Processing failed for ${docCode}: ${message}`);
+    await this.invoicePersistenceService.saveFastApiInvoice({
+      docCode,
+      maDvcs: maDvcs || '',
+      maKh: orderData.customer?.code || '',
+      tenKh: orderData.customer?.name || '',
+      ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+      status: 0,
+      message: message,
+      guid: null,
+    });
   }
 
   /**
@@ -397,22 +307,11 @@ export class InvoiceFlowOrchestratorService {
         result: result,
       };
     } catch (error: any) {
-      this.logger.error(`Lỗi khi xử lý ${docCode}: ${error?.message || error}`);
-      // Log failure
-      await this.invoicePersistenceService.saveFastApiInvoice({
-        docCode,
-        maDvcs: maDvcs || '',
-        maKh: '',
-        tenKh: '',
-        ngayCt: new Date(),
-        status: 0,
-        message: `Lỗi hệ thống: ${error?.message || error}`,
-        guid: null,
-      });
-
+      const errorMessage = `Lỗi hệ thống: ${error?.message || error}`;
+      await this.recordFailure(docCode, orderData, errorMessage, maDvcs);
       return {
         success: false,
-        message: `Lỗi hệ thống: ${error?.message || error}`,
+        message: errorMessage,
         result: null,
       };
     }

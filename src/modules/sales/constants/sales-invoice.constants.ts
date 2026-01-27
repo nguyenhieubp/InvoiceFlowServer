@@ -12,6 +12,7 @@ export const ORDER_TYPES = {
   SERVICE: '02. làm dịch vụ',
   SERVICE_NO_SPACE: '02.làm dịch vụ', // Alternative without space
   LOYALTY_EXCHANGE: '03. Đổi điểm',
+  NORMAL_EXCHANGE: '04. Đổi DV',
   BIRTHDAY_GIFT: '05. Tặng sinh nhật',
   INVESTMENT: '06. Đầu tư',
   ACCOUNT_SALE: '07. Bán tài khoản',
