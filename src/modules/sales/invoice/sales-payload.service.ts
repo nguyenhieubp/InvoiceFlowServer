@@ -77,8 +77,9 @@ export class SalesPayloadService {
       );
 
       // 3. Load supporting data
-      const { stockTransferMap, transDate } =
-        await this.getInvoiceStockTransferMap(orderData.docCode, isNormalOrder);
+      const transDate = orderData.stockTransfers?.[0]?.transDate || null;
+      // [REF] Removed redundant getInvoiceStockTransferMap
+
       const cardSerialMap = await this.getInvoiceCardSerialMap(
         orderData.docCode,
       );
@@ -138,7 +139,7 @@ export class SalesPayloadService {
             );
             return this.mapSaleToInvoiceDetail(sale, index, orderData, {
               isNormalOrder,
-              stockTransferMap,
+              // stockTransferMap removed
               cardSerialMap,
               svcCodeMap,
               onlySalesOrder: options?.onlySalesOrder,
@@ -259,10 +260,8 @@ export class SalesPayloadService {
       );
 
     // Load Stock Transfer Map (Sync logic with SalesInvoice)
-    const { stockTransferMap } = await this.getInvoiceStockTransferMap(
-      orderData.docCode,
-      isNormalOrder,
-    );
+    // [REF] Removed getInvoiceStockTransferMap call as we used enriched data directly
+    const stockTransferMap_UNUSED = new Map(); // Placeholder if needed, but we removed usage
 
     // Helper để build detail/ndetail item
     const buildLineItem = async (
@@ -270,13 +269,7 @@ export class SalesPayloadService {
       index: number,
       linkedDong?: number,
     ) => {
-      const { qty } = this.calculateInvoiceQty(
-        sale,
-        orderData.docCode,
-        sale.product?.materialCode,
-        false, // Not normal order flow for GXT logic here (or simplified)
-        new Map(),
-      );
+      const { qty } = this.calculateInvoiceQty(sale);
       // Simplify logic for GXT lines if needed, or reuse parts of calculateInvoicePrices/Amounts if complexity grows.
       // For now, mapping basic fields as per original requirement:
       const tienHang = this.toNumber(
@@ -302,14 +295,8 @@ export class SalesPayloadService {
       );
 
       // Resolve ma_kho using standard Invoice Logic (StockTransfer support)
-      const lineMaKho = await this.resolveInvoiceMaKho(
-        sale,
-        materialCode,
-        stockTransferMap,
-        orderData.docCode,
-        maBp,
-        isTachThe,
-      );
+      // Resolve ma_kho using standard Invoice Logic (StockTransfer support)
+      const lineMaKho = await this.resolveInvoiceMaKho(sale, maBp);
 
       // Rule đánh số dòng (Dong):
       // - dong: Tự tăng (index + 1) cho cả 2 loại
@@ -393,14 +380,7 @@ export class SalesPayloadService {
         sale.department?.ma_bp || sale.branchCode || orderData.branchCode,
         '',
       );
-      return await this.resolveInvoiceMaKho(
-        sale,
-        mCode,
-        stockTransferMap,
-        orderData.docCode,
-        mBp,
-        isTachThe,
-      );
+      return await this.resolveInvoiceMaKho(sale, mBp);
     };
 
     const maKhoN =
@@ -884,64 +864,6 @@ export class SalesPayloadService {
     return docDate;
   }
 
-  private async getInvoiceStockTransferMap(
-    docCode: string,
-    isNormalOrder: boolean,
-  ) {
-    const docCodesForStockTransfer =
-      StockTransferUtils.getDocCodesForStockTransfer([docCode]);
-    const allStockTransfers = await this.stockTransferRepository.find({
-      where: { soCode: In(docCodesForStockTransfer) },
-      order: { itemCode: 'ASC', createdAt: 'ASC' },
-    });
-
-    const stockTransferMap = new Map<
-      string,
-      { st?: StockTransfer[]; rt?: StockTransfer[] }
-    >();
-    let transDate: Date | null = null;
-
-    if (isNormalOrder && allStockTransfers.length > 0) {
-      transDate = allStockTransfers[0].transDate || null;
-
-      // ✅ Collect unique item codes for batch fetching
-      const itemCodes = Array.from(
-        new Set(
-          allStockTransfers
-            .map((st) => st.itemCode)
-            .filter((c): c is string => !!c && c.trim() !== ''),
-        ),
-      );
-
-      // ✅ Batch fetch all products at once (instead of in loop)
-      const loyaltyMap = new Map<string, any>();
-      if (itemCodes.length > 0) {
-        const products = await this.loyaltyService.fetchProducts(itemCodes);
-        products.forEach((product, itemCode) => {
-          loyaltyMap.set(itemCode, product);
-        });
-      }
-
-      allStockTransfers.forEach((st) => {
-        const materialCode =
-          st.materialCode || loyaltyMap.get(st.itemCode)?.materialCode;
-        if (!materialCode) return;
-        const key = `${st.soCode || st.docCode || docCode}_${materialCode}`;
-
-        if (!stockTransferMap.has(key)) stockTransferMap.set(key, {});
-        const m = stockTransferMap.get(key)!;
-        if (st.docCode.startsWith('ST') || Number(st.qty || 0) < 0) {
-          if (!m.st) m.st = [];
-          m.st.push(st);
-        } else if (st.docCode.startsWith('RT') || Number(st.qty || 0) > 0) {
-          if (!m.rt) m.rt = [];
-          m.rt.push(st);
-        }
-      });
-    }
-    return { stockTransferMap, allStockTransfers, transDate };
-  }
-
   private async getInvoiceCardSerialMap(
     docCode: string,
   ): Promise<Map<string, string>> {
@@ -1171,18 +1093,12 @@ export class SalesPayloadService {
     });
   }
 
-  private async resolveInvoiceBatchSerial(
-    sale: any,
-    saleMaterialCode: string,
-    cardSerialMap: Map<string, string>,
-    stockTransferMap: Map<string, any>,
-    docCode: string,
-    loyaltyProduct: any,
-  ) {
+  private async resolveInvoiceBatchSerial(sale: any, loyaltyProduct: any) {
     let batchSerial: string | null = null;
-    if (saleMaterialCode) {
-      const sts = stockTransferMap.get(`${docCode}_${saleMaterialCode}`)?.st;
-      if (sts?.[0]?.batchSerial) batchSerial = sts[0].batchSerial;
+
+    // [FIX] Use pre-assigned stock transfer from SalesQueryService
+    if (sale.stockTransfer?.batchSerial) {
+      batchSerial = sale.stockTransfer.batchSerial;
     }
 
     // [Fix] Fallback for Voucher (Type 94) - use ma_vt_ref (Ecode) as serial if not found in ST
@@ -1197,25 +1113,18 @@ export class SalesPayloadService {
     });
   }
 
-  private calculateInvoiceQty(
-    sale: any,
-    docCode: string,
-    saleMaterialCode: string,
-    isNormalOrder: boolean,
-    stockTransferMap: Map<string, any>,
-  ) {
+  private calculateInvoiceQty(sale: any) {
     let qty = this.toNumber(sale.qty, 0);
     const saleQty = this.toNumber(sale.qty, 0);
     let allocationRatio = 1;
 
-    if (saleMaterialCode) {
-      const key = `${docCode}_${saleMaterialCode}`;
-      const firstSt = stockTransferMap.get(key)?.st?.[0];
-      if (firstSt && saleQty !== 0) {
-        qty = Math.abs(Number(firstSt.qty || 0));
-        allocationRatio = qty / saleQty;
-      }
+    // [FIX] Use pre-assigned stock transfer
+    const st = sale.stockTransfer;
+    if (st && saleQty !== 0) {
+      qty = Math.abs(Number(st.qty || 0));
+      allocationRatio = qty / saleQty;
     }
+
     return { qty, saleQty, allocationRatio };
   }
 
@@ -1255,18 +1164,12 @@ export class SalesPayloadService {
     return maKh;
   }
 
-  private async resolveInvoiceMaKho(
-    sale: any,
-    saleMaterialCode: string,
-    stockTransferMap: Map<string, any>,
-    docCode: string,
-    maBp: string,
-    isTachThe: boolean,
-  ): Promise<string> {
+  private async resolveInvoiceMaKho(sale: any, maBp: string): Promise<string> {
     let maKhoFromST: string | null = null;
-    if (saleMaterialCode) {
-      const sts = stockTransferMap.get(`${docCode}_${saleMaterialCode}`)?.st;
-      if (sts?.[0]?.stockCode) maKhoFromST = sts[0].stockCode;
+
+    // [FIX] Use pre-assigned stock transfer
+    if (sale.stockTransfer?.stockCode) {
+      maKhoFromST = sale.stockTransfer.stockCode;
     }
 
     const orderTypes = InvoiceLogicUtils.getOrderTypes(
@@ -1419,7 +1322,7 @@ export class SalesPayloadService {
   ): Promise<any> {
     const {
       isNormalOrder,
-      stockTransferMap,
+      // stockTransferMap removed
       cardSerialMap,
       svcCodeMap,
       onlySalesOrder, // [NEW] Option to skip inventory fields
@@ -1438,13 +1341,7 @@ export class SalesPayloadService {
       sale.product?.maERP;
 
     // 1. Qty & Allocation
-    const { qty, allocationRatio } = this.calculateInvoiceQty(
-      sale,
-      orderData.docCode,
-      saleMaterialCode,
-      isNormalOrder,
-      stockTransferMap,
-    );
+    const { qty, allocationRatio } = this.calculateInvoiceQty(sale);
 
     // 2. Prices
     const { giaBan, tienHang, tienHangGoc } = this.calculateInvoicePrices(
@@ -1501,23 +1398,12 @@ export class SalesPayloadService {
     if (!onlySalesOrder) {
       const batchSerialResult = await this.resolveInvoiceBatchSerial(
         sale,
-        saleMaterialCode,
-        cardSerialMap,
-        stockTransferMap,
-        orderData.docCode,
         loyaltyProduct,
       );
       maLo = batchSerialResult.maLo || '';
       soSerial = batchSerialResult.soSerial || '';
 
-      finalMaKho = await this.resolveInvoiceMaKho(
-        sale,
-        saleMaterialCode,
-        stockTransferMap,
-        orderData.docCode,
-        maBp,
-        loaiGd === '11' || loaiGd === '12',
-      );
+      finalMaKho = await this.resolveInvoiceMaKho(sale, maBp);
     } else {
       // In Sales Order Only mode, we skip these inventory fields
       // But we still might need ma_kho? User requested "bỏ mấy cái lô serial liên quan để kho đi"

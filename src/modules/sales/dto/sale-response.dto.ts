@@ -60,6 +60,7 @@ export class SaleItemResponseDto {
   docDate: Date;
   branchCode: string;
   docSourceType: string;
+  maSerial: string;
 
   // ========== ITEM INFO ==========
   itemCode: string;
@@ -102,7 +103,6 @@ export class SaleItemResponseDto {
   thanhToanVoucherDisplay?: string | null;
   thanhToanTkTienAoDisplay?: string | null;
   chietKhauThanhToanTkTienAoDisplay?: number | null;
-  soSerialDisplay?: string | null;
 
   // ========== PROMOTION/DISCOUNT ==========
   maCtkmTangHang?: string;

@@ -92,6 +92,7 @@ export function mapToSaleItemResponse(sale: any): SaleItemResponseDto {
     docDate: sale.docDate,
     branchCode: sale.branchCode,
     docSourceType: sale.docSourceType,
+    maSerial: sale.stockTransfer?.batchSerial || sale.maSerial,
 
     // Item info
     itemCode: sale.itemCode,
@@ -134,7 +135,6 @@ export function mapToSaleItemResponse(sale: any): SaleItemResponseDto {
     thanhToanVoucherDisplay: sale.thanhToanVoucherDisplay,
     thanhToanTkTienAoDisplay: sale.thanhToanTkTienAoDisplay,
     chietKhauThanhToanTkTienAoDisplay: sale.chietKhauThanhToanTkTienAoDisplay,
-    soSerialDisplay: sale.soSerialDisplay,
 
     // Promotion/Discount
     maCtkmTangHang: sale.maCtkmTangHang,

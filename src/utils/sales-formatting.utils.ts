@@ -35,7 +35,6 @@ export async function calculateDisplayFields(
   thanhToanVoucher: number | null;
   thanhToanTkTienAoDisplay: string | null;
   chietKhauThanhToanTkTienAoDisplay: number | null;
-  soSerialDisplay: string | null;
   cucThueDisplay: string | null;
   tkDoanhThuDisplay: string | null;
   tkGiaVonDisplay: string | null;
@@ -112,16 +111,6 @@ export async function calculateDisplayFields(
     }
   }
 
-  let soSerialDisplay: string | null = null;
-  if (
-    sale.serial &&
-    sale.serial.indexOf('_') <= 0 &&
-    loyaltyProduct?.trackSerial &&
-    !loyaltyProduct?.trackBatch
-  ) {
-    soSerialDisplay = sale.serial;
-  }
-
   const cucThueDisplay =
     sale.cucThue || department?.ma_dvcs || department?.ma_dvcs_ht || null;
 
@@ -150,7 +139,6 @@ export async function calculateDisplayFields(
     thanhToanVoucher,
     thanhToanTkTienAoDisplay,
     chietKhauThanhToanTkTienAoDisplay,
-    soSerialDisplay,
     cucThueDisplay,
     tkDoanhThuDisplay,
     tkGiaVonDisplay,
@@ -268,6 +256,7 @@ export async function formatSaleForFrontend(
   const trackSerial = loyaltyProductForTracking?.trackSerial === true;
   const trackBatch = loyaltyProductForTracking?.trackBatch === true;
 
+  // 3. Batch/Serial Resolution
   let { maLo, soSerial } = InvoiceLogicUtils.resolveBatchSerial({
     batchSerialFromST,
     trackBatch,
@@ -330,7 +319,7 @@ export async function formatSaleForFrontend(
     loyaltyProduct,
   });
 
-  // 6. Display Fields
+  // 7. Display Fields
   const displayFields = await calculateDisplayFields(
     sale,
     order,
@@ -356,7 +345,7 @@ export async function formatSaleForFrontend(
     isEmployee: isEmployee ?? false,
   });
 
-  // 7. Wholesale Promotion Code Mapping
+  // 8. Wholesale Promotion Code Mapping
   // Áp dụng cho đơn hàng bán buôn khi dist_tm > 0
   let maCkTheoChinhSach;
   const typeSale = (sale.type_sale || '').toUpperCase().trim();
@@ -384,9 +373,6 @@ export async function formatSaleForFrontend(
   // Use loose equality for safety (number vs string)
   if (isWholesale && String(loaiVt) === '94' && sale.maThe) {
     soSerial = sale.maThe; // Override biến soSerial local (data field)
-    if (displayFields) {
-      displayFields.soSerialDisplay = sale.maThe;
-    }
   }
 
   // [FIX FORCE] Nếu Stock Transfer có batchSerial nhưng không hiển thị (do tracking config),
@@ -394,20 +380,28 @@ export async function formatSaleForFrontend(
   // Fix: Chỉ hiển thị ở Serial nếu nó không phải là Mã Lô
   if (!soSerial && !maLo && batchSerialFromST) {
     soSerial = batchSerialFromST;
-    if (displayFields && !displayFields.soSerialDisplay) {
-      displayFields.soSerialDisplay = batchSerialFromST;
-    }
   }
 
   return {
     ...sale,
-    customer: undefined, // Remove customer from sale - it's already at order level
+    customer: sale.customer
+      ? {
+          code: sale.customer.code,
+          name: sale.customer.name,
+          brand: sale.customer.brand,
+          address: sale.customer.address,
+          idnumber: sale.customer.idnumber,
+          mobile: sale.customer.mobile,
+          birthday: sale.customer.birthday,
+          sexual: sale.customer.sexual,
+        }
+      : null,
     itemName: sale.itemName || loyaltyProduct?.name || null,
     maKho: maKho,
     maCtkmTangHang: maCtkmTangHang,
     // [MOVED] muaHangCkVip moved to bottom with explicit check
     maLo: maLo,
-    maSerial: soSerial,
+    maSerial: batchSerialFromST,
     isTangHang,
     isDichVu: calculatedFields.isDichVu,
     promCodeDisplay: finalPromCodeDisplay,
@@ -439,8 +433,6 @@ export async function formatSaleForFrontend(
       ? null
       : displayFields.thanhToanVoucherDisplay,
     thanhToanVoucher: isSanTmdt ? 0 : displayFields.thanhToanVoucher,
-    // [FIX FINAL] Ensure soSerialDisplay is populated from fallback logic (stockTransfer)
-    soSerialDisplay: displayFields?.soSerialDisplay || soSerial || null,
     productType: productType,
     // Optimized: Only return fields actually used by frontend
     product: loyaltyProduct
@@ -486,6 +478,13 @@ export async function formatSaleForFrontend(
       sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0,
     ),
     muaHangCkVip: calculatedFields.muaHangCkVip || null, // Ensure not undefined
+
+    // [FIX] maThe assignment logic:
+    // - For type V items in normal orders (01. Thường): use batchSerialFromST if available
+    maThe:
+      isThuong && productType === 'V'
+        ? batchSerialFromST || ''
+        : sale.maThe || '',
   };
 }
 

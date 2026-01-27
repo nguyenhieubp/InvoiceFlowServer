@@ -103,6 +103,7 @@ export class SalesQueryService {
       StockTransferUtils.getDocCodesForStockTransfer([docCode]);
     const stockTransfers = await this.stockTransferRepository.find({
       where: { soCode: In(docCodesForStockTransfer) },
+      order: { createdAt: 'ASC' }, // [FIX] Ensure FIFO for sequential matching
     });
 
     // 4.1. Order Fee (for Platform Order detection)
@@ -112,21 +113,36 @@ export class SalesQueryService {
     const isPlatformOrder = !!orderFee;
     const platformBrand = orderFee?.brand;
 
-    const { stockTransferMap, stockTransferByDocCodeMap } =
-      StockTransferUtils.buildStockTransferMaps(
-        stockTransfers,
-        loyaltyProductMap,
-        [docCode],
-      );
-
-    // Pre-build map for ItemCode lookup (fallback)
-    const stockTransferByItemCodeMap = new Map<string, StockTransfer[]>();
+    // [FIX] Group by ItemCode and Pre-assign to Sales (1-1 Sequential)
+    const stockTransfersByItemCode = new Map<
+      string,
+      { st: StockTransfer[]; rt: StockTransfer[] }
+    >();
     stockTransfers.forEach((st) => {
-      const key = `${st.soCode}_${st.itemCode}`;
-      if (!stockTransferByItemCodeMap.has(key)) {
-        stockTransferByItemCodeMap.set(key, []);
+      const key = st.itemCode;
+      if (!key) return;
+      if (!stockTransfersByItemCode.has(key)) {
+        stockTransfersByItemCode.set(key, { st: [], rt: [] });
       }
-      stockTransferByItemCodeMap.get(key)!.push(st);
+      const group = stockTransfersByItemCode.get(key)!;
+      if (st.docCode.startsWith('RT')) group.rt.push(st);
+      else if (st.docCode.startsWith('ST')) group.st.push(st);
+    });
+
+    const saleIdToStockTransferMap = new Map<
+      string,
+      { st: StockTransfer | null; rt: StockTransfer | null }
+    >();
+    sales.forEach((sale) => {
+      const key = sale.itemCode;
+      let assignedSt: StockTransfer | null = null;
+      let assignedRt: StockTransfer | null = null;
+      const group = stockTransfersByItemCode.get(key);
+      if (group) {
+        if (group.st.length > 0) assignedSt = group.st.shift() || null;
+        if (group.rt.length > 0) assignedRt = group.rt.shift() || null;
+      }
+      saleIdToStockTransferMap.set(sale.id, { st: assignedSt, rt: assignedRt });
     });
 
     // 5. Card Data (for Tach The orders)
@@ -171,28 +187,20 @@ export class SalesQueryService {
           ? departmentMap.get(sale.branchCode)
           : null;
 
-        const saleMaterialCode = loyaltyProduct?.materialCode;
-        let saleStockTransfers: StockTransfer[] = [];
+        // [FIX] Use Pre-assigned Stock Transfers
+        const { st: assignedSt, rt: assignedRt } = saleIdToStockTransferMap.get(
+          sale.id,
+        ) || { st: null, rt: null };
+        const saleStockTransfers: StockTransfer[] = [];
+        if (assignedSt) saleStockTransfers.push(assignedSt);
+        if (assignedRt) saleStockTransfers.push(assignedRt);
 
-        if (saleMaterialCode) {
-          const stockTransferKey = `${docCode}_${saleMaterialCode}`;
-          saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
+        // Resolve Ma Kho directly
+        let maKhoFromStockTransfer = '';
+        if (assignedSt?.stockCode) {
+          maKhoFromStockTransfer =
+            warehouseCodeMap?.get(assignedSt.stockCode) || assignedSt.stockCode;
         }
-
-        // Fallback: lookup by itemCode
-        if (saleStockTransfers.length === 0 && sale.itemCode) {
-          const key = `${docCode}_${sale.itemCode}`;
-          saleStockTransfers = stockTransferByItemCodeMap.get(key) || [];
-        }
-
-        const maKhoFromStockTransfer = this.getMaKhoFromStockTransfer(
-          sale,
-          docCode,
-          stockTransfers,
-          saleMaterialCode,
-          stockTransferMap,
-          warehouseCodeMap,
-        );
 
         const calculatedFields = SalesCalculationUtils.calculateSaleFields(
           sale,
@@ -229,7 +237,14 @@ export class SalesQueryService {
           platformBrand, // [NEW]
           isEmployee, // [API] Pre-fetched employee status
         );
-        return enriched;
+
+        // [EXPAND] Return keys for Fast API Payload reuse
+        return {
+          ...enriched,
+          stockTransfer: assignedSt || undefined,
+          ma_nx_st: assignedSt?.docCode || null,
+          ma_nx_rt: assignedRt?.docCode || null,
+        };
       }),
     );
 
@@ -714,9 +729,79 @@ export class SalesQueryService {
       sourceCompany: brandForEmployeeCheck,
     }));
 
+    // 7. Pre-fetch Employee Status via API
+    // ... (existing helper logic)
+
     const isEmployeeMapForAll = await this.n8nService.checkCustomersIsEmployee(
       partnerCodesToCheckForAll,
     );
+
+    // [FIX] Robust 1-1 Stock Transfer Matching Logic (Batch for all orders)
+    const saleIdToStockTransferMap = new Map<
+      string,
+      { st: StockTransfer | null; rt: StockTransfer | null }
+    >();
+
+    // Group Stock Transfers by SO Code for efficiency
+    const stockTransfersBySoCode = new Map<string, StockTransfer[]>();
+    stockTransfers.forEach((st) => {
+      const soCode = st.soCode || st.docCode; // Fallback? usually soCode is key
+      if (!stockTransfersBySoCode.has(soCode)) {
+        stockTransfersBySoCode.set(soCode, []);
+      }
+      stockTransfersBySoCode.get(soCode)!.push(st);
+    });
+
+    for (const [docCode, sales] of enrichedSalesMap.entries()) {
+      const orderStockTransfers = stockTransfersBySoCode.get(docCode) || [];
+
+      // Group STs by ItemCode
+      const stByItem = new Map<
+        string,
+        { st: StockTransfer[]; rt: StockTransfer[] }
+      >();
+      orderStockTransfers.forEach((st) => {
+        // Logic to find match key: materialCode or itemCode
+        // We need to match with logic used in findByOrderCode roughly
+        // We'll use itemCode as primary key if available, or materialCode
+        // The sales loop below will verify.
+
+        // To match logic in findByOrderCode, we used itemCode if available
+        const key = st.itemCode;
+        if (!key) return; // limit capability if no itemCode
+
+        if (!stByItem.has(key)) stByItem.set(key, { st: [], rt: [] });
+        const m = stByItem.get(key)!;
+
+        if (st.docCode.startsWith('ST') || Number(st.qty || 0) < 0) {
+          m.st.push(st);
+        } else {
+          m.rt.push(st);
+        }
+      });
+
+      // Loop sales and assign
+      sales.forEach((sale) => {
+        if (!sale.id) return;
+        const key = sale.itemCode; // Primary match key
+
+        if (key && stByItem.has(key)) {
+          const m = stByItem.get(key)!;
+          const assignedSt = m.st.shift() || null;
+          const assignedRt = m.rt.shift() || null;
+          saleIdToStockTransferMap.set(sale.id, {
+            st: assignedSt,
+            rt: assignedRt,
+          });
+        } else {
+          // Fallback? If logic relies on materialCode?
+          // Current findAllOrders logic relied on materialCode heavily.
+          // findByOrderCode used itemCode primarily.
+          // Let's stick to itemCode for consistency.
+          saleIdToStockTransferMap.set(sale.id, { st: null, rt: null });
+        }
+      });
+    }
 
     // 8. Format Sales for Frontend
     // OPTIMIZED: Parallelize formatSaleForFrontend calls instead of sequential
@@ -744,25 +829,21 @@ export class SalesQueryService {
           sale.maThe = maThe;
           const saleMaterialCode = loyaltyProduct?.materialCode;
 
-          let saleStockTransfers: StockTransfer[] = [];
-          if (saleMaterialCode) {
-            const stockTransferKey = `${docCode}_${saleMaterialCode}`;
-            saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
-          }
-          // OPTIMIZED: Use map lookup O(1) instead of filter O(m)
-          if (saleStockTransfers.length === 0 && sale.itemCode) {
-            const key = `${docCode}_${sale.itemCode}`;
-            saleStockTransfers = stockTransferByItemCodeMap.get(key) || [];
-          }
+          // [FIX] Use Pre-assigned Stock Transfers
+          const { st: assignedSt, rt: assignedRt } =
+            saleIdToStockTransferMap.get(sale.id) || { st: null, rt: null };
 
-          const maKhoFromStockTransfer = this.getMaKhoFromStockTransfer(
-            sale,
-            docCode,
-            stockTransfers,
-            saleMaterialCode,
-            stockTransferMap,
-            warehouseCodeMap,
-          );
+          let saleStockTransfers: StockTransfer[] = [];
+          if (assignedSt) saleStockTransfers.push(assignedSt);
+          if (assignedRt) saleStockTransfers.push(assignedRt);
+
+          // [FIX] Resolve MaKho from assigned ST directly
+          let maKhoFromStockTransfer = '';
+          if (assignedSt?.stockCode) {
+            maKhoFromStockTransfer =
+              warehouseCodeMap.get(assignedSt.stockCode) ||
+              assignedSt.stockCode;
+          }
           const calculatedFields = SalesCalculationUtils.calculateSaleFields(
             sale,
             loyaltyProduct,
