@@ -68,6 +68,15 @@ export class FastApiPayloadHelper {
         detail: (orderData.detail || []).map((item: any) => {
           const { product, ...cleanItem } = item;
           const result: any = { ...cleanItem };
+
+          // FIX: Loại bỏ tien_hang cho giao dịch "03. Đổi điểm" (Point Redemption)
+          // Kiểm tra xem có phải đơn đổi điểm không (ma_ctkm_th chứa "KMDIEM")
+          const isDoiDiem =
+            item.ma_ctkm_th && String(item.ma_ctkm_th).includes('KMDIEM');
+          if (isDoiDiem && 'tien_hang' in result) {
+            delete result.tien_hang;
+          }
+
           // Giữ lại ma_lo và so_serial (kể cả null)
           if ('ma_lo' in item) result.ma_lo = item.ma_lo;
           if ('so_serial' in item) result.so_serial = item.so_serial;
@@ -105,6 +114,15 @@ export class FastApiPayloadHelper {
       detail: (orderData.detail || []).map((item: any) => {
         const { product, ...cleanItem } = item;
         const result: any = { ...cleanItem };
+
+        // FIX: Loại bỏ tien_hang cho giao dịch "03. Đổi điểm" (Point Redemption)
+        // Kiểm tra xem có phải đơn đổi điểm không (ma_ctkm_th chứa "KMDIEM")
+        const isDoiDiem =
+          item.ma_ctkm_th && String(item.ma_ctkm_th).includes('KMDIEM');
+        if (isDoiDiem && 'tien_hang' in result) {
+          delete result.tien_hang;
+        }
+
         // Giữ lại ma_lo và so_serial (kể cả null)
         if ('ma_lo' in item) result.ma_lo = item.ma_lo;
         if ('so_serial' in item) result.so_serial = item.so_serial;
