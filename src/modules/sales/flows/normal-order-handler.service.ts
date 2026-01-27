@@ -77,6 +77,8 @@ export class NormalOrderHandlerService {
         soResult[0].status === STATUS.SUCCESS) ||
       (soResult && soResult.status === STATUS.SUCCESS);
 
+    // NOTE: We continue even if SO fails? Usually if SO fails, SI might fail too, but legacy logic might allow retries.
+    // But original code returned early if !isSoSuccess. Let's keep that.
     if (!isSoSuccess) {
       const message =
         Array.isArray(soResult) && soResult[0]?.message
@@ -107,26 +109,33 @@ export class NormalOrderHandlerService {
           responseMessage.toLowerCase().includes('pk_d81'));
 
       if (isDuplicateError) {
+        this.logger.warn(
+          `Đơn hàng ${docCode} đã tồn tại trong Fast API. Tiếp tục xử lý Payment.`,
+        );
+        // Mock success result to allow flow to continue
+        siResult = [
+          {
+            status: STATUS.SUCCESS,
+            message: 'Đã tồn tại (Duplicate) - Proceeding to Payment',
+            guid: null, // Cannot retrieve GUID easily from duplicate error, but simpler for retryFlow
+          },
+        ];
+      } else {
+        // Real failure
+        // Return failure with soResult preserved
         return {
-          status: STATUS.SUCCESS,
-          message: `Đơn hàng ${docCode} đã tồn tại trong Fast API`,
-          result: error?.response?.data || {},
-          fastApiResponse: error?.response?.data || {},
+          status: 0,
+          message: `Lỗi tạo Sales Invoice: ${error?.message || error}`,
+          result: {
+            salesOrder: soResult,
+            salesInvoiceError: error?.message || error,
+          },
+          fastApiResponse: {
+            salesOrder: soResult,
+            salesInvoiceError: error?.message || error,
+          },
         };
       }
-      // Return failure with soResult preserved
-      return {
-        status: 0,
-        message: `Lỗi tạo Sales Invoice: ${error?.message || error}`,
-        result: {
-          salesOrder: soResult,
-          salesInvoiceError: error?.message || error,
-        },
-        fastApiResponse: {
-          salesOrder: soResult,
-          salesInvoiceError: error?.message || error,
-        },
-      };
     }
 
     const isSiSuccess =
@@ -148,12 +157,15 @@ export class NormalOrderHandlerService {
       };
     }
 
-    // 4. Cashio Payment (Synced via PaymentMethod API)
+    // 4 & 5. Payment Processing (Cashio & Stock)
+    const paymentErrors: string[] = [];
     const cashioResult = {
       cashReceiptResults: [],
       creditAdviceResults: [],
     };
+    let paymentResult: any = null;
 
+    // 4. Cashio Payment
     try {
       const paymentDataList =
         await this.paymentService.findPaymentByDocCode(docCode);
@@ -174,14 +186,15 @@ export class NormalOrderHandlerService {
           `[Cashio] No payment records found for order ${docCode}`,
         );
       }
-    } catch (err) {
+    } catch (err: any) {
+      const msg = `[Cashio Error] ${err?.message || err}`;
       this.logger.error(
-        `[Cashio] Error processing payment sync for order ${docCode}: ${err?.message || err}`,
+        `[Cashio] Error processing payment sync for order ${docCode}: ${msg}`,
       );
+      paymentErrors.push(msg);
     }
 
     // 5. Payment (Stock)
-    let paymentResult: any = null;
     try {
       const docCodesForStockTransfer =
         StockTransferUtils.getDocCodesForStockTransfer([docCode]);
@@ -200,22 +213,40 @@ export class NormalOrderHandlerService {
           stockCodes,
         );
       }
-    } catch (e) {
-      this.logger.warn(`[Payment] warning: ${e}`);
+    } catch (e: any) {
+      const msg = `[Stock Payment Error] ${e?.message || e}`;
+      this.logger.warn(`[Payment] warning: ${msg}`);
+      // Only treat as error if it's critical? User seems to care about "Cấu hình thanh toán" which comes from here roughly or step 4.
+      // processPayment uses findPaymentMethodByCode too.
+      paymentErrors.push(msg);
     }
 
     // 6. Build Result
+    // If there are payment errors, we treat the WHOLE process as FAILED to allow retry.
+    const isPaymentSuccess = paymentErrors.length === 0;
+
     const responseStatus =
-      siResult &&
-      Array.isArray(siResult) &&
-      siResult.length > 0 &&
-      siResult[0].status === STATUS.SUCCESS
-        ? STATUS.SUCCESS
-        : STATUS.FAILED;
-    const responseMessage =
-      responseStatus === STATUS.SUCCESS
-        ? 'Tạo hóa đơn thành công'
-        : 'Tạo hóa đơn thất bại';
+      isPaymentSuccess && isSiSuccess ? STATUS.SUCCESS : STATUS.FAILED;
+
+    let responseMessage = '';
+    if (responseStatus === STATUS.SUCCESS) {
+      responseMessage = 'Tạo hóa đơn thành công';
+      // Add note if it was a duplicate retry
+      if (
+        Array.isArray(siResult) &&
+        siResult[0]?.message?.includes('Duplicate')
+      ) {
+        responseMessage = 'Tạo hóa đơn thành công (Đã tồn tại trước đó)';
+      }
+    } else {
+      // Build error message
+      const parts: string[] = [];
+      if (!isSiSuccess) parts.push('Lỗi tạo Invoice');
+      if (!isPaymentSuccess)
+        parts.push(`Lỗi thanh toán: ${paymentErrors.join('; ')}`);
+      responseMessage = parts.join('. ') || 'Xử lý thất bại';
+    }
+
     const responseGuid =
       siResult && Array.isArray(siResult) && siResult.length > 0
         ? siResult[0].guid
@@ -227,6 +258,7 @@ export class NormalOrderHandlerService {
         salesInvoice: siResult,
         cashio: cashioResult,
         payment: paymentResult,
+        paymentErrors,
       },
       status: responseStatus,
       message: responseMessage,
@@ -236,6 +268,7 @@ export class NormalOrderHandlerService {
         salesInvoice: siResult,
         cashio: cashioResult,
         payment: paymentResult,
+        errors: paymentErrors,
       },
     };
   }
