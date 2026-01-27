@@ -147,19 +147,37 @@ export class SpecialOrderHandlerService {
         });
       }
 
-      // Build invoice data cho tất cả sales (dùng để tạo SalesOrder)
-      const invoiceData =
-        await this.salesPayloadService.buildFastApiInvoiceData(orderData);
+      // Step 2 & 3: Tạo SalesOrder & SalesInvoice CHỈ cho các dòng dịch vụ (S)
+      // Logic: Dòng dịch vụ là dòng có svc_code hoặc productType = 'S'
+      const serviceLines = sales.filter((s: any) => {
+        const productType = s.productType?.toUpperCase()?.trim();
+        return productType === PRODUCT_TYPES.SERVICE;
+      });
 
-      // Step 2: Tạo SalesOrder cho TẤT CẢ dòng (I, S, V...)
+      if (serviceLines.length === 0) {
+        throw new Error(`Đơn dịch vụ ${docCode} không có dòng dịch vụ (S) nào`);
+      }
+
+      // Rebuild payload SPECIFICALLY for service lines
+      const serviceOrderData = {
+        ...orderData,
+        sales: serviceLines,
+      };
+
+      const serviceInvoiceData =
+        await this.salesPayloadService.buildFastApiInvoiceData(
+          serviceOrderData,
+        );
+
+      // Step 2: Tạo SalesOrder (Chỉ dòng S)
       this.logger.log(
-        `[ServiceOrderFlow] Tạo SalesOrder cho ${sales.length} dòng`,
+        `[ServiceOrderFlow] Tạo SalesOrder cho ${serviceLines.length} dòng dịch vụ (S)`,
       );
       const salesOrderResult =
         await this.fastApiInvoiceFlowService.createSalesOrder({
-          ...invoiceData,
+          ...serviceInvoiceData,
           customer: orderData.customer,
-          ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+          ten_kh: orderData.customer?.name || serviceInvoiceData.ong_ba || '',
         });
 
       // Validate Sales Order Result
@@ -175,69 +193,39 @@ export class SpecialOrderHandlerService {
             ? salesOrderResult[0].message
             : salesOrderResult?.message || 'Tạo Sales Order thất bại';
         const error: any = new Error(message);
-        error.response = { data: salesOrderResult }; // Attach response for logging
+        error.response = { data: salesOrderResult };
         throw error;
       }
 
-      // Step 3: Tạo SalesInvoice CHỈ cho các dòng dịch vụ
-      // Logic: Dòng dịch vụ là dòng có svc_code (item được dùng trong dịch vụ)
-      // hoặc productType = 'S' (dịch vụ thuần túy)
-      const serviceLines = sales.filter((s: any) => {
-        // Fallback: Check productType = 'S' (dịch vụ thuần túy)
-        const productType = s.productType?.toUpperCase()?.trim();
-        if (productType === PRODUCT_TYPES.SERVICE) {
-          return true;
-        }
+      // Step 3: Tạo SalesInvoice (Chỉ dòng S - dùng chung Payload)
+      this.logger.log(
+        `[ServiceOrderFlow] Tạo SalesInvoice cho ${serviceLines.length} dòng dịch vụ (S)`,
+      );
 
-        // Không phải dòng dịch vụ
-        return false;
-      });
-
+      // Declare variable for scope visibility in return statement
       let salesInvoiceResult: any = null;
-      if (serviceLines.length > 0) {
-        this.logger.log(
-          `[ServiceOrderFlow] Tạo SalesInvoice cho ${serviceLines.length} dòng dịch vụ (productType = 'S')`,
-        );
 
-        // ✅ Extract service lines from EXISTING invoiceData (no rebuild)
-        const serviceInvoiceData = {
-          ...invoiceData,
-          detail: invoiceData.detail.filter((detailItem: any) => {
-            // Match detail items with service lines by ma_vt (materialCode)
-            return serviceLines.some((serviceLine: any) => {
-              const materialCode =
-                serviceLine.product?.materialCode || serviceLine.itemCode;
-              return detailItem.ma_vt === materialCode;
-            });
-          }),
-        };
+      salesInvoiceResult =
+        await this.fastApiInvoiceFlowService.createSalesInvoice({
+          ...serviceInvoiceData,
+          customer: orderData.customer,
+          ten_kh: orderData.customer?.name || serviceInvoiceData.ong_ba || '',
+        });
 
-        salesInvoiceResult =
-          await this.fastApiInvoiceFlowService.createSalesInvoice({
-            ...serviceInvoiceData,
-            customer: orderData.customer,
-            ten_kh: orderData.customer?.name || serviceInvoiceData.ong_ba || '',
-          });
+      const isSiSuccess =
+        (Array.isArray(salesInvoiceResult) &&
+          salesInvoiceResult.length > 0 &&
+          salesInvoiceResult[0].status === STATUS.SUCCESS) ||
+        (salesInvoiceResult && salesInvoiceResult.status === STATUS.SUCCESS);
 
-        const isSiSuccess =
-          (Array.isArray(salesInvoiceResult) &&
-            salesInvoiceResult.length > 0 &&
-            salesInvoiceResult[0].status === STATUS.SUCCESS) ||
-          (salesInvoiceResult && salesInvoiceResult.status === STATUS.SUCCESS);
-
-        if (!isSiSuccess) {
-          const message =
-            Array.isArray(salesInvoiceResult) && salesInvoiceResult[0]?.message
-              ? salesInvoiceResult[0].message
-              : salesInvoiceResult?.message || 'Tạo Sales Invoice thất bại';
-          const error: any = new Error(message);
-          error.response = { data: salesInvoiceResult };
-          throw error;
-        }
-      } else {
-        this.logger.log(
-          `[ServiceOrderFlow] Không có dòng dịch vụ (productType = 'S'), bỏ qua SalesInvoice`,
-        );
+      if (!isSiSuccess) {
+        const message =
+          Array.isArray(salesInvoiceResult) && salesInvoiceResult[0]?.message
+            ? salesInvoiceResult[0].message
+            : salesInvoiceResult?.message || 'Tạo Sales Invoice thất bại';
+        const error: any = new Error(message);
+        error.response = { data: salesInvoiceResult };
+        throw error;
       }
 
       let cashioResult: any = {
@@ -309,7 +297,7 @@ export class SpecialOrderHandlerService {
                 await this.fastApiInvoiceFlowService.processPayment(
                   docCode,
                   orderData,
-                  invoiceData,
+                  serviceInvoiceData,
                   stockCodes,
                 );
 
