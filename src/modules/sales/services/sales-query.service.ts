@@ -860,10 +860,19 @@ export class SalesQueryService {
           if (sale.itemCode && loyaltyProduct?.materialType) {
             loyaltyProductMap.set(sale.itemCode, loyaltyProduct);
           } else if (sale.itemCode && loyaltyProduct?.productType) {
-            // Fallback or explicit handling if needed
             if (!loyaltyProductMap.has(sale.itemCode)) {
               loyaltyProductMap.set(sale.itemCode, loyaltyProduct);
             }
+          }
+
+          // [FIX] Apply card data from legacy fetch (mimic Backend Payload logic)
+          // We must use loyaltyProduct.materialCode as the key
+          const matCode = loyaltyProduct?.materialCode;
+          if (matCode && getMaThe.has(matCode) && !sale.maThe) {
+            const serialFromCard = getMaThe.get(matCode);
+            sale.maThe = serialFromCard;
+            // Also fill soSerial as fallback
+            if (!sale.soSerial) sale.soSerial = serialFromCard;
           }
 
           const order = orderMap.get(sale.docCode);

@@ -143,7 +143,6 @@ export class N8nService {
       const saleQty = Number(sale.qty || 0);
 
       if (saleQty < 0) {
-        // Tìm item có qty < 0
         const negativeItem = cardData.find(
           (item: any) => Number(item.qty || 0) < 0,
         );
@@ -151,7 +150,6 @@ export class N8nService {
           sale.issuePartnerCode = negativeItem.issue_partner_code;
         }
       } else if (saleQty > 0) {
-        // Tìm item có qty > 0 và action = "ADJUST"
         const positiveItem = cardData.find(
           (item: any) => Number(item.qty || 0) > 0 && item.action === 'ADJUST',
         );
