@@ -120,6 +120,20 @@ export class SalesPayloadService {
         }
       }
 
+      // [NEW] Batch fetch all products like SalesQueryService to match Frontend behavior
+      const allItemCodes = Array.from(
+        new Set(
+          allSales
+            .map((s: any) => s.itemCode)
+            .filter((c: any) => !!c && c.trim() !== ''),
+        ),
+      ) as string[];
+
+      const loyaltyProductMap =
+        allItemCodes.length > 0
+          ? await this.loyaltyService.fetchProducts(allItemCodes)
+          : new Map();
+
       // 4. Transform sales to details (Filter out TRUTONKEEP items)
       const detail = await Promise.all(
         allSales
@@ -142,6 +156,7 @@ export class SalesPayloadService {
               // stockTransferMap removed
               cardSerialMap,
               svcCodeMap,
+              loyaltyProductMap, // [NEW] Pass map
               onlySalesOrder: options?.onlySalesOrder,
               isPlatformOrder, // [NEW] Pass flag
               platformBrand, // [NEW] Pass brand
@@ -1325,6 +1340,7 @@ export class SalesPayloadService {
       // stockTransferMap removed
       cardSerialMap,
       svcCodeMap,
+      loyaltyProductMap, // [NEW] Get map
       onlySalesOrder, // [NEW] Option to skip inventory fields
       isPlatformOrder, // [NEW]
       platformBrand, // [NEW]
@@ -1365,7 +1381,13 @@ export class SalesPayloadService {
       (sale.svc_code && svcCodeMap?.get(sale.svc_code)) ||
       SalesUtils.getMaterialCode(sale, sale.product) ||
       sale.itemCode;
-    const loyaltyProduct = await this.loyaltyService.checkProduct(materialCode);
+
+    // [FIX] Use map first, then checkProduct
+    // This matches SalesQueryService logic: Map lookup is primary
+    const loyaltyProduct =
+      loyaltyProductMap?.get(sale.itemCode) ||
+      loyaltyProductMap?.get(materialCode) ||
+      (await this.loyaltyService.checkProduct(materialCode));
 
     const { maCk01, maCtkmTangHang } = await this.resolveInvoicePromotionCodes(
       sale,
