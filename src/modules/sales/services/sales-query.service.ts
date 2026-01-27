@@ -1048,16 +1048,21 @@ export class SalesQueryService {
               sale.ordertypeName || sale.ordertype || '',
             );
             const isNormalOrder = orderTypes.isThuong;
-            const isTypeV = sale.productType === 'V';
+            const isTypeV =
+              sale.productType === 'V' || product?.productType === 'V';
 
             if (product?.materialType === '94' || (isNormalOrder && isTypeV)) {
               // User request: maThe must take value from soSerial
-              // Helper: Ensure soSerial is populated (fallback to ma_vt_ref)
-              if (!sale.soSerial && sale.ma_vt_ref) {
-                sale.soSerial = sale.ma_vt_ref;
+              // Helper: Ensure soSerial is populated (fallback to ma_vt_ref or stockTransfer.batchSerial)
+              if (!sale.soSerial) {
+                // [FIX] Try ma_vt_ref first, then stockTransfer.batchSerial
+                sale.soSerial =
+                  sale.ma_vt_ref || sale.stockTransfer?.batchSerial;
               }
               // Assign soSerial to maThe
-              sale.maThe = sale.soSerial;
+              if (sale.soSerial) {
+                sale.maThe = sale.soSerial;
+              }
             }
           });
         }
