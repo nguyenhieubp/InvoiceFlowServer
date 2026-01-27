@@ -1389,6 +1389,11 @@ export class SalesPayloadService {
       loyaltyProductMap?.get(materialCode) ||
       (await this.loyaltyService.checkProduct(materialCode));
 
+    // [CRITICAL FIX] Assign to sale.product so downstream logic uses fresh data
+    if (loyaltyProduct) {
+      sale.product = loyaltyProduct;
+    }
+
     const { maCk01, maCtkmTangHang } = await this.resolveInvoicePromotionCodes(
       sale,
       orderData,
