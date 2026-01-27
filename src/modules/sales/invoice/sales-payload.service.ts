@@ -1116,16 +1116,37 @@ export class SalesPayloadService {
       batchSerial = sale.stockTransfer.batchSerial;
     }
 
-    // [Fix] Fallback for Voucher (Type 94) - use ma_vt_ref (Ecode) as serial if not found in ST
-    if (!batchSerial && loyaltyProduct?.materialType === '94') {
+    const orderTypes = InvoiceLogicUtils.getOrderTypes(
+      sale.ordertypeName || sale.ordertype || '',
+    );
+    const isNormalOrder = orderTypes.isThuong;
+    const isTypeV = sale.productType === 'V' || sale.productType === 'S';
+
+    // [Fix] Fallback for Voucher (Type 94) OR Normal Order + Type V/S - use ma_vt_ref (Ecode) as serial
+    if (
+      !batchSerial &&
+      (loyaltyProduct?.materialType === '94' || (isNormalOrder && isTypeV))
+    ) {
       batchSerial = sale.ma_vt_ref || sale.serial || sale.soSerial;
     }
 
-    return InvoiceLogicUtils.resolveBatchSerial({
+    const result = InvoiceLogicUtils.resolveBatchSerial({
       batchSerialFromST: batchSerial,
       trackBatch: loyaltyProduct?.trackBatch === true,
       trackSerial: loyaltyProduct?.trackSerial === true,
     });
+
+    // [CRITICAL] Override: If it's Type 94 or (Normal + Type V/S) and we found a serial, FORCE return it as soSerial
+    // This allows maThe to be populated even if trackSerial is false in Loyalty
+    if (
+      !result.soSerial &&
+      batchSerial &&
+      (loyaltyProduct?.materialType === '94' || (isNormalOrder && isTypeV))
+    ) {
+      return { maLo: null, soSerial: batchSerial };
+    }
+
+    return result;
   }
 
   private calculateInvoiceQty(sale: any) {
