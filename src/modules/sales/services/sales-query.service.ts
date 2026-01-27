@@ -11,6 +11,7 @@ import * as SalesUtils from '../../../utils/sales.utils';
 import * as SalesCalculationUtils from '../../../utils/sales-calculation.utils';
 import * as SalesFormattingUtils from '../../../utils/sales-formatting.utils';
 import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
+import { InvoiceLogicUtils } from '../../../utils/invoice-logic.utils';
 import { VoucherIssueService } from '../../voucher-issue/voucher-issue.service';
 import { SalesExplosionService } from './sales-explosion.service';
 import { SalesFilterService } from './sales-filter.service';
@@ -950,6 +951,7 @@ export class SalesQueryService {
       // ... logic continues ...
 
       // [New] Override maThe for Voucher items (Type 94) with Ecode (ma_vt_ref)
+      // AND for Normal Orders (01. Thường) with product type S or V
       // Frontend requires maThe to show the serial/ecode
       enrichedOrders.forEach((order) => {
         if (order.sales) {
@@ -957,7 +959,13 @@ export class SalesQueryService {
             const product =
               loyaltyProductMap.get(sale.itemCode) ||
               loyaltyProductMap.get(sale.materialCode);
-            if (product?.materialType === '94') {
+            const orderTypes = InvoiceLogicUtils.getOrderTypes(
+              sale.ordertypeName || sale.ordertype || '',
+            );
+            const isNormalOrder = orderTypes.isThuong;
+            const isTypeV = sale.productType === 'V';
+
+            if (product?.materialType === '94' || (isNormalOrder && isTypeV)) {
               // User request: maThe must take value from soSerial
               // Helper: Ensure soSerial is populated (fallback to ma_vt_ref)
               if (!sale.soSerial && sale.ma_vt_ref) {
@@ -1392,14 +1400,24 @@ export class SalesQueryService {
       return new Date(b.docDate).getTime() - new Date(a.docDate).getTime();
     });
 
-    // Manual maThe overrides (Voucher Item Type 94)
+    // Manual maThe overrides (Voucher Item Type 94 AND Normal Orders with type S/V)
     orders.forEach((order) => {
       if (order.sales) {
         order.sales.forEach((sale: any) => {
           const product =
             loyaltyProductMap.get(sale.itemCode) ||
             loyaltyProductMap.get(sale.materialCode);
-          if (product?.materialType === '94') {
+          const orderTypes = InvoiceLogicUtils.getOrderTypes(
+            sale.ordertypeName || sale.ordertype || '',
+          );
+          const isNormalOrder = orderTypes.isThuong;
+          const isTypeS_or_V =
+            sale.productType === 'S' || sale.productType === 'V';
+
+          if (
+            product?.materialType === '94' ||
+            (isNormalOrder && isTypeS_or_V)
+          ) {
             if (!sale.soSerial && sale.ma_vt_ref) {
               sale.soSerial = sale.ma_vt_ref;
             }

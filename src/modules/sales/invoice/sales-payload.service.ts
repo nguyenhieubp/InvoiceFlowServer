@@ -1530,9 +1530,7 @@ export class SalesPayloadService {
       tk_chiet_khau: this.val(tkChietKhau, 16),
       tk_chi_phi: this.val(tkChiPhi, 16),
       ma_phi: this.val(maPhi, 16),
-      tien_hang:
-        (Number(sale.linetotal) || Number(sale.revenue) || 0) -
-        (Number(sale.disc_amt) || 0),
+      tien_hang: Number(giaBan) * Number(qty),
       so_luong: Number(sale.qty),
       // Logic for ma_lo/so_serial is now handled above conditionally
       ...(soSerial && soSerial.trim() !== ''
@@ -1582,7 +1580,10 @@ export class SalesPayloadService {
       tk_cpbh: this.val(sale.tkCpbh, 16),
       ma_bp: maBp,
       ma_the: this.val(
-        loyaltyProduct?.materialType === '94' && soSerial
+        (loyaltyProduct?.materialType === '94' && soSerial) ||
+          (isNormalOrder &&
+            (sale.productType === 'S' || sale.productType === 'V') &&
+            soSerial)
           ? soSerial
           : cardSerialMap.get(saleMaterialCode),
         256,
