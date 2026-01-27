@@ -520,7 +520,7 @@ export class FastApiInvoiceFlowService {
         this.logger.warn(
           '[ProcessCashioPayment] Missing payment method code (fop_syscode)',
         );
-        return null; // Skip if no code
+        return;
       }
 
       // Map data from PaymentService to Fast API payload structure
@@ -885,10 +885,11 @@ export class FastApiInvoiceFlowService {
                 throw new BadRequestException(errorMessage);
               }
             } else {
-              // Payment method có documentType nhưng không phải "Giấy báo nợ" → báo lỗi
-              const errorMessage = `Payment method "${cashioData.fop_syscode}" (${cashioData.code}) có documentType = "${paymentMethod.documentType}", không phải "Giấy báo nợ"`;
-              this.logger.error(`[Payment] ${errorMessage}`);
-              throw new BadRequestException(errorMessage);
+              // Payment method có documentType nhưng không phải "Giấy báo nợ" → Bỏ qua (theo yêu cầu user: "Total out không xử lý continue")
+              this.logger.warn(
+                `[Payment] Payment method "${cashioData.fop_syscode}" (${cashioData.code}) có documentType = "${paymentMethod.documentType}", không phải "Giấy báo nợ". Bỏ qua total_out.`,
+              );
+              continue;
             }
           }
         }
