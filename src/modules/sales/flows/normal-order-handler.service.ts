@@ -11,6 +11,7 @@ import * as SalesUtils from '../../../utils/sales.utils';
 import * as ConvertUtils from '../../../utils/convert.utils';
 import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
 import { STATUS } from '../constants/sales-invoice.constants';
+import axios from 'axios';
 
 @Injectable()
 export class NormalOrderHandlerService {
@@ -47,8 +48,6 @@ export class NormalOrderHandlerService {
         ma_kh: SalesUtils.normalizeMaKh(orderData.customer.code),
         ten_kh: orderData.customer.name || '',
         dia_chi: orderData.customer.address || undefined,
-        dien_thoai:
-          orderData.customer.mobile || orderData.customer.phone || undefined,
         so_cccd: orderData.customer.idnumber || undefined,
         ngay_sinh: orderData.customer?.birthday
           ? ConvertUtils.formatDateYYYYMMDD(orderData.customer.birthday)

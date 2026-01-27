@@ -355,7 +355,6 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
     so_cccd?: string;
     e_mail?: string;
     gioi_tinh?: string;
-    dien_thoai?: string;
   }): Promise<any> {
     try {
       // Lấy token (tự động refresh nếu cần)
@@ -375,7 +374,6 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
       if (customerData.so_cccd) payload.so_cccd = customerData.so_cccd;
       if (customerData.e_mail) payload.e_mail = customerData.e_mail;
       if (customerData.gioi_tinh) payload.gioi_tinh = customerData.gioi_tinh;
-      if (customerData.dien_thoai) payload.dien_thoai = customerData.dien_thoai;
 
       // Gọi API Customer với token
       const response = await firstValueFrom(
@@ -415,8 +413,6 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
             if (customerData.e_mail) payload.e_mail = customerData.e_mail;
             if (customerData.gioi_tinh)
               payload.gioi_tinh = customerData.gioi_tinh;
-            if (customerData.dien_thoai)
-              payload.dien_thoai = customerData.dien_thoai;
 
             const retryResponse = await firstValueFrom(
               this.httpService.post(`${this.baseUrl}/Customer`, payload, {

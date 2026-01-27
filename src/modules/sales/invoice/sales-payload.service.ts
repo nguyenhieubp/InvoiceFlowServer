@@ -1162,7 +1162,7 @@ export class SalesPayloadService {
 
   private resolveInvoiceLoaiGd(sale: any, loyaltyProduct: any = null): string {
     const orderTypes = InvoiceLogicUtils.getOrderTypes(
-      sale.ordertype || sale.ordertypeName || '',
+      sale.ordertypeName || '',
     );
     return InvoiceLogicUtils.resolveLoaiGd({
       sale,
@@ -1240,7 +1240,7 @@ export class SalesPayloadService {
     let maKh = SalesUtils.normalizeMaKh(orderData.customer?.code);
     const firstSale = orderData.sales?.[0];
     const { isTachThe } = InvoiceLogicUtils.getOrderTypes(
-      firstSale?.ordertype || firstSale?.ordertypeName || '',
+      firstSale?.ordertypeName || firstSale?.ordertype || '',
     );
 
     if (isTachThe && Array.isArray(orderData.sales)) {
@@ -1270,7 +1270,7 @@ export class SalesPayloadService {
     }
 
     const orderTypes = InvoiceLogicUtils.getOrderTypes(
-      sale.ordertype || sale.ordertypeName || '',
+      sale.ordertypeName || sale.ordertype || '',
     );
 
     const maKho = InvoiceLogicUtils.resolveMaKho({

@@ -153,10 +153,6 @@ export class SalesInvoiceService {
           ma_kh: SalesUtils.normalizeMaKh(orderData.customer?.code),
           ten_kh: orderData.customer?.name || '',
           dia_chi: orderData.customer?.address || undefined,
-          dien_thoai:
-            orderData.customer?.mobile ||
-            orderData.customer?.phone ||
-            undefined,
           so_cccd: orderData.customer?.idnumber || undefined,
           ngay_sinh: orderData.customer?.birthday
             ? ConvertUtils.formatDateYYYYMMDD(orderData.customer.birthday)

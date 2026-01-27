@@ -14,6 +14,7 @@ import { formatDateYYYYMMDD } from '../utils/convert.utils';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PaymentSyncLog } from '../entities/payment-sync-log.entity';
+import axios from 'axios';
 
 /**
  * Service quản lý tạo invoice trong Fast API
@@ -45,7 +46,6 @@ export class FastApiInvoiceFlowService {
     so_cccd?: string;
     e_mail?: string;
     gioi_tinh?: string;
-    dien_thoai?: string;
   }): Promise<any> {
     try {
       const result =
@@ -467,10 +467,6 @@ export class FastApiInvoiceFlowService {
           ma_kh: invoiceData.ma_kh,
           ten_kh: invoiceData.ten_kh || invoiceData.customer?.name || '',
           dia_chi: invoiceData.customer?.address || undefined,
-          dien_thoai:
-            invoiceData.customer?.mobile ||
-            invoiceData.customer?.phone ||
-            undefined,
           so_cccd: invoiceData.customer?.idnumber || undefined,
           ngay_sinh: invoiceData.customer?.birthday
             ? formatDateYYYYMMDD(invoiceData.customer.birthday)

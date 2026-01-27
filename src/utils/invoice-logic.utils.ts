@@ -53,10 +53,10 @@ export class InvoiceLogicUtils {
       normalized.toLowerCase().includes('tặng sinh nhật') ||
       normalized.toLowerCase().includes('tang sinh nhat');
     const isThuong =
-      normalized.includes('01.Thường') ||
-      normalized.includes('01. Thường') ||
-      normalized.toLowerCase().includes('thường') ||
-      normalized.toLowerCase().includes('thuong');
+      normalized.startsWith('01.') ||
+      normalized.startsWith('01 ') ||
+      normalized.toLowerCase() === 'thường' ||
+      normalized.toLowerCase() === 'thuong';
     const isDoiDv =
       normalized.includes('04. Đổi DV') || normalized.includes('04.Đổi DV');
     const isTachThe =
