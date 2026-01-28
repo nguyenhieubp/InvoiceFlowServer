@@ -6,10 +6,13 @@ export class PurchaseOrderController {
   constructor(private readonly purchaseOrderService: PurchaseOrderService) {}
 
   @Post('sync')
-  async syncPO(@Body() body: { startDate: string; endDate: string }) {
+  async syncPO(
+    @Body() body: { startDate: string; endDate: string; brand?: string },
+  ) {
     return this.purchaseOrderService.syncPurchaseOrders(
       body.startDate,
       body.endDate,
+      body.brand,
     );
   }
 

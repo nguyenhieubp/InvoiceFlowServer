@@ -492,6 +492,74 @@ export class ZappyApiService {
   }
 
   /**
+   * Lấy dữ liệu đơn đặt hàng (PO) từ Zappy API
+   * @param date - Ngày theo format DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
+   * @returns Array of PO records
+   */
+  async getDailyPO(date: string, brand?: string): Promise<any[]> {
+    try {
+      const baseUrl = this.getBaseUrlForBrand(brand);
+      const url = `${baseUrl}/get_daily_po?P_DATE=${date}`;
+
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: { accept: 'application/json' },
+        }),
+      );
+
+      const items = response.data?.data || [];
+      if (!Array.isArray(items)) {
+        this.logger.warn(
+          `Invalid response format for PO date ${date} (brand: ${brand})`,
+        );
+        return [];
+      }
+
+      return items;
+    } catch (error: any) {
+      this.logger.error(
+        `Error fetching daily PO from Zappy API: ${error?.message || error}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy dữ liệu phiếu nhập kho (Goods Receipt) từ Zappy API
+   * @param date - Ngày theo format DDMMMYYYY (ví dụ: 01NOV2025)
+   * @param brand - Brand name (f3, labhair, yaman, menard, ...). Nếu không có thì dùng default
+   * @returns Array of GR records
+   */
+  async getDailyGR(date: string, brand?: string): Promise<any[]> {
+    try {
+      const baseUrl = this.getBaseUrlForBrand(brand);
+      const url = `${baseUrl}/get_daily_gr?P_DATE=${date}`;
+
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: { accept: 'application/json' },
+        }),
+      );
+
+      const items = response.data?.data || [];
+      if (!Array.isArray(items)) {
+        this.logger.warn(
+          `Invalid response format for GR date ${date} (brand: ${brand})`,
+        );
+        return [];
+      }
+
+      return items;
+    } catch (error: any) {
+      this.logger.error(
+        `Error fetching daily GR from Zappy API: ${error?.message || error}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Transform dữ liệu từ Zappy format sang Order format
    */
   private transformZappySalesToOrders(

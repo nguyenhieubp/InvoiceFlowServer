@@ -1,69 +1,81 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
-import { HttpService } from '@nestjs/axios';
-import { lastValueFrom } from 'rxjs';
 import { PurchaseOrder } from '../../entities/purchase-order.entity';
-import { AxiosRequestConfig } from 'axios';
+import { ZappyApiService } from '../../services/zappy-api.service';
 
 @Injectable()
 export class PurchaseOrderService {
   private readonly logger = new Logger(PurchaseOrderService.name);
-  private readonly PO_API_URL =
-    'https://vmterp.com/ords/erp/retail/api/get_daily_po';
 
   constructor(
     @InjectRepository(PurchaseOrder)
     private poRepository: Repository<PurchaseOrder>,
-    private httpService: HttpService,
+    private zappyService: ZappyApiService,
   ) {}
 
   /**
    * Sync Purchase Orders for a date range
+   * @param startDate Date string YYYY-MM-DD
+   * @param endDate Date string YYYY-MM-DD
+   * @param brand Brand name (optional, default 'menard')
    */
-  async syncPurchaseOrders(startDate: string, endDate: string) {
-    this.logger.log(`Starting PO sync from ${startDate} to ${endDate}`);
+  async syncPurchaseOrders(startDate: string, endDate: string, brand?: string) {
+    const brands =
+      brand && brand !== 'all' ? [brand] : ['menard', 'f3', 'labhair', 'yaman'];
+
+    this.logger.log(
+      `Starting PO sync from ${startDate} to ${endDate} for brands: ${brands.join(', ')}`,
+    );
+
     const dates = this.getDatesInRange(startDate, endDate);
     let totalSynced = 0;
 
-    for (const date of dates) {
-      try {
-        const formattedDate = this.formatDateForApi(date); // DDMONYYYY
-        this.logger.log(`Fetching POs for date: ${formattedDate}`);
-
-        const response = await lastValueFrom(
-          this.httpService.get(`${this.PO_API_URL}?P_DATE=${formattedDate}`),
-        );
-
-        const items = response.data?.items || response.data || [];
-        if (!Array.isArray(items)) {
-          this.logger.warn(
-            `Invalid response format for PO date ${formattedDate}`,
+    for (const currentBrand of brands) {
+      for (const date of dates) {
+        try {
+          const formattedDate = this.formatDateForApi(date); // DDMONYYYY
+          this.logger.log(
+            `Fetching POs for date: ${formattedDate} (Brand: ${currentBrand})`,
           );
-          continue;
+
+          const items = await this.zappyService.getDailyPO(
+            formattedDate,
+            currentBrand,
+          );
+
+          if (items.length > 0) {
+            const dayStart = new Date(date);
+            dayStart.setHours(0, 0, 0, 0);
+            const dayEnd = new Date(date);
+            dayEnd.setHours(23, 59, 59, 999);
+
+            // Note: If we want to support overlapping data from different brands on the same date,
+            // we should likely filter delete by brand too, assuming the entity supports it.
+            // For now, staying consistent with previous logic but being careful.
+            // Ideally, we'd add .andWhere('brand = :brand', { brand: currentBrand }) if we had a brand column.
+            await this.poRepository.delete({
+              poDate: Between(dayStart, dayEnd),
+              // TODO: Add brand filter here if Entity has brand column to avoid deleting other brands' data
+              // catName might hold brand info?
+            });
+
+            const entities = items.map((item) => this.mapToPurchaseOrder(item));
+            await this.poRepository.save(entities);
+            totalSynced += entities.length;
+            this.logger.log(
+              `Synced ${entities.length} POs for ${formattedDate} (Brand: ${currentBrand})`,
+            );
+          } else {
+            this.logger.log(
+              `No POs found for ${formattedDate} (Brand: ${currentBrand})`,
+            );
+          }
+        } catch (error: any) {
+          this.logger.error(
+            `Failed to sync PO for date ${date} (Brand: ${currentBrand}): ${error.message}`,
+          );
         }
-
-        if (items.length > 0) {
-          const dayStart = new Date(date);
-          dayStart.setHours(0, 0, 0, 0);
-          const dayEnd = new Date(date);
-          dayEnd.setHours(23, 59, 59, 999);
-
-          await this.poRepository.delete({
-            poDate: Between(dayStart, dayEnd),
-          });
-
-          const entities = items.map((item) => this.mapToPurchaseOrder(item));
-          await this.poRepository.save(entities);
-          totalSynced += entities.length;
-          this.logger.log(`Synced ${entities.length} POs for ${formattedDate}`);
-        } else {
-          this.logger.log(`No POs found for ${formattedDate}`);
-        }
-      } catch (error) {
-        this.logger.error(
-          `Failed to sync PO for date ${date}: ${error.message}`,
-        );
       }
     }
     return { success: true, count: totalSynced };

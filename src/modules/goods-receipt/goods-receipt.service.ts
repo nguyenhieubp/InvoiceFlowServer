@@ -1,68 +1,72 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
-import { HttpService } from '@nestjs/axios';
-import { lastValueFrom } from 'rxjs';
 import { GoodsReceipt } from '../../entities/goods-receipt.entity';
-import { AxiosRequestConfig } from 'axios';
+import { ZappyApiService } from '../../services/zappy-api.service';
 
 @Injectable()
 export class GoodsReceiptService {
   private readonly logger = new Logger(GoodsReceiptService.name);
-  private readonly GR_API_URL = 'https://zappy.io.vn/ords/vmt/api/get_daily_gr';
 
   constructor(
     @InjectRepository(GoodsReceipt)
     private grRepository: Repository<GoodsReceipt>,
-    private httpService: HttpService,
+    private zappyService: ZappyApiService,
   ) {}
 
   /**
    * Sync Goods Receipts for a date range
    */
-  async syncGoodsReceipts(startDate: string, endDate: string) {
-    this.logger.log(`Starting GR sync from ${startDate} to ${endDate}`);
+  async syncGoodsReceipts(startDate: string, endDate: string, brand?: string) {
+    const brands =
+      brand && brand !== 'all' ? [brand] : ['menard', 'f3', 'labhair', 'yaman'];
+
+    this.logger.log(
+      `Starting GR sync from ${startDate} to ${endDate} for brands: ${brands.join(', ')}`,
+    );
+
     const dates = this.getDatesInRange(startDate, endDate);
     let totalSynced = 0;
 
-    for (const date of dates) {
-      try {
-        const formattedDate = this.formatDateForApi(date); // DDMONYYYY
-        this.logger.log(`Fetching GRs for date: ${formattedDate}`);
-
-        const response = await lastValueFrom(
-          this.httpService.get(`${this.GR_API_URL}?P_DATE=${formattedDate}`),
-        );
-
-        const items = response.data?.items || response.data || [];
-        if (!Array.isArray(items)) {
-          this.logger.warn(
-            `Invalid response format for GR date ${formattedDate}`,
+    for (const currentBrand of brands) {
+      for (const date of dates) {
+        try {
+          const formattedDate = this.formatDateForApi(date); // DDMONYYYY
+          this.logger.log(
+            `Fetching GRs for date: ${formattedDate} (Brand: ${currentBrand})`,
           );
-          continue;
+
+          const items = await this.zappyService.getDailyGR(
+            formattedDate,
+            currentBrand,
+          );
+
+          if (items.length > 0) {
+            const dayStart = new Date(date);
+            dayStart.setHours(0, 0, 0, 0);
+            const dayEnd = new Date(date);
+            dayEnd.setHours(23, 59, 59, 999);
+
+            await this.grRepository.delete({
+              grDate: Between(dayStart, dayEnd),
+            });
+
+            const entities = items.map((item) => this.mapToGoodsReceipt(item));
+            await this.grRepository.save(entities);
+            totalSynced += entities.length;
+            this.logger.log(
+              `Synced ${entities.length} GRs for ${formattedDate} (Brand: ${currentBrand})`,
+            );
+          } else {
+            this.logger.log(
+              `No GRs found for ${formattedDate} (Brand: ${currentBrand})`,
+            );
+          }
+        } catch (error: any) {
+          this.logger.error(
+            `Failed to sync GR for date ${date} (Brand: ${currentBrand}): ${error.message}`,
+          );
         }
-
-        if (items.length > 0) {
-          const dayStart = new Date(date);
-          dayStart.setHours(0, 0, 0, 0);
-          const dayEnd = new Date(date);
-          dayEnd.setHours(23, 59, 59, 999);
-
-          await this.grRepository.delete({
-            grDate: Between(dayStart, dayEnd),
-          });
-
-          const entities = items.map((item) => this.mapToGoodsReceipt(item));
-          await this.grRepository.save(entities);
-          totalSynced += entities.length;
-          this.logger.log(`Synced ${entities.length} GRs for ${formattedDate}`);
-        } else {
-          this.logger.log(`No GRs found for ${formattedDate}`);
-        }
-      } catch (error) {
-        this.logger.error(
-          `Failed to sync GR for date ${date}: ${error.message}`,
-        );
       }
     }
     return { success: true, count: totalSynced };
