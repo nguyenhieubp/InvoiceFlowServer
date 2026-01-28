@@ -151,7 +151,7 @@ export class SalesQueryService {
 
     // 5. Card Data (for Tach The orders)
     const hasTachThe = sales.some((s) =>
-      SalesUtils.isTachTheOrder(s.ordertype, s.ordertypeName),
+      SalesUtils.isTachTheOrder(s.ordertypeName),
     );
     let cardData: any = null;
     if (hasTachThe) {
@@ -466,34 +466,6 @@ export class SalesQueryService {
     // I will cancel this tool call and use multi_replace for inserting logs.
 
     // 3. Export Logic (Early Return)
-    if (isExport) {
-      const salesWithCustomer = allSales.map((sale) => {
-        return {
-          ...sale,
-          customer: sale.customer
-            ? {
-                code: sale.customer.code || sale.partnerCode || null,
-                brand: sale.customer.brand || null,
-                name: sale.customer.name || null,
-                mobile: sale.customer.mobile || null,
-              }
-            : sale.partnerCode
-              ? {
-                  code: sale.partnerCode || null,
-                  brand: null,
-                  name: null,
-                  mobile: null,
-                  id: null,
-                }
-              : null,
-        };
-      });
-
-      return {
-        sales: salesWithCustomer,
-        total: totalOrders,
-      };
-    }
 
     // 4. Group by Order (Data Preparation)
     const orderMap = new Map<string, any>();
@@ -934,7 +906,7 @@ export class SalesQueryService {
     // First pass to identify orders
     for (const [docCode, sales] of enrichedSalesMap.entries()) {
       const hasTachThe = sales.some((s: any) =>
-        SalesUtils.isTachTheOrder(s.ordertype, s.ordertypeName),
+        SalesUtils.isTachTheOrder(s.ordertypeName),
       );
       if (hasTachThe) {
         docCodesNeedingCardData.push(docCode);

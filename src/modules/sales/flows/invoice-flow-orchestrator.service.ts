@@ -226,20 +226,19 @@ export class InvoiceFlowOrchestratorService {
     // but a manual single pass is "Senior" level optimization.
 
     for (const s of sales) {
-      if (SalesUtils.isDoiDiemOrder(s.ordertype, s.ordertypeName))
+      if (SalesUtils.isDoiDiemOrder(s.ordertypeName))
         return ORDER_TYPES.LOYALTY_EXCHANGE;
-      if (SalesUtils.isDoiDvOrder(s.ordertype, s.ordertypeName))
+      if (SalesUtils.isDoiDvOrder(s.ordertypeName))
         return ORDER_TYPES.NORMAL_EXCHANGE;
-      if (SalesUtils.isTangSinhNhatOrder(s.ordertype, s.ordertypeName))
+      if (SalesUtils.isTangSinhNhatOrder(s.ordertypeName))
         return ORDER_TYPES.BIRTHDAY_GIFT;
-      if (SalesUtils.isDauTuOrder(s.ordertype, s.ordertypeName))
+      if (SalesUtils.isDauTuOrder(s.ordertypeName))
         return ORDER_TYPES.INVESTMENT;
-      if (SalesUtils.isTachTheOrder(s.ordertype, s.ordertypeName))
+      if (SalesUtils.isTachTheOrder(s.ordertypeName))
         return ORDER_TYPES.CARD_SEPARATION;
-      if (SalesUtils.isDoiVoOrder(s.ordertype, s.ordertypeName))
+      if (SalesUtils.isDoiVoOrder(s.ordertypeName))
         return ORDER_TYPES.BOTTLE_EXCHANGE;
-      if (isServiceOrder(s.ordertypeName || s.ordertype))
-        return ORDER_TYPES.SERVICE;
+      if (isServiceOrder(s.ordertypeName)) return ORDER_TYPES.SERVICE;
     }
     return ORDER_TYPES.NORMAL;
   }

@@ -68,10 +68,7 @@ export function calculateSaleFields(
     ordertypeName.includes('08. Tách thẻ') ||
     ordertypeName.includes('Đổi thẻ KEEP->Thẻ DV');
 
-  const isDoiDiem = SalesUtils.isDoiDiemOrder(
-    sale.ordertype,
-    sale.ordertypeName,
-  );
+  const isDoiDiem = SalesUtils.isDoiDiemOrder(sale.ordertypeName);
   if (isDoiDiem) isTangHang = false;
 
   let maCtkmTangHang: string | null = sale.maCtkmTangHang
@@ -113,8 +110,7 @@ export function calculateSaleFields(
     const maCtkmTangHangStr = maCtkmTangHang
       ? String(maCtkmTangHang).trim()
       : '';
-    if (maCtkmTangHangStr && maCtkmTangHangStr !== 'TT DAU TU')
-      promCodeDisplay = '1';
+    if (maCtkmTangHangStr !== 'TT DAU TU') promCodeDisplay = '1';
   }
 
   const customerBrand = sale.customer?.brand || null;

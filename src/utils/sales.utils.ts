@@ -194,10 +194,9 @@ function checkOrderTypeMatches(
  * Helper: Kiểm tra xem đơn hàng có phải "03. Đổi điểm" không
  */
 export function isDoiDiemOrder(
-  ordertype: string | null | undefined,
   ordertypeName: string | null | undefined,
 ): boolean {
-  return checkOrderTypeMatches(ordertype || ordertypeName, [
+  return checkOrderTypeMatches(ordertypeName, [
     '03. Đổi điểm',
     '03.Đổi điểm',
     '03.  Đổi điểm',
@@ -208,10 +207,9 @@ export function isDoiDiemOrder(
  * Helper: Kiểm tra xem đơn hàng có phải "04. Đổi DV" không
  */
 export function isDoiDvOrder(
-  ordertype: string | null | undefined,
   ordertypeName: string | null | undefined,
 ): boolean {
-  return checkOrderTypeMatches(ordertype || ordertypeName, [
+  return checkOrderTypeMatches(ordertypeName, [
     '04. Đổi DV',
     '04.Đổi DV',
     '04.  Đổi DV',
@@ -222,10 +220,9 @@ export function isDoiDvOrder(
  * Helper: Kiểm tra xem đơn hàng có phải "05. Tặng sinh nhật" không
  */
 export function isTangSinhNhatOrder(
-  ordertype: string | null | undefined,
   ordertypeName: string | null | undefined,
 ): boolean {
-  return checkOrderTypeMatches(ordertype || ordertypeName, [
+  return checkOrderTypeMatches(ordertypeName, [
     '05. Tặng sinh nhật',
     '05.Tặng sinh nhật',
     '05.  Tặng sinh nhật',
@@ -236,10 +233,9 @@ export function isTangSinhNhatOrder(
  * Helper: Kiểm tra xem đơn hàng có phải "06. Đầu tư" không
  */
 export function isDauTuOrder(
-  ordertype: string | null | undefined,
   ordertypeName: string | null | undefined,
 ): boolean {
-  return checkOrderTypeMatches(ordertype || ordertypeName, [
+  return checkOrderTypeMatches(ordertypeName, [
     '06. Đầu tư',
     '06.Đầu tư',
     '06.  Đầu tư',
@@ -250,10 +246,9 @@ export function isDauTuOrder(
  * Helper: Kiểm tra xem đơn hàng có phải "08. Tách thẻ" không
  */
 export function isTachTheOrder(
-  ordertype: string | null | undefined,
   ordertypeName: string | null | undefined,
 ): boolean {
-  return checkOrderTypeMatches(ordertype || ordertypeName, [
+  return checkOrderTypeMatches(ordertypeName, [
     '08. Tách thẻ',
     '08.Tách thẻ',
     '08.  Tách thẻ',
@@ -264,10 +259,9 @@ export function isTachTheOrder(
  * Helper: Kiểm tra xem đơn hàng có phải "Đổi vỏ" không
  */
 export function isDoiVoOrder(
-  ordertype: string | null | undefined,
   ordertypeName: string | null | undefined,
 ): boolean {
-  return checkOrderTypeMatches(ordertype || ordertypeName, ['Đổi vỏ']);
+  return checkOrderTypeMatches(ordertypeName, ['Đổi vỏ']);
 }
 
 /**
