@@ -1498,7 +1498,7 @@ export class SalesPayloadService {
       km_yn:
         maCtkmTangHang === 'TT DAU TU'
           ? 0
-          : Math.abs(giaBan) < 0.01 && Math.abs(tienHang) < 0.01
+          : InvoiceLogicUtils.isTangHang(Number(giaBan), Number(tienHang))
             ? 1
             : 0,
       dong_thuoc_goi: this.val(sale.dongThuocGoi, 32),

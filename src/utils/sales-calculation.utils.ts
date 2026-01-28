@@ -1,4 +1,5 @@
 import * as SalesUtils from './sales.utils';
+import { InvoiceLogicUtils } from './invoice-logic.utils';
 
 /**
  * Sales Calculation Utilities
@@ -59,7 +60,7 @@ export function calculateSaleFields(
   let giaBan = Number(sale.giaBan || 0);
   if (giaBan === 0 && tienHang != null && qty > 0) giaBan = tienHang / qty;
 
-  let isTangHang = Math.abs(giaBan) < 0.01 && Math.abs(tienHang) < 0.01;
+  let isTangHang = InvoiceLogicUtils.isTangHang(giaBan, tienHang);
 
   const ordertypeName = sale.ordertype || '';
   const isDichVu =
@@ -105,13 +106,12 @@ export function calculateSaleFields(
     if (maCtkmTangHang) maCtkmTangHang = maCtkmTangHang.trim();
   }
 
-  let promCodeDisplay: string | null = null;
-  if (isTangHang && !isDichVu) {
-    const maCtkmTangHangStr = maCtkmTangHang
-      ? String(maCtkmTangHang).trim()
-      : '';
-    if (maCtkmTangHangStr !== 'TT DAU TU') promCodeDisplay = '1';
-  }
+  // Use centralized logic for display code
+  const promCodeDisplay = InvoiceLogicUtils.getPromCodeDisplay(
+    isTangHang,
+    isDichVu,
+    maCtkmTangHang,
+  );
 
   const customerBrand = sale.customer?.brand || null;
   const muaHangCkVip = calculateMuaHangCkVip(

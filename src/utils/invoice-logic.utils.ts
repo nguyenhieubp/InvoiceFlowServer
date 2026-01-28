@@ -767,4 +767,31 @@ export class InvoiceLogicUtils {
 
     return null;
   }
+  /**
+   * Xác định xem sale item có phải là hàng tặng (Giá = 0) hay không
+   * Source of Truth cho cả Frontend Display và Fast API Payload (km_yn)
+   */
+  static isTangHang(giaBan: number, tienHang: number): boolean {
+    return Math.abs(giaBan) < 0.01 && Math.abs(tienHang) < 0.01;
+  }
+
+  /**
+   * Xác định giá trị hiển thị cho cột Khuyến mại (promCodeDisplay)
+   * Source of Truth cho Frontend Display
+   */
+  static getPromCodeDisplay(
+    isTangHang: boolean,
+    isDichVu: boolean,
+    maCtkmTangHang: string | null,
+  ): string | null {
+    if (isTangHang && !isDichVu) {
+      const maCtkmTangHangStr = maCtkmTangHang
+        ? String(maCtkmTangHang).trim()
+        : '';
+      if (maCtkmTangHangStr !== 'TT DAU TU') {
+        return '1';
+      }
+    }
+    return null;
+  }
 }
