@@ -1330,6 +1330,7 @@ export class SalesPayloadService {
       is_reward_line: sale.isRewardLine ? 1 : 0,
       is_bundle_reward_line: sale.isBundleRewardLine ? 1 : 0,
       km_yn:
+        InvoiceLogicUtils.getOrderTypes(sale.ordertypeName).isDoiDv ||
         maCtkmTangHang === 'TT DAU TU'
           ? 0
           : InvoiceLogicUtils.isTangHang(Number(giaBan), Number(tienHang))

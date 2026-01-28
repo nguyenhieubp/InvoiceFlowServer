@@ -62,14 +62,9 @@ export function calculateSaleFields(
 
   let isTangHang = InvoiceLogicUtils.isTangHang(giaBan, tienHang);
 
-  const ordertypeName = sale.ordertype || '';
-  const isDichVu =
-    ordertypeName.includes('02. Làm dịch vụ') ||
-    ordertypeName.includes('04. Đổi DV') ||
-    ordertypeName.includes('08. Tách thẻ') ||
-    ordertypeName.includes('Đổi thẻ KEEP->Thẻ DV');
+  const orderTypes = InvoiceLogicUtils.getOrderTypes(sale.ordertypeName || '');
+  const { isDichVu, isDoiDiem, isDoiDv } = orderTypes;
 
-  const isDoiDiem = SalesUtils.isDoiDiemOrder(sale.ordertypeName);
   if (isDoiDiem) isTangHang = false;
 
   let maCtkmTangHang: string | null = sale.maCtkmTangHang
@@ -92,6 +87,7 @@ export function calculateSaleFields(
   }
 
   if (isTangHang && !maCtkmTangHang) {
+    const ordertypeName = sale.ordertypeName || '';
     if (
       ordertypeName.includes('06. Đầu tư') ||
       ordertypeName.includes('06.Đầu tư')
@@ -111,6 +107,7 @@ export function calculateSaleFields(
     isTangHang,
     isDichVu,
     maCtkmTangHang,
+    isDoiDv,
   );
 
   const customerBrand = sale.customer?.brand || null;

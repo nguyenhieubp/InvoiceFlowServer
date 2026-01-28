@@ -778,7 +778,9 @@ export class InvoiceLogicUtils {
     isTangHang: boolean,
     isDichVu: boolean,
     maCtkmTangHang: string | null,
+    isDoiDv: boolean = false,
   ): string | null {
+    if (isDoiDv) return null;
     if (isTangHang && !isDichVu) {
       const maCtkmTangHangStr = maCtkmTangHang
         ? String(maCtkmTangHang).trim()
