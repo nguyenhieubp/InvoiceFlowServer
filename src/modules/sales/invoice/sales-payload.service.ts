@@ -920,92 +920,13 @@ export class SalesPayloadService {
     isNormalOrder: boolean,
     isPlatformOrder?: boolean, // [NEW]
   ) {
-    const orderTypes = InvoiceLogicUtils.getOrderTypes(
-      sale.ordertypeName || sale.ordertype,
-    );
-    const headerOrderTypes = InvoiceLogicUtils.getOrderTypes(
-      orderData.sales?.[0]?.ordertypeName ||
-        orderData.sales?.[0]?.ordertype ||
-        '',
-    );
-
-    const amounts: any = {
-      tienThue: this.toNumber(sale.tienThue, 0),
-      dtTgNt: this.toNumber(sale.dtTgNt, 0),
-      ck01_nt: this.toNumber(
-        InvoiceLogicUtils.resolveChietKhauMuaHangGiamGia(
-          sale,
-          orderTypes.isDoiDiem || headerOrderTypes.isDoiDiem,
-        ),
-        0,
-      ),
-      ck02_nt:
-        this.toNumber(sale.disc_tm, 0) > 0
-          ? this.toNumber(sale.disc_tm, 0)
-          : this.toNumber(sale.chietKhauCkTheoChinhSach, 0),
-      ck03_nt: this.toNumber(
-        sale.chietKhauMuaHangCkVip || sale.grade_discamt,
-        0,
-      ),
-      ck04_nt: this.toNumber(
-        sale.chietKhauThanhToanCoupon || sale.chietKhau09,
-        0,
-      ),
-      ck05_nt:
-        this.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
-          ? this.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0)
-          : 0,
-      ck07_nt: this.toNumber(sale.chietKhauVoucherDp2, 0),
-      ck08_nt: this.toNumber(sale.chietKhauVoucherDp3, 0),
-    };
-
-    // Fill others with default 0 or from sale fields
-    for (let i = 9; i <= 22; i++) {
-      if (i === 11) continue; // ck11 handled separately
-      const key = `ck${i.toString().padStart(2, '0')}_nt`;
-      const saleKey = `chietKhau${i.toString().padStart(2, '0')}`;
-      amounts[key] = this.toNumber(sale[saleKey] || sale[key], 0);
-    }
-    // Map platform voucher (VC CTKM SÀN) to ck06 => REQ: Map to ck15 for Platform Order
-    if (isPlatformOrder) {
-      // FIX: Use paid_by_voucher_ecode_ecoin_bp as the source value (same as ck05)
-      amounts.ck15_nt =
-        this.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
-          ? this.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0)
-          : this.toNumber(sale.chietKhauVoucherDp1, 0); // Fallback to OrderFee enrichment
-      amounts.ck05_nt = 0; // Clear ck05
-      amounts.ck06_nt = 0; // Clear ck06
-    } else {
-      amounts.ck06_nt = this.toNumber(sale.chietKhauVoucherDp1, 0);
-    }
-
-    // ck11 (ECOIN) logic
-    let ck11_nt = this.toNumber(
-      sale.chietKhauThanhToanTkTienAo || sale.chietKhau11,
-      0,
-    );
-    if (
-      ck11_nt === 0 &&
-      this.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0 &&
-      orderData.cashioData
-    ) {
-      const ecoin = orderData.cashioData.find(
-        (c: any) => c.fop_syscode === 'ECOIN',
-      );
-      if (ecoin?.total_in) ck11_nt = this.toNumber(ecoin.total_in, 0);
-    }
-    amounts.ck11_nt = ck11_nt;
-
-    // Allocation
-    if (allocationRatio !== 1 && allocationRatio > 0) {
-      Object.keys(amounts).forEach((k) => {
-        if (k.endsWith('_nt') || k === 'tienThue' || k === 'dtTgNt') {
-          amounts[k] *= allocationRatio;
-        }
-      });
-    }
-
-    if (orderTypes.isDoiDiem || headerOrderTypes.isDoiDiem) amounts.ck05_nt = 0;
+    const amounts = InvoiceLogicUtils.calculateInvoiceAmounts({
+      sale,
+      orderData,
+      allocationRatio,
+      isPlatformOrder,
+      cashioData: orderData.cashioData,
+    });
 
     // promCode logic
     let promCode = sale.promCode || sale.prom_code || null;
@@ -1231,103 +1152,14 @@ export class SalesPayloadService {
     loyaltyProduct: any,
     isPlatformOrder?: boolean, // [NEW]
   ) {
-    for (let i = 1; i <= 22; i++) {
-      const idx = i.toString().padStart(2, '0');
-      const key = `ck${idx}_nt`;
-      const maKey = `ma_ck${idx}`;
-      detailItem[key] = Number(amounts[key] || 0);
-
-      // Special ma_ck logic
-      if (i === 2) {
-        // 02. Chiết khấu theo chính sách (Bán buôn)
-        const isWholesale =
-          sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS';
-        const distTm = detailItem.ck02_nt;
-
-        // Bỏ check channel_code vì dữ liệu không có sẵn trong entity
-        if (isWholesale && distTm > 0) {
-          detailItem[maKey] = this.val(
-            InvoiceLogicUtils.resolveWholesalePromotionCode({
-              product: loyaltyProduct,
-              distTm: distTm,
-            }),
-            32,
-          );
-        } else {
-          detailItem[maKey] = this.val(sale.maCk02 || '', 32);
-        }
-      } else if (i === 3) {
-        const brand = orderData.customer?.brand || orderData.brand || '';
-        detailItem[maKey] = this.val(
-          SalesCalculationUtils.calculateMuaHangCkVip(
-            sale,
-            sale.product,
-            brand,
-          ),
-          32,
-        );
-      } else if (i === 4) {
-        detailItem[maKey] = this.val(
-          detailItem.ck04_nt > 0 || sale.thanhToanCoupon
-            ? sale.maCk04 || 'COUPON'
-            : '',
-          32,
-        );
-      } else if (i === 5) {
-        const { isDoiDiem } = InvoiceLogicUtils.getOrderTypes(
-          sale.ordertype || sale.ordertypeName,
-        );
-        const { isDoiDiem: isDoiDiemHeader } = InvoiceLogicUtils.getOrderTypes(
-          orderData.sales?.[0]?.ordertype ||
-            orderData.sales?.[0]?.ordertypeName ||
-            '',
-        );
-
-        if (isDoiDiem || isDoiDiemHeader) {
-          detailItem[maKey] = '';
-        } else if (detailItem.ck05_nt > 0) {
-          // Note: using logic from buildFastApiInvoiceData
-          detailItem[maKey] = this.val(
-            InvoiceLogicUtils.resolveVoucherCode({
-              sale: {
-                ...sale,
-                customer: sale.customer || orderData.customer,
-              },
-              customer: null, // Resolution happens inside resolveVoucherCode
-              brand: orderData.customer?.brand || orderData.brand || '',
-            }),
-            32,
-            sale.maCk05 || 'VOUCHER',
-          );
-        }
-      } else if (i === 7) {
-        detailItem[maKey] = this.val(sale.voucherDp2 ? 'VOUCHER_DP2' : '', 32);
-      } else if (i === 8) {
-        detailItem[maKey] = this.val(sale.voucherDp3 ? 'VOUCHER_DP3' : '', 32);
-      } else if (i === 11) {
-        detailItem[maKey] = this.val(
-          detailItem.ck11_nt > 0 || sale.thanhToanTkTienAo
-            ? sale.maCk11 ||
-                SalesUtils.generateTkTienAoLabel(
-                  orderData.docDate,
-                  orderData.customer?.brand ||
-                    orderData.sales?.[0]?.customer?.brand,
-                )
-            : '',
-          32,
-        );
-      } else {
-        // Default mapping for other ma_ck fields
-        if (i !== 1) {
-          if (i === 15 && isPlatformOrder) {
-            detailItem[maKey] = 'VC CTKM SÀN'; // [NEW] Platform Order Voucher Name
-          } else {
-            const saleMaKey = `maCk${idx}`;
-            detailItem[maKey] = this.val(sale[saleMaKey] || '', 32);
-          }
-        }
-      }
-    }
+    InvoiceLogicUtils.mapDiscountFields({
+      detailItem,
+      amounts,
+      sale,
+      orderData,
+      loyaltyProduct,
+      isPlatformOrder,
+    });
   }
 
   private buildInvoiceCbDetail(detail: any[]) {

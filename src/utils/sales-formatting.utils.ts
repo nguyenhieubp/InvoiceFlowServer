@@ -327,6 +327,15 @@ export async function formatSaleForFrontend(
     loyaltyProduct,
   });
 
+  // [NEW] Source of Truth Calculation for Amounts
+  const amounts = InvoiceLogicUtils.calculateInvoiceAmounts({
+    sale: sale,
+    orderData: order,
+    allocationRatio: allocationRatio,
+    isPlatformOrder: isPlatformOrderOverride || isSanTmdt,
+    cashioData: order?.cashioData,
+  });
+
   // 7. Display Fields
   const displayFields = await calculateDisplayFields(
     sale,
@@ -422,69 +431,27 @@ export async function formatSaleForFrontend(
         (isSanTmdt ? '' : displayFields.thanhToanVoucherDisplay) ||
         '',
     muaHangGiamGiaDisplay: muaHangGiamGiaDisplay, // [NEW] Mã CTKM cho chiết khấu mua hàng NV
-    other_discamt: other_discamt,
-    chietKhauMuaHangGiamGia: other_discamt,
-    maCkTheoChinhSach: maCkTheoChinhSach, // Mã CTKM cho bán buôn
-    giaBan: giaBan,
-    tienHang: giaBan * saleQty,
-    linetotal: isDoiDiem ? 0 : (sale.linetotal ?? tienHang),
-    ordertypeName: ordertypeName,
-    loaiGd: loaiGd,
-    issuePartnerCode: SalesUtils.normalizeMaKh(sale.issuePartnerCode || null),
-    partnerCode: SalesUtils.normalizeMaKh(
-      isTachThe && sale.issuePartnerCode
-        ? sale.issuePartnerCode
-        : sale.partnerCode || sale.partner_code || null,
-    ),
-    ...displayFields,
-    thanhToanVoucherDisplay: isSanTmdt
-      ? null
-      : displayFields.thanhToanVoucherDisplay,
-    thanhToanVoucher: isSanTmdt ? 0 : displayFields.thanhToanVoucher,
-    productType: productType,
-    // Optimized: Only return fields actually used by frontend
-    product: loyaltyProduct
-      ? {
-          productType: productType,
-          dvt: loyaltyProduct.unit || null,
-          maVatTu: loyaltyProduct.materialCode || sale.itemCode,
-          tenVatTu: loyaltyProduct.name || null,
-          trackInventory: loyaltyProduct.trackInventory ?? null,
-          trackSerial: trackSerial,
-          trackBatch: trackBatch,
-          tkChietKhau: loyaltyProduct.tkChietKhau || null,
-          tkDoanhThuBanLe: loyaltyProduct.tkDoanhThuBanLe || null,
-          tkDoanhThuBanBuon: loyaltyProduct.tkDoanhThuBanBuon || null,
-          tkGiaVonBanLe: loyaltyProduct.tkGiaVonBanLe || null,
-          tkGiaVonBanBuon: loyaltyProduct.tkGiaVonBanBuon || null,
-        }
-      : null,
-    // Optimized: Only return fields actually used by frontend
-    department: department
-      ? {
-          ma_bp: department.ma_bp || null,
-          branchcode: department.branchcode || null,
-          ma_dvcs: department.ma_dvcs || null,
-          ma_dvcs_ht: department.ma_dvcs_ht || null,
-          type: department.type || null,
-        }
-      : null,
-    dvt: loyaltyProduct?.unit || sale.dvt || null,
-    tkChietKhau,
-    tkChiPhi,
-    maPhi,
-    brand: (platformBrandOverride || sale?.brand)?.toUpperCase() || null, // [NEW] Use override
-    type_sale: sale?.type_sale || null,
-    // Force voucher discount to 0 if order is Point Exchange (isDoiDiem) OR Platform Order (isSanTmdt)
-    paid_by_voucher_ecode_ecoin_bp:
-      isDoiDiem || isSanTmdt ? 0 : sale.paid_by_voucher_ecode_ecoin_bp,
-    chietKhauThanhToanVoucher:
-      isDoiDiem || isSanTmdt ? 0 : sale.chietKhauThanhToanVoucher,
+    // [FIX] Overwrite fields with Source of Truth Amounts
+    // Ensures Frontend matches Fast API Payload exactly
+    chietKhauMuaHangGiamGia: amounts.ck01_nt,
+    other_discamt: amounts.ck01_nt,
+    chietKhauCkTheoChinhSach: amounts.ck02_nt,
+    chietKhauMuaHangCkVip: amounts.ck03_nt,
+    chietKhauThanhToanCoupon: amounts.ck04_nt,
+
+    // ck05 logic already includes isDoiDiem/isPlatform checks
+    paid_by_voucher_ecode_ecoin_bp: amounts.ck05_nt,
+    chietKhauThanhToanVoucher: amounts.ck05_nt,
+
+    chietKhauVoucherDp1: amounts.ck06_nt,
+    chietKhauVoucherDp2: amounts.ck07_nt,
+    chietKhauVoucherDp3: amounts.ck08_nt,
+    chietKhauThanhToanTkTienAo: amounts.ck11_nt,
 
     // [FIX] Explicitly return VIP discount fields
-    chietKhauMuaHangCkVip: Number(
-      sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0,
-    ),
+    // chietKhauMuaHangCkVip: Number(
+    //   sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0,
+    // ),
     muaHangCkVip: calculatedFields.muaHangCkVip || null, // Ensure not undefined
 
     // [FIX] maThe assignment logic:

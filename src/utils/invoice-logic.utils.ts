@@ -794,4 +794,270 @@ export class InvoiceLogicUtils {
     }
     return null;
   }
+  /**
+   * Helper chuyển đổi về số an toàn (Source of Truth)
+   */
+  static toNumber(value: any, defaultValue: number = 0): number {
+    if (value === null || value === undefined || value === '')
+      return defaultValue;
+    const num = Number(value);
+    return isNaN(num) ? defaultValue : num;
+  }
+
+  /**
+   * Helper giới hạn độ dài chuỗi (Source of Truth)
+   */
+  static limitString(
+    value: any,
+    maxLength: number,
+    defaultValue: string = '',
+  ): string {
+    const val =
+      value === null || value === undefined || value === ''
+        ? defaultValue
+        : String(value);
+    return val.length > maxLength ? val.substring(0, maxLength) : val;
+  }
+
+  /**
+   * Tính toán các giá trị tiền (Discount, Tax, etc.)
+   * Source of Truth cho Fast API Payload và Frontend Display
+   */
+  static calculateInvoiceAmounts(params: {
+    sale: any;
+    orderData: any; // Header data (sales[0] usually) or explicit header
+    allocationRatio: number;
+    isPlatformOrder?: boolean;
+    cashioData?: any[]; // Optional, for ECoin logic
+  }) {
+    const { sale, orderData, allocationRatio, isPlatformOrder, cashioData } =
+      params;
+
+    // Determine header order types safely
+    const headerSale = orderData?.sales?.[0] || {};
+    const headerOrderTypes = InvoiceLogicUtils.getOrderTypes(
+      headerSale.ordertypeName || headerSale.ordertype || '',
+    );
+    const orderTypes = InvoiceLogicUtils.getOrderTypes(
+      sale.ordertypeName || sale.ordertype,
+    );
+
+    const amounts: any = {
+      tienThue: InvoiceLogicUtils.toNumber(sale.tienThue, 0),
+      dtTgNt: InvoiceLogicUtils.toNumber(sale.dtTgNt, 0),
+      ck01_nt: InvoiceLogicUtils.toNumber(
+        InvoiceLogicUtils.resolveChietKhauMuaHangGiamGia(
+          sale,
+          orderTypes.isDoiDiem || headerOrderTypes.isDoiDiem,
+        ),
+        0,
+      ),
+      ck02_nt:
+        InvoiceLogicUtils.toNumber(sale.disc_tm, 0) > 0
+          ? InvoiceLogicUtils.toNumber(sale.disc_tm, 0)
+          : InvoiceLogicUtils.toNumber(sale.chietKhauCkTheoChinhSach, 0),
+      ck03_nt: InvoiceLogicUtils.toNumber(
+        sale.chietKhauMuaHangCkVip || sale.grade_discamt,
+        0,
+      ),
+      ck04_nt: InvoiceLogicUtils.toNumber(
+        sale.chietKhauThanhToanCoupon || sale.chietKhau09,
+        0,
+      ),
+      ck05_nt:
+        InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
+          ? InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0)
+          : 0,
+      ck07_nt: InvoiceLogicUtils.toNumber(sale.chietKhauVoucherDp2, 0),
+      ck08_nt: InvoiceLogicUtils.toNumber(sale.chietKhauVoucherDp3, 0),
+    };
+
+    // Fill others with default 0 or from sale fields
+    for (let i = 9; i <= 22; i++) {
+      if (i === 11) continue; // ck11 handled separately
+      const key = `ck${i.toString().padStart(2, '0')}_nt`;
+      const saleKey = `chietKhau${i.toString().padStart(2, '0')}`;
+      amounts[key] = InvoiceLogicUtils.toNumber(sale[saleKey] || sale[key], 0);
+    }
+
+    // Map platform voucher (VC CTKM SÀN) to ck06 => REQ: Map to ck15 for Platform Order
+    if (isPlatformOrder) {
+      amounts.ck15_nt =
+        InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
+          ? InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0)
+          : InvoiceLogicUtils.toNumber(sale.chietKhauVoucherDp1, 0); // Fallback
+      amounts.ck05_nt = 0; // Clear ck05
+      amounts.ck06_nt = 0; // Clear ck06
+    } else {
+      amounts.ck06_nt = InvoiceLogicUtils.toNumber(sale.chietKhauVoucherDp1, 0);
+    }
+
+    // ck11 (ECOIN) logic
+    let ck11_nt = InvoiceLogicUtils.toNumber(
+      sale.chietKhauThanhToanTkTienAo || sale.chietKhau11,
+      0,
+    );
+    if (
+      ck11_nt === 0 &&
+      InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0 &&
+      cashioData
+    ) {
+      const ecoin = cashioData.find((c: any) => c.fop_syscode === 'ECOIN');
+      if (ecoin?.total_in)
+        ck11_nt = InvoiceLogicUtils.toNumber(ecoin.total_in, 0);
+    }
+    amounts.ck11_nt = ck11_nt;
+
+    // Allocation
+    if (allocationRatio !== 1 && allocationRatio > 0) {
+      Object.keys(amounts).forEach((k) => {
+        if (k.endsWith('_nt') || k === 'tienThue' || k === 'dtTgNt') {
+          amounts[k] *= allocationRatio;
+        }
+      });
+    }
+
+    if (orderTypes.isDoiDiem || headerOrderTypes.isDoiDiem) amounts.ck05_nt = 0;
+
+    return amounts;
+  }
+
+  /**
+   * Helper terse wrapper for limitString(toString(value, def), max)
+   */
+  static val(value: any, maxLength: number, defaultValue: string = ''): string {
+    return this.limitString(
+      value === null || value === undefined ? defaultValue : String(value),
+      maxLength,
+    );
+  }
+
+  static mapDiscountFields(params: {
+    detailItem: any;
+    amounts: any;
+    sale: any;
+    orderData: any;
+    loyaltyProduct: any;
+    isPlatformOrder?: boolean;
+  }) {
+    const {
+      detailItem,
+      amounts,
+      sale,
+      orderData,
+      loyaltyProduct,
+      isPlatformOrder,
+    } = params;
+
+    for (let i = 1; i <= 22; i++) {
+      const idx = i.toString().padStart(2, '0');
+      const key = `ck${idx}_nt`;
+      const maKey = `ma_ck${idx}`;
+      detailItem[key] = Number(amounts[key] || 0);
+
+      // Special ma_ck logic
+      if (i === 2) {
+        // 02. Chiết khấu theo chính sách (Bán buôn)
+        const isWholesale =
+          sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS';
+        const distTm = detailItem.ck02_nt;
+
+        // Bỏ check channel_code vì dữ liệu không có sẵn trong entity
+        if (isWholesale && distTm > 0) {
+          detailItem[maKey] = InvoiceLogicUtils.val(
+            InvoiceLogicUtils.resolveWholesalePromotionCode({
+              product: loyaltyProduct,
+              distTm: distTm,
+            }),
+            32,
+          );
+        } else {
+          detailItem[maKey] = InvoiceLogicUtils.val(sale.maCk02 || '', 32);
+        }
+      } else if (i === 3) {
+        // Note: calculateMuaHangCkVip might need to be imported or moved.
+        // For now, assuming we pass the value or move it.
+        // BUT calculateMuaHangCkVip is in SalesCalculationUtils (frontend/backend both use it)
+        // Let's assume we copy logic or use simple value for now?
+        // Ref: SalesPayloadService calls SalesCalculationUtils.calculateMuaHangCkVip
+        // To avoid circular dep, we might need to duplicate specific small logic or refactor calculateMuaHangCkVip to here.
+        // Let's keep it simple: if sales-calculation imports THIS, we can't import THAT.
+        // Solution: Move calculateMuaHangCkVip to InvoiceLogicUtils as well.
+        detailItem[maKey] = InvoiceLogicUtils.val(sale.muaHangCkVip || '', 32);
+      } else if (i === 4) {
+        detailItem[maKey] = InvoiceLogicUtils.val(
+          detailItem.ck04_nt > 0 || sale.thanhToanCoupon
+            ? sale.maCk04 || 'COUPON'
+            : '',
+          32,
+        );
+      } else if (i === 5) {
+        const { isDoiDiem } = InvoiceLogicUtils.getOrderTypes(
+          sale.ordertype || sale.ordertypeName,
+        );
+        const { isDoiDiem: isDoiDiemHeader } = InvoiceLogicUtils.getOrderTypes(
+          orderData.sales?.[0]?.ordertype ||
+            orderData.sales?.[0]?.ordertypeName ||
+            '',
+        );
+
+        if (isDoiDiem || isDoiDiemHeader) {
+          detailItem[maKey] = '';
+        } else if (detailItem.ck05_nt > 0) {
+          // Note: using logic from buildFastApiInvoiceData
+          detailItem[maKey] = InvoiceLogicUtils.val(
+            InvoiceLogicUtils.resolveVoucherCode({
+              sale: {
+                ...sale,
+                customer: sale.customer || orderData.customer,
+              },
+              customer: null, // Resolution happens inside resolveVoucherCode
+              brand: orderData.customer?.brand || orderData.brand || '',
+            }),
+            32,
+            sale.maCk05 || 'VOUCHER',
+          );
+        }
+      } else if (i === 7) {
+        detailItem[maKey] = InvoiceLogicUtils.val(
+          sale.voucherDp2 ? 'VOUCHER_DP2' : '',
+          32,
+        );
+      } else if (i === 8) {
+        detailItem[maKey] = InvoiceLogicUtils.val(
+          sale.voucherDp3 ? 'VOUCHER_DP3' : '',
+          32,
+        );
+      } else if (i === 11) {
+        // Note: SalesUtils.generateTkTienAoLabel needed.
+        // Reuse logic or import SalesUtils? SalesUtils does NOT import InvoiceLogicUtils (yet).
+        // SalesUtils is a lower level util?
+        // Actually InvoiceLogicUtils imports SalesUtils. So it is fine to call SalesUtils here.
+        detailItem[maKey] = InvoiceLogicUtils.val(
+          detailItem.ck11_nt > 0 || sale.thanhToanTkTienAo
+            ? sale.maCk11 ||
+                SalesUtils.generateTkTienAoLabel(
+                  orderData.docDate,
+                  orderData.customer?.brand ||
+                    orderData.sales?.[0]?.customer?.brand,
+                )
+            : '',
+          32,
+        );
+      } else {
+        // Default mapping for other ma_ck fields
+        if (i !== 1) {
+          if (i === 15 && isPlatformOrder) {
+            detailItem[maKey] = 'VC CTKM SÀN'; // [NEW] Platform Order Voucher Name
+          } else {
+            const saleMaKey = `maCk${idx}`;
+            detailItem[maKey] = InvoiceLogicUtils.val(
+              sale[saleMaKey] || '',
+              32,
+            );
+          }
+        }
+      }
+    }
+  }
 }
