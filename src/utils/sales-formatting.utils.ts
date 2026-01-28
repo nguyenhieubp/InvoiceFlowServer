@@ -448,6 +448,60 @@ export async function formatSaleForFrontend(
     chietKhauVoucherDp3: amounts.ck08_nt,
     chietKhauThanhToanTkTienAo: amounts.ck11_nt,
 
+    // [RESTORED] Missing fields
+    maCkTheoChinhSach: maCkTheoChinhSach,
+    giaBan: giaBan,
+    tienHang: giaBan * saleQty,
+    linetotal: isDoiDiem ? 0 : (sale.linetotal ?? tienHang),
+    ordertypeName: ordertypeName,
+    loaiGd: loaiGd,
+    issuePartnerCode: SalesUtils.normalizeMaKh(sale.issuePartnerCode || null),
+    partnerCode: SalesUtils.normalizeMaKh(
+      isTachThe && sale.issuePartnerCode
+        ? sale.issuePartnerCode
+        : sale.partnerCode || sale.partner_code || null,
+    ),
+
+    ...displayFields,
+
+    thanhToanVoucherDisplay: isSanTmdt
+      ? null
+      : displayFields.thanhToanVoucherDisplay,
+    thanhToanVoucher: isSanTmdt ? 0 : displayFields.thanhToanVoucher,
+
+    productType: productType,
+    product: loyaltyProduct
+      ? {
+          productType: productType,
+          dvt: loyaltyProduct.unit || null,
+          maVatTu: loyaltyProduct.materialCode || sale.itemCode,
+          tenVatTu: loyaltyProduct.name || null,
+          trackInventory: loyaltyProduct.trackInventory ?? null,
+          trackSerial: trackSerial,
+          trackBatch: trackBatch,
+          tkChietKhau: loyaltyProduct.tkChietKhau || null,
+          tkDoanhThuBanLe: loyaltyProduct.tkDoanhThuBanLe || null,
+          tkDoanhThuBanBuon: loyaltyProduct.tkDoanhThuBanBuon || null,
+          tkGiaVonBanLe: loyaltyProduct.tkGiaVonBanLe || null,
+          tkGiaVonBanBuon: loyaltyProduct.tkGiaVonBanBuon || null,
+        }
+      : null,
+    department: department
+      ? {
+          ma_bp: department.ma_bp || null,
+          branchcode: department.branchcode || null,
+          ma_dvcs: department.ma_dvcs || null,
+          ma_dvcs_ht: department.ma_dvcs_ht || null,
+          type: department.type || null,
+        }
+      : null,
+    dvt: loyaltyProduct?.unit || sale.dvt || null,
+    tkChietKhau,
+    tkChiPhi,
+    maPhi,
+    brand: (platformBrandOverride || sale?.brand)?.toUpperCase() || null,
+    type_sale: sale?.type_sale || null,
+
     // [FIX] Explicitly return VIP discount fields
     // chietKhauMuaHangCkVip: Number(
     //   sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0,
