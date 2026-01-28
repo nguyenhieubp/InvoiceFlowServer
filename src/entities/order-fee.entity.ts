@@ -24,6 +24,10 @@ export class OrderFee {
   @Index()
   erpOrderCode: string;
 
+  @Column({ name: 'order_sn', length: 100, nullable: true })
+  @Index()
+  orderSn: string;
+
   @Column({ name: 'platform', length: 50 })
   @Index()
   platform: string; // Sàn TMĐT: shopee, lazada, tiktok, etc.

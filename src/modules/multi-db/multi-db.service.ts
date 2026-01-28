@@ -288,6 +288,7 @@ export class MultiDbService {
                     brand: brandConfig.name,
                     erpOrderCode: log.erpOrderCode,
                     platform: 'tiktok',
+                    orderSn: detail.order_sn, // [NEW] Map order_sn
                     rawData: detail.order_data,
                     orderCreatedAt: orderDate, // [NEW] Save order date
                     syncedAt: new Date(),
@@ -322,6 +323,7 @@ export class MultiDbService {
                       brand: fee.brand,
                       erpOrderCode: fee.erpOrderCode,
                       platform: 'shopee',
+                      orderSn: fee.rawData?.order_sn, // [NEW] Map order_sn
                       rawData: fee.rawData,
                       orderCreatedAt: feeCreatedAt, // [NEW] Save order date
                       syncedAt: new Date(),
@@ -469,6 +471,7 @@ export class MultiDbService {
             brand: fee.brand,
             erpOrderCode: fee.erpOrderCode,
             platform: 'shopee', // Sàn TMĐT
+            orderSn: fee.rawData?.order_sn, // [NEW] Map order_sn
             rawData: fee.rawData,
             syncedAt: new Date(),
           },

@@ -76,7 +76,7 @@ export class ShopeeFeesService {
       brand: fee.brand,
       platform: fee.platform,
       erpOrderCode: fee.erpOrderCode,
-      orderCode: fee.rawData?.raw_data?.order_sn || fee.rawData?.order_sn,
+      orderCode: fee.orderSn,
       voucherShop: fee.rawData?.raw_data?.voucher_from_seller || 0,
       commissionFee: fee.rawData?.raw_data?.commission_fee || 0,
       serviceFee: fee.rawData?.raw_data?.service_fee || 0,

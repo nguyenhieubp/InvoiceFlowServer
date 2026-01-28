@@ -74,7 +74,7 @@ export class TikTokFeesService {
         brand: fee.brand,
         platform: fee.platform,
         erpOrderCode: fee.erpOrderCode,
-        orderCode: fee.rawData?.order_id || fee.rawData?.id,
+        orderCode: fee.orderSn,
         orderCreatedAt: fee.orderCreatedAt,
         syncedAt: fee.syncedAt,
         // Payment fields from rawData.payment
