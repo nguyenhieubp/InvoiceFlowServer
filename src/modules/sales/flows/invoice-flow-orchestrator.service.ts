@@ -204,8 +204,7 @@ export class InvoiceFlowOrchestratorService {
             orderType, // Pass the specific order type as description/type
             undefined, // beforeAction
             undefined, // afterEnrichmentAction
-            orderType === ORDER_TYPES.BOTTLE_EXCHANGE ||
-              orderType === ORDER_TYPES.LOYALTY_EXCHANGE, // [FIX] Create Invoice for Bottle Exchange AND Loyalty Exchange
+            true, // [FIX] Force create Invoice for ALL Special Orders as requested
           ),
         true,
       );

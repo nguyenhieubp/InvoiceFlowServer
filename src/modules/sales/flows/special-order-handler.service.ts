@@ -190,6 +190,7 @@ export class SpecialOrderHandlerService {
           );
         }
       },
+      true, // [FIX] Force create Invoice for Split Card
     );
   }
 
