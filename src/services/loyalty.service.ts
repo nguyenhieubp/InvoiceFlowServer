@@ -351,4 +351,50 @@ export class LoyaltyService {
     }
     return null;
   }
+
+  /**
+   * Kiểm tra lô tồn tại trong Loyalty API
+   * API: /lot-categories/check?ma_vt={ma_vt}&ma_lo={ma_lo}
+   */
+  async checkLot(maVt: string, maLo: string): Promise<boolean> {
+    if (!maVt || !maLo) return false;
+    try {
+      const url = `${this.LOYALTY_API_BASE_URL}/lot-categories/check?ma_vt=${encodeURIComponent(maVt)}&ma_lo=${encodeURIComponent(maLo)}`;
+      const response = await this.httpService.axiosRef.get(url, {
+        headers: { accept: 'application/json' },
+        timeout: this.REQUEST_TIMEOUT,
+      });
+      // Nếu trả về data (thường là object lo) thì coi như tồn tại
+      return !!response?.data;
+    } catch (error: any) {
+      if (error?.response?.status !== 404) {
+        this.logger.warn(`[LoyaltyService] checkLot error: ${error?.message}`);
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Kiểm tra serial tồn tại trong Loyalty API
+   * API: /serial-categories/check?ma_vt={ma_vt}&ma_serial={ma_serial}
+   */
+  async checkSerial(maVt: string, maSerial: string): Promise<boolean> {
+    if (!maVt || !maSerial) return false;
+    try {
+      const url = `${this.LOYALTY_API_BASE_URL}/serial-categories/check?ma_vt=${encodeURIComponent(maVt)}&ma_serial=${encodeURIComponent(maSerial)}`;
+      const response = await this.httpService.axiosRef.get(url, {
+        headers: { accept: 'application/json' },
+        timeout: this.REQUEST_TIMEOUT,
+      });
+      // Nếu trả về data (thường là object serial) thì coi như tồn tại
+      return !!response?.data;
+    } catch (error: any) {
+      if (error?.response?.status !== 404) {
+        this.logger.warn(
+          `[LoyaltyService] checkSerial error: ${error?.message}`,
+        );
+      }
+      return false;
+    }
+  }
 }

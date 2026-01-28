@@ -270,6 +270,9 @@ export class FastApiInvoiceFlowService {
         throw new BadRequestException(errorMessage);
       }
 
+      // [NEW] Sync Lot/Serial before submitting invoice
+      await this.syncMissingLotSerial(invoiceData);
+
       // Build clean payload (giống salesOrder nhưng action luôn = 0)
       const cleanInvoiceData = FastApiPayloadHelper.buildCleanPayload(
         invoiceData,
@@ -1335,5 +1338,62 @@ export class FastApiInvoiceFlowService {
     }
 
     return promotion;
+  }
+
+  /**
+   * [NEW] Kiểm tra và đồng bộ Lô/Serial thiếu sang Fast API
+   * Logic: Check Loyalty API -> Nếu 404 thì gọi Fast API đẩy lên
+   */
+  private async syncMissingLotSerial(data: any): Promise<void> {
+    const detail = data?.detail || [];
+    const allLines = [...(Array.isArray(detail) ? detail : [])];
+
+    if (allLines.length === 0) return;
+
+    for (const item of allLines) {
+      const maVt = item.ma_vt;
+      const maLo = item.ma_lo;
+      const soSerial = item.so_serial;
+
+      if (!maVt) continue;
+
+      // 1. Xử lý Lô (Lot)
+      if (maLo && maLo.trim() !== '') {
+        try {
+          const exists = await this.loyaltyService.checkLot(maVt, maLo);
+          if (!exists) {
+            await this.fastApiService.createOrUpdateLot({
+              ma_vt: maVt,
+              ma_lo: maLo,
+              ten_lo: maLo, // Mặc định tên lô = mã lô theo yêu cầu user
+              action: '0',
+            });
+          }
+        } catch (error: any) {
+          this.logger.warn(
+            `[SyncLotSerial] Failed to sync Lot ${maLo} for item ${maVt}: ${error.message}`,
+          );
+        }
+      }
+
+      // 2. Xử lý Serial
+      if (soSerial && soSerial.trim() !== '') {
+        try {
+          const exists = await this.loyaltyService.checkSerial(maVt, soSerial);
+          if (!exists) {
+            await this.fastApiService.createOrUpdateSerial({
+              ma_vt: maVt,
+              ma_serial: soSerial,
+              ten_serial: soSerial, // Mặc định tên serial = mã serial theo yêu cầu user
+              action: '0',
+            });
+          }
+        } catch (error: any) {
+          this.logger.warn(
+            `[SyncLotSerial] Failed to sync Serial ${soSerial} for item ${maVt}: ${error.message}`,
+          );
+        }
+      }
+    }
   }
 }

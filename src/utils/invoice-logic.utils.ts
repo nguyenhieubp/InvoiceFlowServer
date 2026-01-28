@@ -516,11 +516,6 @@ export class InvoiceLogicUtils {
     const { batchSerialFromST, trackBatch, trackSerial } = params;
     const serialValue = batchSerialFromST || '';
 
-    // Logic xác định dùng maLo hay soSerial (Priority: Batch > Serial)
-    const useBatch = trackBatch && !trackSerial;
-    // Nếu cả hai đều true hoặc cả hai đều false, check logic trong SalesUtils.shouldUseBatch
-    // (Thường là trackBatch: true, trackSerial: false => ma_lo)
-
     // Re-use logic from SalesUtils.shouldUseBatch for consistency
     const isActuallyBatch = trackBatch === true && trackSerial !== true;
 

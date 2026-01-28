@@ -1361,6 +1361,94 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Tạo hoặc cập nhật mã serial trong Fast API
+   * @param serialData - Thông tin serial (ma_vt, ma_serial, ten_serial là required)
+   */
+  async createOrUpdateSerial(serialData: {
+    ma_vt: string;
+    ma_serial: string;
+    ten_serial: string;
+    ghi_chu?: string;
+    active?: string;
+    action?: string;
+  }): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Chỉ gửi các field có giá trị
+      const payload: any = {
+        ma_vt: serialData.ma_vt,
+        ma_serial: serialData.ma_serial,
+        ten_serial: serialData.ten_serial,
+        action: serialData.action || '0',
+      };
+
+      if (serialData.ghi_chu) payload.ghi_chu = serialData.ghi_chu;
+      if (serialData.active !== undefined) payload.active = serialData.active;
+
+      // Gọi API Serial với token
+      const response = await firstValueFrom(
+        this.httpService.post(`${this.baseUrl}/Serial`, payload, {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      );
+
+      this.logger.log(
+        `Serial ${serialData.ma_serial} for item ${serialData.ma_vt} created/updated successfully`,
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(
+        `Error creating/updating serial ${serialData.ma_serial} for item ${serialData.ma_vt}: ${error?.message || error}`,
+      );
+
+      // Nếu lỗi 401 (Unauthorized), refresh token và retry
+      if (error?.response?.status === 401) {
+        this.logger.log('Token expired, refreshing and retrying serial API...');
+        const newToken = await this.login();
+        if (newToken) {
+          try {
+            const payload: any = {
+              ma_vt: serialData.ma_vt,
+              ma_serial: serialData.ma_serial,
+              ten_serial: serialData.ten_serial,
+              action: serialData.action || '0',
+            };
+            if (serialData.ghi_chu) payload.ghi_chu = serialData.ghi_chu;
+            if (serialData.active !== undefined)
+              payload.active = serialData.active;
+
+            const retryResponse = await firstValueFrom(
+              this.httpService.post(`${this.baseUrl}/Serial`, payload, {
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${newToken}`,
+                },
+              }),
+            );
+            this.logger.log(
+              `Serial ${serialData.ma_serial} for item ${serialData.ma_vt} created/updated successfully (after retry)`,
+            );
+            return retryResponse.data;
+          } catch (retryError) {
+            this.logger.error(`Retry serial API failed: ${retryError}`);
+            throw retryError;
+          }
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  /**
    * Cleanup khi module bị destroy
    */
   onModuleDestroy() {
