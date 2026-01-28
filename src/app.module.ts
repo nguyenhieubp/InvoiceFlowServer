@@ -25,6 +25,8 @@ import { VoucherIssueModule } from './modules/voucher-issue/voucher-issue.module
 import { StockTransferModule } from './modules/stock-transfer/stock-transfer.module';
 import { ShopeeFeesModule } from './modules/shopee-fees/shopee-fees.module';
 import { TikTokFeesModule } from './modules/tiktok-fees/tiktok-fees.module';
+import { PurchaseOrderModule } from './modules/purchase-order/purchase-order.module';
+import { GoodsReceiptModule } from './modules/goods-receipt/goods-receipt.module';
 
 @Module({
   imports: [
@@ -66,6 +68,8 @@ import { TikTokFeesModule } from './modules/tiktok-fees/tiktok-fees.module';
     StockTransferModule,
     ShopeeFeesModule,
     TikTokFeesModule,
+    PurchaseOrderModule,
+    GoodsReceiptModule,
     TypeOrmModule.forFeature([Sale]),
   ],
   controllers: [AppController],
