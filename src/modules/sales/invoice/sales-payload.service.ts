@@ -1389,7 +1389,7 @@ export class SalesPayloadService {
       km_yn:
         (() => {
           const types = InvoiceLogicUtils.getOrderTypes(sale.ordertypeName);
-          return types.isDoiDv || types.isDoiVo;
+          return types.isDoiDv || types.isDoiVo || types.isTachThe;
         })() || maCtkmTangHang === 'TT DAU TU'
           ? 0
           : InvoiceLogicUtils.isTangHang(Number(giaBan), Number(tienHang))

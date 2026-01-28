@@ -348,12 +348,12 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
    * @param customerData - Thông tin khách hàng (chỉ cần ma_kh và ten_kh là required)
    */
   async createOrUpdateCustomer(customerData: {
-    ma_kh: string;
-    ten_kh: string;
-    dia_chi?: string;
-    ngay_sinh?: string;
-    so_cccd?: string;
-    e_mail?: string;
+    code: string;
+    name: string;
+    address?: string;
+    birthDate?: string;
+    cccd?: string;
+    email?: string;
     gioi_tinh?: string;
   }): Promise<any> {
     try {
@@ -365,14 +365,14 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
 
       // Chỉ gửi các field có giá trị
       const payload: any = {
-        ma_kh: customerData.ma_kh,
-        ten_kh: customerData.ten_kh,
+        ma_kh: customerData.code,
+        ten_kh: customerData.name,
       };
 
-      if (customerData.dia_chi) payload.dia_chi = customerData.dia_chi;
-      if (customerData.ngay_sinh) payload.ngay_sinh = customerData.ngay_sinh;
-      if (customerData.so_cccd) payload.so_cccd = customerData.so_cccd;
-      if (customerData.e_mail) payload.e_mail = customerData.e_mail;
+      if (customerData.address) payload.dia_chi = customerData.address;
+      if (customerData.birthDate) payload.ngay_sinh = customerData.birthDate;
+      if (customerData.cccd) payload.so_cccd = customerData.cccd;
+      if (customerData.email) payload.e_mail = customerData.email;
       if (customerData.gioi_tinh) payload.gioi_tinh = customerData.gioi_tinh;
 
       // Gọi API Customer với token
@@ -386,12 +386,12 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
       );
 
       this.logger.log(
-        `Customer ${customerData.ma_kh} created/updated successfully`,
+        `Customer ${customerData.code} created/updated successfully`,
       );
       return response.data;
     } catch (error: any) {
       this.logger.error(
-        `Error creating/updating customer ${customerData.ma_kh}: ${error?.message || error}`,
+        `Error creating/updating customer ${customerData.code}: ${error?.message || error}`,
       );
 
       // Nếu lỗi 401 (Unauthorized), refresh token và retry
@@ -403,14 +403,14 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
         if (newToken) {
           try {
             const payload: any = {
-              ma_kh: customerData.ma_kh,
-              ten_kh: customerData.ten_kh,
+              ma_kh: customerData.code,
+              ten_kh: customerData.name,
             };
-            if (customerData.dia_chi) payload.dia_chi = customerData.dia_chi;
-            if (customerData.ngay_sinh)
-              payload.ngay_sinh = customerData.ngay_sinh;
-            if (customerData.so_cccd) payload.so_cccd = customerData.so_cccd;
-            if (customerData.e_mail) payload.e_mail = customerData.e_mail;
+            if (customerData.address) payload.dia_chi = customerData.address;
+            if (customerData.birthDate)
+              payload.ngay_sinh = customerData.birthDate;
+            if (customerData.cccd) payload.so_cccd = customerData.cccd;
+            if (customerData.email) payload.e_mail = customerData.email;
             if (customerData.gioi_tinh)
               payload.gioi_tinh = customerData.gioi_tinh;
 
@@ -423,7 +423,7 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
               }),
             );
             this.logger.log(
-              `Customer ${customerData.ma_kh} created/updated successfully (after retry)`,
+              `Customer ${customerData.code} created/updated successfully (after retry)`,
             );
             return retryResponse.data;
           } catch (retryError) {

@@ -48,8 +48,15 @@ export class FastApiInvoiceFlowService {
     gioi_tinh?: string;
   }): Promise<any> {
     try {
-      const result =
-        await this.fastApiService.createOrUpdateCustomer(customerData);
+      const result = await this.fastApiService.createOrUpdateCustomer({
+        code: customerData.ma_kh,
+        name: customerData.ten_kh,
+        address: customerData.dia_chi,
+        birthDate: customerData.ngay_sinh,
+        cccd: customerData.so_cccd,
+        email: customerData.e_mail,
+        gioi_tinh: customerData.gioi_tinh,
+      });
 
       // Validate response: status = 1 mới là success
       if (Array.isArray(result) && result.length > 0) {
@@ -95,6 +102,10 @@ export class FastApiInvoiceFlowService {
    */
   async createSalesOrder(orderData: any, action: number = 0): Promise<any> {
     try {
+      await this.createOrUpdateCustomer({
+        ma_kh: orderData.ma_kh,
+        ten_kh: orderData.ten_kh || '',
+      });
       const cleanOrderData = FastApiPayloadHelper.buildCleanPayload(
         orderData,
         action,
@@ -465,19 +476,6 @@ export class FastApiInvoiceFlowService {
 
     try {
       // Step 1: Tạo/cập nhật Customer
-      if (invoiceData.ma_kh) {
-        await this.createOrUpdateCustomer({
-          ma_kh: invoiceData.ma_kh,
-          ten_kh: invoiceData.ten_kh || invoiceData.customer?.name || '',
-          dia_chi: invoiceData.customer?.address || undefined,
-          so_cccd: invoiceData.customer?.idnumber || undefined,
-          ngay_sinh: invoiceData.customer?.birthday
-            ? formatDateYYYYMMDD(invoiceData.customer.birthday)
-            : undefined,
-          gioi_tinh: invoiceData.customer?.sexual || undefined,
-        });
-      }
-
       // Step 2: Tạo salesOrder (đơn hàng bán)
       const resultSalesOrder = await this.createSalesOrder(invoiceData);
       if (!resultSalesOrder) {
@@ -975,16 +973,6 @@ export class FastApiInvoiceFlowService {
     // Gọi Customer API trước (Fast/Customer)
     if (stockTransfer.branchCode) {
       try {
-        // Lấy tên từ department nếu có, nếu không thì dùng branchCode
-        const tenKh =
-          department?.name || department?.ten || stockTransfer.branchCode || '';
-        await this.createOrUpdateCustomer({
-          ma_kh: stockTransfer.branchCode,
-          ten_kh: tenKh,
-        });
-        this.logger.log(
-          `[Warehouse] Đã tạo/cập nhật customer ${stockTransfer.branchCode} trước khi xử lý warehouse`,
-        );
       } catch (error: any) {
         // Log warning nhưng không throw error để không chặn luồng xử lý warehouse
         this.logger.warn(
@@ -1186,13 +1174,6 @@ export class FastApiInvoiceFlowService {
     // Gọi Customer API trước (Fast/Customer)
     if (firstStockTransfer.branchCode) {
       try {
-        await this.createOrUpdateCustomer({
-          ma_kh: firstStockTransfer.branchCode,
-          ten_kh: firstStockTransfer.branchCode,
-        });
-        this.logger.log(
-          `[Warehouse Transfer] Đã tạo/cập nhật customer ${firstStockTransfer.branchCode} trước khi xử lý warehouse transfer`,
-        );
       } catch (error: any) {
         // Log warning nhưng không throw error để không chặn luồng xử lý warehouse transfer
         this.logger.warn(
