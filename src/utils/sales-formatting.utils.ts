@@ -245,8 +245,8 @@ export async function formatSaleForFrontend(
 
   // Pricing logic for non-normal orders (FIX V7) is now handled inside InvoiceLogicUtils.calculatePrices
 
-  // FIX V7: Re-evaluate isTangHang strict logic
-  let isTangHang = giaBan === 0 && tienHang === 0;
+  // FIX V7: Use centralized isTangHang logic
+  let isTangHang = InvoiceLogicUtils.isTangHang(giaBan, tienHang);
   if (isDichVu) isTangHang = false;
   const materialCode = saleMaterialCode || sale.itemCode;
 
@@ -413,7 +413,7 @@ export async function formatSaleForFrontend(
           sexual: sale.customer.sexual,
         }
       : null,
-    itemName: sale.itemName || loyaltyProduct?.name || null,
+
     maKho: maKho,
     maCtkmTangHang: maCtkmTangHang,
     // [MOVED] muaHangCkVip moved to bottom with explicit check
@@ -455,7 +455,9 @@ export async function formatSaleForFrontend(
     linetotal: isDoiDiem ? 0 : (sale.linetotal ?? tienHang),
     ordertypeName: ordertypeName,
     loaiGd: loaiGd,
-    issuePartnerCode: SalesUtils.normalizeMaKh(sale.issuePartnerCode || null),
+    issuePartnerCode: InvoiceLogicUtils.resolveInvoiceIssuePartnerCode(
+      sale.issuePartnerCode,
+    ),
     partnerCode: SalesUtils.normalizeMaKh(
       isTachThe && sale.issuePartnerCode
         ? sale.issuePartnerCode
@@ -486,6 +488,17 @@ export async function formatSaleForFrontend(
           tkGiaVonBanBuon: loyaltyProduct.tkGiaVonBanBuon || null,
         }
       : null,
+
+    // [FIX] Centralized Material Info
+    maVatTu: InvoiceLogicUtils.resolveInvoiceMaterial(sale, loyaltyProduct)
+      .maVt,
+    dvt: InvoiceLogicUtils.resolveInvoiceMaterial(sale, loyaltyProduct).dvt,
+    itemName: InvoiceLogicUtils.resolveInvoiceMaterial(sale, loyaltyProduct)
+      .tenVt,
+
+    // [FIX] Centralized Tax Code
+    maThue: InvoiceLogicUtils.resolveInvoiceTaxCode(sale.maThue),
+
     department: department
       ? {
           ma_bp: department.ma_bp || null,
@@ -495,7 +508,6 @@ export async function formatSaleForFrontend(
           type: department.type || null,
         }
       : null,
-    dvt: loyaltyProduct?.unit || sale.dvt || null,
     tkChietKhau,
     tkChiPhi,
     maPhi,
@@ -508,12 +520,14 @@ export async function formatSaleForFrontend(
     // ),
     muaHangCkVip: calculatedFields.muaHangCkVip || null, // Ensure not undefined
 
-    // [FIX] maThe assignment logic:
-    // - For type V items in normal orders (01. Thường): use batchSerialFromST if available
-    maThe:
-      isThuong && productType === 'V'
-        ? batchSerialFromST || ''
-        : sale.maThe || '',
+    // [FIX] maThe assignment logic: Centralized source of truth
+    maThe: InvoiceLogicUtils.resolveInvoiceMaThe({
+      loyaltyProduct,
+      soSerial: batchSerialFromST, // Note: frontend uses batchSerialFromST as source for serial
+      isNormalOrder: isThuong,
+      saleProductType: productType,
+      saleMaThe: sale.maThe,
+    }),
   };
 }
 

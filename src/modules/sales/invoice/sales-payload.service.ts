@@ -1304,15 +1304,17 @@ export class SalesPayloadService {
         : maLo && maLo.trim() !== ''
           ? { ma_lo: this.limitString(maLo, 16) }
           : {}),
-      ma_kh_i: this.val(sale.issuePartnerCode, 16),
+      ma_kh_i: this.val(
+        InvoiceLogicUtils.resolveInvoiceIssuePartnerCode(sale.issuePartnerCode),
+        16,
+      ),
       ma_vt: this.val(
-        loyaltyProduct?.materialCode || sale.product?.maVatTu || '',
+        InvoiceLogicUtils.resolveInvoiceMaterial(sale, loyaltyProduct).maVt,
         16,
       ),
       dvt: this.val(
-        sale.product?.dvt || sale.product?.unit || sale.dvt,
+        InvoiceLogicUtils.resolveInvoiceMaterial(sale, loyaltyProduct).dvt,
         32,
-        'Cái',
       ),
       loai: this.val(sale.loai || sale.cat1, 2),
       loai_gd: this.val(loaiGd, 2),
@@ -1340,18 +1342,22 @@ export class SalesPayloadService {
       ma_ck06: this.val(sale.voucherDp1, 32), // Platform voucher (VC CTKM SÀN)
       dt_tg_nt: Number(amounts.dtTgNt),
       tien_thue: Number(amounts.tienThue),
-      ma_thue: this.val(sale.maThue, 8, '00'),
+      ma_thue: this.val(
+        InvoiceLogicUtils.resolveInvoiceTaxCode(sale.maThue),
+        8,
+      ),
       thue_suat: Number(this.toNumber(sale.thueSuat, 0)),
       tk_thue: this.val(sale.tkThueCo, 16),
       tk_cpbh: this.val(sale.tkCpbh, 16),
       ma_bp: maBp,
       ma_the: this.val(
-        (loyaltyProduct?.materialType === '94' && soSerial) ||
-          (isNormalOrder &&
-            (sale.productType === 'S' || sale.productType === 'V') &&
-            soSerial)
-          ? soSerial
-          : cardSerialMap.get(saleMaterialCode),
+        InvoiceLogicUtils.resolveInvoiceMaThe({
+          loyaltyProduct,
+          soSerial,
+          isNormalOrder,
+          saleProductType: sale.productType,
+          cardSerialFromMap: cardSerialMap?.get(saleMaterialCode),
+        }),
         256,
       ),
       dong: index + 1,

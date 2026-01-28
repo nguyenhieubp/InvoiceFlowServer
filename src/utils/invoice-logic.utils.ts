@@ -1060,4 +1060,101 @@ export class InvoiceLogicUtils {
       }
     }
   }
+  /**
+   * Xác định Mã Thẻ (maThe/ma_the)
+   * Rule:
+   * - Nếu là materialType 94 (Ecode/Voucher) và có soSerial -> dùng soSerial
+   * - Nếu là đơn hàng thường (isThuong/isNormalOrder) và productType S hoặc V và có soSerial -> dùng soSerial
+   * - Fallback: cardSerialMap (cho Fast API) hoặc sale.maThe (cho Frontend)
+   */
+  static resolveInvoiceMaThe(params: {
+    loyaltyProduct: any;
+    soSerial: string | null;
+    isNormalOrder: boolean; // isThuong
+    saleProductType: string | null;
+    cardSerialFromMap?: string | null; // For Fast API
+    saleMaThe?: string | null; // For Frontend default
+  }): string {
+    const {
+      loyaltyProduct,
+      soSerial,
+      isNormalOrder,
+      saleProductType,
+      cardSerialFromMap,
+      saleMaThe,
+    } = params;
+
+    const materialType = String(loyaltyProduct?.materialType || '');
+    const productType = String(saleProductType || '');
+
+    // Rule 1 & 2: Priority to soSerial for Type 94 OR (Normal Order & Type S/V)
+    if (
+      (materialType === '94' && soSerial) ||
+      (isNormalOrder &&
+        (productType === 'S' || productType === 'V') &&
+        soSerial)
+    ) {
+      return soSerial || '';
+    }
+
+    // Fallback
+    return cardSerialFromMap || saleMaThe || '';
+  }
+
+  /**
+   * Xác định Mã khách gửi (ma_kh_i)
+   * Chuẩn hóa bỏ prefix NV nếu có
+   */
+  static resolveInvoiceIssuePartnerCode(
+    issuePartnerCode: string | null,
+  ): string {
+    if (!issuePartnerCode) return '';
+    const trimmed = String(issuePartnerCode).trim();
+    if (trimmed.length > 2 && trimmed.substring(0, 2).toUpperCase() === 'NV') {
+      return trimmed.substring(2);
+    }
+    return trimmed;
+  }
+
+  /**
+   * Xác định Mã thuế (ma_thue)
+   * Default '00' nếu không có
+   */
+  static resolveInvoiceTaxCode(maThue: any): string {
+    return maThue ? String(maThue).trim() : '00';
+  }
+
+  /**
+   * Xác định Vật tư & ĐVT
+   * Trả về { maVt, dvt }
+   */
+  static resolveInvoiceMaterial(
+    sale: any,
+    loyaltyProduct: any,
+  ): { maVt: string; dvt: string; tenVt: string | null } {
+    // 1. Ma Vat Tu
+    const materialCode =
+      loyaltyProduct?.materialCode ||
+      sale.product?.maVatTu ||
+      sale.itemCode ||
+      '';
+
+    // 2. DVT (Default 'Cái')
+    const dvt =
+      loyaltyProduct?.unit ||
+      sale.product?.dvt ||
+      sale.product?.unit ||
+      sale.dvt ||
+      'Cái';
+
+    // 3. Ten VT
+    const tenVt =
+      loyaltyProduct?.name || sale.product?.tenVatTu || sale.itemName || null;
+
+    return {
+      maVt: String(materialCode).trim(),
+      dvt: String(dvt).trim(),
+      tenVt,
+    };
+  }
 }
