@@ -267,6 +267,7 @@ export class SpecialOrderHandlerService {
         throw error;
       }
 
+      const paymentErrors: string[] = [];
       let cashioResult: any = {
         cashReceiptResults: [],
         creditAdviceResults: [],
@@ -294,10 +295,12 @@ export class SpecialOrderHandlerService {
             `[Cashio] No payment records found for order ${docCode}`,
           );
         }
-      } catch (err) {
+      } catch (err: any) {
+        const msg = `[Cashio Error] ${err?.message || err}`;
         this.logger.error(
-          `[Cashio] Error processing payment sync for order ${docCode}: ${err?.message || err}`,
+          `[Cashio] Error processing payment sync for order ${docCode}: ${msg}`,
         );
+        paymentErrors.push(msg);
       }
 
       if (salesInvoiceResult) {
@@ -367,10 +370,11 @@ export class SpecialOrderHandlerService {
             );
           }
         } catch (paymentError: any) {
-          // Log lỗi nhưng không fail toàn bộ flow
+          const msg = `[Stock Payment Error] ${paymentError?.message || paymentError}`;
           this.logger.warn(
-            `[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode}: ${paymentError?.message || paymentError}`,
+            `[Payment] Lỗi khi xử lý payment cho đơn hàng ${docCode}: ${msg}`,
           );
+          paymentErrors.push(msg);
         }
       }
 
@@ -406,14 +410,25 @@ export class SpecialOrderHandlerService {
         }
       }
 
-      // Lưu kết quả vào bảng kê hóa đơn
-      // Status = 1 chỉ khi salesInvoice thành công (vì salesInvoice là quan trọng nhất cho dịch vụ)
-      const responseStatus = salesInvoiceResult
-        ? STATUS.SUCCESS
-        : STATUS.FAILED;
-      const responseMessage = salesInvoiceResult
-        ? 'Tạo sales order và sales invoice thành công (02. Làm dịch vụ)'
-        : 'Tạo sales order và sales invoice thất bại (02. Làm dịch vụ)';
+      // 6. Build Result
+      const isPaymentSuccess = paymentErrors.length === 0;
+      const responseStatus =
+        salesInvoiceResult && isSiSuccess && isPaymentSuccess
+          ? STATUS.SUCCESS
+          : STATUS.FAILED;
+
+      let responseMessage = '';
+      if (responseStatus === STATUS.SUCCESS) {
+        responseMessage =
+          'Tạo sales order và sales invoice thành công (02. Làm dịch vụ)';
+      } else {
+        const parts: string[] = [];
+        if (!isSiSuccess) parts.push('Lỗi tạo Sales Invoice');
+        if (!isPaymentSuccess)
+          parts.push(`Lỗi thanh toán: ${paymentErrors.join('; ')}`);
+        responseMessage =
+          parts.join('. ') || 'Xử lý thất bại (02. Làm dịch vụ)';
+      }
 
       return {
         result: {
@@ -421,6 +436,7 @@ export class SpecialOrderHandlerService {
           salesInvoice: salesInvoiceResult,
           gxtInvoice: gxtInvoiceResult,
           cashio: cashioResult,
+          paymentErrors,
         },
         status: responseStatus,
         message: responseMessage,
@@ -430,6 +446,7 @@ export class SpecialOrderHandlerService {
           salesInvoice: salesInvoiceResult,
           gxtInvoice: gxtInvoiceResult,
           cashio: cashioResult,
+          errors: paymentErrors,
         },
       };
     } catch (error: any) {
