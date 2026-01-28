@@ -11,9 +11,13 @@ import {
 @Index(['grCode'])
 @Index(['poCode'])
 @Index(['itemCode'])
+@Index(['brand'])
 export class GoodsReceipt {
   @PrimaryColumn({ name: 'id', generated: 'uuid' })
   id: string;
+
+  @Column({ name: 'brand', type: 'varchar', length: 50, nullable: true })
+  brand: string | null;
 
   @Column({ name: 'gr_code', length: 50 })
   grCode: string;

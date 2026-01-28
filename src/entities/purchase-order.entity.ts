@@ -10,9 +10,13 @@ import {
 @Index(['poDate'])
 @Index(['poCode'])
 @Index(['itemCode'])
+@Index(['brand'])
 export class PurchaseOrder {
   @PrimaryColumn({ name: 'id', generated: 'uuid' }) // Use UUID as primary key since po_code might not be unique per line item
   id: string;
+
+  @Column({ name: 'brand', type: 'varchar', length: 50, nullable: true })
+  brand: string | null;
 
   @Column({ name: 'po_code', length: 50 })
   poCode: string;

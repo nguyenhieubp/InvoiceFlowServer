@@ -56,11 +56,12 @@ export class PurchaseOrderService {
             // Ideally, we'd add .andWhere('brand = :brand', { brand: currentBrand }) if we had a brand column.
             await this.poRepository.delete({
               poDate: Between(dayStart, dayEnd),
-              // TODO: Add brand filter here if Entity has brand column to avoid deleting other brands' data
-              // catName might hold brand info?
+              brand: currentBrand,
             });
 
-            const entities = items.map((item) => this.mapToPurchaseOrder(item));
+            const entities = items.map((item) =>
+              this.mapToPurchaseOrder(item, currentBrand),
+            );
             await this.poRepository.save(entities);
             totalSynced += entities.length;
             this.logger.log(
@@ -90,6 +91,7 @@ export class PurchaseOrderService {
     startDate?: string;
     endDate?: string;
     search?: string;
+    brand?: string;
   }) {
     const page = params.page || 1;
     const limit = params.limit || 20;
@@ -105,6 +107,9 @@ export class PurchaseOrderService {
       query.andWhere('(po.poCode LIKE :search OR po.itemName LIKE :search)', {
         search: `%${params.search}%`,
       });
+    }
+    if (params.brand) {
+      query.andWhere('po.brand = :brand', { brand: params.brand });
     }
 
     query.orderBy('po.poDate', 'DESC');
@@ -151,8 +156,9 @@ export class PurchaseOrderService {
     return `${day}${month}${year}`;
   }
 
-  private mapToPurchaseOrder(item: any): PurchaseOrder {
+  private mapToPurchaseOrder(item: any, brand?: string): PurchaseOrder {
     const po = new PurchaseOrder();
+    po.brand = brand || null;
     po.poCode = item.po_code;
     po.poDate = item.po_date ? new Date(item.po_date) : null;
     po.catName = item.cat_name;

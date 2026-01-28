@@ -49,9 +49,12 @@ export class GoodsReceiptService {
 
             await this.grRepository.delete({
               grDate: Between(dayStart, dayEnd),
+              brand: currentBrand,
             });
 
-            const entities = items.map((item) => this.mapToGoodsReceipt(item));
+            const entities = items.map((item) =>
+              this.mapToGoodsReceipt(item, currentBrand),
+            );
             await this.grRepository.save(entities);
             totalSynced += entities.length;
             this.logger.log(
@@ -81,6 +84,7 @@ export class GoodsReceiptService {
     startDate?: string;
     endDate?: string;
     search?: string;
+    brand?: string;
   }) {
     const page = params.page || 1;
     const limit = params.limit || 20;
@@ -96,6 +100,9 @@ export class GoodsReceiptService {
       query.andWhere('(gr.grCode LIKE :search OR gr.itemName LIKE :search)', {
         search: `%${params.search}%`,
       });
+    }
+    if (params.brand) {
+      query.andWhere('gr.brand = :brand', { brand: params.brand });
     }
 
     query.orderBy('gr.grDate', 'DESC');
@@ -142,8 +149,9 @@ export class GoodsReceiptService {
     return `${day}${month}${year}`;
   }
 
-  private mapToGoodsReceipt(item: any): GoodsReceipt {
+  private mapToGoodsReceipt(item: any, brand?: string): GoodsReceipt {
     const gr = new GoodsReceipt();
+    gr.brand = brand || null;
     gr.grCode = item.gr_code;
     gr.grDate = item.gr_date ? new Date(item.gr_date) : null;
     gr.poCode = item.po_code;

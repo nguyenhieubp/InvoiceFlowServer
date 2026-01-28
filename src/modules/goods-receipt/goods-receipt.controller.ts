@@ -23,6 +23,7 @@ export class GoodsReceiptController {
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
     @Query('search') search: string,
+    @Query('brand') brand: string,
   ) {
     return this.goodsReceiptService.getGoodsReceipts({
       page,
@@ -30,6 +31,7 @@ export class GoodsReceiptController {
       startDate,
       endDate,
       search,
+      brand,
     });
   }
 }

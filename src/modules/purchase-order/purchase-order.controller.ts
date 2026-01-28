@@ -23,6 +23,7 @@ export class PurchaseOrderController {
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
     @Query('search') search: string,
+    @Query('brand') brand: string,
   ) {
     return this.purchaseOrderService.getPurchaseOrders({
       page,
@@ -30,6 +31,7 @@ export class PurchaseOrderController {
       startDate,
       endDate,
       search,
+      brand,
     });
   }
 }
