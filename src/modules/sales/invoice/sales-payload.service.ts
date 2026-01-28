@@ -136,16 +136,32 @@ export class SalesPayloadService {
 
       // [DEBUG LOG START]
       // Collect unique partnerCodes and issuePartnerCodes
+      // [FIX] Robust Brand Detection (Restore my fix)
+      const sourceCompany = orderData.customer?.brand || '';
+
       const partnerCodesToCheck = Array.from(
         new Set(
           allSales
             .flatMap((s: any) => [s.partnerCode, s.issuePartnerCode])
             .filter((c: any): c is string => !!c && c.trim() !== ''),
         ),
-      ).map((partnerCode: unknown) => ({
-        partnerCode: String(partnerCode),
-        sourceCompany: String(orderData.customer?.brand || ''),
-      }));
+      ).flatMap((partnerCode: unknown) => {
+        const code = String(partnerCode);
+        const checks = [
+          {
+            partnerCode: code,
+            sourceCompany: String(sourceCompany),
+          },
+        ];
+        // [FIX] Also check NV prefix if not present (heuristic for numeric codes)
+        if (!code.toUpperCase().startsWith('NV')) {
+          checks.push({
+            partnerCode: `NV${code}`,
+            sourceCompany: String(sourceCompany),
+          });
+        }
+        return checks;
+      });
 
       this.logger.log(
         `[DEBUG] Checking Employee Status for codes: ${JSON.stringify(
@@ -1282,7 +1298,9 @@ export class SalesPayloadService {
 
     const isEmployee =
       isEmployeeMap?.get(sale.partnerCode) ||
+      isEmployeeMap?.get(`NV${sale.partnerCode}`) || // [FIX] Check NV prefix
       isEmployeeMap?.get((sale as any).issuePartnerCode) ||
+      isEmployeeMap?.get(`NV${(sale as any).issuePartnerCode}`) || // [FIX] Check NV prefix
       false;
 
     const { maCk01, maCtkmTangHang } = await this.resolveInvoicePromotionCodes(
