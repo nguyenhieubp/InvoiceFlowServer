@@ -57,6 +57,7 @@ export class SpecialOrderHandlerService {
     description: string,
     beforeAction?: () => Promise<void>,
     afterEnrichmentAction?: (enrichedOrder: any) => Promise<void>,
+    createInvoice: boolean = false,
   ): Promise<any> {
     this.logger.log(`[SpecialOrder] Bắt đầu xử lý ${description}: ${docCode}`);
     try {
@@ -83,16 +84,55 @@ export class SpecialOrderHandlerService {
         ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
       });
 
-      const responseStatus =
+      let responseStatus =
         Array.isArray(result) &&
         result.length > 0 &&
         result[0].status === STATUS.SUCCESS
           ? STATUS.SUCCESS
           : STATUS.FAILED;
-      const apiMessage =
+      let apiMessage =
         Array.isArray(result) && result.length > 0 && result[0].message
           ? result[0].message
           : '';
+
+      const fastApiResponse: any = { salesOrder: result };
+
+      // [NEW] Option to create Sales Invoice immediately after Sales Order
+      if (responseStatus === STATUS.SUCCESS && createInvoice) {
+        try {
+          this.logger.log(
+            `[SpecialOrder] Creating Sales Invoice for ${docCode}...`,
+          );
+          const invoiceResult =
+            await this.fastApiInvoiceFlowService.createSalesInvoice({
+              ...invoiceData,
+              customer: orderData.customer,
+              ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+            });
+          fastApiResponse.salesInvoice = invoiceResult;
+
+          // Check invoice result status
+          const invStatus =
+            Array.isArray(invoiceResult) && invoiceResult.length > 0
+              ? invoiceResult[0].status
+              : invoiceResult && invoiceResult.status;
+
+          if (invStatus === 1) {
+            // 1 is Success for Invoice API
+            apiMessage += ' | Invoice Created';
+          } else {
+            apiMessage += ` | Invoice Failed: ${Array.isArray(invoiceResult) && invoiceResult.length > 0 ? invoiceResult[0].message : invoiceResult?.message || 'Unknown'}`;
+            // Optional: Mark overall status as warning or failed depending on strictness
+            // keeping SUCCESS if SO succeeded, but warning in message
+          }
+        } catch (invError: any) {
+          this.logger.error(
+            `[SpecialOrder] Failed to create Sales Invoice for ${docCode}: ${invError.message}`,
+          );
+          apiMessage += ` | Invoice Error: ${invError.message}`;
+        }
+      }
+
       const responseMessage =
         responseStatus === STATUS.SUCCESS
           ? `${description} thành công: ${apiMessage}`
@@ -110,7 +150,7 @@ export class SpecialOrderHandlerService {
         status: responseStatus,
         message: responseMessage,
         guid: responseGuid,
-        fastApiResponse: { salesOrder: result },
+        fastApiResponse: fastApiResponse,
       };
     } catch (error: any) {
       this.logger.error(

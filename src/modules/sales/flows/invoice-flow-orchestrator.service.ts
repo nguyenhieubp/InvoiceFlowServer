@@ -202,6 +202,9 @@ export class InvoiceFlowOrchestratorService {
             orderData,
             docCode,
             orderType, // Pass the specific order type as description/type
+            undefined, // beforeAction
+            undefined, // afterEnrichmentAction
+            orderType === ORDER_TYPES.BOTTLE_EXCHANGE, // Create Invoice ONLY for Bottle Exchange
           ),
         true,
       );

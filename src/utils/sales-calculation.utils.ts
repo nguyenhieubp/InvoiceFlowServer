@@ -63,7 +63,7 @@ export function calculateSaleFields(
   let isTangHang = InvoiceLogicUtils.isTangHang(giaBan, tienHang);
 
   const orderTypes = InvoiceLogicUtils.getOrderTypes(sale.ordertypeName || '');
-  const { isDichVu, isDoiDiem, isDoiDv } = orderTypes;
+  const { isDichVu, isDoiDiem, isDoiDv, isDoiVo } = orderTypes;
 
   if (isDoiDiem) isTangHang = false;
 
@@ -108,6 +108,7 @@ export function calculateSaleFields(
     isDichVu,
     maCtkmTangHang,
     isDoiDv,
+    isDoiVo,
   );
 
   const customerBrand = sale.customer?.brand || null;
