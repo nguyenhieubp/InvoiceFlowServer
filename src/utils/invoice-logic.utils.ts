@@ -1094,11 +1094,17 @@ export class InvoiceLogicUtils {
         (productType === 'S' || productType === 'V') &&
         soSerial)
     ) {
+      console.log(`[MaThe] Hit Rule 1/2. Returning soSerial: ${soSerial}`);
       return soSerial || '';
     }
 
     // Fallback
-    return cardSerialFromMap || saleMaThe || '';
+    console.log(
+      `[MaThe] Fallback. saleMaThe: ${saleMaThe}, cardMap: ${cardSerialFromMap}, soSerial: ${soSerial}`,
+    );
+    const res = saleMaThe || cardSerialFromMap || '';
+    console.log(`[MaThe] Returning: ${res}`);
+    return res;
   }
 
   /**

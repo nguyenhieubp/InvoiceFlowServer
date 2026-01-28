@@ -7,6 +7,7 @@ import { SalesPayloadService } from '../invoice/sales-payload.service';
 import { SalesQueryService } from '../services/sales-query.service';
 import { PaymentService } from '../../payment/payment.service';
 import { forwardRef, Inject } from '@nestjs/common';
+import { N8nService } from '../../../services/n8n.service';
 import * as SalesUtils from '../../../utils/sales.utils';
 import * as ConvertUtils from '../../../utils/convert.utils';
 import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
@@ -23,6 +24,7 @@ export class NormalOrderHandlerService {
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private salesPayloadService: SalesPayloadService,
     private salesQueryService: SalesQueryService,
+    private n8nService: N8nService,
     @Inject(forwardRef(() => PaymentService))
     private paymentService: PaymentService,
   ) {}
@@ -60,6 +62,38 @@ export class NormalOrderHandlerService {
     const [enrichedOrder] = await this.salesQueryService.enrichOrdersWithCashio(
       [orderData],
     );
+
+    // [FIX] N8n Integration for Card Data (Enrichment source of truth)
+    // Applied AFTER explosion to ensure we overwrite any Stock Transfer duplicates
+    // [FIX] Check orderData.sales (Raw) for OrderType, as exploded sales might be minimalist and miss orderTypeName
+    const isTachThe = orderData.sales?.some((s: any) =>
+      SalesUtils.isTachTheOrder(s.ordertypeName),
+    );
+
+    if (isTachThe) {
+      this.logger.log(
+        `[NormalOrder] Detected Tách Thẻ order ${docCode}, fetching Card Data from N8n (After Explosion)...`,
+      );
+      try {
+        const cardResponse =
+          await this.n8nService.fetchCardDataWithRetry(docCode);
+        const cardData = this.n8nService.parseCardData(cardResponse);
+        if (cardData && cardData.length > 0) {
+          // Use the CONSUMPTION logic to map data to enriched sales
+          this.n8nService.mapIssuePartnerCodeToSales(
+            enrichedOrder.sales,
+            cardData,
+          );
+          this.logger.log(
+            `[NormalOrder] Successfully enriched sales with N8n Card Data`,
+          );
+        } else {
+          this.logger.warn(`[NormalOrder] N8n returned no card data`);
+        }
+      } catch (err) {
+        this.logger.error(`[NormalOrder] Failed to enrich from N8n: ${err}`);
+      }
+    }
 
     const invoiceData =
       await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);

@@ -899,25 +899,62 @@ export class SalesQueryService {
       delete enrichedSale._docCode; // Clean up temporary marker
     }
 
-    // 8. Final Grouping & N+1 Fix for 'Tach The'
-    // Collect docCodes that require card data fetching
-    const docCodesNeedingCardData: string[] = [];
+    // 8. Update orders with formatted sales (Critical step restored)
+    // [OPTIMIZATION] Collect all sales for batch enrichment
+    const allSalesForEnrichment: any[] = [];
+    const verificationTasks: Promise<void>[] = [];
 
-    // First pass to identify orders
     for (const [docCode, sales] of enrichedSalesMap.entries()) {
-      const hasTachThe = sales.some((s: any) =>
-        SalesUtils.isTachTheOrder(s.ordertypeName),
-      );
-      if (hasTachThe) {
-        docCodesNeedingCardData.push(docCode);
+      const order = orderMap.get(docCode);
+      if (order) {
+        allSalesForEnrichment.push(...sales);
+        order.sales = sales; // Assign FORMATTED sales to order
       }
     }
+
+    // [MOVED] Resolve ma_vt_ref (Before Explosion)
+    if (allSalesForEnrichment.length > 0) {
+      verificationTasks.push(
+        this.voucherIssueService.enrichSalesWithMaVtRef(
+          allSalesForEnrichment,
+          loyaltyProductMap,
+        ),
+      );
+    }
+
+    // Wait for all verification tasks to complete
+    if (verificationTasks.length > 0) {
+      await Promise.all(verificationTasks);
+    }
+
+    // 9. Sort and return
+    const orders = Array.from(orderMap.values()).sort((a, b) => {
+      // Sort by latest date first
+      return new Date(b.docDate).getTime() - new Date(a.docDate).getTime();
+    });
+
+    // 10. Enrich with Cashio (Explosion)
+    // This explodes sales based on Stock Transfers. Fields like Qty are reset here.
+    const enrichedOrders = await this.enrichOrdersWithCashio(orders);
+
+    // [FIX] N8n Integration for Card Data (Enrichment source of truth)
+    // Applied AFTER explosion to ensure we overwrite any Stock Transfer duplicates or Qty resets
+    // Collect docCodes that require card data fetching
+    const docCodesNeedingCardData: string[] = [];
+    enrichedOrders.forEach((order) => {
+      if (
+        order.sales?.some((s: any) =>
+          SalesUtils.isTachTheOrder(s.ordertypeName),
+        )
+      ) {
+        docCodesNeedingCardData.push(order.docCode);
+      }
+    });
 
     // Execute parallel requests for card data with concurrency limit
     const cardDataMap = new Map<string, any>(); // Map<docCode, cardData>
     if (docCodesNeedingCardData.length > 0) {
       const startN8N = Date.now();
-      // OPTIMIZED: Add concurrency limit to prevent overwhelming N8N service
       const MAX_CONCURRENT = 5;
       const chunks: string[][] = [];
       for (let i = 0; i < docCodesNeedingCardData.length; i += MAX_CONCURRENT) {
@@ -951,48 +988,14 @@ export class SalesQueryService {
       );
     }
 
-    // Apply card data and build final orders
-    const verificationTasks: Promise<void>[] = []; // Collect tasks for parallel execution
-
-    // [OPTIMIZATION] Collect all sales for batch enrichment
-    const allSalesForEnrichment: any[] = [];
-
-    for (const [docCode, sales] of enrichedSalesMap.entries()) {
-      const order = orderMap.get(docCode);
-      if (order) {
-        // Apply card data if available
-        if (cardDataMap.has(docCode)) {
-          const cardData = cardDataMap.get(docCode);
-          this.n8nService.mapIssuePartnerCodeToSales(sales, cardData);
-        }
-
-        allSalesForEnrichment.push(...sales);
-        order.sales = sales;
+    // Apply card data to ENRICHED orders
+    enrichedOrders.forEach((order) => {
+      if (cardDataMap.has(order.docCode)) {
+        const cardData = cardDataMap.get(order.docCode);
+        // Use the CONSUMPTION logic to map data to enriched sales
+        this.n8nService.mapIssuePartnerCodeToSales(order.sales || [], cardData);
       }
-    }
-
-    // [NEW] Resolve ma_vt_ref using centralized logic from VoucherIssueService (Batch)
-    if (allSalesForEnrichment.length > 0) {
-      verificationTasks.push(
-        this.voucherIssueService.enrichSalesWithMaVtRef(
-          allSalesForEnrichment,
-          loyaltyProductMap,
-        ),
-      );
-    }
-
-    // Wait for all verification tasks to complete
-    if (verificationTasks.length > 0) {
-      await Promise.all(verificationTasks);
-    }
-
-    // 9. Sort and return
-    const orders = Array.from(orderMap.values()).sort((a, b) => {
-      // Sort by latest date first
-      return new Date(b.docDate).getTime() - new Date(a.docDate).getTime();
     });
-
-    const enrichedOrders = await this.enrichOrdersWithCashio(orders);
     // CX4772
     // [CRITICAL] Re-enrich ma_vt_ref AFTER explosion
     // enrichOrdersWithCashio creates new sale lines from stock transfers

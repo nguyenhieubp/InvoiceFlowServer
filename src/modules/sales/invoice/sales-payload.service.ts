@@ -1357,6 +1357,7 @@ export class SalesPayloadService {
           isNormalOrder,
           saleProductType: sale.productType,
           cardSerialFromMap: cardSerialMap?.get(saleMaterialCode),
+          saleMaThe: sale.maThe, // [FIX] Pass specific maThe from sale (e.g. N8n)
         }),
         256,
       ),

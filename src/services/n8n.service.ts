@@ -135,35 +135,63 @@ export class N8nService {
    * @param cardData - Card data từ N8N
    */
   mapIssuePartnerCodeToSales(sales: any[], cardData: any[]): void {
-    if (cardData.length === 0) {
+    if (!cardData || cardData.length === 0) {
       return;
     }
 
+    // [FIX] Use a pool of available cards to ensure 1-to-1 allocation (Consume logic)
+    const availableCards = [...cardData];
+
     sales.forEach((sale: any) => {
       const saleQty = Number(sale.qty || 0);
+      let matchedIndex = -1;
 
-      if (saleQty < 0) {
-        const negativeItem = cardData.find(
-          (item: any) => Number(item.qty || 0) < 0,
+      // Priority 1: Exact Signed Qty Match
+      matchedIndex = availableCards.findIndex(
+        (c) => Number(c.qty || 0) === saleQty,
+      );
+
+      // Priority 2: Absolute Qty Match (Handle case where sale.qty is positive but card is negative)
+      if (matchedIndex === -1) {
+        matchedIndex = availableCards.findIndex(
+          (c) => Math.abs(Number(c.qty || 0)) === Math.abs(saleQty),
         );
-        if (negativeItem?.issue_partner_code) {
-          sale.issuePartnerCode = negativeItem.issue_partner_code;
+      }
+
+      // Priority 3: Fallback (Just take the first one if strict matching fails but counts align)
+      // Only if we really want to force distribution. Let's keep strictness for now or fallback if crucial.
+      // User complaint was about duplicates.
+      if (matchedIndex === -1 && availableCards.length > 0) {
+        // Try to find one with same sign at least?
+        // Or just taking any might be better than nothing?
+        // Let's stick to Qty matching. If qty differs, maybe it's not the right line.
+      }
+
+      if (matchedIndex !== -1) {
+        const matchedCard = availableCards[matchedIndex];
+
+        // Assign Data
+        if (matchedCard.issue_partner_code) {
+          sale.issuePartnerCode = matchedCard.issue_partner_code;
         }
-      } else if (saleQty > 0) {
-        const positiveItem = cardData.find(
-          (item: any) => Number(item.qty || 0) > 0 && item.action === 'ADJUST',
-        );
-        if (positiveItem?.issue_partner_code) {
-          sale.issuePartnerCode = positiveItem.issue_partner_code;
-        } else {
-          // Fallback: Tìm item có qty > 0 (không cần action = "ADJUST")
-          const positiveItemFallback = cardData.find(
-            (item: any) => Number(item.qty || 0) > 0,
-          );
-          if (positiveItemFallback?.issue_partner_code) {
-            sale.issuePartnerCode = positiveItemFallback.issue_partner_code;
-          }
+
+        // [FIX] Map Serial / MaThe (User reported duplicate serials)
+        if (matchedCard.serial) {
+          sale.maThe = matchedCard.serial;
+          sale.soSerial = matchedCard.serial; // Populate soSerial as source of truth
         }
+
+        // [FIX] Map Quantity to ensure correct sign (User reported quantity error)
+        if (matchedCard.qty) {
+          const newQty = Number(matchedCard.qty);
+          sale.qty = newQty;
+          sale.so_luong = newQty;
+          // Note: Updating tien_hang might safely be skipped if price is 0 or handled elsewhere
+        }
+
+        // remove logs
+        // Remove from pool
+        availableCards.splice(matchedIndex, 1);
       }
     });
   }

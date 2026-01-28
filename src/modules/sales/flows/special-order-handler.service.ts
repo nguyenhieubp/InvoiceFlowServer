@@ -56,6 +56,7 @@ export class SpecialOrderHandlerService {
     docCode: string,
     description: string,
     beforeAction?: () => Promise<void>,
+    afterEnrichmentAction?: (enrichedOrder: any) => Promise<void>,
   ): Promise<any> {
     this.logger.log(`[SpecialOrder] Bắt đầu xử lý ${description}: ${docCode}`);
     try {
@@ -66,6 +67,11 @@ export class SpecialOrderHandlerService {
       // Explode sales by Stock Transfers
       const [enrichedOrder] =
         await this.salesQueryService.enrichOrdersWithCashio([orderData]);
+
+      // [FIX] Execute logic AFTER enrichment (e.g. N8n mapping) to overwrite ST values
+      if (afterEnrichmentAction) {
+        await afterEnrichmentAction(enrichedOrder);
+      }
 
       const invoiceData =
         await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
@@ -100,18 +106,51 @@ export class SpecialOrderHandlerService {
           : null;
 
       return {
-        result,
+        result: { salesOrder: result },
         status: responseStatus,
         message: responseMessage,
         guid: responseGuid,
-        fastApiResponse: result,
+        fastApiResponse: { salesOrder: result },
       };
     } catch (error: any) {
       this.logger.error(
-        `Lỗi khi ${description} cho ${docCode}: ${error?.message || error}`,
+        `[SpecialOrder] Lỗi khi xử lý ${description} ${docCode}: ${error?.message || error}`,
       );
       throw error;
     }
+  }
+
+  /**
+   * Xử lý đơn Tách thẻ (08. Tách thẻ) - có thêm logic fetch card data
+   */
+  async handleTachTheOrder(orderData: any, docCode: string): Promise<any> {
+    return this.handleStandardSpecialOrder(
+      orderData,
+      docCode,
+      ORDER_TYPES.CARD_SEPARATION,
+      undefined, // No beforeAction
+      async (enrichedOrder) => {
+        // Gọi API get_card để lấy issue_partner_code cho đơn "08. Tách thẻ"
+        // [FIX] Apply to ENRICHED sales (After explosion)
+        try {
+          const cardResponse =
+            await this.n8nService.fetchCardDataWithRetry(docCode);
+          const cardData = this.n8nService.parseCardData(cardResponse);
+          this.n8nService.mapIssuePartnerCodeToSales(
+            enrichedOrder.sales || [],
+            cardData,
+          );
+          this.logger.log(
+            `[SpecialOrder] Successfully enriched sales with N8n Card Data (After Explosion)`,
+          );
+        } catch (e) {
+          // Ignore error as per original logic, but log it
+          this.logger.warn(
+            `[SpecialOrder] Failed to n8n enrich: ${e?.message || e}`,
+          );
+        }
+      },
+    );
   }
 
   /**
@@ -399,30 +438,5 @@ export class SpecialOrderHandlerService {
       );
       throw error;
     }
-  }
-
-  /**
-   * Xử lý đơn Tách thẻ (08. Tách thẻ) - có thêm logic fetch card data
-   */
-  async handleTachTheOrder(orderData: any, docCode: string): Promise<any> {
-    return this.handleStandardSpecialOrder(
-      orderData,
-      docCode,
-      ORDER_TYPES.CARD_SEPARATION,
-      async () => {
-        // Gọi API get_card để lấy issue_partner_code cho đơn "08. Tách thẻ"
-        try {
-          const cardResponse =
-            await this.n8nService.fetchCardDataWithRetry(docCode);
-          const cardData = this.n8nService.parseCardData(cardResponse);
-          this.n8nService.mapIssuePartnerCodeToSales(
-            orderData.sales || [],
-            cardData,
-          );
-        } catch (e) {
-          // Ignore error as per original logic
-        }
-      },
-    );
   }
 }
