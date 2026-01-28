@@ -134,6 +134,35 @@ export class SalesPayloadService {
           ? await this.loyaltyService.fetchProducts(allItemCodes)
           : new Map();
 
+      // [DEBUG LOG START]
+      // Collect unique partnerCodes and issuePartnerCodes
+      const partnerCodesToCheck = Array.from(
+        new Set(
+          allSales
+            .flatMap((s: any) => [s.partnerCode, s.issuePartnerCode])
+            .filter((c: any): c is string => !!c && c.trim() !== ''),
+        ),
+      ).map((partnerCode: unknown) => ({
+        partnerCode: String(partnerCode),
+        sourceCompany: String(orderData.customer?.brand || ''),
+      }));
+
+      this.logger.log(
+        `[DEBUG] Checking Employee Status for codes: ${JSON.stringify(
+          partnerCodesToCheck,
+        )}`,
+      );
+
+      const isEmployeeMap =
+        await this.n8nService.checkCustomersIsEmployee(partnerCodesToCheck);
+
+      this.logger.log(
+        `[DEBUG] Employee Check Result Map: ${JSON.stringify(
+          Array.from(isEmployeeMap.entries()),
+        )}`,
+      );
+      // [DEBUG LOG END]
+
       // 4. Transform sales to details (Filter out TRUTONKEEP items)
       const detail = await Promise.all(
         allSales
@@ -160,6 +189,7 @@ export class SalesPayloadService {
               onlySalesOrder: options?.onlySalesOrder,
               isPlatformOrder, // [NEW] Pass flag
               platformBrand, // [NEW] Pass brand
+              isEmployeeMap, // [NEW] Pass map
             });
           }),
       );
@@ -962,6 +992,7 @@ export class SalesPayloadService {
     giaBan: number,
     promCode: string | null,
     isPlatformOrder?: boolean, // [NEW]
+    isEmployee?: boolean, // [NEW]
   ) {
     const orderTypes = InvoiceLogicUtils.getOrderTypes(
       sale.ordertypeName || sale.ordertype,
@@ -990,6 +1021,7 @@ export class SalesPayloadService {
       promCode: sale.promCode || sale.prom_code, // Pass RAW code to let Utils handle PRMN logic consistently
       maHangGiamGia: maHangGiamGia,
       isSanTmdtOverride: isPlatformOrder, // [NEW] Pass override
+      isEmployee: isEmployee, // [NEW]
     });
   }
 
@@ -1197,6 +1229,7 @@ export class SalesPayloadService {
       onlySalesOrder, // [NEW] Option to skip inventory fields
       isPlatformOrder, // [NEW]
       platformBrand, // [NEW]
+      isEmployeeMap, // [NEW]
     } = context;
 
     // [NEW] Patch brand from Platform info if available
@@ -1247,12 +1280,18 @@ export class SalesPayloadService {
       sale.product = loyaltyProduct;
     }
 
+    const isEmployee =
+      isEmployeeMap?.get(sale.partnerCode) ||
+      isEmployeeMap?.get((sale as any).issuePartnerCode) ||
+      false;
+
     const { maCk01, maCtkmTangHang } = await this.resolveInvoicePromotionCodes(
       sale,
       orderData,
       giaBan,
       amounts.promCode,
       isPlatformOrder, // [NEW]
+      isEmployee, // [NEW]
     );
 
     const { tkChietKhau, tkChiPhi, maPhi } = await this.resolveInvoiceAccounts(

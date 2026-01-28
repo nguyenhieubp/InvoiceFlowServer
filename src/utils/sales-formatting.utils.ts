@@ -399,6 +399,15 @@ export async function formatSaleForFrontend(
     soSerial = batchSerialFromST;
   }
 
+  // [FIX] Prioritize muaHangGiamGiaDisplay (employee discount) when available
+  const calculatedPromotionDisplayCode = maCtkmTangHang
+    ? ''
+    : muaHangGiamGiaDisplay || // [NEW] Employee discount code takes priority
+      maCk01 ||
+      SalesUtils.getPromotionDisplayCode(sale.promCode) ||
+      (isSanTmdt ? '' : displayFields.thanhToanVoucherDisplay) ||
+      '';
+
   return {
     ...sale,
     customer: sale.customer
@@ -421,15 +430,9 @@ export async function formatSaleForFrontend(
     maSerial: batchSerialFromST,
     isTangHang,
     isDichVu: calculatedFields.isDichVu,
-    promCodeDisplay: finalPromCodeDisplay,
-    // [FIX] Prioritize muaHangGiamGiaDisplay (employee discount) when available
-    promotionDisplayCode: maCtkmTangHang
-      ? ''
-      : muaHangGiamGiaDisplay || // [NEW] Employee discount code takes priority
-        maCk01 ||
-        SalesUtils.getPromotionDisplayCode(sale.promCode) ||
-        (isSanTmdt ? '' : displayFields.thanhToanVoucherDisplay) ||
-        '',
+
+    promCodeDisplay: calculatedPromotionDisplayCode, // [FIX] Unify with promotionDisplayCode as source of truth
+    promotionDisplayCode: calculatedPromotionDisplayCode,
     muaHangGiamGiaDisplay: muaHangGiamGiaDisplay, // [NEW] Mã CTKM cho chiết khấu mua hàng NV
     // [FIX] Overwrite fields with Source of Truth Amounts
     // Ensures Frontend matches Fast API Payload exactly
