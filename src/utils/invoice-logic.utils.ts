@@ -333,6 +333,29 @@ export class InvoiceLogicUtils {
       }
     }
 
+    // [MOVED] Logic Discount for Retail Purchase (other_discamt > 0) AND Employee Order
+    // Lifted out of restriction block to support "All order types"
+    const otherDiscamt = Number(
+      sale.other_discamt || sale.chietKhauMuaHangGiamGia || 0,
+    );
+    if (
+      isEmployee && // [CHECK] Only for Employee
+      otherDiscamt > 0 &&
+      !effectiveIsSanTmdt &&
+      !maCk01
+    ) {
+      if (['TTM', 'TSG', 'THP'].includes(maDvcs)) {
+        // Format: Fixed as per request
+        maCk01 = '2505MN.CK521';
+      } else if (maDvcs === 'FBV') {
+        if (effectiveProductType === 'I') maCk01 = 'SPQTNV';
+        else if (effectiveProductType === 'S') maCk01 = 'DVQTNV';
+      } else if (maDvcs === 'LHV') {
+        if (effectiveProductType === 'S') maCk01 = 'R504DICHVU';
+        else if (effectiveProductType === 'I') maCk01 = 'R504SANPHAM';
+      }
+    }
+
     if (!isDoiDiem && !isTangHang && !isWholesale) {
       // [NEW] Platform Order (Đơn sàn) Logic
       if (effectiveIsSanTmdt) {
@@ -341,28 +364,6 @@ export class InvoiceLogicUtils {
           maCk01 = 'TTM.R601ECOM';
         } else if (brand === 'yaman') {
           maCk01 = 'BTH.R601ECOM';
-        }
-      }
-
-      // [NEW] Logic Discount for Retail Purchase (other_discamt > 0) AND Employee Order
-      const otherDiscamt = Number(
-        sale.other_discamt || sale.chietKhauMuaHangGiamGia || 0,
-      );
-      if (
-        isEmployee && // [CHECK] Only for Employee
-        otherDiscamt > 0 &&
-        !effectiveIsSanTmdt &&
-        !maCk01
-      ) {
-        if (['TTM', 'TSG', 'THP'].includes(maDvcs)) {
-          // Format: Fixed as per request
-          maCk01 = '2505MN.CK521';
-        } else if (maDvcs === 'FBV') {
-          if (effectiveProductType === 'I') maCk01 = 'SPQTNV';
-          else if (effectiveProductType === 'S') maCk01 = 'DVQTNV';
-        } else if (maDvcs === 'LHV') {
-          if (effectiveProductType === 'S') maCk01 = 'R504DICHVU';
-          else if (effectiveProductType === 'I') maCk01 = 'R504SANPHAM';
         }
       }
 
@@ -1165,6 +1166,7 @@ export class InvoiceLogicUtils {
     department: any,
     branchCode: string,
     loyaltyService?: any,
+    isEmployee?: boolean, // [NEW] Accept isEmployee param
   ) {
     const orderTypes = this.getOrderTypes(sale.ordertypeName);
     const { isDoiDiem, isDauTu } = orderTypes;
@@ -1178,7 +1180,7 @@ export class InvoiceLogicUtils {
     });
 
     const isTangHang = this.isTangHang(giaBan, tienHang);
-    const maDvcs = department?.company || '';
+    const maDvcs = department?.ma_dvcs || '';
     const productType = sale.productType || loyaltyProduct?.productType || null;
     const productTypeUpper = productType
       ? String(productType).toUpperCase().trim()
@@ -1187,7 +1189,12 @@ export class InvoiceLogicUtils {
 
     // 2. Resolve Accounting Accounts
     const maHangGiamGia =
-      sale.maHangGiamGia || loyaltyProduct?.materialCode || '';
+      sale.maHangGiamGia ||
+      this.calcCodeDisCount(
+        sale.product?.productType || loyaltyProduct?.productType,
+        sale.product?.materialType || loyaltyProduct?.materialType,
+      ) ||
+      '';
     const hasMaCtkm = !!sale.maCtkm;
     const hasMaCtkmTangHang = !!sale.maCtkmTangHang;
 
@@ -1211,6 +1218,7 @@ export class InvoiceLogicUtils {
       productTypeUpper,
       promCode,
       maHangGiamGia,
+      isEmployee, // [NEW] Pass isEmployee
     });
 
     // 4. Resolve Batch/Serial
@@ -1265,5 +1273,28 @@ export class InvoiceLogicUtils {
       maKho,
       promCodeDisplay,
     };
+  }
+  /**
+   * Mã mua hàng giảm giá
+   */
+  static calcCodeDisCount(productType: any, loaiVt: any): string {
+    let isEcode;
+    if (String(loaiVt) === '94') {
+      isEcode = true;
+    } else {
+      isEcode = false;
+    }
+
+    const ECG = ['10GIFT'];
+
+    if (!isEcode) {
+      return 'SP';
+    } else {
+      if (ECG.includes(productType)) {
+        return 'ECG';
+      } else {
+        return 'E';
+      }
+    }
   }
 }

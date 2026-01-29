@@ -4,8 +4,7 @@ import { StockTransfer } from '../../../entities/stock-transfer.entity';
 import { OrderFee } from '../../../entities/order-fee.entity';
 import { CategoriesService } from '../../categories/categories.service';
 import { LoyaltyService } from 'src/services/loyalty.service';
-import * as SalesFormattingUtils from '../../../utils/sales-formatting.utils';
-import * as SalesCalculationUtils from '../../../utils/sales-calculation.utils';
+import { InvoiceLogicUtils } from '../../../utils/invoice-logic.utils';
 
 /**
  * FormattingContext - All data needed for formatting sales
@@ -97,69 +96,170 @@ export class SalesFormattingService {
     // Get stock transfers if needed
     let saleStockTransfers: StockTransfer[] = [];
     if (includeStockTransfers && stockTransferMap) {
-      const saleMaterialCode = loyaltyProduct?.materialCode;
-      if (saleMaterialCode) {
-        const stockTransferKey = `${sale.docCode}_${saleMaterialCode}`;
-        saleStockTransfers = stockTransferMap.get(stockTransferKey) || [];
-      }
-
-      // Fallback to itemCode lookup
-      if (saleStockTransfers.length === 0 && sale.itemCode) {
+      if ((sale as any).stockTransfers) {
+        saleStockTransfers = (sale as any).stockTransfers;
+      } else {
         const key = `${sale.docCode}_${sale.itemCode}`;
         saleStockTransfers = stockTransferMap.get(key) || [];
       }
     }
 
-    // Calculate fields
-    const calculatedFields = SalesCalculationUtils.calculateSaleFields(
-      sale,
-      loyaltyProduct,
-      department,
-      sale.branchCode,
-    );
-
-    // Get maKho from stock transfer if available
-    if (includeStockTransfers && warehouseCodeMap && stockTransferMap) {
-      const saleMaterialCode = loyaltyProduct?.materialCode;
-      // This would need the getMaKhoFromStockTransfer method
-      // For now, we'll keep the existing maKho from calculatedFields
-    }
-
-    // Get order context
-    const order = orderMap?.get(sale.docCode);
-
-    // Check if platform order
-    const isPlatformOrder = orderFeeMap?.has(sale.docCode) || false;
-    const platformBrand = orderFeeMap?.get(sale.docCode)?.brand;
-
-    // Get employee status from pre-fetched map
+    // Get employee status from pre-fetched map (moved up)
     const isEmployee =
       isEmployeeMap?.get(sale.partnerCode) ||
       isEmployeeMap?.get((sale as any).issuePartnerCode) ||
       false;
 
-    // Format using existing utility
-    const enrichedSale = await SalesFormattingUtils.formatSaleForFrontend(
+    // Calculate fields using InvoiceLogicUtils (Unified Logic)
+    const calculatedFields = await InvoiceLogicUtils.calculateSaleFields(
       sale,
       loyaltyProduct,
       department,
-      calculatedFields,
-      order,
-      this.categoriesService,
-      this.loyaltyService,
-      saleStockTransfers,
+      sale.branchCode,
+      this.loyaltyService, // Pass loyaltyService for Wholesale accounts lookup
+      isEmployee, // [NEW] Pass isEmployee
+    );
+
+    // [FIX] Restore variables for mapping
+    const isPlatformOrder = orderFeeMap?.has(sale.docCode) || false;
+    const platformBrand = orderFeeMap?.get(sale.docCode)?.brand;
+
+    // Resolve Ma Kho for display (if needed) using Category Service map
+    // Priority: Assigned ST > Calculated > Sale.maKho
+    let maKhoDisplay = calculatedFields.maKho;
+
+    // If we have an assigned ST, use its stockCode logic
+    if (saleStockTransfers.length > 0) {
+      // Usually the first one or the one with negative qty determines the warehouse source
+      const st = saleStockTransfers[0];
+      if (st.stockCode) {
+        maKhoDisplay = st.stockCode;
+      }
+    }
+
+    if (warehouseCodeMap && maKhoDisplay) {
+      maKhoDisplay = warehouseCodeMap.get(maKhoDisplay) || maKhoDisplay;
+    }
+
+    // Override values in sale object for display consistency if needed
+    // But better to return a clean object.
+    const enrichedSale = {
+      ...(sale as any),
+      // Overwrite/Add fields from Logic Utils
+      giaBan: calculatedFields.giaBan,
+      tienHang: calculatedFields.tienHang,
+      tienHangGoc: calculatedFields.tienHangGoc, // Add this if FE uses it
+      tkChietKhau: calculatedFields.tkChietKhau,
+      tkChiPhi: calculatedFields.tkChiPhi,
+      maPhi: calculatedFields.maPhi,
+      maLo: calculatedFields.maLo,
+      soSerial: calculatedFields.soSerial,
+      maKho: maKhoDisplay,
+      maCtkmTangHang: calculatedFields.maCtkmTangHang,
+
+      // [RESTORE] Cuc Thue Display
+      cucThueDisplay:
+        sale.cucThue || department?.ma_dvcs || department?.ma_dvcs_ht || null,
+
+      // [RESTORE] Account Displays
+      tkDoanhThuDisplay:
+        loyaltyProduct?.tkDoanhThuBanLe ||
+        loyaltyProduct?.tkDoanhThuBanBuon ||
+        '-',
+      tkGiaVonDisplay:
+        loyaltyProduct?.tkGiaVonBanLe || loyaltyProduct?.tkGiaVonBanBuon || '-',
+
+      // [RESTORE] Mua Hang Giam Gia Display (Corresponds to ma_ck01 in Fast API)
+      muaHangGiamGiaDisplay: calculatedFields.maCk01 || null,
+
+      // [UPDATE] User Request: promCodeDisplay should be km_yn value
+      promCodeDisplay: String(
+        (() => {
+          const types = InvoiceLogicUtils.getOrderTypes(sale.ordertypeName);
+          const isSinhNhat = types.isSinhNhat;
+          return types.isDoiDv ||
+            types.isDoiVo ||
+            types.isTachThe ||
+            isSinhNhat || // Apply updated birthday logic
+            calculatedFields.maCtkmTangHang === 'TT DAU TU'
+            ? 0
+            : InvoiceLogicUtils.isTangHang(
+                  Number(calculatedFields.giaBan),
+                  Number(calculatedFields.tienHang),
+                )
+              ? 1
+              : 0;
+        })(),
+      ),
+
+      // [UPDATE] Remove redundant display fields as requested
+      // promotionDisplayCode: ...,
+      // muaHangGiamGiaDisplay: ...,
+
+      // Product Info
+      tenVatTu:
+        loyaltyProduct?.name ||
+        (sale as any).product?.tenVatTu ||
+        sale.itemName,
+      dvt: loyaltyProduct?.unit || (sale as any).product?.dvt || sale.dvt,
+
+      // [FIX] Explicitly Map maVatTu (Source of Truth)
+      maVatTu: InvoiceLogicUtils.resolveInvoiceMaterial(sale, loyaltyProduct)
+        .maVt,
+      itemName: InvoiceLogicUtils.resolveInvoiceMaterial(sale, loyaltyProduct)
+        .tenVt,
+
+      // [FIX] Explicitly Map Department Object
+      department: department
+        ? {
+            ma_bp: department.ma_bp || null,
+            branchcode: department.branchcode || null,
+            ma_dvcs: department.ma_dvcs || null,
+            ma_dvcs_ht: department.ma_dvcs_ht || null,
+            type: department.type || null,
+          }
+        : null,
+
+      // [FIX] Enriched Product Object
+      product: loyaltyProduct
+        ? {
+            productType:
+              loyaltyProduct.productType || loyaltyProduct.producttype,
+            dvt: loyaltyProduct.unit || null,
+            maVatTu: loyaltyProduct.materialCode || sale.itemCode,
+            tenVatTu: loyaltyProduct.name || null,
+            trackInventory: loyaltyProduct.trackInventory ?? null,
+            trackSerial: !!loyaltyProduct.trackSerial,
+            trackBatch: !!loyaltyProduct.trackBatch,
+            tkChietKhau: loyaltyProduct.tkChietKhau || null,
+            tkDoanhThuBanLe: loyaltyProduct.tkDoanhThuBanLe || null,
+            tkDoanhThuBanBuon: loyaltyProduct.tkDoanhThuBanBuon || null,
+            tkGiaVonBanLe: loyaltyProduct.tkGiaVonBanLe || null,
+            tkGiaVonBanBuon: loyaltyProduct.tkGiaVonBanBuon || null,
+          }
+        : (sale as any).product,
+
+      // Platform Info
       isPlatformOrder,
       platformBrand,
-      isEmployee, // [API] Pre-fetched employee status
-    );
+      isEmployee,
+
+      // Stock Transfers Attached
+      stockTransfers: saleStockTransfers,
+    };
 
     // Override svcCode with materialCode if available
     if (sale.svc_code && svcCodeMap) {
       const materialCode = svcCodeMap.get(sale.svc_code);
       if (materialCode) {
-        enrichedSale.svcCode = materialCode;
+        enrichedSale.svc_code = materialCode;
       }
     }
+
+    // [Compatibility] Re-add properties expected by SalesFormattingUtils if we removed it
+    // Or just ensure the FE consumes these new fields correctly.
+    // It seems formatSaleForFrontend did a lot of field renaming.
+    // To be perfectly safe, we should inline the logic of formatSaleForFrontend but adapted to new Utils.
 
     return enrichedSale;
   }

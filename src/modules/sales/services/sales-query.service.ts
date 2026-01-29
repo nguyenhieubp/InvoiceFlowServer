@@ -8,7 +8,7 @@ import { LoyaltyService } from '../../../services/loyalty.service';
 import { CategoriesService } from '../../categories/categories.service';
 import { N8nService } from '../../../services/n8n.service';
 import * as SalesUtils from '../../../utils/sales.utils';
-import * as SalesFormattingUtils from '../../../utils/sales-formatting.utils';
+// import * as SalesFormattingUtils from '../../../utils/sales-formatting.utils'; // REMOVED
 import { SalesFormattingService } from './sales-formatting.service';
 import { VoucherIssueService } from '../../voucher-issue/voucher-issue.service';
 import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
@@ -237,19 +237,56 @@ export class SalesQueryService {
           isEmployeeMap.get((sale as any).issuePartnerCode) ||
           false;
 
-        const enriched = await SalesFormattingUtils.formatSaleForFrontend(
+        // [NEW] Use SalesFormattingService instead of Utils
+
+        // Temporarily attach assigned transfers for the service to pick up
+        // This aligns with our update in SalesFormattingService
+        (sale as any).stockTransfers = saleStockTransfers;
+
+        // Build minimal context for single sale format (Optimization: reuse context object if possible, but here we build per loop for safety with local vars)
+        // Actually, we should build a GLOBAL context for the batch, but 'saleStockTransfers' is specific to this sale's resolution logic.
+        // So we pass a partial context or just what's needed.
+        // The service expects a full context. Let's construct it efficiently.
+        const context = this.salesFormattingService.buildContext({
+          loyaltyProductMap,
+          departmentMap,
+          stockTransferMap: undefined, // We pass explicit STs via sale property
+          orderFeeMap: undefined, // Handled via override params in service? No, service reads map.
+          // Wait, service reads orderFeeMap. We need to pass it if we want platform logic to work.
+          // But findAllOrders didn't load orderFeeMap fully? It loaded 'orderFee' for single docCode.
+          // Let's create a mini map for this single order context if needed.
+          // In findByOrderCode, we have 'isPlatformOrder' and 'platformBrand' variables.
+          // SalesFormattingService checks `orderFeeMap?.has(sale.docCode)`.
+          // So we should construct a map if we want to use the service fully.
+
+          // To maintain compatibility with existing variables:
+          warehouseCodeMap,
+          svcCodeMap: undefined, // Not used in findByOrderCode scope
+          getMaTheMap: undefined, // Not used, passed via sale.maThe? Service checks map.
+          // The service checks `getMaTheMap`. We should pass it if we have it?
+          // `findByOrderCode` doesn't seem to fetch `getMaTheMap`?
+          // It fetches `cardData` LATER.
+          // So for `findByOrderCode`, `getMaTheMap` is empty at this stage.
+          orderMap: new Map([[docCode, mockOrder]]),
+          isEmployeeMap,
+          includeStockTransfers: true,
+        });
+
+        // Manual override for Platform Order since we have local vars
+        // We can fake the map entry
+        const orderFeeMap = new Map();
+        if (isPlatformOrder) {
+          orderFeeMap.set(docCode, { brand: platformBrand } as any);
+        }
+        context.orderFeeMap = orderFeeMap;
+
+        const enriched = await this.salesFormattingService.formatSingleSale(
           sale,
-          loyaltyProduct,
-          department,
-          calculatedFields,
-          mockOrder, // Pass mock order
-          this.categoriesService,
-          this.loyaltyService,
-          saleStockTransfers,
-          isPlatformOrder, // [NEW]
-          platformBrand, // [NEW]
-          isEmployee, // [API] Pre-fetched employee status
+          context,
         );
+
+        // Clean up temp property
+        delete (sale as any).stockTransfers;
 
         // [EXPAND] Return keys for Fast API Payload reuse
         return {
@@ -1414,29 +1451,36 @@ export class SalesQueryService {
             isEmployeeMapForAll.get((sale as any).issuePartnerCode) ||
             false;
 
-          const enrichedSale = await SalesFormattingUtils.formatSaleForFrontend(
-            sale,
-            loyaltyProduct,
-            department,
-            calculatedFields,
-            order,
-            this.categoriesService,
-            this.loyaltyService,
-            saleStockTransfers,
-            !!orderFeeMap.get(sale.docCode), // [NEW] isPlatformOrderOverride
-            orderFeeMap.get(sale.docCode)?.brand, // [NEW] platformBrandOverride
-            isEmployeeInAll, // [API] Pre-fetched employee status
-          );
+          // [NEW] Use SalesFormattingService for findAllOrders (Explosion)
+
+          (sale as any).stockTransfers = saleStockTransfers; // Pass assigned STs
+
+          const context = this.salesFormattingService.buildContext({
+            loyaltyProductMap,
+            departmentMap,
+            stockTransferMap: undefined, // Passed via sale property
+            orderFeeMap,
+            warehouseCodeMap,
+            svcCodeMap,
+            getMaTheMap: getMaThe,
+            orderMap,
+            isEmployeeMap: isEmployeeMapForAll,
+            includeStockTransfers: true,
+          });
+
+          const enrichedSale =
+            await this.salesFormattingService.formatSingleSale(sale, context);
 
           // [NEW] Override svcCode with looked-up materialCode if available
-          // The frontend uses 'svcCode' from the response. We keep original svc_code in DB.
-          // But for display, we check the map.
+          // (Service does this too, but let's keep consistent with existing flow if explicit override needed)
           if (sale.svc_code) {
             enrichedSale.svcCode = svcCodeMap.get(sale.svc_code);
           }
 
           // Store enriched sale (will be pushed in order after Promise.all)
           enrichedSale._docCode = docCode; // Temporary marker for grouping
+
+          delete (sale as any).stockTransfers;
           return enrichedSale;
         })();
 
@@ -1893,10 +1937,23 @@ export class SalesQueryService {
     );
     const allItemCodes = Array.from(new Set([...itemCodes]));
 
-    const [loyaltyProductMap, departmentMap] = await Promise.all([
-      this.loyaltyService.fetchProducts(allItemCodes),
-      this.loyaltyService.fetchLoyaltyDepartments(branchCodes),
-    ]);
+    const [loyaltyProductMap, departmentMap, warehouseCodeMap] =
+      await Promise.all([
+        this.loyaltyService.fetchProducts(allItemCodes),
+        this.loyaltyService.fetchLoyaltyDepartments(branchCodes),
+        this.categoriesService.getWarehouseCodeMap(),
+      ]);
+
+    // [NEW] Batch fetch OrderFees for platform voucher enrichment
+    let orderFeeMap = new Map<string, OrderFee>();
+    if (docCodes.length > 0) {
+      const orderFees = await this.orderFeeRepository.find({
+        where: { erpOrderCode: In(docCodes) },
+      });
+      orderFees.forEach((fee) => {
+        orderFeeMap.set(fee.erpOrderCode, fee);
+      });
+    }
     let svcCodeMap = new Map<string, string>();
     if (svcCodes.length > 0) {
       svcCodeMap =
@@ -1985,18 +2042,34 @@ export class SalesQueryService {
           false;
 
         // Use empty stock transfers for this aggregation view
-        const enrichedSale = await SalesFormattingUtils.formatSaleForFrontend(
+        // [NEW] Use SalesFormattingService
+
+        // Prepare context for this sale (or batch it outside loop for performance)
+        // For performance, we should ideally reuse the context.
+        // But `isEmployeeAggregated` is specific? No, map is global.
+        // `order` is specific? No, map is global.
+        // `stockTransfer` is specific? We used empty array.
+
+        // Let's make a context outside loop?
+        // We are inside `promise` closure.
+        // We can build context inside.
+
+        const context = this.salesFormattingService.buildContext({
+          loyaltyProductMap,
+          departmentMap,
+          stockTransferMap: undefined, // Empty for aggregation view
+          orderFeeMap: orderFeeMap,
+          warehouseCodeMap,
+          svcCodeMap,
+          getMaTheMap: getMaThe,
+          orderMap: orderMap,
+          isEmployeeMap: isEmployeeMapAggregated,
+          includeStockTransfers: false,
+        });
+
+        const enrichedSale = await this.salesFormattingService.formatSingleSale(
           sale,
-          loyaltyProduct,
-          department,
-          calculatedFields,
-          order,
-          this.categoriesService,
-          this.loyaltyService,
-          [], // No stock transfers
-          undefined, // isPlatformOrderOverride
-          undefined, // platformBrandOverride
-          isEmployeeAggregated, // [API] Pre-fetched employee status
+          context,
         );
 
         if (sale.svc_code) {
