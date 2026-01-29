@@ -1272,6 +1272,23 @@ export class InvoiceLogicUtils {
       loaiGd,
       maKho,
       promCodeDisplay,
+      // [NEW] Wholesale fields
+      maCk02:
+        (sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS') &&
+        (sale.disc_tm > 0 || sale.disc_amt > 0)
+          ? this.resolveWholesalePromotionCode({
+              product: loyaltyProduct,
+              distTm:
+                Number(sale.disc_tm || 0) > 0
+                  ? Number(sale.disc_tm)
+                  : Number(sale.disc_amt || 0),
+            })
+          : null,
+      ck02Nt:
+        (sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS') &&
+        (sale.disc_tm > 0 || sale.disc_amt > 0)
+          ? Number(sale.disc_tm || sale.disc_amt || 0)
+          : 0,
     };
   }
   /**

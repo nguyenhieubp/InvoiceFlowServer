@@ -92,29 +92,49 @@ export class SaleItemResponseDto {
   tkChiPhi?: string;
   maPhi?: string;
 
-  // ========== DISPLAY FIELDS (Backend calculated) ==========
-  promCodeDisplay?: string | null;
-  promotionDisplayCode?: string;
-  muaHangGiamGiaDisplay?: string | null; // [NEW] Mã CTKM cho chiết khấu mua hàng NV
+  // ========== STANDARDIZED DISCOUNT FIELDS (01-11) ==========
+  ma_ck01?: string | null; // Mua hàng giảm giá
+  ck01_nt?: number;
+
+  ma_ck02?: string | null; // CK theo chính sách
+  ck02_nt?: number;
+
+  ma_ck03?: string | null; // Mua hàng CK VIP
+  ck03_nt?: number;
+
+  ma_ck04?: string | null; // Thanh toán coupon
+  ck04_nt?: number;
+
+  ma_ck05?: string | null; // Thanh toán Voucher
+  ck05_nt?: number;
+
+  ma_ck06?: string | null; // Dự phòng 1
+  ck06_nt?: number;
+
+  ma_ck07?: string | null; // Dự phòng 2
+  ck07_nt?: number;
+
+  ma_ck08?: string | null; // Dự phòng 3
+  ck08_nt?: number;
+
+  ma_ck09?: string | null; // Chiết khấu hãng
+  ck09_nt?: number;
+
+  ma_ck10?: string | null; // Thưởng bằng hàng
+  ck10_nt?: number;
+
+  ma_ck11?: string | null; // Thanh toán TK tiền ảo
+  ck11_nt?: number;
+
+  // ========== DISPLAY FIELDS ==========
+  km_yn?: number; // [RENAME] Was promCodeDisplay. 0=No, 1=Yes
   cucThueDisplay?: string;
   tkDoanhThuDisplay?: string;
   tkGiaVonDisplay?: string;
 
-  // Voucher/Payment Display Fields
-  thanhToanCouponDisplay?: string | null;
-  chietKhauThanhToanCouponDisplay?: number | null;
-  thanhToanVoucherDisplay?: string | null;
-  thanhToanTkTienAoDisplay?: string | null;
-  chietKhauThanhToanTkTienAoDisplay?: number | null;
-
-  // ========== PROMOTION/DISCOUNT ==========
+  // ========== PROMOTION/DISCOUNT (Others) ==========
   maCtkmTangHang?: string;
-  voucherDp1?: string | null;
-  chietKhauVoucherDp1?: number;
   maThe?: string;
-  maCkTheoChinhSach?: string; // Mã CK theo chính sách (bán buôn)
-  muaHangCkVip?: string; // [FIX] Add VIP classification
-  chietKhauMuaHangCkVip?: number; // [FIX] Add VIP discount amount
 
   // ========== FLAGS ==========
   isProcessed: boolean;
@@ -138,6 +158,7 @@ export class SaleItemResponseDto {
   // ========== WHOLESALE SPECIFIC ==========
   disc_tm?: number | string;
   disc_ctkm?: string;
+  // ma_ck02/ck02_nt moved to standardized block above
 
   // ========== AMOUNTS (for calculations) ==========
   disc_amt?: number;

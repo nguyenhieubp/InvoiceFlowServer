@@ -180,28 +180,70 @@ export class SalesFormattingService {
       tkGiaVonDisplay:
         loyaltyProduct?.tkGiaVonBanLe || loyaltyProduct?.tkGiaVonBanBuon || '-',
 
-      // [RESTORE] Mua Hang Giam Gia Display (Corresponds to ma_ck01 in Fast API)
+      // [STANDARDIZED] Discount Fields Enriched
+      maCk01: calculatedFields.maCk01 || null,
+      ck01Nt: calculatedFields.maCk01
+        ? Number(sale.other_discamt || 0) > 0
+          ? Number(sale.other_discamt)
+          : Number(sale.chietKhauMuaHangGiamGia || 0)
+        : 0,
+
+      maCk02: calculatedFields.maCk02 || null,
+      ck02Nt: calculatedFields.ck02Nt || 0,
+
+      maCk03: sale.muaHangCkVip || null,
+      ck03Nt: Number(sale.grade_discamt || sale.chietKhauMuaHangCkVip || 0),
+
+      maCk04: (sale as any).maCk04 || null,
+      ck04Nt: Number((sale as any).chietKhauThanhToanCoupon || 0),
+
+      maCk05:
+        Number(
+          sale.paid_by_voucher_ecode_ecoin_bp ||
+            (sale as any).chietKhauThanhToanVoucher ||
+            0,
+        ) > 0
+          ? InvoiceLogicUtils.resolveVoucherCode({
+              sale: {
+                ...sale,
+                customer:
+                  sale.customer || orderMap?.get(sale.docCode)?.customer,
+              },
+              customer: sale.customer || orderMap?.get(sale.docCode)?.customer,
+              brand: platformBrand || sale.brand || '',
+            }) ||
+            (sale as any).maCk05 ||
+            null
+          : null,
+      ck05Nt: Number(
+        sale.paid_by_voucher_ecode_ecoin_bp ||
+          (sale as any).chietKhauThanhToanVoucher ||
+          0,
+      ),
+
+      maCk06: sale.voucherDp1 || null,
+      ck06Nt: Number(sale.chietKhauVoucherDp1 || 0),
+
+      maCk07: (sale as any).voucherDp2 || null,
+      ck07Nt: Number((sale as any).chietKhauVoucherDp2 || 0),
+
+      maCk08: (sale as any).voucherDp3 || null,
+      ck08Nt: Number((sale as any).chietKhauVoucherDp3 || 0),
+
+      maCk09: (sale as any).hang || null,
+      ck09Nt: Number((sale as any).chietKhauHang || 0),
+
+      maCk10: (sale as any).thuongBangHang || null,
+      ck10Nt: Number((sale as any).chietKhauThuongMuaBangHang || 0),
+
+      maCk11: (sale as any).maCk11 || null,
+      ck11Nt: Number((sale as any).chietKhauThanhToanTkTienAo || 0),
+
+      // [RESTORE] Mua Hang Giam Gia Display (Corresponds to ma_ck01 in Fast API) -- Keeping for backward compat if needed, but redundant
       muaHangGiamGiaDisplay: calculatedFields.maCk01 || null,
 
-      // [UPDATE] User Request: promCodeDisplay should be km_yn value
-      promCodeDisplay: String(
-        (() => {
-          const types = InvoiceLogicUtils.getOrderTypes(sale.ordertypeName);
-          const isSinhNhat = types.isSinhNhat;
-          return types.isDoiDv ||
-            types.isDoiVo ||
-            types.isTachThe ||
-            isSinhNhat || // Apply updated birthday logic
-            calculatedFields.maCtkmTangHang === 'TT DAU TU'
-            ? 0
-            : InvoiceLogicUtils.isTangHang(
-                  Number(calculatedFields.giaBan),
-                  Number(calculatedFields.tienHang),
-                )
-              ? 1
-              : 0;
-        })(),
-      ),
+      // [UPDATE] User Request: promCodeDisplay renamed to km_yn
+      km_yn: (sale as any).km_yn ?? 0,
 
       // [UPDATE] Remove redundant display fields as requested
       // promotionDisplayCode: ...,

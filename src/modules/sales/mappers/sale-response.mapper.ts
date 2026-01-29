@@ -127,29 +127,17 @@ export function mapToSaleItemResponse(sale: any): SaleItemResponseDto {
     maPhi: sale.maPhi,
 
     // Display fields (backend calculated)
-    promCodeDisplay: sale.promCodeDisplay,
-    promotionDisplayCode: sale.promotionDisplayCode,
-    muaHangGiamGiaDisplay: sale.muaHangGiamGiaDisplay, // [NEW] Mã CTKM cho chiết khấu mua hàng NV
+    km_yn: sale.km_yn,
     cucThueDisplay: sale.cucThueDisplay,
     tkDoanhThuDisplay: sale.tkDoanhThuDisplay,
     tkGiaVonDisplay: sale.tkGiaVonDisplay,
-
-    // Voucher/Payment display fields
-    thanhToanCouponDisplay: sale.thanhToanCouponDisplay,
-    chietKhauThanhToanCouponDisplay: sale.chietKhauThanhToanCouponDisplay,
-    thanhToanVoucherDisplay: sale.thanhToanVoucherDisplay,
-    thanhToanTkTienAoDisplay: sale.thanhToanTkTienAoDisplay,
-    chietKhauThanhToanTkTienAoDisplay: sale.chietKhauThanhToanTkTienAoDisplay,
+    // muaHangGiamGiaDisplay - REMOVED
+    // thanhToanCouponDisplay - REMOVED
+    // ...
 
     // Promotion/Discount
     maCtkmTangHang: sale.maCtkmTangHang,
-    voucherDp1: sale.voucherDp1,
-    chietKhauVoucherDp1: sale.chietKhauVoucherDp1,
     maThe: sale.maThe,
-    maCkTheoChinhSach: sale.maCkTheoChinhSach,
-    // [FIX] Map VIP fields
-    muaHangCkVip: sale.muaHangCkVip,
-    chietKhauMuaHangCkVip: sale.chietKhauMuaHangCkVip,
 
     // Flags
     isProcessed: sale.isProcessed,
@@ -164,6 +152,30 @@ export function mapToSaleItemResponse(sale: any): SaleItemResponseDto {
     loaiGd: sale.loaiGd,
     svcCode: sale.svcCode,
     maCa: sale.maCa,
+
+    // Standardized Discount Fields (01-11)
+    ma_ck01: sale.maCk01,
+    ck01_nt: sale.ck01Nt,
+    ma_ck02: sale.maCk02,
+    ck02_nt: sale.ck02Nt,
+    ma_ck03: sale.maCk03,
+    ck03_nt: sale.ck03Nt,
+    ma_ck04: sale.maCk04,
+    ck04_nt: sale.ck04Nt,
+    ma_ck05: sale.maCk05,
+    ck05_nt: sale.ck05Nt,
+    ma_ck06: sale.maCk06,
+    ck06_nt: sale.ck06Nt,
+    ma_ck07: sale.maCk07,
+    ck07_nt: sale.ck07Nt,
+    ma_ck08: sale.maCk08,
+    ck08_nt: sale.ck08Nt,
+    ma_ck09: sale.maCk09,
+    ck09_nt: sale.ck09Nt,
+    ma_ck10: sale.maCk10,
+    ck10_nt: sale.ck10Nt,
+    ma_ck11: sale.maCk11,
+    ck11_nt: sale.ck11Nt,
 
     // Wholesale specific
     disc_tm: sale.disc_tm,
