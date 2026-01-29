@@ -172,13 +172,6 @@ export class SalesPayloadService {
       const isEmployeeMap =
         await this.n8nService.checkCustomersIsEmployee(partnerCodesToCheck);
 
-      this.logger.log(
-        `[DEBUG] Employee Check Result Map: ${JSON.stringify(
-          Array.from(isEmployeeMap.entries()),
-        )}`,
-      );
-      // [DEBUG LOG END]
-
       // 4. Transform sales to details (Filter out TRUTONKEEP items)
       const detail = await Promise.all(
         allSales
@@ -1472,7 +1465,13 @@ export class SalesPayloadService {
       ma_gd: '1',
       ma_tt: null,
       ma_ca: firstSale?.maCa || null,
-      hinh_thuc: '0',
+      hinh_thuc:
+        firstSale &&
+        ['WHOLESALE', 'WS'].includes(
+          (firstSale.type_sale || '').toUpperCase().trim(),
+        )
+          ? '1'
+          : '0',
       dien_giai: orderData.docCode || null,
       ngay_lct: ngayLct,
       ngay_ct: ngayCt,
