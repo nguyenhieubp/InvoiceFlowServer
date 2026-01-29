@@ -55,6 +55,7 @@ export class NormalOrderHandlerService {
           ? ConvertUtils.formatDateYYYYMMDD(orderData.customer.birthday)
           : undefined,
         gioi_tinh: orderData.customer.sexual || undefined,
+        brand: orderData.sourceCompany || orderData.brand, // [NEW] Pass brand/sourceCompany
       });
     }
 

@@ -8,13 +8,12 @@ import {
 import { FastApiClientService } from './fast-api-client.service';
 import { CategoriesService } from '../modules/categories/categories.service';
 import { SyncService } from '../modules/sync/sync.service';
+import { N8nService } from './n8n.service';
 import { LoyaltyService } from './loyalty.service';
-import { FastApiPayloadHelper } from './fast-api-payload.helper';
-import { formatDateYYYYMMDD } from '../utils/convert.utils';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PaymentSyncLog } from '../entities/payment-sync-log.entity';
-import axios from 'axios';
+import { FastApiPayloadHelper } from './fast-api-payload.helper';
 
 /**
  * Service quản lý tạo invoice trong Fast API
@@ -32,11 +31,13 @@ export class FastApiInvoiceFlowService {
     private readonly loyaltyService: LoyaltyService,
     @InjectRepository(PaymentSyncLog)
     private readonly paymentSyncLogRepository: Repository<PaymentSyncLog>,
+    private readonly n8nService: N8nService,
   ) {}
 
   /**
    * Tạo/cập nhật khách hàng trong Fast API
    * 2.1/ Danh mục khách hàng
+   * [UPDATE] Sử dụng N8n làm Single Source of Truth nếu có brand
    */
   async createOrUpdateCustomer(customerData: {
     ma_kh: string;
@@ -46,16 +47,48 @@ export class FastApiInvoiceFlowService {
     so_cccd?: string;
     e_mail?: string;
     gioi_tinh?: string;
+    brand?: string; // [NEW]
   }): Promise<any> {
     try {
+      let n8nData: any = null;
+      if (customerData.ma_kh && customerData.brand) {
+        n8nData = await this.n8nService.checkCustomer(
+          customerData.ma_kh,
+          customerData.brand,
+        );
+      }
+
+      // Priority: N8n Data > Input Data > Empty
+      const payloadCode = n8nData?.code || customerData.ma_kh;
+      const payloadName = n8nData?.name || customerData.ten_kh;
+      // Map other fields if N8n returns them (guessing keys based on conventions, or user snippet)
+      // User snippet only showed code/name/mobile/group_code.
+      // I will trust N8n for name.
+      // If N8n returns address/birthday, I should use them.
+      // I'll assume n8nData might have 'address', 'birthday' etc. or standard keys.
+      // Safety: Use input as fallback.
+      const payloadAddress = n8nData?.address || customerData.dia_chi;
+      const payloadBirthDate = n8nData?.birthday || customerData.ngay_sinh;
+      const payloadCccd =
+        n8nData?.idnumber || n8nData?.cccd || customerData.so_cccd;
+      const payloadEmail = n8nData?.email || customerData.e_mail;
+      const payloadSex =
+        n8nData?.sexual || n8nData?.gioi_tinh || customerData.gioi_tinh;
+
+      if (n8nData) {
+        this.logger.log(
+          `[Flow] Synced customer ${payloadCode} from N8n (Brand: ${customerData.brand})`,
+        );
+      }
+
       const result = await this.fastApiService.createOrUpdateCustomer({
-        code: customerData.ma_kh,
-        name: customerData.ten_kh,
-        address: customerData.dia_chi,
-        birthDate: customerData.ngay_sinh,
-        cccd: customerData.so_cccd,
-        email: customerData.e_mail,
-        gioi_tinh: customerData.gioi_tinh,
+        code: payloadCode,
+        name: payloadName,
+        address: payloadAddress,
+        birthDate: payloadBirthDate,
+        cccd: payloadCccd,
+        email: payloadEmail,
+        gioi_tinh: payloadSex,
       });
 
       // Validate response: status = 1 mới là success

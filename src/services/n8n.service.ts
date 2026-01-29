@@ -196,6 +196,52 @@ export class N8nService {
     });
   }
 
+  /**
+   * Check generic customer info via N8n webhook
+   * @param partnerCode - Mã khách hàng
+   * @param sourceCompany - Brand
+   */
+  async checkCustomer(
+    partnerCode: string,
+    sourceCompany: string,
+  ): Promise<any> {
+    const apiUrl = `${this.baseUrl}/check_customer`;
+    try {
+      this.logger.log(
+        `[N8n] Checking customer ${partnerCode} (${sourceCompany})...`,
+      );
+      const response = await this.httpService.axiosRef.request({
+        method: 'GET',
+        url: apiUrl,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        data: {
+          partner_code: partnerCode,
+          source_company: sourceCompany,
+        },
+        timeout: 10000,
+      });
+
+      const responseData = response.data;
+      if (
+        Array.isArray(responseData) &&
+        responseData.length > 0 &&
+        responseData[0].data &&
+        Array.isArray(responseData[0].data) &&
+        responseData[0].data.length > 0
+      ) {
+        return responseData[0].data[0];
+      }
+      return null;
+    } catch (error: any) {
+      this.logger.error(
+        `[N8n] Failed to check customer ${partnerCode}: ${error?.message || error}`,
+      );
+      return null;
+    }
+  }
+
   // In-memory cache for employee check
   private readonly employeeCache = new Map<string, boolean>();
 

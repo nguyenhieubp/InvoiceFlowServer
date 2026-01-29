@@ -184,6 +184,7 @@ export class SalesInvoiceService {
             ? ConvertUtils.formatDateYYYYMMDD(orderData.customer.birthday)
             : undefined,
           gioi_tinh: orderData.customer?.sexual || undefined,
+          brand: orderData.brand || orderData.customer?.brand,
         });
 
         const result = await this.fastApiInvoiceFlowService.createSalesOrder({
@@ -273,6 +274,8 @@ export class SalesInvoiceService {
       ordertypeName: firstSale.ordertypeName || null,
       branchCode: firstSale.branchCode || null,
       customer: firstSale.customer || null,
+      brand: firstSale.brand || firstSale.customer?.brand || null,
+      sourceCompany: firstSale.brand || firstSale.customer?.brand || null,
       sales: formattedSales,
       cashio: selectedCashio,
       stockTransfers,
