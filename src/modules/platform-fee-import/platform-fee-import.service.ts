@@ -1,22 +1,43 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import * as XLSX from 'xlsx';
-import { PlatformFeeImport } from '../../entities/platform-fee-import.entity';
+import { PlatformFeeImportShopee } from '../../entities/platform-fee-import-shopee.entity';
+import { PlatformFeeImportTiktok } from '../../entities/platform-fee-import-tiktok.entity';
+import { PlatformFeeImportLazada } from '../../entities/platform-fee-import-lazada.entity';
+import { PlatformFeeMap } from '../../entities/platform-fee-map.entity';
 // Using crypto for UUID generation (built-in Node.js)
+
+type Platform = 'shopee' | 'tiktok' | 'lazada';
+type PlatformFeeEntity =
+  | PlatformFeeImportShopee
+  | PlatformFeeImportTiktok
+  | PlatformFeeImportLazada;
 
 @Injectable()
 export class PlatformFeeImportService {
   private readonly logger = new Logger(PlatformFeeImportService.name);
 
   constructor(
-    @InjectRepository(PlatformFeeImport)
-    private readonly platformFeeImportRepository: Repository<PlatformFeeImport>,
+    @InjectRepository(PlatformFeeImportShopee)
+    private readonly shopeeRepo: Repository<PlatformFeeImportShopee>,
+
+    @InjectRepository(PlatformFeeImportTiktok)
+    private readonly tiktokRepo: Repository<PlatformFeeImportTiktok>,
+
+    @InjectRepository(PlatformFeeImportLazada)
+    private readonly lazadaRepo: Repository<PlatformFeeImportLazada>,
+
+    @InjectRepository(PlatformFeeMap)
+    private readonly feeMapRepo: Repository<PlatformFeeMap>,
+
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
   async importFromExcel(
     file: Express.Multer.File,
-    platform: 'shopee' | 'tiktok' | 'lazada',
+    platform: Platform,
   ): Promise<{
     total: number;
     success: number;
@@ -59,14 +80,49 @@ export class PlatformFeeImportService {
       const firstRow = data[0];
       const headers = Object.keys(firstRow).map(normalizeHeader);
 
+      const repo = this.getRepositoryByPlatform(platform) as Repository<any>;
+
       // Process each row
       for (let i = 0; i < data.length; i++) {
         const row = data[i];
         const rowNumber = i + 2; // +2 because Excel rows start at 1 and we skip header
 
         try {
-          const entity = this.mapRowToEntity(row, headers, platform, importBatchId, rowNumber);
-          await this.platformFeeImportRepository.save(entity);
+          const entity = this.mapRowToEntity(
+            row,
+            headers,
+            platform,
+            importBatchId,
+            rowNumber,
+          );
+
+          // Apply fee mapping for Lazada rows (map tên phí text -> mã phí hạch toán)
+          if (platform === 'lazada') {
+            await this.applyLazadaFeeMapping(
+              entity as PlatformFeeImportLazada,
+            );
+          }
+
+          // Determine order id from imported entity
+          // NOTE: "cột mã đơn hàng" user refers to the main order code on each platform
+          // (Mã Shopee/Tiktok/Lazada => maSan). "Mã đơn hàng hoàn" is refund/return code.
+          const orderId: string | null =
+            this.toText((entity as any).maSan) ||
+            this.toText((entity as any).maDonHangHoan) ||
+            null;
+
+          if (!orderId) {
+            throw new Error('Không tìm thấy mã đơn hàng trong dòng dữ liệu');
+          }
+
+          const exists = await this.checkPancakeOrderExists(orderId);
+          if (!exists) {
+            throw new Error(
+              `Mã đơn hàng "${orderId}" không tồn tại trong bảng platform_fee`,
+            );
+          }
+
+          await repo.save(entity as any);
           success++;
         } catch (error: any) {
           failed++;
@@ -92,17 +148,75 @@ export class PlatformFeeImportService {
     }
   }
 
+  private getRepositoryByPlatform(platform: Platform) {
+    if (platform === 'shopee') return this.shopeeRepo;
+    if (platform === 'tiktok') return this.tiktokRepo;
+    return this.lazadaRepo;
+  }
+
+  private toText(value: any): string | null {
+    if (value === null || value === undefined) return null;
+    const s = typeof value === 'string' ? value : String(value);
+    const trimmed = s.trim();
+    return trimmed.length ? trimmed : null;
+  }
+
+  private async checkPancakeOrderExists(orderId: string): Promise<boolean> {
+    const rows = await this.dataSource.query(
+      'SELECT 1 FROM public.platform_fee WHERE pancake_order_id = $1 LIMIT 1',
+      [orderId],
+    );
+    return Array.isArray(rows) && rows.length > 0;
+  }
+
+  private normalizeFeeName(name: string | null): string | null {
+    if (!name) return null;
+    return name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+  }
+
+  private async applyLazadaFeeMapping(
+    entity: PlatformFeeImportLazada,
+  ): Promise<void> {
+    const rawName = entity.tenPhiDoanhThu;
+    const normalized = this.normalizeFeeName(rawName);
+    if (!normalized) {
+      return;
+    }
+
+    const mapping = await this.feeMapRepo.findOne({
+      where: {
+        platform: 'lazada',
+        normalizedFeeName: normalized,
+        active: true,
+      },
+    });
+
+    if (mapping) {
+      // Ghi đè/điền mã phí hạch toán theo bảng mapping
+      entity.maPhiNhanDienHachToan = mapping.accountCode;
+    }
+  }
+
   private mapRowToEntity(
     row: Record<string, any>,
     headers: string[],
-    platform: 'shopee' | 'tiktok' | 'lazada',
+    platform: Platform,
     importBatchId: string,
     rowNumber: number,
-  ): PlatformFeeImport {
-    const entity = new PlatformFeeImport();
-    entity.platform = platform;
-    entity.importBatchId = importBatchId;
-    entity.rowNumber = rowNumber;
+  ): PlatformFeeEntity {
+    const entity: PlatformFeeEntity =
+      platform === 'shopee'
+        ? new PlatformFeeImportShopee()
+        : platform === 'tiktok'
+          ? new PlatformFeeImportTiktok()
+          : new PlatformFeeImportLazada();
+
+    (entity as any).importBatchId = importBatchId;
+    (entity as any).rowNumber = rowNumber;
 
     // Helper to get value by header name (case-insensitive, flexible matching)
     const getValue = (headerPatterns: string[]): any => {
@@ -125,66 +239,67 @@ export class PlatformFeeImportService {
 
     // Common fields
     if (platform === 'shopee') {
-      entity.maSan = getValue(['mã shopee', 'ma shopee', 'mã shopee']);
-      entity.maNoiBoSp = getValue(['mã nội bộ sp', 'ma noi bo sp']);
-      entity.ngayDoiSoat = this.parseDate(
+      const e = entity as PlatformFeeImportShopee;
+      e.maSan = this.toText(getValue(['mã shopee', 'ma shopee', 'mã shopee']));
+      e.maNoiBoSp = this.toText(getValue(['mã nội bộ sp', 'ma noi bo sp']));
+      e.ngayDoiSoat = this.parseDate(
         getValue(['ngày đối soát', 'ngay doi soat']),
       ) || null;
-      entity.maDonHangHoan = getValue([
+      e.maDonHangHoan = this.toText(getValue([
         'mã đơn hàng hoàn',
         'ma don hang hoan',
-      ]);
-      entity.shopPhatHanhTrenSan = getValue([
+      ]));
+      e.shopPhatHanhTrenSan = this.toText(getValue([
         'shop phát hành trên sàn',
         'shop phat hanh tren san',
-      ]);
-      entity.giaTriGiamGiaCtkm = this.parseDecimal(
+      ]));
+      e.giaTriGiamGiaCtkm = this.parseDecimal(
         getValue([
           'giá trị giảm giá theo ctkm của mình ban hành',
           'gia tri giam gia theo ctkm cua minh ban hanh',
         ]),
       ) || null;
-      entity.doanhThuDonHang = this.parseDecimal(
+      e.doanhThuDonHang = this.parseDecimal(
         getValue(['doanh thu đơn hàng', 'doanh thu don hang']),
       ) || null;
 
       // Shopee specific fees (6 fees) - Map by exact column names
-      entity.phiCoDinh605MaPhi164020 = this.parseDecimal(
+      e.phiCoDinh605MaPhi164020 = this.parseDecimal(
         getValue([
           'phí cố định 6.05% mã phí 164020',
           'phi co dinh 6.05% ma phi 164020',
           'phí cố định 6.05% mã phí 164020',
         ]),
       ) || null;
-      entity.phiDichVu6MaPhi164020 = this.parseDecimal(
+      e.phiDichVu6MaPhi164020 = this.parseDecimal(
         getValue([
           'phí dịch vụ 6% mã phí 164020',
           'phi dich vu 6% ma phi 164020',
           'phí dịch vụ 6% mã phí 164020',
         ]),
       ) || null;
-      entity.phiThanhToan5MaPhi164020 = this.parseDecimal(
+      e.phiThanhToan5MaPhi164020 = this.parseDecimal(
         getValue([
           'phí thanh toán 5% mã phí 164020',
           'phi thanh toan 5% ma phi 164020',
           'phí thanh toán 5% mã phí 164020',
         ]),
       ) || null;
-      entity.phiHoaHongTiepThiLienKet21150050 = this.parseDecimal(
+      e.phiHoaHongTiepThiLienKet21150050 = this.parseDecimal(
         getValue([
           'phí hoa hồng tiếp thị liên kết 21% 150050',
           'phi hoa hong tiep thi lien ket 21% 150050',
           'phí hoa hồng tiếp thị liên kết 21% 150050',
         ]),
       ) || null;
-      entity.chiPhiDichVuShippingFeeSaver164010 = this.parseDecimal(
+      e.chiPhiDichVuShippingFeeSaver164010 = this.parseDecimal(
         getValue([
           'chi phí dịch vụ shipping fee saver 164010',
           'chi phi dich vu shipping fee saver 164010',
           'chi phí dịch vụ shipping fee saver 164010',
         ]),
       ) || null;
-      entity.phiPiShipDoMktDangKy164010 = this.parseDecimal(
+      e.phiPiShipDoMktDangKy164010 = this.parseDecimal(
         getValue([
           'phí pi ship ( do mkt đăng ký) 164010',
           'phi pi ship ( do mkt dang ky) 164010',
@@ -193,11 +308,11 @@ export class PlatformFeeImportService {
         ]),
       ) || null;
 
-      entity.maCacBenTiepThiLienKet = getValue([
+      e.maCacBenTiepThiLienKet = this.toText(getValue([
         'mã các bên tiếp thị liên kết',
         'ma cac ben tiep thi lien ket',
-      ]);
-      entity.sanTmdt = getValue(['sàn tmđt', 'san tmdt', 'sàn tmđt shopee']);
+      ]));
+      e.sanTmdt = this.toText(getValue(['sàn tmđt', 'san tmdt', 'sàn tmđt shopee']));
       
       // MKT columns
       const rowKeysShopee = Object.keys(row);
@@ -217,69 +332,70 @@ export class PlatformFeeImportService {
         );
 
       if (mktColumns.length > 0) {
-        entity.cotChoBsMkt1 = String(row[mktColumns[0].originalKey] || '');
+        e.cotChoBsMkt1 = String(row[mktColumns[0].originalKey] || '');
       }
       if (mktColumns.length > 1) {
-        entity.cotChoBsMkt2 = String(row[mktColumns[1].originalKey] || '');
+        e.cotChoBsMkt2 = String(row[mktColumns[1].originalKey] || '');
       }
       if (mktColumns.length > 2) {
-        entity.cotChoBsMkt3 = String(row[mktColumns[2].originalKey] || '');
+        e.cotChoBsMkt3 = String(row[mktColumns[2].originalKey] || '');
       }
       if (mktColumns.length > 3) {
-        entity.cotChoBsMkt4 = String(row[mktColumns[3].originalKey] || '');
+        e.cotChoBsMkt4 = String(row[mktColumns[3].originalKey] || '');
       }
       if (mktColumns.length > 4) {
-        entity.cotChoBsMkt5 = String(row[mktColumns[4].originalKey] || '');
+        e.cotChoBsMkt5 = String(row[mktColumns[4].originalKey] || '');
       }
 
-      entity.boPhan = getValue(['bộ phận', 'bo phan']);
+      e.boPhan = this.toText(getValue(['bộ phận', 'bo phan']));
     } else if (platform === 'tiktok') {
-      entity.maSan = getValue(['mã tiktok', 'ma tiktok']);
-      entity.maNoiBoSp = getValue(['mã nội bộ sp', 'ma noi bo sp']);
-      entity.ngayDoiSoat = this.parseDate(
+      const e = entity as PlatformFeeImportTiktok;
+      e.maSan = this.toText(getValue(['mã tiktok', 'ma tiktok']));
+      e.maNoiBoSp = this.toText(getValue(['mã nội bộ sp', 'ma noi bo sp']));
+      e.ngayDoiSoat = this.parseDate(
         getValue(['ngày đối soát', 'ngay doi soat']),
       ) || null;
-      entity.maDonHangHoan = getValue([
+      e.maDonHangHoan = this.toText(getValue([
         'mã đơn hàng hoàn',
         'ma don hang hoan',
-      ]);
-      entity.shopPhatHanhTrenSan = getValue([
+      ]));
+      e.shopPhatHanhTrenSan = this.toText(getValue([
         'shop phát hành trên sàn',
         'shop phat hanh tren san',
-      ]);
-      entity.giaTriGiamGiaCtkm = this.parseDecimal(
+      ]));
+      e.giaTriGiamGiaCtkm = this.parseDecimal(
         getValue([
           'giá trị giảm giá theo ctkm của mình ban hành',
           'gia tri giam gia theo ctkm cua minh ban hanh',
         ]),
       ) || null;
-      entity.doanhThuDonHang = this.parseDecimal(
+      e.doanhThuDonHang = this.parseDecimal(
         getValue(['doanh thu đơn hàng', 'doanh thu don hang']),
       ) || null;
 
       // TikTok specific fees (4 fees) - Map by exact column names
-      entity.phiGiaoDichTyLe5164020 = this.parseDecimal(
+      e.phiGiaoDichTyLe5164020 = this.parseDecimal(
         getValue([
           'phí giao dịch tỷ lệ 5% 164020',
           'phi giao dich ty le 5% 164020',
           'phí giao dịch tỷ lệ 5% 164020',
         ]),
       ) || null;
-      entity.phiHoaHongTraChoTiktok454164020 = this.parseDecimal(
+      e.phiHoaHongTraChoTiktok454164020 = this.parseDecimal(
         getValue([
           'phí hoa hồng trả cho tiktok 4.54% 164020',
           'phi hoa hong tra cho tiktok 4.54% 164020',
           'phí hoa hồng trả cho tiktok 4.54% 164020',
         ]),
       ) || null;
-      entity.phiHoaHongTiepThiLienKet150050 = this.parseDecimal(
+      e.phiHoaHongTiepThiLienKet150050 = this.parseDecimal(
         getValue([
           'phí hoa hồng tiếp thị liên kết 150050',
           'phi hoa hong tiep thi lien ket 150050',
           'phí hoa hồng tiếp thị liên kết 150050',
         ]),
       ) || null;
-      entity.phiDichVuSfp6164020 = this.parseDecimal(
+      e.phiDichVuSfp6164020 = this.parseDecimal(
         getValue([
           'phí dịch vụ sfp 6% 164020',
           'phi dich vu sfp 6% 164020',
@@ -287,11 +403,11 @@ export class PlatformFeeImportService {
         ]),
       ) || null;
 
-      entity.maCacBenTiepThiLienKet = getValue([
+      e.maCacBenTiepThiLienKet = this.toText(getValue([
         'mã các bên tiếp thị liên kết',
         'ma cac ben tiep thi lien ket',
-      ]);
-      entity.sanTmdt = getValue(['sàn tmđt', 'san tmdt', 'sàn tmđt tiktok']);
+      ]));
+      e.sanTmdt = this.toText(getValue(['sàn tmđt', 'san tmdt', 'sàn tmđt tiktok']));
       
       // MKT columns
       const rowKeysTiktok = Object.keys(row);
@@ -311,48 +427,57 @@ export class PlatformFeeImportService {
         );
 
       if (mktColumns.length > 0) {
-        entity.cotChoBsMkt1 = String(row[mktColumns[0].originalKey] || '');
+        e.cotChoBsMkt1 = String(row[mktColumns[0].originalKey] || '');
       }
       if (mktColumns.length > 1) {
-        entity.cotChoBsMkt2 = String(row[mktColumns[1].originalKey] || '');
+        e.cotChoBsMkt2 = String(row[mktColumns[1].originalKey] || '');
       }
       if (mktColumns.length > 2) {
-        entity.cotChoBsMkt3 = String(row[mktColumns[2].originalKey] || '');
+        e.cotChoBsMkt3 = String(row[mktColumns[2].originalKey] || '');
       }
       if (mktColumns.length > 3) {
-        entity.cotChoBsMkt4 = String(row[mktColumns[3].originalKey] || '');
+        e.cotChoBsMkt4 = String(row[mktColumns[3].originalKey] || '');
       }
       if (mktColumns.length > 4) {
-        entity.cotChoBsMkt5 = String(row[mktColumns[4].originalKey] || '');
+        e.cotChoBsMkt5 = String(row[mktColumns[4].originalKey] || '');
       }
 
-      entity.boPhan = getValue(['bộ phận', 'bo phan']);
+      e.boPhan = this.toText(getValue(['bộ phận', 'bo phan']));
     } else if (platform === 'lazada') {
-      entity.maSan = getValue(['mã lazada', 'ma lazada']);
-      entity.maNoiBoSp = getValue(['mã nội bộ sp', 'ma noi bo sp']);
-      entity.ngayDoiSoat = this.parseDate(
+      const e = entity as PlatformFeeImportLazada;
+      e.maSan = this.toText(getValue(['mã lazada', 'ma lazada']));
+      e.maNoiBoSp = this.toText(getValue(['mã nội bộ sp', 'ma noi bo sp']));
+      e.ngayDoiSoat = this.parseDate(
         getValue(['ngày đối soát', 'ngay doi soat']),
       ) || null;
-      entity.tenPhiDoanhThu = getValue([
+      e.tenPhiDoanhThu = this.toText(getValue([
         'tên phí/ doanh thu đơn hàng',
         'ten phi/ doanh thu don hang',
-      ]);
-      entity.quangCaoTiepThiLienKet = getValue([
+      ]));
+      e.quangCaoTiepThiLienKet = this.toText(getValue([
         'quảng cáo tiếp thị liên kết',
         'quang cao tiep thi lien ket',
-      ]);
-      entity.maDonHangHoan = getValue([
+      ]));
+      e.maDonHangHoan = this.toText(getValue([
         'mã đơn hàng hoàn',
         'ma don hang hoan',
-      ]);
-      entity.maPhiNhanDienHachToan = getValue([
+      ]));
+      e.maPhiNhanDienHachToan = this.toText(getValue([
         'mã phí để nhận diện hạch toán',
         'ma phi de nhan dien hach toan',
         'mã phí để nhận diện hạch toán',
-      ]);
-      entity.sanTmdt = getValue(['sàn tmđt', 'san tmdt', 'sàn tmđt lazada']);
-      entity.ghiChu = getValue(['ghi chú', 'ghi chu']);
-      entity.boPhan = getValue(['bộ phận', 'bo phan']);
+      ]));
+      e.soTienPhi = this.parseDecimal(getValue([
+        'số tiền phí',
+        'so tien phi',
+        'số tiền',
+        'so tien',
+        'số tiền phí đã đối soát',
+        'so tien phi da doi soat',
+      ])) || null;
+      e.sanTmdt = this.toText(getValue(['sàn tmđt', 'san tmdt', 'sàn tmđt lazada']));
+      e.ghiChu = this.toText(getValue(['ghi chú', 'ghi chu']));
+      e.boPhan = this.toText(getValue(['bộ phận', 'bo phan']));
     }
 
     return entity;
@@ -392,15 +517,16 @@ export class PlatformFeeImportService {
     endDate?: string;
     search?: string;
   }) {
+    if (!params?.platform) {
+      throw new BadRequestException('Platform là bắt buộc (shopee | tiktok | lazada)');
+    }
+
     const page = params?.page || 1;
     const limit = params?.limit || 10;
     const skip = (page - 1) * limit;
 
-    const qb = this.platformFeeImportRepository.createQueryBuilder('pfi');
-
-    if (params?.platform) {
-      qb.andWhere('pfi.platform = :platform', { platform: params.platform });
-    }
+    const repo = this.getRepositoryByPlatform(params.platform as Platform);
+    const qb = repo.createQueryBuilder('pfi');
 
     if (params?.startDate && params?.endDate) {
       qb.andWhere('pfi.ngayDoiSoat BETWEEN :startDate AND :endDate', {
@@ -434,7 +560,7 @@ export class PlatformFeeImportService {
   }
 
   async generateTemplate(
-    platform: 'shopee' | 'tiktok' | 'lazada',
+    platform: Platform,
   ): Promise<Buffer> {
     const workbook = XLSX.utils.book_new();
     let headers: string[] = [];
@@ -527,6 +653,7 @@ export class PlatformFeeImportService {
         'Quảng cáo tiếp thị liên kết',
         'Mã đơn hàng hoàn',
         'MÃ PHÍ ĐỂ NHẬN DIỆN HẠCH TOÁN',
+        'Số tiền phí',
         'Sàn TMĐT LAZADA',
         'GHI CHÚ',
         'Bộ phận',
@@ -536,6 +663,8 @@ export class PlatformFeeImportService {
       headers.forEach((header) => {
         if (header.includes('Ngày')) {
           sampleRowLazada[header] = '2024-01-01';
+        } else if (header.includes('Số tiền')) {
+          sampleRowLazada[header] = 0;
         } else if (header.includes('Mã') || header.includes('Tên') || header.includes('Quảng') || header.includes('GHI') || header.includes('Bộ')) {
           sampleRowLazada[header] = 'Mẫu';
         } else {
@@ -552,5 +681,151 @@ export class PlatformFeeImportService {
 
     const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
     return buffer;
+  }
+
+  // Fee Map CRUD methods
+  async findAllFeeMaps(params?: {
+    platform?: string;
+    page?: number;
+    limit?: number;
+    search?: string;
+    active?: boolean;
+  }) {
+    const page = params?.page || 1;
+    const limit = params?.limit || 10;
+    const skip = (page - 1) * limit;
+
+    const qb = this.feeMapRepo.createQueryBuilder('fm');
+
+    if (params?.platform) {
+      qb.andWhere('fm.platform = :platform', { platform: params.platform });
+    }
+
+    if (params?.active !== undefined) {
+      qb.andWhere('fm.active = :active', { active: params.active });
+    }
+
+    if (params?.search) {
+      qb.andWhere(
+        '(fm.rawFeeName ILIKE :search OR fm.normalizedFeeName ILIKE :search OR fm.internalCode ILIKE :search OR fm.accountCode ILIKE :search)',
+        { search: `%${params.search}%` },
+      );
+    }
+
+    qb.orderBy('fm.platform', 'ASC');
+    qb.addOrderBy('fm.rawFeeName', 'ASC');
+    qb.skip(skip);
+    qb.take(limit);
+
+    const [data, total] = await qb.getManyAndCount();
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async createFeeMap(data: {
+    platform: string;
+    rawFeeName: string;
+    internalCode: string;
+    accountCode: string;
+    description?: string;
+    active?: boolean;
+  }) {
+    const normalized = this.normalizeFeeName(data.rawFeeName);
+    if (!normalized) {
+      throw new BadRequestException('Tên phí không hợp lệ');
+    }
+
+    // Check if already exists
+    const existing = await this.feeMapRepo.findOne({
+      where: {
+        platform: data.platform,
+        normalizedFeeName: normalized,
+      },
+    });
+
+    if (existing) {
+      throw new BadRequestException(
+        `Mapping đã tồn tại cho platform "${data.platform}" và tên phí "${data.rawFeeName}"`,
+      );
+    }
+
+    const feeMap = this.feeMapRepo.create({
+      platform: data.platform,
+      rawFeeName: data.rawFeeName,
+      normalizedFeeName: normalized,
+      internalCode: data.internalCode,
+      accountCode: data.accountCode,
+      description: data.description || null,
+      active: data.active !== undefined ? data.active : true,
+    });
+
+    return await this.feeMapRepo.save(feeMap);
+  }
+
+  async updateFeeMap(
+    id: string,
+    data: {
+      platform?: string;
+      rawFeeName?: string;
+      internalCode?: string;
+      accountCode?: string;
+      description?: string;
+      active?: boolean;
+    },
+  ) {
+    const feeMap = await this.feeMapRepo.findOne({ where: { id } });
+    if (!feeMap) {
+      throw new BadRequestException('Không tìm thấy mapping phí');
+    }
+
+    if (data.rawFeeName) {
+      const normalized = this.normalizeFeeName(data.rawFeeName);
+      if (!normalized) {
+        throw new BadRequestException('Tên phí không hợp lệ');
+      }
+
+      // Check if another record exists with same platform + normalized name
+      const existing = await this.feeMapRepo.findOne({
+        where: {
+          platform: data.platform || feeMap.platform,
+          normalizedFeeName: normalized,
+        },
+      });
+
+      if (existing && existing.id !== id) {
+        throw new BadRequestException(
+          `Mapping đã tồn tại cho platform "${data.platform || feeMap.platform}" và tên phí "${data.rawFeeName}"`,
+        );
+      }
+
+      feeMap.rawFeeName = data.rawFeeName;
+      feeMap.normalizedFeeName = normalized;
+    }
+
+    if (data.platform) feeMap.platform = data.platform;
+    if (data.internalCode) feeMap.internalCode = data.internalCode;
+    if (data.accountCode) feeMap.accountCode = data.accountCode;
+    if (data.description !== undefined) feeMap.description = data.description;
+    if (data.active !== undefined) feeMap.active = data.active;
+
+    return await this.feeMapRepo.save(feeMap);
+  }
+
+  async deleteFeeMap(id: string) {
+    const feeMap = await this.feeMapRepo.findOne({ where: { id } });
+    if (!feeMap) {
+      throw new BadRequestException('Không tìm thấy mapping phí');
+    }
+
+    await this.feeMapRepo.remove(feeMap);
+    return { message: 'Xóa mapping phí thành công' };
   }
 }

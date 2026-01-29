@@ -2,6 +2,8 @@ import {
   Controller,
   Get,
   Post,
+  Put,
+  Delete,
   Body,
   Query,
   Param,
@@ -79,6 +81,16 @@ export class PlatformFeeImportController {
     @Query('endDate') endDate?: string,
     @Query('search') search?: string,
   ) {
+    if (!platform) {
+      throw new BadRequestException('Platform là bắt buộc (shopee | tiktok | lazada)');
+    }
+
+    if (!['shopee', 'tiktok', 'lazada'].includes(platform)) {
+      throw new BadRequestException(
+        'Platform không hợp lệ. Phải là shopee, tiktok hoặc lazada',
+      );
+    }
+
     return this.platformFeeImportService.findAll({
       platform,
       page,
@@ -123,5 +135,38 @@ export class PlatformFeeImportController {
         error.message || 'Lỗi khi tạo file mẫu',
       );
     }
+  }
+
+  // Fee Map endpoints
+  @Get('fee-map')
+  async getFeeMaps(
+    @Query('platform') platform?: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('search') search?: string,
+    @Query('active') active?: string,
+  ) {
+    return this.platformFeeImportService.findAllFeeMaps({
+      platform,
+      page,
+      limit,
+      search,
+      active: active === 'true' ? true : active === 'false' ? false : undefined,
+    });
+  }
+
+  @Post('fee-map')
+  async createFeeMap(@Body() body: any) {
+    return this.platformFeeImportService.createFeeMap(body);
+  }
+
+  @Put('fee-map/:id')
+  async updateFeeMap(@Param('id') id: string, @Body() body: any) {
+    return this.platformFeeImportService.updateFeeMap(id, body);
+  }
+
+  @Delete('fee-map/:id')
+  async deleteFeeMap(@Param('id') id: string) {
+    return this.platformFeeImportService.deleteFeeMap(id);
   }
 }
