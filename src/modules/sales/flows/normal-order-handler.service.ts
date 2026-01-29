@@ -99,10 +99,44 @@ export class NormalOrderHandlerService {
     const invoiceData =
       await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
 
-    // 2. Create Sales Order -> SKIPPED (User request: Invoice flow only triggers Invoice API)
-    // const soResult = await this.fastApiInvoiceFlowService.createSalesOrder(...)
+    // 2. Create Sales Order (User Request: Run BOTH Order and Invoice)
+    let soResult: any = null;
+    try {
+      soResult = await this.fastApiInvoiceFlowService.createSalesOrder({
+        ...invoiceData,
+        customer: orderData.customer,
+        ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+      });
+    } catch (error: any) {
+      const responseMessage =
+        error?.response?.data?.message || error?.message || '';
+      const isDuplicateError =
+        typeof responseMessage === 'string' &&
+        (responseMessage.toLowerCase().includes('đã tồn tại') ||
+          responseMessage.toLowerCase().includes('pk_d81') ||
+          responseMessage.toLowerCase().includes('duplicate'));
 
-    const soResult = null; // Placeholder to keep return type consistent
+      if (isDuplicateError) {
+        this.logger.warn(
+          `Sales Order ${docCode} đã tồn tại. Tiếp tục tạo Invoice.`,
+        );
+        soResult = {
+          status: 1, // Mock success
+          message: 'Sales Order already exists',
+        };
+      } else {
+        // Nếu lỗi khác (không phải duplicate), có thể log và tiếp tục hoặc throw
+        // User yêu cầu "đồng bộ chạy cả", nếu SO lỗi thì có thể ảnh hưởng SI?
+        // Tạm thời log error và flow tiếp tục để đảm bảo Invoice (quan trọng hơn) vẫn chạy
+        this.logger.error(
+          `Lỗi tạo Sales Order ${docCode}: ${responseMessage}. Vẫn tiếp tục tạo Invoice.`,
+        );
+        soResult = {
+          status: 0,
+          message: error?.message || 'Create Sales Order Failed',
+        };
+      }
+    }
 
     // 3. Create Sales Invoice
     let siResult: any;

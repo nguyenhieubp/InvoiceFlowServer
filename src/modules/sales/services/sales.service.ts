@@ -340,4 +340,11 @@ export class SalesService {
   async createStockTransfer(createDto: any) {
     return this.salesInvoiceService.createStockTransfer(createDto);
   }
+
+  async processInvoicesByDateRange(startDate: string, endDate: string) {
+    return this.salesInvoiceService.processInvoicesByDateRange(
+      startDate,
+      endDate,
+    );
+  }
 }

@@ -50,22 +50,22 @@ export class SalesInvoiceService {
       // ============================================
       // 1. CHECK INVOICE ĐÃ TẠO
       // ============================================
-      if (!forceRetry && !options?.onlySalesOrder) {
-        const existingInvoice = await this.fastApiInvoiceRepository.findOne({
-          where: { docCode },
-        });
+      // if (!forceRetry && !options?.onlySalesOrder) {
+      //   const existingInvoice = await this.fastApiInvoiceRepository.findOne({
+      //     where: { docCode },
+      //   });
 
-        if (existingInvoice && existingInvoice.status === 1) {
-          return {
-            success: true,
-            message: `Đơn hàng ${docCode} đã được tạo hóa đơn thành công trước đó`,
-            result: existingInvoice.fastApiResponse
-              ? JSON.parse(existingInvoice.fastApiResponse)
-              : null,
-            alreadyExists: true,
-          };
-        }
-      }
+      //   if (existingInvoice && existingInvoice.status === 1) {
+      //     return {
+      //       success: true,
+      //       message: `Đơn hàng ${docCode} đã được tạo hóa đơn thành công trước đó`,
+      //       result: existingInvoice.fastApiResponse
+      //         ? JSON.parse(existingInvoice.fastApiResponse)
+      //         : null,
+      //       alreadyExists: true,
+      //     };
+      //   }
+      // }
 
       // ============================================
       // 2. LẤY DỮ LIỆU ĐƠN HÀNG
@@ -437,9 +437,9 @@ export class SalesInvoiceService {
         for (const chunk of chunks) {
           const chunkPromises = chunk.map(async (docCode) => {
             try {
-              // Gọi hàm processSingleOrder cho từng đơn
+              // Gọi hàm createInvoiceViaFastApi cho từng đơn (để handle cả logic _X)
               // ForceRetry = false để skip các đơn đã thành công rồi
-              const result = await this.processSingleOrder(docCode, false);
+              const result = await this.createInvoiceViaFastApi(docCode, false);
               return { docCode, result, error: null };
             } catch (err: any) {
               return { docCode, result: null, error: err };

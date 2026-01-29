@@ -274,6 +274,19 @@ export class SalesController {
     };
   }
 
+  @Post('invoice/batch-process')
+  async batchProcessInvoices(
+    @Body('startDate') startDate: string,
+    @Body('endDate') endDate: string,
+  ) {
+    if (!startDate || !endDate) {
+      throw new BadRequestException(
+        'startDate và endDate là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+      );
+    }
+    return this.salesService.processInvoicesByDateRange(startDate, endDate);
+  }
+
   @Post('stock-transfer')
   async createStockTransfer(@Body() createDto: CreateStockTransferDto) {
     if (
