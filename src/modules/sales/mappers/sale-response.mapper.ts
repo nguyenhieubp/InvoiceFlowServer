@@ -25,6 +25,9 @@ export function mapProductSummary(product: any): ProductSummaryDto | undefined {
     tenVatTu: product.tenVatTu,
     dvt: product.dvt,
     productType: product.productType,
+    trackBatch: product.trackBatch,
+    trackSerial: product.trackSerial,
+    trackStocktake: product.trackStocktake,
   };
 }
 
@@ -92,7 +95,9 @@ export function mapToSaleItemResponse(sale: any): SaleItemResponseDto {
     docDate: sale.docDate,
     branchCode: sale.branchCode,
     docSourceType: sale.docSourceType,
-    maSerial: sale.stockTransfer?.batchSerial || sale.maSerial,
+    maSerial: sale.product?.trackBatch
+      ? ''
+      : sale.maSerial || sale.stockTransfer?.batchSerial || '',
 
     // Item info
     itemCode: sale.itemCode,

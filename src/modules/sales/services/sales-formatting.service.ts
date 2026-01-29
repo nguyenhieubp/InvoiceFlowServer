@@ -110,6 +110,16 @@ export class SalesFormattingService {
       isEmployeeMap?.get((sale as any).issuePartnerCode) ||
       false;
 
+    // [NEW] Resolve Batch/Serial from various sources (matches SalesPayloadService)
+    let batchSerial: string | null = null;
+    if (saleStockTransfers.length > 0) {
+      batchSerial = saleStockTransfers[0].batchSerial || null;
+    }
+    if (!batchSerial) {
+      batchSerial =
+        (sale as any).ma_vt_ref || sale.serial || sale.soSerial || null;
+    }
+
     // Calculate fields using InvoiceLogicUtils (Unified Logic)
     const calculatedFields = await InvoiceLogicUtils.calculateSaleFields(
       sale,
@@ -117,7 +127,8 @@ export class SalesFormattingService {
       department,
       sale.branchCode,
       this.loyaltyService, // Pass loyaltyService for Wholesale accounts lookup
-      isEmployee, // [NEW] Pass isEmployee
+      isEmployee,
+      batchSerial, // [NEW] Pass resolved batchSerial
     );
 
     // [FIX] Restore variables for mapping
@@ -231,6 +242,7 @@ export class SalesFormattingService {
             trackInventory: loyaltyProduct.trackInventory ?? null,
             trackSerial: !!loyaltyProduct.trackSerial,
             trackBatch: !!loyaltyProduct.trackBatch,
+            trackStocktake: !!loyaltyProduct.trackStocktake,
             tkChietKhau: loyaltyProduct.tkChietKhau || null,
             tkDoanhThuBanLe: loyaltyProduct.tkDoanhThuBanLe || null,
             tkDoanhThuBanBuon: loyaltyProduct.tkDoanhThuBanBuon || null,

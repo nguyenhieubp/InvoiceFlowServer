@@ -13,6 +13,9 @@ export class ProductSummaryDto {
   tenVatTu: string;
   dvt: string;
   productType: string;
+  trackBatch?: boolean;
+  trackSerial?: boolean;
+  trackStocktake?: boolean;
 }
 
 /**

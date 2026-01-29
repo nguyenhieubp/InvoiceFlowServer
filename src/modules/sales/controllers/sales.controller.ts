@@ -221,12 +221,6 @@ export class SalesController {
     return this.salesService.syncSalesByDateRange(startDate, endDate);
   }
 
-  @Post('sync-sales-oct-dec-2025')
-  async syncSalesOctDec2025() {
-    // Đồng bộ sale từ 01/10/2025 đến 01/12/2025 cho tất cả các nhãn
-    return this.salesService.syncSalesByDateRange('01OCT2025', '01DEC2025');
-  }
-
   @Post('order/:docCode/create-invoice-fast')
   async createInvoiceViaFastApi(
     @Param('docCode') docCode: string,

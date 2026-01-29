@@ -1167,6 +1167,7 @@ export class InvoiceLogicUtils {
     branchCode: string,
     loyaltyService?: any,
     isEmployee?: boolean, // [NEW] Accept isEmployee param
+    batchSerialFromST?: string | null, // [NEW] Accept batchSerial param
   ) {
     const orderTypes = this.getOrderTypes(sale.ordertypeName);
     const { isDoiDiem, isDauTu } = orderTypes;
