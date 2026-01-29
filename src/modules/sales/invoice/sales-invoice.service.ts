@@ -87,9 +87,31 @@ export class SalesInvoiceService {
 
       if (_.isEmpty(stockTransfers)) {
         if (hasX) {
+          // [AUTO-FLOW] For _X orders:
+          // 1. Process Action 0 (Original Order)
+          // 2. Process Action 1 (Cancellation Order)
+          this.logger.log(
+            `[AutoFlow] Detected _X order ${docCode}. Executing Action 0 -> Action 1 sequence.`,
+          );
+
+          // Step 1: Action 0
+          try {
+            await this.saleReturnHandlerService.handleSaleOrderWithUnderscoreX(
+              orderData,
+              docCode,
+              0,
+            );
+          } catch (e) {
+            this.logger.warn(
+              `[AutoFlow] Action 0 failed or already exists for ${docCode}: ${e.message}. Continuing to Action 1.`,
+            );
+            // Continue even if Action 0 fails (maybe it already exists)
+          }
+
+          // Step 2: Action 1 (The actual _X order processing)
           return await this.saleReturnHandlerService.handleSaleOrderWithUnderscoreX(
             orderData,
-            docCode ?? '',
+            docCode,
             1,
           );
         } else {
