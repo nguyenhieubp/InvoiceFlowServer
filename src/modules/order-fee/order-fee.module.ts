@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrderFee } from '../../entities/order-fee.entity';
+import { ShopeeFee } from '../../entities/shopee-fee.entity';
+import { TikTokFee } from '../../entities/tiktok-fee.entity';
 import { OrderFeeController } from './order-fee.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([OrderFee])],
+  imports: [TypeOrmModule.forFeature([OrderFee, ShopeeFee, TikTokFee])],
   controllers: [OrderFeeController],
   providers: [],
   exports: [],

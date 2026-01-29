@@ -3,6 +3,8 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { OrderFee } from '../../entities/order-fee.entity';
 import { PlatformFee } from '../../entities/platform-fee.entity';
+import { ShopeeFee } from '../../entities/shopee-fee.entity';
+import { TikTokFee } from '../../entities/tiktok-fee.entity';
 
 /**
  * Multi-Database Service
@@ -23,6 +25,12 @@ export class MultiDbService {
 
     @InjectRepository(PlatformFee)
     private platformFeeRepository: Repository<PlatformFee>,
+
+    @InjectRepository(ShopeeFee)
+    private shopeeFeeRepository: Repository<ShopeeFee>,
+
+    @InjectRepository(TikTokFee)
+    private tiktokFeeRepository: Repository<TikTokFee>,
 
     // Secondary Database (103.145.79.165)
     @InjectDataSource('secondary')
@@ -248,9 +256,15 @@ export class MultiDbService {
 
         try {
           // Identify TikTok vs Shopee Logic
+          this.logger.log(
+            `Checking TikTok source for ${batch.length} orders...`,
+          );
           const tiktokIds = await this.checkTikTokSource(
             brandConfig,
             batch.map((l) => l.pancakeOrderId),
+          );
+          this.logger.log(
+            `Found ${tiktokIds.size} TikTok orders and ${batch.length - tiktokIds.size} Shopee orders.`,
           );
 
           // Group by platform
@@ -263,9 +277,15 @@ export class MultiDbService {
 
           // --- 1. Process TikTok Orders ---
           if (tiktokLogs.length > 0) {
+            this.logger.log(
+              `Fetching TikTok details for ${tiktokLogs.length} orders...`,
+            );
             const details = await this.getTikTokDetails(
               brandConfig,
               tiktokLogs.map((l) => l.pancakeOrderId),
+            );
+            this.logger.log(
+              `Found details for ${details.length} TikTok orders.`,
             );
 
             for (const log of tiktokLogs) {
@@ -282,56 +302,144 @@ export class MultiDbService {
                   ? new Date(createTime * 1000)
                   : new Date();
 
+                const tiktokFeeData = {
+                  brand: brandConfig.name,
+                  erpOrderCode: log.erpOrderCode,
+                  orderSn: detail.order_sn,
+                  orderStatus: detail.order_data?.order_status,
+                  orderCreatedAt: orderDate,
+                  syncedAt: new Date(),
+                  // Detailed fields - TikTok API uses camelCase
+                  tax: Number(detail.order_data?.payment?.tax || 0),
+                  currency: detail.order_data?.payment?.currency || 'VND',
+                  subTotal: Number(detail.order_data?.payment?.subTotal || 0),
+                  shippingFee: Number(
+                    detail.order_data?.payment?.shippingFee || 0,
+                  ),
+                  totalAmount: Number(
+                    detail.order_data?.payment?.totalAmount || 0,
+                  ),
+                  sellerDiscount: Number(
+                    detail.order_data?.payment?.sellerDiscount || 0,
+                  ),
+                  platformDiscount: Number(
+                    detail.order_data?.payment?.platformDiscount || 0,
+                  ),
+                  originalTotalProductPrice: Number(
+                    detail.order_data?.payment?.originalTotalProductPrice || 0,
+                  ),
+                  originalShippingFee: Number(
+                    detail.order_data?.payment?.originalShippingFee || 0,
+                  ),
+                  shippingFeeSellerDiscount: Number(
+                    detail.order_data?.payment?.shippingFeeSellerDiscount || 0,
+                  ),
+                  shippingFeeCofundedDiscount: Number(
+                    detail.order_data?.payment?.shippingFeeCofundedDiscount ||
+                      0,
+                  ),
+                  shippingFeePlatformDiscount: Number(
+                    detail.order_data?.payment?.shippingFeePlatformDiscount ||
+                      0,
+                  ),
+                };
+
+                // 1. Save to OrderFee (Legacy)
                 await this.orderFeeRepository.upsert(
                   {
                     feeId: `${log.erpOrderCode}_TIKTOK`,
                     brand: brandConfig.name,
                     erpOrderCode: log.erpOrderCode,
                     platform: 'tiktok',
-                    orderSn: detail.order_sn, // [NEW] Map order_sn
+                    orderSn: detail.order_sn,
                     rawData: detail.order_data,
-                    orderCreatedAt: orderDate, // [NEW] Save order date
+                    orderCreatedAt: orderDate,
                     syncedAt: new Date(),
                   },
                   ['feeId'],
                 );
+
+                // 2. Save to TikTokFee (New structured table)
+                try {
+                  await this.tiktokFeeRepository.upsert(tiktokFeeData, [
+                    'erpOrderCode',
+                    'orderSn',
+                  ]);
+                } catch (err) {
+                  this.logger.error(
+                    `Failed to upsert TikTokFee for ${log.erpOrderCode}: ${err.message}`,
+                  );
+                }
+
                 synced++;
               }
             }
           }
 
-          // --- 2. Process Shopee Orders (Existing Logic) ---
+          // --- 2. Process Shopee Orders ---
           if (shopeeLogs.length > 0) {
+            this.logger.log(`Processing ${shopeeLogs.length} Shopee orders...`);
             for (const erpLog of shopeeLogs) {
               try {
+                this.logger.log(
+                  `Fetching Shopee fees for ERP code ${erpLog.erpOrderCode}...`,
+                );
                 const fees = await this.getOrderFeesByBrandConfig(
                   erpLog.erpOrderCode,
                   brandConfig,
                 );
+                this.logger.log(
+                  `Found ${fees.length} Shopee fees for ERP code ${erpLog.erpOrderCode}.`,
+                );
 
                 for (const fee of fees) {
-                  // Determine creation date early
                   const feeCreatedAt =
                     fee.rawData?.create_at ||
                     fee.rawData?.created_at ||
                     new Date();
 
-                  // 1. Save Raw Order Fee
+                  // 1. Save Raw Order Fee (Legacy)
                   await this.orderFeeRepository.upsert(
                     {
                       feeId: fee.rawData?.id,
                       brand: fee.brand,
                       erpOrderCode: fee.erpOrderCode,
                       platform: 'shopee',
-                      orderSn: fee.rawData?.order_sn, // [NEW] Map order_sn
+                      orderSn: fee.rawData?.order_sn,
                       rawData: fee.rawData,
-                      orderCreatedAt: feeCreatedAt, // [NEW] Save order date
+                      orderCreatedAt: feeCreatedAt,
                       syncedAt: new Date(),
                     },
                     ['feeId'],
                   );
 
-                  // 2. Calculate and Save Platform Fee (if applicable)
+                  // 2. Save to ShopeeFee (New structured table)
+                  const details = fee.rawData?.raw_data || {};
+                  try {
+                    await this.shopeeFeeRepository.upsert(
+                      {
+                        brand: fee.brand,
+                        erpOrderCode: fee.erpOrderCode,
+                        orderSn: fee.rawData?.order_sn,
+                        platform: 'shopee',
+                        voucherShop: Number(details.voucher_from_seller || 0),
+                        commissionFee: Number(details.commission_fee || 0),
+                        serviceFee: Number(details.service_fee || 0),
+                        paymentFee: Number(
+                          details.credit_card_transaction_fee || 0,
+                        ),
+                        orderCreatedAt: feeCreatedAt,
+                        syncedAt: new Date(),
+                      },
+                      ['erpOrderCode', 'orderSn'],
+                    );
+                  } catch (err) {
+                    this.logger.error(
+                      `Failed to upsert ShopeeFee for ${fee.erpOrderCode}: ${err.message}`,
+                    );
+                  }
+
+                  // 3. Calculate and Save Platform Fee (Keep existing logic if needed)
                   if (
                     fee.rawData?.fee_type === 'order_income' &&
                     fee.rawData?.raw_data
@@ -344,7 +452,6 @@ export class MultiDbService {
                       raw.voucher_from_seller || 0,
                     );
                     const escrowAmount = Number(raw.escrow_amount || 0);
-
                     const platformFeeAmount =
                       orderSellingPrice - voucherFromSeller - escrowAmount;
 
@@ -365,7 +472,7 @@ export class MultiDbService {
                   synced++;
                 }
               } catch (e) {
-                // Ignore individual shopee validation errors to keep sync running
+                // Ignore individual errors
               }
             }
           }
@@ -384,7 +491,7 @@ export class MultiDbService {
 
       return { synced, failed, total: erpLogs.length };
     } catch (error) {
-      this.logger.error(`❌ Sync failed for brand ${brandConfig.name}`, error);
+      this.logger.error(`Sync failed for brand ${brandConfig.name}`, error);
       throw error;
     }
   }
@@ -464,46 +571,171 @@ export class MultiDbService {
       }
 
       for (const fee of fees) {
-        // 1. Save Raw Order Fee
-        await this.orderFeeRepository.upsert(
-          {
-            feeId: fee.rawData?.id,
-            brand: fee.brand,
-            erpOrderCode: fee.erpOrderCode,
-            platform: 'shopee', // Sàn TMĐT
-            orderSn: fee.rawData?.order_sn, // [NEW] Map order_sn
-            rawData: fee.rawData,
-            syncedAt: new Date(),
-          },
-          ['feeId'],
+        // Find brand config for this fee
+        const brandConfig = this.brands.find(
+          (b) => b.name.toLowerCase() === fee.brand.toLowerCase(),
         );
 
-        // 2. Calculate and Save Platform Fee (if applicable)
-        if (fee.rawData?.fee_type === 'order_income' && fee.rawData?.raw_data) {
-          const raw = fee.rawData.raw_data;
-          const orderSellingPrice = Number(raw.order_selling_price || 0);
-          const voucherFromSeller = Number(raw.voucher_from_seller || 0);
-          const escrowAmount = Number(raw.escrow_amount || 0);
+        if (brandConfig) {
+          const tiktokIds = await this.checkTikTokSource(brandConfig, [
+            fee.pancakeOrderId,
+          ]);
 
-          const platformFeeAmount =
-            orderSellingPrice - voucherFromSeller - escrowAmount;
+          if (tiktokIds.has(fee.pancakeOrderId)) {
+            // --- TikTok Order Manual Sync ---
+            const details = await this.getTikTokDetails(brandConfig, [
+              fee.pancakeOrderId,
+            ]);
+            const detail = details.find(
+              (d) => d.order_sn === fee.pancakeOrderId,
+            );
 
-          // User requested "create_at" from detail_order_fee
-          const feeCreatedAt =
-            fee.rawData?.create_at || fee.rawData?.created_at || new Date();
+            if (detail && detail.order_data) {
+              const createTime =
+                detail.order_data.create_time ||
+                detail.order_data.createTime ||
+                0;
+              const orderDate = createTime
+                ? new Date(createTime * 1000)
+                : new Date();
 
-          await this.platformFeeRepository.upsert(
-            {
-              brand: fee.brand,
-              erpOrderCode: fee.erpOrderCode,
-              pancakeOrderId: fee.pancakeOrderId,
-              amount: platformFeeAmount,
-              formulaDescription: `(${orderSellingPrice} - ${voucherFromSeller}) - ${escrowAmount}`,
-              orderFeeCreatedAt: feeCreatedAt,
-              syncedAt: new Date(),
-            },
-            ['erpOrderCode', 'pancakeOrderId'],
-          );
+              const tiktokFeeData = {
+                brand: brandConfig.name,
+                erpOrderCode: fee.erpOrderCode,
+                orderSn: detail.order_sn,
+                orderStatus: detail.order_data?.order_status,
+                orderCreatedAt: orderDate,
+                syncedAt: new Date(),
+                // Detailed fields - TikTok API uses camelCase
+                tax: Number(detail.order_data?.payment?.tax || 0),
+                currency: detail.order_data?.payment?.currency || 'VND',
+                subTotal: Number(detail.order_data?.payment?.subTotal || 0),
+                shippingFee: Number(
+                  detail.order_data?.payment?.shippingFee || 0,
+                ),
+                totalAmount: Number(
+                  detail.order_data?.payment?.totalAmount || 0,
+                ),
+                sellerDiscount: Number(
+                  detail.order_data?.payment?.sellerDiscount || 0,
+                ),
+                platformDiscount: Number(
+                  detail.order_data?.payment?.platformDiscount || 0,
+                ),
+                originalTotalProductPrice: Number(
+                  detail.order_data?.payment?.originalTotalProductPrice || 0,
+                ),
+                originalShippingFee: Number(
+                  detail.order_data?.payment?.originalShippingFee || 0,
+                ),
+                shippingFeeSellerDiscount: Number(
+                  detail.order_data?.payment?.shippingFeeSellerDiscount || 0,
+                ),
+                shippingFeeCofundedDiscount: Number(
+                  detail.order_data?.payment?.shippingFeeCofundedDiscount || 0,
+                ),
+                shippingFeePlatformDiscount: Number(
+                  detail.order_data?.payment?.shippingFeePlatformDiscount || 0,
+                ),
+              };
+
+              // 1. Save to OrderFee (Legacy)
+              await this.orderFeeRepository.upsert(
+                {
+                  feeId: `${fee.erpOrderCode}_TIKTOK`,
+                  brand: brandConfig.name,
+                  erpOrderCode: fee.erpOrderCode,
+                  platform: 'tiktok',
+                  orderSn: detail.order_sn,
+                  rawData: detail.order_data,
+                  orderCreatedAt: orderDate,
+                  syncedAt: new Date(),
+                },
+                ['feeId'],
+              );
+
+              // 2. Save to TikTokFee (New structured table)
+              try {
+                await this.tiktokFeeRepository.upsert(tiktokFeeData, [
+                  'erpOrderCode',
+                  'orderSn',
+                ]);
+              } catch (err) {
+                this.logger.error(
+                  `Failed to manual upsert TikTokFee for ${fee.erpOrderCode}: ${err.message}`,
+                );
+              }
+            }
+          } else {
+            // --- Shopee Order Manual Sync ---
+            // 1. Save Raw Order Fee
+            await this.orderFeeRepository.upsert(
+              {
+                feeId: fee.rawData?.id,
+                brand: fee.brand,
+                erpOrderCode: fee.erpOrderCode,
+                platform: 'shopee',
+                orderSn: fee.rawData?.order_sn,
+                rawData: fee.rawData,
+                syncedAt: new Date(),
+              },
+              ['feeId'],
+            );
+
+            // 2. Save to ShopeeFee (New structured table)
+            const details = fee.rawData?.raw_data || {};
+            const feeCreatedAt =
+              fee.rawData?.create_at || fee.rawData?.created_at || new Date();
+
+            try {
+              await this.shopeeFeeRepository.upsert(
+                {
+                  brand: fee.brand,
+                  erpOrderCode: fee.erpOrderCode,
+                  orderSn: fee.rawData?.order_sn,
+                  platform: 'shopee',
+                  voucherShop: Number(details.voucher_from_seller || 0),
+                  commissionFee: Number(details.commission_fee || 0),
+                  serviceFee: Number(details.service_fee || 0),
+                  paymentFee: Number(details.credit_card_transaction_fee || 0),
+                  orderCreatedAt: feeCreatedAt,
+                  syncedAt: new Date(),
+                },
+                ['erpOrderCode', 'orderSn'],
+              );
+            } catch (err) {
+              this.logger.error(
+                `Failed to manual upsert ShopeeFee for ${fee.erpOrderCode}: ${err.message}`,
+              );
+            }
+
+            // 3. Calculate and Save Platform Fee (if applicable)
+            if (
+              fee.rawData?.fee_type === 'order_income' &&
+              fee.rawData?.raw_data
+            ) {
+              const raw = fee.rawData.raw_data;
+              const orderSellingPrice = Number(raw.order_selling_price || 0);
+              const voucherFromSeller = Number(raw.voucher_from_seller || 0);
+              const escrowAmount = Number(raw.escrow_amount || 0);
+
+              const platformFeeAmount =
+                orderSellingPrice - voucherFromSeller - escrowAmount;
+
+              await this.platformFeeRepository.upsert(
+                {
+                  brand: fee.brand,
+                  erpOrderCode: fee.erpOrderCode,
+                  pancakeOrderId: fee.pancakeOrderId,
+                  amount: platformFeeAmount,
+                  formulaDescription: `(${orderSellingPrice} - ${voucherFromSeller}) - ${escrowAmount}`,
+                  orderFeeCreatedAt: feeCreatedAt,
+                  syncedAt: new Date(),
+                },
+                ['erpOrderCode', 'pancakeOrderId'],
+              );
+            }
+          }
         }
       }
 

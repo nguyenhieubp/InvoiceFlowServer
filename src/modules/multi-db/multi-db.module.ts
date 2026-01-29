@@ -6,11 +6,13 @@ import { MultiDbController } from './multi-db.controller';
 import { MultiDbSyncService } from './multi-db-sync.service';
 import { OrderFee } from '../../entities/order-fee.entity';
 import { PlatformFee } from '../../entities/platform-fee.entity';
+import { ShopeeFee } from '../../entities/shopee-fee.entity';
+import { TikTokFee } from '../../entities/tiktok-fee.entity';
 
 @Module({
   imports: [
     // Primary database entities
-    TypeOrmModule.forFeature([OrderFee, PlatformFee]),
+    TypeOrmModule.forFeature([OrderFee, PlatformFee, ShopeeFee, TikTokFee]),
 
     // Secondary database entities
     TypeOrmModule.forFeature([], 'secondary'),

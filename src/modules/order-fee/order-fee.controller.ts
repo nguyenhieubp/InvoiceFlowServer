@@ -2,12 +2,21 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { OrderFee } from '../../entities/order-fee.entity';
+import { ShopeeFee } from '../../entities/shopee-fee.entity';
+import { TikTokFee } from '../../entities/tiktok-fee.entity';
+import { Between, ILike } from 'typeorm';
 
 @Controller('order-fees')
 export class OrderFeeController {
   constructor(
     @InjectRepository(OrderFee)
     private orderFeeRepository: Repository<OrderFee>,
+
+    @InjectRepository(ShopeeFee)
+    private shopeeFeeRepository: Repository<ShopeeFee>,
+
+    @InjectRepository(TikTokFee)
+    private tiktokFeeRepository: Repository<TikTokFee>,
   ) {}
 
   /**
@@ -124,6 +133,94 @@ export class OrderFeeController {
 
     return {
       data: mappedData,
+      meta: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * GET /order-fees/shopee
+   */
+  @Get('shopee')
+  async findShopeeFees(
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+    @Query('brand') brand?: string,
+    @Query('search') search?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const skip = (page - 1) * limit;
+    const where: any = {};
+
+    if (brand) where.brand = brand;
+    if (search) where.erpOrderCode = ILike(`%${search}%`);
+
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      where.orderCreatedAt = Between(start, end);
+    }
+
+    const [data, total] = await this.shopeeFeeRepository.findAndCount({
+      where,
+      skip,
+      take: limit,
+      order: { orderCreatedAt: 'DESC' },
+    });
+
+    return {
+      data,
+      meta: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * GET /order-fees/tiktok
+   */
+  @Get('tiktok')
+  async findTikTokFees(
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+    @Query('brand') brand?: string,
+    @Query('search') search?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const skip = (page - 1) * limit;
+    const where: any = {};
+
+    if (brand) where.brand = brand;
+    if (search) where.erpOrderCode = ILike(`%${search}%`);
+
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      where.orderCreatedAt = Between(start, end);
+    }
+
+    const [data, total] = await this.tiktokFeeRepository.findAndCount({
+      where,
+      skip,
+      take: limit,
+      order: { orderCreatedAt: 'DESC' },
+    });
+
+    return {
+      data,
       meta: {
         total,
         page: Number(page),
