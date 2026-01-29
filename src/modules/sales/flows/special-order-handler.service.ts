@@ -10,7 +10,7 @@ import { FastApiInvoiceFlowService } from '../../../services/fast-api-invoice-fl
 import { N8nService } from '../../../services/n8n.service';
 import { SalesPayloadService } from '../invoice/sales-payload.service';
 import { SalesQueryService } from '../services/sales-query.service';
-import { InvoicePersistenceService } from '../invoice/invoice-persistence.service';
+
 import { PaymentService } from '../../payment/payment.service';
 import { forwardRef, Inject } from '@nestjs/common';
 import * as SalesUtils from '../../../utils/sales.utils';
@@ -42,7 +42,7 @@ export class SpecialOrderHandlerService {
     private n8nService: N8nService,
     private salesPayloadService: SalesPayloadService,
     private salesQueryService: SalesQueryService,
-    private invoicePersistenceService: InvoicePersistenceService,
+
     @Inject(forwardRef(() => PaymentService))
     private paymentService: PaymentService,
   ) {}

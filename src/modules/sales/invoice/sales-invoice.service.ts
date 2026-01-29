@@ -4,8 +4,8 @@ import { Repository, In } from 'typeorm';
 import { Sale } from '../../../entities/sale.entity';
 import { StockTransfer } from '../../../entities/stock-transfer.entity';
 import { FastApiInvoice } from '../../../entities/fast-api-invoice.entity';
-import { InvoiceDataEnrichmentService } from './invoice-data-enrichment.service';
-import { InvoicePersistenceService } from './invoice-persistence.service';
+import { Invoice } from '../../../entities/invoice.entity';
+import { DailyCashio } from '../../../entities/daily-cashio.entity';
 import { InvoiceFlowOrchestratorService } from '../flows/invoice-flow-orchestrator.service';
 import { SaleReturnHandlerService } from '../flows/sale-return-handler.service';
 import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
@@ -14,6 +14,7 @@ import { FastApiInvoiceFlowService } from '../../../services/fast-api-invoice-fl
 import { SalesPayloadService } from './sales-payload.service';
 import * as SalesUtils from '../../../utils/sales.utils';
 import * as ConvertUtils from '../../../utils/convert.utils';
+import { SalesQueryService } from '../services/sales-query.service';
 
 @Injectable()
 export class SalesInvoiceService {
@@ -26,8 +27,11 @@ export class SalesInvoiceService {
     private fastApiInvoiceRepository: Repository<FastApiInvoice>,
     @InjectRepository(StockTransfer)
     private stockTransferRepository: Repository<StockTransfer>,
-    private invoiceDataEnrichmentService: InvoiceDataEnrichmentService,
-    private invoicePersistenceService: InvoicePersistenceService,
+    @InjectRepository(Invoice)
+    private invoiceRepository: Repository<Invoice>,
+    @InjectRepository(DailyCashio)
+    private dailyCashioRepository: Repository<DailyCashio>,
+    private salesQueryService: SalesQueryService,
     private invoiceFlowOrchestratorService: InvoiceFlowOrchestratorService,
     private saleReturnHandlerService: SaleReturnHandlerService,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
@@ -183,7 +187,7 @@ export class SalesInvoiceService {
       this.logger.error(
         `Unexpected error processing order ${docCode}: ${error?.message || error}`,
       );
-      await this.invoicePersistenceService.saveFastApiInvoice({
+      await this.saveFastApiInvoice({
         docCode,
         maDvcs: '',
         maKh: '',
@@ -202,14 +206,59 @@ export class SalesInvoiceService {
   }
 
   /**
-   * Delegate to InvoiceDataEnrichmentService
+   * Helper: Find and enrich order data
    */
   async findByOrderCode(docCode: string) {
-    return this.invoiceDataEnrichmentService.findByOrderCode(docCode);
+    // 1. [REFACTORED] Reuse Frontend Logic (SalesQueryService)
+    // This fetches Sales, performs robust 1-1 Stick Transfer matching, and enriches data.
+    const formattedSales =
+      await this.salesQueryService.findByOrderCode(docCode);
+
+    if (!formattedSales || formattedSales.length === 0) {
+      throw new NotFoundException(`Order with docCode ${docCode} not found`);
+    }
+
+    // 2. Fetch Cashio (Required for Payment Payload)
+    const cashioRecords = await this.dailyCashioRepository
+      .createQueryBuilder('cashio')
+      .where('cashio.so_code = :docCode', { docCode })
+      .orWhere('cashio.master_code = :docCode', { docCode })
+      .getMany();
+
+    const ecoinCashio = cashioRecords.find((c) => c.fop_syscode === 'ECOIN');
+    const voucherCashio = cashioRecords.find(
+      (c) => c.fop_syscode === 'VOUCHER',
+    );
+    const selectedCashio =
+      ecoinCashio || voucherCashio || cashioRecords[0] || null;
+
+    // 3. Fetch Stock Transfers (Raw) for Root Payload
+    const docCodesForStockTransfer =
+      StockTransferUtils.getDocCodesForStockTransfer([docCode]);
+    const stockTransfers = await this.stockTransferRepository.find({
+      where: { soCode: In(docCodesForStockTransfer) },
+      order: { createdAt: 'ASC' },
+    });
+
+    // 4. Construct Order Data
+    const firstSale = formattedSales[0];
+
+    return {
+      docCode,
+      docDate: firstSale.docDate || new Date(),
+      docSourceType: firstSale.docSourceType || null,
+      ordertype: firstSale.ordertype || null,
+      ordertypeName: firstSale.ordertypeName || null,
+      branchCode: firstSale.branchCode || null,
+      customer: firstSale.customer || null,
+      sales: formattedSales,
+      cashio: selectedCashio,
+      stockTransfers,
+    };
   }
 
   /**
-   * Delegate to InvoicePersistenceService
+   * Persist FastApiInvoice record
    */
   async saveFastApiInvoice(data: {
     docCode: string;
@@ -222,25 +271,24 @@ export class SalesInvoiceService {
     guid?: string | null;
     fastApiResponse?: string;
   }): Promise<FastApiInvoice> {
-    return this.invoicePersistenceService.saveFastApiInvoice(data);
+    return this.salesQueryService.saveFastApiInvoice(data);
   }
 
   /**
-   * Delegate to InvoicePersistenceService
+   * Update isProcessed status for sales
    */
   async markOrderAsProcessed(docCode: string): Promise<void> {
-    return this.invoicePersistenceService.markOrderAsProcessed(docCode);
+    return this.salesQueryService.markOrderAsProcessed(docCode);
   }
 
   /**
-   * Đánh dấu lại các đơn hàng đã có invoice là đã xử lý
-   * Method này dùng để xử lý các invoice đã được tạo trước đó
+   * Retroactive fix: Mark processed orders based on existing invoices
    */
   async markProcessedOrdersFromInvoices(): Promise<{
     updated: number;
     message: string;
   }> {
-    return this.invoicePersistenceService.markProcessedOrdersFromInvoices();
+    return this.salesQueryService.markProcessedOrdersFromInvoices();
   }
 
   /**
@@ -332,10 +380,6 @@ export class SalesInvoiceService {
       this.logger.log(`[Phase 2] Bắt đầu xử lý hóa đơn cho ngày ${dateStr}...`);
 
       try {
-        // Tìm các đơn hàng chưa xử lý trong ngày này
-        // Lưu ý: Cần query DB để lấy docCode.
-        // Giả sử lấy tất cả đơn trong ngày (hoặc tối ưu sau bằng cách filter Processed)
-        // Ở đây ta sẽ query Sale entity DISTINCT docCode theo ngày
         const startOfDay = new Date(currentDate);
         startOfDay.setHours(0, 0, 0, 0);
         const endOfDay = new Date(currentDate);

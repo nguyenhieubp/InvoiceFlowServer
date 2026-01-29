@@ -4,16 +4,12 @@ import { HttpModule } from '@nestjs/axios';
 import { SalesController } from './controllers/sales.controller';
 import { SalesService } from './services/sales.service';
 import { SalesQueryService } from './services/sales-query.service';
-import { SalesSyncService } from './services/sales-sync.service';
-import { SalesExplosionService } from './services/sales-explosion.service';
-import { SalesFilterService } from './services/sales-filter.service';
 import { SalesFormattingService } from './services/sales-formatting.service';
-import { SalesDataFetcherService } from './services/sales-data-fetcher.service';
+
 import { SalesInvoiceService } from './invoice/sales-invoice.service';
 import { SalesPayloadService } from './invoice/sales-payload.service';
 import { SalesWarehouseService } from './services/sales-warehouse.service';
-import { InvoicePersistenceService } from './invoice/invoice-persistence.service';
-import { InvoiceDataEnrichmentService } from './invoice/invoice-data-enrichment.service';
+
 import { SpecialOrderHandlerService } from './flows/special-order-handler.service';
 import { NormalOrderHandlerService } from './flows/normal-order-handler.service';
 import { SaleReturnHandlerService } from './flows/sale-return-handler.service';
@@ -39,8 +35,8 @@ import { CategoriesModule } from '../categories/categories.module';
 import { SyncModule } from '../sync/sync.module';
 import { PaymentModule } from '../payment/payment.module';
 import { VoucherIssueModule } from '../voucher-issue/voucher-issue.module';
-
 import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
+import { SalesSyncService } from './services/sales-sync.service';
 
 @Module({
   imports: [
@@ -70,16 +66,12 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
     SalesService,
     // New specialized services
     SalesQueryService,
-    SalesSyncService,
-    SalesExplosionService,
-    SalesFilterService,
     SalesFormattingService,
-    SalesDataFetcherService,
     SalesInvoiceService,
     SalesPayloadService,
     SalesWarehouseService,
-    InvoicePersistenceService,
-    InvoiceDataEnrichmentService,
+    SalesSyncService,
+
     // New handler services
     SpecialOrderHandlerService,
     NormalOrderHandlerService,
@@ -98,16 +90,12 @@ import { PaymentSyncLog } from '../../entities/payment-sync-log.entity';
     FastApiInvoiceFlowService,
     // Export specialized services để có thể sử dụng ở module khác
     SalesQueryService,
-    SalesSyncService,
-    SalesExplosionService,
-    SalesFilterService,
     SalesFormattingService,
-    SalesDataFetcherService,
     SalesInvoiceService,
     SalesPayloadService,
     SalesWarehouseService,
-    InvoicePersistenceService,
-    InvoiceDataEnrichmentService,
+    SalesSyncService,
+
     // Export new handler services
     SpecialOrderHandlerService,
     NormalOrderHandlerService,

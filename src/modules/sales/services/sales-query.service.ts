@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, IsNull, Like } from 'typeorm';
+import { Repository, In, IsNull, Like, SelectQueryBuilder } from 'typeorm';
 import { Sale } from '../../../entities/sale.entity';
 import { StockTransfer } from '../../../entities/stock-transfer.entity';
 import { OrderFee } from '../../../entities/order-fee.entity';
@@ -8,15 +8,17 @@ import { LoyaltyService } from '../../../services/loyalty.service';
 import { CategoriesService } from '../../categories/categories.service';
 import { N8nService } from '../../../services/n8n.service';
 import * as SalesUtils from '../../../utils/sales.utils';
-import * as SalesCalculationUtils from '../../../utils/sales-calculation.utils';
 import * as SalesFormattingUtils from '../../../utils/sales-formatting.utils';
+import { SalesFormattingService } from './sales-formatting.service';
+import { VoucherIssueService } from '../../voucher-issue/voucher-issue.service';
 import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
 import { InvoiceLogicUtils } from '../../../utils/invoice-logic.utils';
-import { VoucherIssueService } from '../../voucher-issue/voucher-issue.service';
-import { SalesExplosionService } from './sales-explosion.service';
-import { SalesFilterService } from './sales-filter.service';
-import { SalesFormattingService } from './sales-formatting.service';
-import { SalesDataFetcherService } from './sales-data-fetcher.service';
+import { HttpService } from '@nestjs/axios';
+import { Customer } from '../../../entities/customer.entity';
+import { DailyCashio } from '../../../entities/daily-cashio.entity';
+import { ZappyApiService } from '../../../services/zappy-api.service';
+import { FastApiInvoice } from '../../../entities/fast-api-invoice.entity';
+import { Invoice } from '../../../entities/invoice.entity';
 
 /**
  * SalesQueryService
@@ -36,11 +38,18 @@ export class SalesQueryService {
     private loyaltyService: LoyaltyService,
     private categoriesService: CategoriesService,
     private n8nService: N8nService,
+    @InjectRepository(Customer)
+    private customerRepository: Repository<Customer>,
+    @InjectRepository(DailyCashio)
+    private dailyCashioRepository: Repository<DailyCashio>,
+    private httpService: HttpService,
+    private zappyApiService: ZappyApiService,
     private voucherIssueService: VoucherIssueService,
-    private salesExplosionService: SalesExplosionService,
-    private salesFilterService: SalesFilterService,
     private salesFormattingService: SalesFormattingService,
-    private salesDataFetcherService: SalesDataFetcherService,
+    @InjectRepository(FastApiInvoice)
+    private fastApiInvoiceRepository: Repository<FastApiInvoice>,
+    @InjectRepository(Invoice)
+    private invoiceRepository: Repository<Invoice>,
   ) {}
 
   /**
@@ -206,7 +215,7 @@ export class SalesQueryService {
             warehouseCodeMap?.get(assignedSt.stockCode) || assignedSt.stockCode;
         }
 
-        const calculatedFields = SalesCalculationUtils.calculateSaleFields(
+        const calculatedFields = await InvoiceLogicUtils.calculateSaleFields(
           sale,
           loyaltyProduct,
           department,
@@ -278,8 +287,283 @@ export class SalesQueryService {
    * Enrich orders với cashio data
    * REFACTORED: Delegated to SalesExplosionService
    */
+  /**
+   * Enrich orders với cashio data
+   * Logic: 1 sale item with N stock transfers → N exploded sale lines
+   */
   async enrichOrdersWithCashio(orders: any[]): Promise<any[]> {
-    return this.salesExplosionService.enrichOrdersWithCashio(orders);
+    const docCodes = orders.map((o) => o.docCode);
+    if (docCodes.length === 0) return orders;
+
+    const cashioRecords = await this.dailyCashioRepository
+      .createQueryBuilder('cashio')
+      .where('cashio.so_code IN (:...docCodes)', { docCodes })
+      .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
+      .getMany();
+
+    // OPTIMIZED: Build map in single pass O(m) instead of nested loop O(n×m)
+    const cashioMap = new Map<string, DailyCashio[]>();
+    cashioRecords.forEach((cashio) => {
+      const docCode = cashio.so_code || cashio.master_code;
+      if (!docCode) return;
+
+      if (!cashioMap.has(docCode)) {
+        cashioMap.set(docCode, []);
+      }
+      cashioMap.get(docCode)!.push(cashio);
+    });
+
+    // Fetch stock transfers để thêm thông tin stock transfer
+    // Join theo soCode (của stock transfer) = docCode (của order)
+    const stockTransfers = await this.stockTransferRepository.find({
+      where: { soCode: In(docCodes) },
+    });
+
+    const stockTransferMap = new Map<string, StockTransfer[]>();
+    docCodes.forEach((docCode) => {
+      // Join theo soCode (của stock transfer) = docCode (của order)
+      const matchingTransfers = stockTransfers.filter(
+        (st) => st.soCode === docCode,
+      );
+      if (matchingTransfers.length > 0) {
+        stockTransferMap.set(docCode, matchingTransfers);
+      }
+    });
+
+    // Pre-fetch product info for ALL Stock Transfer items to determine Batch vs Serial
+    const allStItemCodes = Array.from(
+      new Set(
+        stockTransfers
+          .map((st) => st.itemCode)
+          .filter((code): code is string => !!code),
+      ),
+    );
+    const stLoyaltyProductMap =
+      await this.loyaltyService.fetchProducts(allStItemCodes);
+
+    // [FIX] Pre-fetch Warehouse Code Mappings
+    const allStockCodes = Array.from(
+      new Set(
+        stockTransfers
+          .map((st) => st.stockCode)
+          .filter((code): code is string => !!code),
+      ),
+    );
+    const warehouseCodeMap = new Map<string, string>();
+    // Note: mapWarehouseCode needs to be awaited sequentially or parallelized.
+    await Promise.all(
+      allStockCodes.map(async (code) => {
+        const mapped = await this.categoriesService.mapWarehouseCode(code);
+        if (mapped) {
+          warehouseCodeMap.set(code, mapped);
+        }
+      }),
+    );
+
+    return orders.map((order) => {
+      const cashioRecords = cashioMap.get(order.docCode) || [];
+      const ecoinCashio = cashioRecords.find((c) => c.fop_syscode === 'ECOIN');
+      const voucherCashio = cashioRecords.find(
+        (c) => c.fop_syscode === 'VOUCHER',
+      );
+      const selectedCashio =
+        ecoinCashio || voucherCashio || cashioRecords[0] || null;
+
+      // Lấy thông tin stock transfer cho đơn hàng này
+      const orderStockTransfers = stockTransferMap.get(order.docCode) || [];
+
+      // Lọc chỉ lấy các stock transfer XUẤT KHO (SALE_STOCKOUT) với qty < 0
+      // Bỏ qua các stock transfer nhập lại (RETURN) với qty > 0
+      const stockOutTransfers = orderStockTransfers.filter((st) => {
+        if (SalesUtils.isTrutonkeepItem(st.itemCode)) {
+          return false;
+        }
+
+        // Chỉ lấy các record có doctype = 'SALE_STOCKOUT' hoặc qty < 0 (xuất kho)
+        const isStockOut =
+          st.doctype === 'SALE_STOCKOUT' || Number(st.qty || 0) < 0;
+        return isStockOut;
+      });
+
+      const uniqueStockTransfers = stockOutTransfers;
+
+      // Explode sales based on stock transfers (Stock Transfer is Root)
+      const explodedSales: any[] = [];
+      const usedSalesIds = new Set<string>();
+
+      if (uniqueStockTransfers.length > 0) {
+        // OPTIMIZATION: Pre-build Map for O(1) lookup instead of O(n) find()
+        // Build map: itemCode (lowercase) -> Sale[]
+        const saleByItemCodeMap = new Map<string, any[]>();
+        (order.sales || []).forEach((sale: any) => {
+          if (!sale.itemCode) return;
+          const key = sale.itemCode.toLowerCase().trim();
+          if (!saleByItemCodeMap.has(key)) {
+            saleByItemCodeMap.set(key, []);
+          }
+          saleByItemCodeMap.get(key)!.push(sale);
+        });
+
+        // 1. Map Stock Transfers to Sales Lines
+        uniqueStockTransfers.forEach((st) => {
+          // Find matching product info
+          const product = stLoyaltyProductMap.get(st.itemCode);
+          const isSerial = !!product?.trackSerial;
+          const isBatch = !!product?.trackBatch;
+
+          // OPTIMIZED: O(1) lookup instead of O(n) find()
+          // Try matching by itemCode first
+          const itemKey = st.itemCode?.toLowerCase().trim();
+          let matchingSales = itemKey ? saleByItemCodeMap.get(itemKey) : null;
+
+          // If no match and materialCode exists, try matching by materialCode
+          // This handles vouchers where Sale.itemCode = materialCode (e.g., E.M00033A)
+          // but StockTransfer.itemCode = original code (e.g., E_JUPTD011A)
+          if (!matchingSales && st.materialCode) {
+            const materialKey = st.materialCode.toLowerCase().trim();
+            matchingSales = saleByItemCodeMap.get(materialKey);
+          }
+
+          // Find first unused sale, or fallback to any sale
+          let sale: any = null;
+          if (matchingSales && matchingSales.length > 0) {
+            // Try to find unused sale first
+            sale = matchingSales.find((s: any) => !usedSalesIds.has(s.id));
+            // If all used, take first one (legacy behavior for 1 sale -> N splits)
+            if (!sale) {
+              sale = matchingSales[0];
+            }
+          }
+
+          if (sale) {
+            usedSalesIds.add(sale.id);
+            const oldQty = Number(sale.qty || 1) || 1; // Avoid divide by zero
+            const newQty = Math.abs(Number(st.qty || 0));
+            const ratio = newQty / oldQty;
+
+            explodedSales.push({
+              ...sale,
+              id: st.id || sale.id, // Use ST id if available
+              qty: newQty, // Update Qty
+              // Recalculate financial fields based on ratio
+              revenue: Number(sale.revenue || 0) * ratio,
+              tienHang: Number(sale.tienHang || 0) * ratio,
+              linetotal: Number(sale.linetotal || 0) * ratio,
+              // Update discount fields if proportional
+              discount: Number(sale.discount || 0) * ratio,
+              chietKhauMuaHangGiamGia:
+                Number(sale.chietKhauMuaHangGiamGia || 0) * ratio,
+              other_discamt: Number(sale.other_discamt || 0) * ratio,
+              disc_amt: Number(sale.disc_amt || 0) * ratio,
+              disc_tm: Number(sale.disc_tm || 0) * ratio,
+              grade_discamt: Number(sale.grade_discamt || 0) * ratio,
+              revenue_wsale: Number(sale.revenue_wsale || 0) * ratio,
+              revenue_retail: Number(sale.revenue_retail || 0) * ratio,
+              itemcost: Number(sale.itemcost || 0) * ratio,
+              totalcost: Number(sale.totalcost || 0) * ratio,
+              ck_tm: Number(sale.ck_tm || 0) * ratio,
+              ck_dly: Number(sale.ck_dly || 0) * ratio,
+              paid_by_voucher_ecode_ecoin_bp:
+                Number(sale.paid_by_voucher_ecode_ecoin_bp || 0) * ratio,
+              chietKhauCkTheoChinhSach:
+                Number(sale.chietKhauCkTheoChinhSach || 0) * ratio,
+              chietKhauMuaHangCkVip:
+                Number(sale.chietKhauMuaHangCkVip || 0) * ratio,
+              chietKhauThanhToanCoupon:
+                Number(sale.chietKhauThanhToanCoupon || 0) * ratio,
+              chietKhauThanhToanVoucher:
+                Number(sale.chietKhauThanhToanVoucher || 0) * ratio,
+              chietKhauDuPhong1: Number(sale.chietKhauDuPhong1 || 0) * ratio,
+              chietKhauDuPhong2: Number(sale.chietKhauDuPhong2 || 0) * ratio,
+              chietKhauDuPhong3: Number(sale.chietKhauDuPhong3 || 0) * ratio,
+              chietKhauHang: Number(sale.chietKhauHang || 0) * ratio,
+              chietKhauThuongMuaBangHang:
+                Number(sale.chietKhauThuongMuaBangHang || 0) * ratio,
+              chietKhauThanhToanTkTienAo:
+                Number(sale.chietKhauThanhToanTkTienAo || 0) * ratio,
+              chietKhauThem1: Number(sale.chietKhauThem1 || 0) * ratio,
+              chietKhauThem2: Number(sale.chietKhauThem2 || 0) * ratio,
+              chietKhauThem3: Number(sale.chietKhauThem3 || 0) * ratio,
+              chietKhauVoucherDp1:
+                Number(sale.chietKhauVoucherDp1 || 0) * ratio,
+              chietKhauVoucherDp2:
+                Number(sale.chietKhauVoucherDp2 || 0) * ratio,
+              chietKhauVoucherDp3:
+                Number(sale.chietKhauVoucherDp3 || 0) * ratio,
+              chietKhauVoucherDp4:
+                Number(sale.chietKhauVoucherDp4 || 0) * ratio,
+              chietKhauVoucherDp5:
+                Number(sale.chietKhauVoucherDp5 || 0) * ratio,
+              chietKhauVoucherDp6:
+                Number(sale.chietKhauVoucherDp6 || 0) * ratio,
+              chietKhauVoucherDp7:
+                Number(sale.chietKhauVoucherDp7 || 0) * ratio,
+              chietKhauVoucherDp8:
+                Number(sale.chietKhauVoucherDp8 || 0) * ratio,
+              troGia: Number(sale.troGia || 0) * ratio,
+              tienThue: Number(sale.tienThue || 0) * ratio,
+              dtTgNt: Number(sale.dtTgNt || 0) * ratio,
+
+              maKho: warehouseCodeMap.get(st.stockCode) || st.stockCode,
+              // Logic check trackBatch/trackSerial
+              maLo: isBatch ? st.batchSerial : undefined,
+              soSerial: isSerial ? st.batchSerial : undefined,
+              // Store original itemCode from StockTransfer for voucher lookup
+              originalItemCode: st.itemCode,
+
+              isStockTransferLine: true,
+              stockTransferId: st.id,
+              stockTransfer:
+                StockTransferUtils.formatStockTransferForFrontend(st),
+              stockTransfers: undefined,
+            });
+          } else {
+            // If no sale found, create a pseudo-sale line from ST
+            explodedSales.push({
+              // Minimal Sale structure
+              docCode: order.docCode,
+              itemCode: st.itemCode,
+              itemName: st.itemName,
+              qty: Math.abs(Number(st.qty || 0)),
+              maKho: warehouseCodeMap.get(st.stockCode) || st.stockCode,
+
+              // Logic check trackBatch/trackSerial
+              maLo: isBatch ? st.batchSerial : undefined,
+              soSerial: isSerial ? st.batchSerial : undefined,
+
+              isStockTransferLine: true,
+              stockTransferId: st.id,
+              stockTransfer:
+                StockTransferUtils.formatStockTransferForFrontend(st),
+              stockTransfers: undefined,
+              price: 0, // Unknown
+              revenue: 0,
+            });
+          }
+        });
+
+        // 2. Add remaining Sales lines (e.g. Services) that were not matched by any ST
+        (order.sales || []).forEach((sale: any) => {
+          if (!usedSalesIds.has(sale.id)) {
+            explodedSales.push(sale);
+          }
+        });
+      } else {
+        explodedSales.push(...(order.sales || []));
+      }
+
+      return {
+        ...order,
+        sales: explodedSales,
+        cashioData: cashioRecords.length > 0 ? cashioRecords : null,
+        cashioFopSyscode: selectedCashio?.fop_syscode || null,
+        cashioFopDescription: selectedCashio?.fop_description || null,
+        cashioCode: selectedCashio?.code || null,
+        cashioMasterCode: selectedCashio?.master_code || null,
+        cashioTotalIn: selectedCashio?.total_in || null,
+        cashioTotalOut: selectedCashio?.total_out || null,
+      };
+    });
   }
 
   /**
@@ -310,23 +594,298 @@ export class SalesQueryService {
   }
 
   /**
+   * Persist FastApiInvoice record
+   */
+  async saveFastApiInvoice(data: {
+    docCode: string;
+    maDvcs?: string;
+    maKh?: string;
+    tenKh?: string;
+    ngayCt?: Date;
+    status: number;
+    message?: string;
+    guid?: string | null;
+    fastApiResponse?: string;
+  }): Promise<FastApiInvoice> {
+    try {
+      const existing = await this.fastApiInvoiceRepository.findOne({
+        where: { docCode: data.docCode },
+      });
+
+      if (existing) {
+        existing.status = data.status;
+        existing.message = data.message || existing.message;
+        existing.guid = data.guid || existing.guid;
+        existing.fastApiResponse =
+          data.fastApiResponse || existing.fastApiResponse;
+        if (data.maDvcs) existing.maDvcs = data.maDvcs;
+        if (data.maKh) existing.maKh = data.maKh;
+        if (data.tenKh) existing.tenKh = data.tenKh;
+        if (data.ngayCt) existing.ngayCt = data.ngayCt;
+
+        const saved = await this.fastApiInvoiceRepository.save(existing);
+        return Array.isArray(saved) ? saved[0] : saved;
+      } else {
+        const fastApiInvoice = this.fastApiInvoiceRepository.create({
+          docCode: data.docCode,
+          maDvcs: data.maDvcs ?? null,
+          maKh: data.maKh ?? null,
+          tenKh: data.tenKh ?? null,
+          ngayCt: data.ngayCt ?? new Date(),
+          status: data.status,
+          message: data.message ?? null,
+          guid: data.guid ?? null,
+          fastApiResponse: data.fastApiResponse ?? null,
+        } as Partial<FastApiInvoice>);
+
+        const saved = await this.fastApiInvoiceRepository.save(fastApiInvoice);
+        return Array.isArray(saved) ? saved[0] : saved;
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `Error saving FastApiInvoice for ${data.docCode}: ${error?.message || error}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Update isProcessed status for sales
+   */
+  async markOrderAsProcessed(docCode: string): Promise<void> {
+    const sales = await this.saleRepository.find({
+      where: { docCode },
+    });
+    if (sales.length > 0) {
+      await this.saleRepository.update({ docCode }, { isProcessed: true });
+    }
+  }
+
+  /**
+   * Retroactive fix: Mark processed orders based on existing invoices
+   */
+  async markProcessedOrdersFromInvoices(): Promise<{
+    updated: number;
+    message: string;
+  }> {
+    const invoices = await this.invoiceRepository.find({
+      where: { isPrinted: true },
+    });
+
+    let updatedCount = 0;
+    const processedDocCodes = new Set<string>();
+
+    for (const invoice of invoices) {
+      let docCode: string | null = null;
+      const salesByKey = await this.saleRepository.find({
+        where: { docCode: invoice.key },
+        take: 1,
+      });
+      if (salesByKey.length > 0) {
+        docCode = invoice.key;
+      } else {
+        try {
+          if (invoice.printResponse) {
+            const printResponse = JSON.parse(invoice.printResponse);
+            if (printResponse.Message) {
+              try {
+                const messageData = JSON.parse(printResponse.Message);
+                if (Array.isArray(messageData) && messageData.length > 0) {
+                  const data = messageData[0];
+                  if (data.key) {
+                    const keyParts = data.key.split('_');
+                    if (keyParts.length > 0) {
+                      const potentialDocCode = keyParts[0];
+                      const salesByPotentialKey =
+                        await this.saleRepository.find({
+                          where: { docCode: potentialDocCode },
+                          take: 1,
+                        });
+                      if (salesByPotentialKey.length > 0) {
+                        docCode = potentialDocCode;
+                      }
+                    }
+                  }
+                }
+              } catch (msgError) {
+                // Ignore
+              }
+            }
+            if (
+              !docCode &&
+              printResponse.Data &&
+              Array.isArray(printResponse.Data) &&
+              printResponse.Data.length > 0
+            ) {
+              const data = printResponse.Data[0];
+              if (data.key) {
+                const keyParts = data.key.split('_');
+                if (keyParts.length > 0) {
+                  const potentialDocCode = keyParts[0];
+                  const salesByPotentialKey = await this.saleRepository.find({
+                    where: { docCode: potentialDocCode },
+                    take: 1,
+                  });
+                  if (salesByPotentialKey.length > 0) {
+                    docCode = potentialDocCode;
+                  }
+                }
+              }
+            }
+          }
+        } catch (error) {
+          // Ignore
+        }
+      }
+
+      if (docCode && !processedDocCodes.has(docCode)) {
+        const updateResult = await this.saleRepository.update(
+          { docCode },
+          { isProcessed: true },
+        );
+        if (updateResult.affected && updateResult.affected > 0) {
+          updatedCount += updateResult.affected;
+          processedDocCodes.add(docCode);
+        }
+      }
+    }
+
+    return {
+      updated: updatedCount,
+      message: `Đã đánh dấu ${processedDocCodes.size} đơn hàng là đã xử lý (${updatedCount} sale records)`,
+    };
+  }
+
+  /**
    * Helper to apply common filters to sales query
    * REFACTORED: Delegated to SalesFilterService
    */
   private applySaleFilters(
-    query: any,
+    query: SelectQueryBuilder<Sale>,
     options: {
       brand?: string;
       search?: string;
       statusAsys?: boolean;
       typeSale?: string;
       date?: string;
-      dateFrom?: string | Date;
-      dateTo?: string | Date;
+      dateFrom?: string | Date; // Allow Date object
+      dateTo?: string | Date; // Allow Date object
       isProcessed?: boolean;
     },
   ): void {
-    this.salesFilterService.applySaleFilters(query, options);
+    const {
+      brand,
+      search,
+      statusAsys,
+      typeSale,
+      date,
+      dateFrom,
+      dateTo,
+      isProcessed,
+    } = options;
+
+    if (isProcessed !== undefined) {
+      query.andWhere('sale.isProcessed = :isProcessed', { isProcessed });
+    }
+    if (statusAsys !== undefined) {
+      query.andWhere('sale.statusAsys = :statusAsys', { statusAsys });
+    }
+    if (typeSale && typeSale !== 'ALL') {
+      query.andWhere('sale.type_sale = :type_sale', {
+        type_sale: typeSale.toUpperCase(),
+      });
+    }
+
+    if (brand) {
+      // Use sale.brand directly instead of joining customer
+      query.andWhere('sale.brand = :brand', { brand });
+    }
+
+    if (search && search.trim() !== '') {
+      const searchPattern = `%${search.trim().toLowerCase()}%`;
+      // Searching by customer fields requires customer join
+      query.andWhere(
+        "(LOWER(sale.docCode) LIKE :search OR LOWER(COALESCE(customer.name, '')) LIKE :search OR LOWER(COALESCE(customer.code, '')) LIKE :search OR LOWER(COALESCE(customer.mobile, '')) LIKE :search)",
+        { search: searchPattern },
+      );
+    }
+
+    // Date logic
+    let startDate: Date | undefined;
+    let endDate: Date | undefined;
+
+    // Handle string inputs for dateFrom/dateTo (from API query params) or Date objects
+    if (dateFrom) {
+      startDate = new Date(dateFrom);
+      startDate.setHours(0, 0, 0, 0);
+    }
+    if (dateTo) {
+      endDate = new Date(dateTo);
+      endDate.setHours(23, 59, 59, 999);
+    }
+
+    if (startDate && endDate) {
+      query.andWhere(
+        'sale.docDate >= :startDate AND sale.docDate <= :endDate',
+        {
+          startDate,
+          endDate,
+        },
+      );
+    } else if (startDate) {
+      query.andWhere('sale.docDate >= :startDate', { startDate });
+    } else if (endDate) {
+      query.andWhere('sale.docDate <= :endDate', { endDate });
+    } else if (date) {
+      // Special format DDMMMYYYY
+      const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+      if (dateMatch) {
+        const [, day, monthStr, year] = dateMatch;
+        const monthMap: { [key: string]: number } = {
+          JAN: 0,
+          FEB: 1,
+          MAR: 2,
+          APR: 3,
+          MAY: 4,
+          JUN: 5,
+          JUL: 6,
+          AUG: 7,
+          SEP: 8,
+          OCT: 9,
+          NOV: 10,
+          DEC: 11,
+        };
+        const month = monthMap[monthStr.toUpperCase()];
+        if (month !== undefined) {
+          const dateObj = new Date(parseInt(year), month, parseInt(day));
+          const startOfDay = new Date(dateObj);
+          startOfDay.setHours(0, 0, 0, 0);
+          const endOfDay = new Date(dateObj);
+          endOfDay.setHours(23, 59, 59, 999);
+          query.andWhere(
+            'sale.docDate >= :startDate AND sale.docDate <= :endDate',
+            {
+              startDate: startOfDay,
+              endDate: endOfDay,
+            },
+          );
+        }
+      }
+    } else if (brand && !startDate && !endDate && !date) {
+      // Default: Last 30 days if only brand is specified
+      const end = new Date();
+      end.setHours(23, 59, 59, 999);
+      const start = new Date();
+      start.setDate(start.getDate() - 30);
+      start.setHours(0, 0, 0, 0);
+      query.andWhere(
+        'sale.docDate >= :startDate AND sale.docDate <= :endDate',
+        {
+          startDate: start,
+          endDate: end,
+        },
+      );
+    }
   }
 
   async findAllOrders(options: {
@@ -820,7 +1379,7 @@ export class SalesQueryService {
               warehouseCodeMap.get(assignedSt.stockCode) ||
               assignedSt.stockCode;
           }
-          const calculatedFields = SalesCalculationUtils.calculateSaleFields(
+          const calculatedFields = await InvoiceLogicUtils.calculateSaleFields(
             sale,
             loyaltyProduct,
             department,
@@ -1410,7 +1969,7 @@ export class SalesQueryService {
         const maThe = getMaThe.get(loyaltyProduct?.materialCode || '') || '';
         sale.maThe = maThe;
 
-        const calculatedFields = SalesCalculationUtils.calculateSaleFields(
+        const calculatedFields = await InvoiceLogicUtils.calculateSaleFields(
           sale,
           loyaltyProduct,
           department,

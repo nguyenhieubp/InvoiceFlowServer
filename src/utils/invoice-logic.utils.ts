@@ -1155,4 +1155,115 @@ export class InvoiceLogicUtils {
       tenVt,
     };
   }
+  /**
+   * Orchestrate calculation of all derived fields for a sale item
+   * Aggregates logic from other helper methods in this class
+   */
+  static async calculateSaleFields(
+    sale: any,
+    loyaltyProduct: any,
+    department: any,
+    branchCode: string,
+    loyaltyService?: any,
+  ) {
+    const orderTypes = this.getOrderTypes(sale.ordertypeName);
+    const { isDoiDiem, isDauTu } = orderTypes;
+
+    // 1. Calculate Prices (Source of Truth)
+    const { giaBan, tienHang, tienHangGoc } = this.calculatePrices({
+      sale,
+      orderTypes,
+      allocationRatio: 1, // Default to 1 (full allocation) if not split
+      qtyFromStock: undefined,
+    });
+
+    const isTangHang = this.isTangHang(giaBan, tienHang);
+    const maDvcs = department?.company || '';
+    const productType = sale.productType || loyaltyProduct?.productType || null;
+    const productTypeUpper = productType
+      ? String(productType).toUpperCase().trim()
+      : null;
+    const promCode = sale.promCode || sale.maCk01 || '';
+
+    // 2. Resolve Accounting Accounts
+    const maHangGiamGia =
+      sale.maHangGiamGia || loyaltyProduct?.materialCode || '';
+    const hasMaCtkm = !!sale.maCtkm;
+    const hasMaCtkmTangHang = !!sale.maCtkmTangHang;
+
+    const { tkChietKhau, tkChiPhi, maPhi } =
+      await this.resolveAccountingAccounts({
+        sale,
+        loyaltyProduct,
+        orderTypes,
+        isTangHang,
+        hasMaCtkm,
+        hasMaCtkmTangHang,
+        loyaltyService,
+      });
+
+    // 3. Resolve Promotion Codes
+    const { maCk01, maCtkmTangHang } = this.resolvePromotionCodes({
+      sale,
+      orderTypes,
+      isTangHang,
+      maDvcs,
+      productTypeUpper,
+      promCode,
+      maHangGiamGia,
+    });
+
+    // 4. Resolve Batch/Serial
+    const { maLo, soSerial } = this.resolveBatchSerial({
+      batchSerialFromST: null, // Logic này thường từ Stock Transfer wrapper
+      trackBatch: !!loyaltyProduct?.trackBatch,
+      trackSerial: !!loyaltyProduct?.trackSerial,
+    });
+
+    // 5. Resolve Loai GD
+    const loaiGd = this.resolveLoaiGd({
+      sale,
+      orderTypes,
+      loyaltyProduct,
+    });
+
+    // 6. Resolve Ma Kho
+    // Cần inject logic kho sau hoặc pass vào param.
+    // Tạm thời để rỗng hoặc tính trong SalesQueryService sau khi join ST
+    const maKho = this.resolveMaKho({
+      maKhoFromST: null,
+      maKhoFromSale: sale.maKho || null,
+      maBp: department?.code || '', // department code ~ maBp?
+      orderTypes,
+    });
+
+    // 7. Resolve Prom Code Display
+    const promCodeDisplay = this.getPromCodeDisplay(
+      isTangHang,
+      orderTypes.isDichVu,
+      maCtkmTangHang,
+      orderTypes.isDoiDv,
+      orderTypes.isDoiVo,
+    );
+
+    return {
+      orderTypes,
+      isTangHang,
+      isDichVu: orderTypes.isDichVu,
+      giaBan,
+      tienHang,
+      tienHangGoc,
+      tkChietKhau,
+      tkChiPhi,
+      maPhi,
+      maCk01, // Used as muaHangCkVip in some contexts
+      muaHangCkVip: maCk01, // Alias for compatibility
+      maCtkmTangHang,
+      maLo,
+      soSerial,
+      loaiGd,
+      maKho,
+      promCodeDisplay,
+    };
+  }
 }

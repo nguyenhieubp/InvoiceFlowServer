@@ -5,7 +5,6 @@ import { StockTransfer } from '../../../entities/stock-transfer.entity';
 import { FastApiInvoiceFlowService } from '../../../services/fast-api-invoice-flow.service';
 import { SalesPayloadService } from '../invoice/sales-payload.service';
 import { SalesQueryService } from '../services/sales-query.service';
-import { InvoicePersistenceService } from '../invoice/invoice-persistence.service';
 import { PaymentService } from '../../payment/payment.service';
 import { forwardRef, Inject } from '@nestjs/common';
 import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
@@ -25,7 +24,6 @@ export class SaleReturnHandlerService {
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private salesPayloadService: SalesPayloadService,
     private salesQueryService: SalesQueryService,
-    private invoicePersistenceService: InvoicePersistenceService,
     @Inject(forwardRef(() => PaymentService))
     private paymentService: PaymentService,
   ) {}

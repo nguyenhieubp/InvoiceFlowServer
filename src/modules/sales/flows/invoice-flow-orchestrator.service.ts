@@ -7,7 +7,7 @@ import { LoyaltyService } from '../../../services/loyalty.service';
 import { SpecialOrderHandlerService } from './special-order-handler.service';
 import { NormalOrderHandlerService } from './normal-order-handler.service';
 import { SaleReturnHandlerService } from './sale-return-handler.service';
-import { InvoicePersistenceService } from '../invoice/invoice-persistence.service';
+import { SalesQueryService } from '../services/sales-query.service';
 import * as SalesUtils from '../../../utils/sales.utils';
 import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
 import {
@@ -29,7 +29,7 @@ export class InvoiceFlowOrchestratorService {
     private specialOrderHandlerService: SpecialOrderHandlerService,
     private normalOrderHandlerService: NormalOrderHandlerService,
     private saleReturnHandlerService: SaleReturnHandlerService,
-    private invoicePersistenceService: InvoicePersistenceService,
+    private salesQueryService: SalesQueryService,
   ) {}
 
   /**
@@ -86,7 +86,7 @@ export class InvoiceFlowOrchestratorService {
         );
 
         // Save to database
-        await this.invoicePersistenceService.saveFastApiInvoice({
+        await this.salesQueryService.saveFastApiInvoice({
           docCode,
           maDvcs: maDvcs,
           maKh: orderData.customer?.code || '',
@@ -253,7 +253,7 @@ export class InvoiceFlowOrchestratorService {
     maDvcs: string,
   ) {
     this.logger.error(`Processing failed for ${docCode}: ${message}`);
-    await this.invoicePersistenceService.saveFastApiInvoice({
+    await this.salesQueryService.saveFastApiInvoice({
       docCode,
       maDvcs: maDvcs || '',
       maKh: orderData.customer?.code || '',
@@ -287,7 +287,7 @@ export class InvoiceFlowOrchestratorService {
         await handlerFn();
 
       // Save invoice status
-      await this.invoicePersistenceService.saveFastApiInvoice({
+      await this.salesQueryService.saveFastApiInvoice({
         docCode,
         maDvcs: maDvcs || orderData.branchCode || '',
         maKh: orderData.customer?.code || '',
@@ -300,7 +300,7 @@ export class InvoiceFlowOrchestratorService {
       });
 
       if (status === STATUS.SUCCESS && shouldMarkProcessed) {
-        await this.invoicePersistenceService.markOrderAsProcessed(docCode);
+        await this.salesQueryService.markOrderAsProcessed(docCode);
       }
 
       return {
