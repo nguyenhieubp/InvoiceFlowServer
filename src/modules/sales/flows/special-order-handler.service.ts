@@ -180,9 +180,42 @@ export class SpecialOrderHandlerService {
             enrichedOrder.sales || [],
             cardData,
           );
+
           this.logger.log(
             `[SpecialOrder] Successfully enriched sales with N8n Card Data (After Explosion)`,
           );
+
+          // [NEW] Sync all customers involved in Split Card (Source & Destination)
+          // cardData contains { issue_partner_code, issue_partner_name, ... }
+          if (Array.isArray(cardData) && cardData.length > 0) {
+            const uniqueCustomers = new Map<string, any>();
+
+            for (const card of cardData) {
+              if (
+                card.issue_partner_code &&
+                !uniqueCustomers.has(card.issue_partner_code)
+              ) {
+                uniqueCustomers.set(card.issue_partner_code, {
+                  ma_kh: card.issue_partner_code,
+                  ten_kh: card.issue_partner_name || card.issue_partner_code,
+                  // Note: N8n might not return full address/email, but we prioritize syncing code & name
+                  dia_chi: '',
+                  e_mail: '',
+                  so_cccd: '',
+                  ngay_sinh: '',
+                  gioi_tinh: '',
+                });
+              }
+            }
+
+            this.logger.log(
+              `[SpecialOrder] Found ${uniqueCustomers.size} customers from N8n to sync: ${Array.from(uniqueCustomers.keys()).join(', ')}`,
+            );
+
+            for (const cust of uniqueCustomers.values()) {
+              await this.fastApiInvoiceFlowService.createOrUpdateCustomer(cust);
+            }
+          }
         } catch (e) {
           // Ignore error as per original logic, but log it
           this.logger.warn(

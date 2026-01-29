@@ -208,7 +208,7 @@ export class SalesInvoiceService {
   /**
    * Helper: Find and enrich order data
    */
-  async findByOrderCode(docCode: string) {
+  public async findByOrderCode(docCode: string) {
     // 1. [REFACTORED] Reuse Frontend Logic (SalesQueryService)
     // This fetches Sales, performs robust 1-1 Stick Transfer matching, and enriches data.
     const formattedSales =

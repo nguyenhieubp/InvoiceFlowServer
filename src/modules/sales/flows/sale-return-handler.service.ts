@@ -13,6 +13,8 @@ import {
   STATUS,
   ACTION,
 } from '../constants/sales-invoice.constants';
+import { SalesInvoiceService } from '../invoice/sales-invoice.service';
+import * as SalesUtils from '../../../utils/sales.utils';
 
 @Injectable()
 export class SaleReturnHandlerService {
@@ -26,6 +28,8 @@ export class SaleReturnHandlerService {
     private salesQueryService: SalesQueryService,
     @Inject(forwardRef(() => PaymentService))
     private paymentService: PaymentService,
+    @Inject(forwardRef(() => SalesInvoiceService))
+    private salesInvoiceService: SalesInvoiceService,
   ) {}
 
   /**
@@ -183,9 +187,12 @@ export class SaleReturnHandlerService {
       `[SaleOrderWithX] Bắt đầu xử lý đơn có đuôi _X: ${docCode}, action: ${action}`,
     );
 
+    const orderWithoutX =
+      await this.salesInvoiceService.findByOrderCode(docCode);
+
     // Explode sales by Stock Transfers
     const [enrichedOrder] = await this.salesQueryService.enrichOrdersWithCashio(
-      [orderData],
+      [orderWithoutX],
     );
 
     // Đơn có đuôi _X → Gọi API salesOrder với action: 1
