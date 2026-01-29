@@ -186,9 +186,10 @@ export class SaleReturnHandlerService {
     this.logger.log(
       `[SaleOrderWithX] Bắt đầu xử lý đơn có đuôi _X: ${docCode}, action: ${action}`,
     );
+    const docCodeWithoutX = this.removeSuffixX(docCode);
 
     const orderWithoutX =
-      await this.salesInvoiceService.findByOrderCode(docCode);
+      await this.salesInvoiceService.findByOrderCode(docCodeWithoutX);
 
     // Explode sales by Stock Transfers
     const [enrichedOrder] = await this.salesQueryService.enrichOrdersWithCashio(
@@ -198,8 +199,6 @@ export class SaleReturnHandlerService {
     // Đơn có đuôi _X → Gọi API salesOrder với action: 1
     const invoiceData =
       await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
-
-    const docCodeWithoutX = this.removeSuffixX(docCode);
 
     // Gọi API salesOrder với action = 1 (không cần tạo/cập nhật customer)
     let result: any;
