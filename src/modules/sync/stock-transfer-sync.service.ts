@@ -61,7 +61,7 @@ export class StockTransferSyncService {
       );
 
       // Gọi API với P_PART=1,2,3 tuần tự để tránh quá tải
-      const parts = [1, 2, 3];
+      const parts = [1, 2, 3, 4, 5];
       const allStockTransData: any[] = [];
 
       for (const part of parts) {

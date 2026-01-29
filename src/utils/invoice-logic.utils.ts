@@ -1187,7 +1187,7 @@ export class InvoiceLogicUtils {
       : null;
     const promCode = sale.promCode || sale.maCk01 || '';
 
-    // 2. Resolve Accounting Accounts
+    // maHangGiamGia is needed for resolvePromotionCodes
     const maHangGiamGia =
       sale.maHangGiamGia ||
       this.calcCodeDisCount(
@@ -1195,21 +1195,8 @@ export class InvoiceLogicUtils {
         sale.product?.materialType || loyaltyProduct?.materialType,
       ) ||
       '';
-    const hasMaCtkm = !!sale.maCtkm;
-    const hasMaCtkmTangHang = !!sale.maCtkmTangHang;
 
-    const { tkChietKhau, tkChiPhi, maPhi } =
-      await this.resolveAccountingAccounts({
-        sale,
-        loyaltyProduct,
-        orderTypes,
-        isTangHang,
-        hasMaCtkm,
-        hasMaCtkmTangHang,
-        loyaltyService,
-      });
-
-    // 3. Resolve Promotion Codes
+    // 2. Resolve Promotion Codes
     const { maCk01, maCtkmTangHang } = this.resolvePromotionCodes({
       sale,
       orderTypes,
@@ -1220,6 +1207,18 @@ export class InvoiceLogicUtils {
       maHangGiamGia,
       isEmployee, // [NEW] Pass isEmployee
     });
+
+    // 3. Resolve Accounting Accounts
+    const { tkChietKhau, tkChiPhi, maPhi } =
+      await this.resolveAccountingAccounts({
+        sale,
+        loyaltyProduct,
+        orderTypes,
+        isTangHang,
+        hasMaCtkm: !!(maCk01 || maCtkmTangHang),
+        hasMaCtkmTangHang: !!maCtkmTangHang,
+        loyaltyService,
+      });
 
     // 4. Resolve Batch/Serial
     const { maLo, soSerial } = this.resolveBatchSerial({
