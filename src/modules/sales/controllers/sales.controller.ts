@@ -226,11 +226,17 @@ export class SalesController {
     @Param('docCode') docCode: string,
     @Body() body: { forceRetry?: boolean; onlySalesOrder?: boolean },
   ) {
-    return this.salesService.createInvoiceViaFastApi(
+    const result = await this.salesService.createInvoiceViaFastApi(
       docCode,
       body?.forceRetry || false,
       { onlySalesOrder: body?.onlySalesOrder },
     );
+
+    if (result && result.success === false) {
+      throw new BadRequestException(result.message || 'Tạo hóa đơn thất bại');
+    }
+
+    return result;
   }
 
   @Post('orders/create-invoice-fast')

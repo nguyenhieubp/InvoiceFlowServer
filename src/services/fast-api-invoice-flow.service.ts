@@ -189,10 +189,10 @@ export class FastApiInvoiceFlowService {
         const firstItem = result[0];
         if (firstItem.status !== 1) {
           const errorMessage = firstItem.message || 'Tạo sales order thất bại';
-          // throw new BadRequestException(errorMessage);
           this.logger.error(
             `[Flow] Sales Order API trả về status = ${firstItem.status}: ${errorMessage}`,
           );
+          throw new BadRequestException(errorMessage);
         }
       } else if (
         result &&
@@ -201,10 +201,10 @@ export class FastApiInvoiceFlowService {
       ) {
         if (result.status !== 1) {
           const errorMessage = result.message || 'Tạo sales order thất bại';
-          // throw new BadRequestException(errorMessage);
           this.logger.error(
             `[Flow] Sales Order API trả về status = ${result.status}: ${errorMessage}`,
           );
+          throw new BadRequestException(errorMessage);
         }
       }
 
