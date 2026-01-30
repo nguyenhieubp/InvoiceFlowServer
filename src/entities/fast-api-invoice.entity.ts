@@ -32,9 +32,6 @@ export class FastApiInvoice {
   status: number; // Status từ Fast API (0 = lỗi, 1 = thành công)
 
   @Column({ type: 'text', nullable: true })
-  message: string; // Message từ Fast API
-
-  @Column({ type: 'text', nullable: true })
   guid: string; // GUID từ Fast API response
 
   @Column({ type: 'text', nullable: true })

@@ -640,7 +640,6 @@ export class SalesQueryService {
     tenKh?: string;
     ngayCt?: Date;
     status: number;
-    message?: string;
     guid?: string | null;
     fastApiResponse?: string;
     payload?: string;
@@ -652,7 +651,6 @@ export class SalesQueryService {
 
       if (existing) {
         existing.status = data.status;
-        existing.message = data.message || existing.message;
         existing.guid = data.guid || existing.guid;
         existing.fastApiResponse =
           data.fastApiResponse || existing.fastApiResponse;
@@ -672,7 +670,6 @@ export class SalesQueryService {
           tenKh: data.tenKh ?? null,
           ngayCt: data.ngayCt ?? new Date(),
           status: data.status,
-          message: data.message ?? null,
           guid: data.guid ?? null,
           fastApiResponse: data.fastApiResponse ?? null,
           payload: data.payload ?? null,

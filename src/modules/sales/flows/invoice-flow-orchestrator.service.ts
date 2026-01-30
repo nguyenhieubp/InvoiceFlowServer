@@ -93,11 +93,11 @@ export class InvoiceFlowOrchestratorService {
           tenKh: orderData.customer?.name || '',
           ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
           status: result.status,
-          message: result.message,
           guid: result.guid,
-          fastApiResponse: JSON.stringify(
-            result.fastApiResponse || result.result,
-          ),
+          fastApiResponse:
+            typeof result?.fastApiResponse === 'object'
+              ? JSON.stringify(result.fastApiResponse)
+              : result?.fastApiResponse,
           payload: result.payload ? JSON.stringify(result.payload) : undefined,
         });
 
@@ -258,7 +258,6 @@ export class InvoiceFlowOrchestratorService {
       tenKh: orderData.customer?.name || '',
       ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
       status: 0,
-      message: message,
       guid: null,
     });
   }
@@ -293,7 +292,6 @@ export class InvoiceFlowOrchestratorService {
         tenKh: orderData.customer?.name || '',
         ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
         status: status,
-        message: message,
         guid: guid,
         fastApiResponse: JSON.stringify(fastApiResponse || result),
         payload: payload ? JSON.stringify(payload) : undefined,
