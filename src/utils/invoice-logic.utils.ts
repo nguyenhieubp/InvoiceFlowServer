@@ -24,6 +24,7 @@ export interface OrderTypes {
   isDichVu: boolean;
   isBanTaiKhoan: boolean;
   isSanTmdt: boolean;
+  isTtPhiKeep: boolean;
 }
 
 /**
@@ -52,11 +53,15 @@ export class InvoiceLogicUtils {
       normalized.includes('05.Tặng sinh nhật') ||
       normalized.toLowerCase().includes('tặng sinh nhật') ||
       normalized.toLowerCase().includes('tang sinh nhat');
+
+    const isTtPhiKeep = normalized.toLowerCase().includes('tt phí keep');
+
     const isThuong =
       normalized.startsWith('01.') ||
       normalized.startsWith('01 ') ||
       normalized.toLowerCase() === 'thường' ||
-      normalized.toLowerCase() === 'thuong';
+      normalized.toLowerCase() === 'thuong' ||
+      isTtPhiKeep;
     const isDoiDv =
       normalized.includes('04. Đổi DV') || normalized.includes('04.Đổi DV');
     const isTachThe =
@@ -83,6 +88,7 @@ export class InvoiceLogicUtils {
       isDichVu,
       isBanTaiKhoan,
       isSanTmdt,
+      isTtPhiKeep,
     };
   }
 
@@ -1071,11 +1077,15 @@ export class InvoiceLogicUtils {
           });
         }
 
-        // Use resolved value if available, otherwise fallback to existing logic
-        detailItem[maKey] = InvoiceLogicUtils.val(
-          resolvedMaCk03 || sale.muaHangCkVip || '',
-          32,
-        );
+        if (detailItem.ck03_nt > 0) {
+          // Use resolved value if available, otherwise fallback to existing logic
+          detailItem[maKey] = InvoiceLogicUtils.val(
+            resolvedMaCk03 || sale.muaHangCkVip || '',
+            32,
+          );
+        } else {
+          detailItem[maKey] = '';
+        }
       } else if (i === 4) {
         detailItem[maKey] = InvoiceLogicUtils.val(
           detailItem.ck04_nt > 0 || sale.thanhToanCoupon

@@ -47,6 +47,8 @@ export class InvoiceValidationService {
     '08.  Tách thẻ',
     // Đổi vỏ
     'Đổi vỏ',
+    // TT phí keep
+    'TT phí keep',
   ];
 
   /**
