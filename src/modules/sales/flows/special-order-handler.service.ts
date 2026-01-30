@@ -256,7 +256,10 @@ export class SpecialOrderHandlerService {
         `[ServiceOrderFlow] Bắt đầu xử lý đơn dịch vụ ${docCode}`,
       );
 
-      const sales = orderData.sales || [];
+      const [enrichedOrder] =
+        await this.salesQueryService.enrichOrdersWithCashio([orderData]);
+
+      const sales = enrichedOrder.sales || [];
       if (sales.length === 0) {
         throw new Error(`Đơn hàng ${docCode} không có sale item nào`);
       }
@@ -288,7 +291,7 @@ export class SpecialOrderHandlerService {
 
       // Rebuild payload SPECIFICALLY for service lines
       const serviceOrderData = {
-        ...orderData,
+        ...enrichedOrder,
         sales: serviceLines,
       };
 
@@ -479,7 +482,7 @@ export class SpecialOrderHandlerService {
         // Chỉ tạo GxtInvoice nếu có cả I (xuất) và S (nhập)
         if (exportLines.length > 0) {
           const gxtData = await this.salesPayloadService.buildGxtInvoiceData(
-            orderData,
+            enrichedOrder,
             serviceLines,
             exportLines,
           );

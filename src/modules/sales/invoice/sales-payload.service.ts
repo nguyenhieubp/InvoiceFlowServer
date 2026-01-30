@@ -343,6 +343,10 @@ export class SalesPayloadService {
         'Cái',
       );
       const maLo = toString(sale.maLo || sale.ma_lo, '');
+      const soSerial = toString(
+        sale.soSerial || sale.serial || sale.so_serial,
+        '',
+      );
       const maBp = toString(
         sale.department?.ma_bp || sale.branchCode || orderData.branchCode,
         '',
@@ -366,6 +370,7 @@ export class SalesPayloadService {
         ma_vt: limitString(materialCode, 16),
         dvt: limitString(dvt, 32),
         ma_lo: limitString(maLo, 16),
+        so_serial: limitString(soSerial, 64),
         so_luong: Math.abs(qty), // Lấy giá trị tuyệt đối
         gia_nt2: Number(giaNt2),
         tien_nt2: Number(tienNt2),
