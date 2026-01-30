@@ -1014,7 +1014,7 @@ export class SalesPayloadService {
       '',
     );
     const productType = sale.productType || '';
-    const loaiVt = sale.product.materialType || '';
+    const loaiVt = sale.product?.materialType || '';
     const maHangGiamGia = InvoiceLogicUtils.calcCodeDisCount(
       sale.product?.productType,
       loaiVt,

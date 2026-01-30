@@ -493,4 +493,81 @@ export class SalesInvoiceService {
       details,
     };
   }
-}
+  async retryFailedInvoices(): Promise<{
+    processed: number;
+    success: number;
+    failed: number;
+    results: any[];
+  }> {
+    this.logger.log('[Retry] Starting batch retry for failed invoices...');
+
+    // 1. Get all failed invoices
+    const failedInvoices = await this.fastApiInvoiceRepository.find({
+      where: { status: 0 },
+      select: ['docCode', 'status', 'id', 'updatedAt'], // Select basic fields
+      order: { updatedAt: 'DESC' }, // Process newest failures first
+    });
+
+    if (failedInvoices.length === 0) {
+      return { processed: 0, success: 0, failed: 0, results: [] };
+    }
+
+    this.logger.log(
+      `[Retry] Found ${failedInvoices.length} failed invoices. Processing...`,
+    );
+
+    const results: any[] = [];
+    let successCount = 0;
+    let failCount = 0;
+
+    // 2. Process each invoice
+    const BATCH_SIZE = 5; // Parallel concurrency
+    // Process in chunks to avoid overwhelming the system
+    for (let i = 0; i < failedInvoices.length; i += BATCH_SIZE) {
+      const chunk = failedInvoices.slice(i, i + BATCH_SIZE);
+      const chunkPromises = chunk.map(async (invoice) => {
+        try {
+          // Force retry = true
+          const result = await this.processSingleOrder(invoice.docCode, true);
+          return {
+            docCode: invoice.docCode,
+            success: result.success,
+            message: result.message,
+            error: result.success ? null : result.message || 'Unknown error',
+          };
+        } catch (error: any) {
+          return {
+            docCode: invoice.docCode,
+            success: false,
+            message: error?.message || 'Exception during retry',
+            error: error?.message,
+          };
+        }
+      });
+
+      const chunkResults = await Promise.all(chunkPromises);
+
+      chunkResults.forEach((r) => {
+        if (r.success) successCount++;
+        else failCount++;
+        results.push(r);
+      });
+
+      // Small delay between chunks
+      if (i + BATCH_SIZE < failedInvoices.length) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+
+    this.logger.log(
+      `[Retry] Completed. Success: ${successCount}, Failed: ${failCount}`,
+    );
+
+    return {
+      processed: failedInvoices.length,
+      success: successCount,
+      failed: failCount,
+      results,
+    };
+  }
+} // End Class

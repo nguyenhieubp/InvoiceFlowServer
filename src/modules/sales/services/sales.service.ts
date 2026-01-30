@@ -347,4 +347,8 @@ export class SalesService {
       endDate,
     );
   }
+
+  async retryFailedInvoices() {
+    return this.salesInvoiceService.retryFailedInvoices();
+  }
 }

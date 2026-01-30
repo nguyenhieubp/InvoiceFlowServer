@@ -280,6 +280,11 @@ export class SalesController {
     };
   }
 
+  @Post('retry-failed-invoices')
+  async retryFailedInvoices() {
+    return this.salesService.retryFailedInvoices();
+  }
+
   @Post('invoice/batch-process')
   async batchProcessInvoices(
     @Body('startDate') startDate: string,
