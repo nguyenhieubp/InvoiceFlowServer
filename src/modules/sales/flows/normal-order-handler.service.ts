@@ -41,6 +41,7 @@ export class NormalOrderHandlerService {
     message: string;
     guid?: string;
     fastApiResponse?: any;
+    payload?: any;
   }> {
     this.logger.log(`[NormalOrder] Bắt đầu xử lý đơn thường: ${docCode}`);
 
@@ -99,14 +100,21 @@ export class NormalOrderHandlerService {
     const invoiceData =
       await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
 
+    // Payload Logging
+    const payloadLog: any = {};
+
     // 2. Create Sales Order (User Request: Run BOTH Order and Invoice)
     let soResult: any = null;
+    const soPayload = {
+      ...invoiceData,
+      customer: orderData.customer,
+      ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+    };
+    payloadLog.salesOrder = soPayload;
+
     try {
-      soResult = await this.fastApiInvoiceFlowService.createSalesOrder({
-        ...invoiceData,
-        customer: orderData.customer,
-        ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-      });
+      soResult =
+        await this.fastApiInvoiceFlowService.createSalesOrder(soPayload);
     } catch (error: any) {
       const responseMessage =
         error?.response?.data?.message || error?.message || '';
@@ -125,9 +133,6 @@ export class NormalOrderHandlerService {
           message: 'Sales Order already exists',
         };
       } else {
-        // Nếu lỗi khác (không phải duplicate), có thể log và tiếp tục hoặc throw
-        // User yêu cầu "đồng bộ chạy cả", nếu SO lỗi thì có thể ảnh hưởng SI?
-        // Tạm thời log error và flow tiếp tục để đảm bảo Invoice (quan trọng hơn) vẫn chạy
         this.logger.error(
           `Lỗi tạo Sales Order ${docCode}: ${responseMessage}. Vẫn tiếp tục tạo Invoice.`,
         );
@@ -140,12 +145,16 @@ export class NormalOrderHandlerService {
 
     // 3. Create Sales Invoice
     let siResult: any;
+    const siPayload = {
+      ...invoiceData,
+      customer: orderData.customer,
+      ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+    };
+    payloadLog.salesInvoice = siPayload;
+
     try {
-      siResult = await this.fastApiInvoiceFlowService.createSalesInvoice({
-        ...invoiceData,
-        customer: orderData.customer,
-        ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-      });
+      siResult =
+        await this.fastApiInvoiceFlowService.createSalesInvoice(siPayload);
     } catch (error: any) {
       const responseMessage =
         error?.response?.data?.message || error?.message || '';
@@ -180,6 +189,7 @@ export class NormalOrderHandlerService {
             salesOrder: soResult,
             salesInvoiceError: error?.message || error,
           },
+          payload: payloadLog,
         };
       }
     }
@@ -200,6 +210,7 @@ export class NormalOrderHandlerService {
         message: `Tạo Sales Invoice thất bại: ${message}`,
         result: { salesOrder: soResult, salesInvoice: siResult },
         fastApiResponse: { salesOrder: soResult, salesInvoice: siResult },
+        payload: payloadLog,
       };
     }
 
@@ -219,6 +230,8 @@ export class NormalOrderHandlerService {
         this.logger.log(
           `[Cashio] Found ${paymentDataList.length} payment records for order ${docCode}. Processing...`,
         );
+        // Note: processCashioPayment might need to be instrumented to return payload if strictly required,
+        // but Sales Order/Invoice is the main request.
         for (const paymentData of paymentDataList) {
           await this.fastApiInvoiceFlowService.processCashioPayment(
             paymentData,
@@ -258,6 +271,7 @@ export class NormalOrderHandlerService {
           invoiceData,
           stockCodes,
         );
+        // Note: processPayment logic is complex and internal.
       }
     } catch (e: any) {
       const msg = `[Stock Payment Error] ${e?.message || e}`;
@@ -316,6 +330,7 @@ export class NormalOrderHandlerService {
         payment: paymentResult,
         errors: paymentErrors,
       },
+      payload: payloadLog,
     };
   }
 }

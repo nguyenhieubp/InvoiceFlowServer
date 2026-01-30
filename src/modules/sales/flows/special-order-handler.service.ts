@@ -83,6 +83,9 @@ export class SpecialOrderHandlerService {
       const [enrichedOrder] =
         await this.salesQueryService.enrichOrdersWithCashio([orderData]);
 
+      // Payload Logging
+      const payloadLog: any = {};
+
       // [FIX] Execute logic AFTER enrichment (e.g. N8n mapping) to overwrite ST values
       if (afterEnrichmentAction) {
         await afterEnrichmentAction(enrichedOrder);
@@ -92,11 +95,15 @@ export class SpecialOrderHandlerService {
         await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
 
       // Call createSalesOrder
-      const result = await this.fastApiInvoiceFlowService.createSalesOrder({
+      const soPayload = {
         ...invoiceData,
         customer: orderData.customer,
         ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-      });
+      };
+      payloadLog.salesOrder = soPayload;
+
+      const result =
+        await this.fastApiInvoiceFlowService.createSalesOrder(soPayload);
 
       let responseStatus =
         Array.isArray(result) &&
@@ -117,12 +124,16 @@ export class SpecialOrderHandlerService {
           this.logger.log(
             `[SpecialOrder] Creating Sales Invoice for ${docCode}...`,
           );
+          const siPayload = {
+            ...invoiceData,
+            customer: orderData.customer,
+            ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+            // ...any other overrides if needed
+          };
+          payloadLog.salesInvoice = siPayload;
+
           const invoiceResult =
-            await this.fastApiInvoiceFlowService.createSalesInvoice({
-              ...invoiceData,
-              customer: orderData.customer,
-              ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-            });
+            await this.fastApiInvoiceFlowService.createSalesInvoice(siPayload);
           fastApiResponse.salesInvoice = invoiceResult;
 
           // Check invoice result status
@@ -165,6 +176,7 @@ export class SpecialOrderHandlerService {
         message: responseMessage,
         guid: responseGuid,
         fastApiResponse: fastApiResponse,
+        payload: payloadLog,
       };
     } catch (error: any) {
       this.logger.error(
@@ -256,6 +268,9 @@ export class SpecialOrderHandlerService {
         `[ServiceOrderFlow] Bắt đầu xử lý đơn dịch vụ ${docCode}`,
       );
 
+      // Payload Logging
+      const payloadLog: any = {};
+
       const [enrichedOrder] =
         await this.salesQueryService.enrichOrdersWithCashio([orderData]);
 
@@ -304,12 +319,16 @@ export class SpecialOrderHandlerService {
       this.logger.log(
         `[ServiceOrderFlow] Tạo SalesOrder cho ${serviceLines.length} dòng dịch vụ (S)`,
       );
+
+      const soPayload = {
+        ...serviceInvoiceData,
+        customer: orderData.customer,
+        ten_kh: orderData.customer?.name || serviceInvoiceData.ong_ba || '',
+      };
+      payloadLog.salesOrder = soPayload;
+
       const salesOrderResult =
-        await this.fastApiInvoiceFlowService.createSalesOrder({
-          ...serviceInvoiceData,
-          customer: orderData.customer,
-          ten_kh: orderData.customer?.name || serviceInvoiceData.ong_ba || '',
-        });
+        await this.fastApiInvoiceFlowService.createSalesOrder(soPayload);
 
       // Validate Sales Order Result
       const isSoSuccess =
@@ -336,12 +355,15 @@ export class SpecialOrderHandlerService {
       // Declare variable for scope visibility in return statement
       let salesInvoiceResult: any = null;
 
+      const siPayload = {
+        ...serviceInvoiceData,
+        customer: orderData.customer,
+        ten_kh: orderData.customer?.name || serviceInvoiceData.ong_ba || '',
+      };
+      payloadLog.salesInvoice = siPayload;
+
       salesInvoiceResult =
-        await this.fastApiInvoiceFlowService.createSalesInvoice({
-          ...serviceInvoiceData,
-          customer: orderData.customer,
-          ten_kh: orderData.customer?.name || serviceInvoiceData.ong_ba || '',
-        });
+        await this.fastApiInvoiceFlowService.createSalesInvoice(siPayload);
 
       const isSiSuccess =
         (Array.isArray(salesInvoiceResult) &&
@@ -488,12 +510,15 @@ export class SpecialOrderHandlerService {
           );
 
           try {
+            const gxtPayload = {
+              ...gxtData,
+              customer: orderData.customer,
+              ten_kh: orderData.customer?.name || gxtData.ong_ba || '',
+            };
+            payloadLog.gxtInvoice = gxtPayload;
+
             gxtInvoiceResult =
-              await this.fastApiInvoiceFlowService.createGxtInvoice({
-                ...gxtData,
-                customer: orderData.customer,
-                ten_kh: orderData.customer?.name || gxtData.ong_ba || '',
-              });
+              await this.fastApiInvoiceFlowService.createGxtInvoice(gxtPayload);
           } catch (gxtError: any) {
             this.logger.warn(
               `[ServiceOrderFlow] Tạo GxtInvoice thất bại: ${gxtError?.message || gxtError}`,
@@ -540,6 +565,7 @@ export class SpecialOrderHandlerService {
           cashio: cashioResult,
           errors: paymentErrors,
         },
+        payload: payloadLog,
       };
     } catch (error: any) {
       this.logger.error(

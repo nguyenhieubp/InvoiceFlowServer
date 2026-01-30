@@ -40,6 +40,9 @@ export class FastApiInvoice {
   @Column({ type: 'text', nullable: true })
   fastApiResponse: string; // Toàn bộ response từ Fast API (JSON string)
 
+  @Column({ type: 'text', nullable: true })
+  payload: string; // Dữ liệu gửi sang Fast API (JSON string)
+
   @CreateDateColumn()
   createdAt: Date;
 

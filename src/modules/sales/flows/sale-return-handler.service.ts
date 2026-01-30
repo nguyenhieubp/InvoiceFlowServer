@@ -44,8 +44,12 @@ export class SaleReturnHandlerService {
     message: string;
     guid?: string;
     fastApiResponse?: any;
+    payload?: any;
   }> {
     this.logger.log(`[SaleReturn] Bắt đầu xử lý đơn trả lại: ${docCode}`);
+
+    // Payload Logging
+    const payloadLog: any = {};
 
     // Kiểm tra xem có stock transfer không
     // Xử lý đặc biệt cho đơn trả lại: fetch cả theo mã đơn gốc (SO)
@@ -67,6 +71,8 @@ export class SaleReturnHandlerService {
           orderData,
           salesReturnStockTransfers,
         );
+
+      payloadLog.salesReturn = salesReturnData;
 
       // Gọi API salesReturn (không cần tạo/cập nhật customer)
       const result =
@@ -161,6 +167,7 @@ export class SaleReturnHandlerService {
         message: responseMessage,
         guid: responseGuid,
         fastApiResponse: result,
+        payload: payloadLog,
       };
     }
 
@@ -170,6 +177,7 @@ export class SaleReturnHandlerService {
       result: null,
       status: 0,
       message: 'SALE_RETURN không có stock transfer - không cần xử lý',
+      payload: payloadLog,
     };
   }
 
@@ -186,6 +194,10 @@ export class SaleReturnHandlerService {
     this.logger.log(
       `[SaleOrderWithX] Bắt đầu xử lý đơn có đuôi _X: ${docCode}, action: ${action}`,
     );
+
+    // Payload Logging
+    const payloadLog: any = {};
+
     const docCodeWithoutX = this.removeSuffixX(docCode);
 
     const orderWithoutX =
@@ -210,12 +222,15 @@ export class SaleReturnHandlerService {
     };
 
     try {
+      const soPayload = {
+        ...data,
+        customer: orderData.customer,
+        ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
+      };
+      payloadLog.salesOrder = soPayload;
+
       result = await this.fastApiInvoiceFlowService.createSalesOrder(
-        {
-          ...data,
-          customer: orderData.customer,
-          ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-        },
+        soPayload,
         action,
       ); // action = 1 cho đơn hàng có đuôi _X
 
@@ -268,6 +283,7 @@ export class SaleReturnHandlerService {
           cashio: cashioResult,
           payment: paymentResult,
         },
+        payload: payloadLog,
       };
     } catch (error: any) {
       // Lấy thông báo lỗi chính xác từ Fast API response

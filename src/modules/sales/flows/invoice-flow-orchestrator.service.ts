@@ -98,6 +98,7 @@ export class InvoiceFlowOrchestratorService {
           fastApiResponse: JSON.stringify(
             result.fastApiResponse || result.result,
           ),
+          payload: result.payload ? JSON.stringify(result.payload) : undefined,
         });
 
         return {
@@ -134,9 +135,6 @@ export class InvoiceFlowOrchestratorService {
         }
       }
 
-      // ============================================
-      // BƯỚC 3: Routing xử lý theo Order Type
-      // ============================================
       // ============================================
       // BƯỚC 3: Routing xử lý theo Order Type
       // ============================================
@@ -278,12 +276,13 @@ export class InvoiceFlowOrchestratorService {
       message: string;
       guid?: string;
       fastApiResponse?: any;
+      payload?: any;
     }>,
     shouldMarkProcessed: boolean = true,
   ): Promise<any> {
     this.logger.log(`[Orchestrator] Executing handler for ${docCode}`);
     try {
-      const { result, status, message, guid, fastApiResponse } =
+      const { result, status, message, guid, fastApiResponse, payload } =
         await handlerFn();
 
       // Save invoice status
@@ -297,6 +296,7 @@ export class InvoiceFlowOrchestratorService {
         message: message,
         guid: guid,
         fastApiResponse: JSON.stringify(fastApiResponse || result),
+        payload: payload ? JSON.stringify(payload) : undefined,
       });
 
       if (status === STATUS.SUCCESS && shouldMarkProcessed) {
