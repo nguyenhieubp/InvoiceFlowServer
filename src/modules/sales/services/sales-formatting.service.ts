@@ -188,7 +188,10 @@ export class SalesFormattingService {
           : Number(sale.chietKhauMuaHangGiamGia || 0)
         : 0,
 
-      maCk02: calculatedFields.maCk02 || null,
+      maCk02:
+        InvoiceLogicUtils.isWholesale(sale) && !calculatedFields.ck02Nt
+          ? null // [FIX] Zero amount = No code for Wholesale
+          : calculatedFields.maCk02 || null,
       ck02Nt: calculatedFields.ck02Nt || 0,
 
       maCk03: sale.muaHangCkVip || null,

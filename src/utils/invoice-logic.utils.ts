@@ -972,16 +972,22 @@ export class InvoiceLogicUtils {
           sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS';
         const distTm = detailItem.ck02_nt;
 
-        // Bỏ check channel_code vì dữ liệu không có sẵn trong entity
-        if (isWholesale && distTm > 0) {
-          detailItem[maKey] = InvoiceLogicUtils.val(
-            InvoiceLogicUtils.resolveWholesalePromotionCode({
-              product: loyaltyProduct,
-              distTm: distTm,
-            }),
-            32,
-          );
+        // [FIX] Explicitly handle Wholesale case logic structure
+        if (isWholesale) {
+          if (distTm > 0) {
+            detailItem[maKey] = InvoiceLogicUtils.val(
+              InvoiceLogicUtils.resolveWholesalePromotionCode({
+                product: loyaltyProduct,
+                distTm: distTm,
+              }),
+              32,
+            );
+          } else {
+            // [FIX] If Wholesale and distTm <= 0, force empty ma_ck02
+            detailItem[maKey] = '';
+          }
         } else {
+          // Retail / Normal behavior
           detailItem[maKey] = InvoiceLogicUtils.val(sale.maCk02 || '', 32);
         }
       } else if (i === 3) {
