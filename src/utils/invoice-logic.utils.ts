@@ -771,6 +771,59 @@ export class InvoiceLogicUtils {
 
     return null;
   }
+
+  /**
+   * Resolve ma_ck03 based on Brand and Product Type (Retail Rules)
+   *
+   * Rules:
+   * YAMAN:
+   *  - SP: BTH CKVIP SP
+   *  - DV: BTH CKVIP DV
+   *
+   * FACIALBAR / f3:
+   *  - SP: FBV CKVIP SP
+   *  - DV: FBV CKVIP DV
+   *
+   * LABHAIR:
+   *  - SP: LHV CKVIP SP
+   *  - DV: LHV CKVIP DV
+   *
+   * MENARD:
+   *  - SP: MN CKVIP SP
+   *  - DV: MN CKVIP DV
+   *  - VC: MN CKVIP VC
+   */
+  static resolveMaCk03(params: {
+    brand: string;
+    productType: string | null;
+  }): string | null {
+    const { brand, productType } = params;
+    const normBrand = (brand || '').trim().toUpperCase();
+    const type = (productType || '').trim().toUpperCase();
+
+    if (normBrand === 'YAMAN') {
+      if (type === 'I') return 'BTH CKVIP SP';
+      if (type === 'S') return 'BTH CKVIP DV';
+    }
+
+    if (normBrand === 'FACIALBAR' || normBrand === 'F3') {
+      if (type === 'I') return 'FBV CKVIP SP';
+      if (type === 'S') return 'FBV CKVIP DV';
+    }
+
+    if (normBrand === 'LABHAIR') {
+      if (type === 'I') return 'LHV CKVIP SP';
+      if (type === 'S') return 'LHV CKVIP DV';
+    }
+
+    if (normBrand === 'MENARD') {
+      if (type === 'I') return 'MN CKVIP SP';
+      if (type === 'S') return 'MN CKVIP DV';
+      if (type === 'V') return 'MN CKVIP VC';
+    }
+
+    return null;
+  }
   /**
    * Xác định xem sale item có phải là hàng tặng (Giá = 0) hay không
    * Source of Truth cho cả Frontend Display và Fast API Payload (km_yn)
@@ -999,7 +1052,30 @@ export class InvoiceLogicUtils {
         // To avoid circular dep, we might need to duplicate specific small logic or refactor calculateMuaHangCkVip to here.
         // Let's keep it simple: if sales-calculation imports THIS, we can't import THAT.
         // Solution: Move calculateMuaHangCkVip to InvoiceLogicUtils as well.
-        detailItem[maKey] = InvoiceLogicUtils.val(sale.muaHangCkVip || '', 32);
+
+        // [NEW] Resolve ma_ck03 for Retail Orders based on Brand/Type rules
+        const isRetail =
+          !InvoiceLogicUtils.isWholesale(sale) &&
+          InvoiceLogicUtils.getOrderTypes(sale.ordertypeName).isThuong;
+
+        let resolvedMaCk03: string | null = null;
+        if (isRetail) {
+          const brand =
+            orderData.customer?.brand || // Primary source
+            orderData.brand || // Fallback
+            '';
+          resolvedMaCk03 = InvoiceLogicUtils.resolveMaCk03({
+            brand,
+            productType:
+              sale.productType || loyaltyProduct?.productType || null, // Prefer sale.productType
+          });
+        }
+
+        // Use resolved value if available, otherwise fallback to existing logic
+        detailItem[maKey] = InvoiceLogicUtils.val(
+          resolvedMaCk03 || sale.muaHangCkVip || '',
+          32,
+        );
       } else if (i === 4) {
         detailItem[maKey] = InvoiceLogicUtils.val(
           detailItem.ck04_nt > 0 || sale.thanhToanCoupon

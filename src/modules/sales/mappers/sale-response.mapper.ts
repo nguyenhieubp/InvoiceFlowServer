@@ -12,6 +12,7 @@ import {
   OrderResponseDto,
   CustomerSummaryDto,
 } from '../dto/sale-response.dto';
+import { InvoiceLogicUtils } from '../../../utils/invoice-logic.utils';
 
 /**
  * Map Product to ProductSummaryDto
@@ -158,7 +159,13 @@ export function mapToSaleItemResponse(sale: any): SaleItemResponseDto {
     ck01_nt: sale.ck01Nt,
     ma_ck02: sale.maCk02,
     ck02_nt: sale.ck02Nt,
-    ma_ck03: sale.maCk03,
+    ma_ck03:
+      sale.maCk03 ||
+      InvoiceLogicUtils.resolveMaCk03({
+        brand: sale.brand,
+        productType: sale.productType,
+      }) ||
+      sale.muaHangCkVip,
     ck03_nt: sale.ck03Nt,
     ma_ck04: sale.maCk04,
     ck04_nt: sale.ck04Nt,
