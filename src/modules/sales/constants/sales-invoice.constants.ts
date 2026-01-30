@@ -45,6 +45,7 @@ export const STATUS = {
   INACTIVE: 0,
   SUCCESS: 1,
   ACTIVE: 1,
+  PROCESSING: 2,
 } as const;
 
 /**

@@ -1,20 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
+import { FastApiInvoice } from '../../../entities/fast-api-invoice.entity';
 import { StockTransfer } from '../../../entities/stock-transfer.entity';
+import { STATUS, DOC_SOURCE_TYPES } from '../constants/sales-invoice.constants';
 import { FastApiInvoiceFlowService } from '../../../services/fast-api-invoice-flow.service';
 import { SalesPayloadService } from '../invoice/sales-payload.service';
 import { SalesQueryService } from '../services/sales-query.service';
 import { PaymentService } from '../../payment/payment.service';
-import { forwardRef, Inject } from '@nestjs/common';
-import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
-import {
-  DOC_SOURCE_TYPES,
-  STATUS,
-  ACTION,
-} from '../constants/sales-invoice.constants';
 import { SalesInvoiceService } from '../invoice/sales-invoice.service';
-import * as SalesUtils from '../../../utils/sales.utils';
+import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
 
 @Injectable()
 export class SaleReturnHandlerService {
@@ -23,6 +18,8 @@ export class SaleReturnHandlerService {
   constructor(
     @InjectRepository(StockTransfer)
     private stockTransferRepository: Repository<StockTransfer>,
+    @InjectRepository(FastApiInvoice) // [NEW] Inject FastApiInvoiceRepository
+    private fastApiInvoiceRepository: Repository<FastApiInvoice>,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private salesPayloadService: SalesPayloadService,
     private salesQueryService: SalesQueryService,
@@ -195,33 +192,53 @@ export class SaleReturnHandlerService {
       `[SaleOrderWithX] Bắt đầu xử lý đơn có đuôi _X: ${docCode}, action: ${action}`,
     );
 
+    // [NEW] 1. Create/Update Entry in fast_api_invoices with STATUS.PROCESSING (0)
+    let fastApiInvoice = await this.fastApiInvoiceRepository.findOne({
+      where: { docCode },
+    });
+
+    if (!fastApiInvoice) {
+      fastApiInvoice = this.fastApiInvoiceRepository.create({
+        docCode,
+        ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
+        status: STATUS.PROCESSING, // 2
+        isManuallyCreated: false,
+        lastErrorMessage: '',
+        type: 'SALE_ORDER_X', // Helper type to distinguish
+      });
+    } else {
+      fastApiInvoice.status = STATUS.PROCESSING;
+      fastApiInvoice.lastErrorMessage = '';
+      fastApiInvoice.updatedAt = new Date();
+    }
+    await this.fastApiInvoiceRepository.save(fastApiInvoice);
+
     // Payload Logging
     const payloadLog: any = {};
 
-    const docCodeWithoutX = this.removeSuffixX(docCode);
-
-    const orderWithoutX =
-      await this.salesInvoiceService.findByOrderCode(docCodeWithoutX);
-
-    // Explode sales by Stock Transfers
-    const [enrichedOrder] = await this.salesQueryService.enrichOrdersWithCashio(
-      [orderWithoutX],
-    );
-
-    // Đơn có đuôi _X → Gọi API salesOrder với action: 1
-    const invoiceData =
-      await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
-
-    // Gọi API salesOrder với action = 1 (không cần tạo/cập nhật customer)
-    let result: any;
-    const data = {
-      ...invoiceData,
-      dien_giai: docCodeWithoutX,
-      so_ct: docCodeWithoutX,
-      ma_kho: orderData?.maKho || '',
-    };
-
     try {
+      const docCodeWithoutX = this.removeSuffixX(docCode);
+
+      const orderWithoutX =
+        await this.salesInvoiceService.findByOrderCode(docCodeWithoutX);
+
+      // Explode sales by Stock Transfers
+      const [enrichedOrder] =
+        await this.salesQueryService.enrichOrdersWithCashio([orderWithoutX]);
+
+      // Đơn có đuôi _X → Gọi API salesOrder với action: 1
+      const invoiceData =
+        await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
+
+      // Gọi API salesOrder với action = 1 (không cần tạo/cập nhật customer)
+      let result: any;
+      const data = {
+        ...invoiceData,
+        dien_giai: docCodeWithoutX,
+        so_ct: docCodeWithoutX,
+        ma_kho: orderData?.maKho || '',
+      };
+
       const soPayload = {
         ...data,
         customer: orderData.customer,
@@ -246,15 +263,7 @@ export class SaleReturnHandlerService {
       const shouldUseApiMessage =
         apiMessage && apiMessage.trim().toUpperCase() !== 'OK';
       let responseMessage = '';
-      if (responseStatus === 1) {
-        responseMessage = shouldUseApiMessage
-          ? `Tạo đơn hàng thành công cho đơn hàng ${docCode}. ${apiMessage}`
-          : `Tạo đơn hàng thành công cho đơn hàng ${docCode}`;
-      } else {
-        responseMessage = shouldUseApiMessage
-          ? `Tạo đơn hàng thất bại cho đơn hàng ${docCode}. ${apiMessage}`
-          : `Tạo đơn hàng thất bại cho đơn hàng ${docCode}`;
-      }
+
       const responseGuid =
         Array.isArray(result) &&
         result.length > 0 &&
@@ -263,6 +272,27 @@ export class SaleReturnHandlerService {
           : Array.isArray(result) && result.length > 0
             ? result[0].guid
             : null;
+
+      // [NEW] 2. Update DB based on API Status
+      if (responseStatus === 1) {
+        responseMessage = shouldUseApiMessage
+          ? `Tạo đơn hàng thành công cho đơn hàng ${docCode}. ${apiMessage}`
+          : `Tạo đơn hàng thành công cho đơn hàng ${docCode}`;
+
+        fastApiInvoice.status = STATUS.SUCCESS; // 1
+        fastApiInvoice.guid = responseGuid;
+        fastApiInvoice.lastErrorMessage = responseMessage;
+      } else {
+        responseMessage = shouldUseApiMessage
+          ? `Tạo đơn hàng thất bại cho đơn hàng ${docCode}. ${apiMessage}`
+          : `Tạo đơn hàng thất bại cho đơn hàng ${docCode}`;
+
+        fastApiInvoice.status = STATUS.FAILED; // 0
+        fastApiInvoice.lastErrorMessage = responseMessage;
+      }
+      // Save payload log
+      fastApiInvoice.payload = payloadLog;
+      await this.fastApiInvoiceRepository.save(fastApiInvoice);
 
       // Xử lý cashio payment (Phiếu thu tiền mặt/Giấy báo có) nếu salesOrder thành công
       let cashioResult: any = null;
@@ -315,6 +345,36 @@ export class SaleReturnHandlerService {
       this.logger.error(
         `SALE_ORDER with _X suffix creation failed for order ${docCode}: ${formattedErrorMessage}`,
       );
+
+      // [NEW] 3. Update DB state to FAILED (2) on Exception
+      try {
+        fastApiInvoice.status = STATUS.FAILED; // 0
+        fastApiInvoice.lastErrorMessage = formattedErrorMessage;
+
+        // [NEW] Save detailed error to fastApiResponse
+        const errorJson = {
+          success: false,
+          message: formattedErrorMessage,
+          error: errorMessage,
+          details: error?.response?.data || null,
+          timestamp: new Date().toISOString(),
+        };
+        fastApiInvoice.fastApiResponse = JSON.stringify(errorJson);
+
+        // Ensure payload is stringified
+        if (payloadLog && typeof payloadLog === 'object') {
+          fastApiInvoice.payload = JSON.stringify(payloadLog);
+        } else {
+          fastApiInvoice.payload = payloadLog;
+        }
+
+        await this.fastApiInvoiceRepository.save(fastApiInvoice);
+      } catch (dbError) {
+        this.logger.error(
+          `Failed to update invoice status for ${docCode}`,
+          dbError,
+        );
+      }
 
       throw new Error(formattedErrorMessage);
     }

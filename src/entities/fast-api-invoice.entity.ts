@@ -40,6 +40,15 @@ export class FastApiInvoice {
   @Column({ type: 'text', nullable: true })
   payload: string; // Dữ liệu gửi sang Fast API (JSON string) - Added for debugging
 
+  @Column({ type: 'text', nullable: true })
+  lastErrorMessage: string;
+
+  @Column({ nullable: true })
+  type: string;
+
+  @Column({ default: false })
+  isManuallyCreated: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 
