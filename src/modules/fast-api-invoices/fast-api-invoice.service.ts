@@ -213,4 +213,53 @@ export class FastApiInvoiceService {
 
     return await query.getMany();
   }
+
+  /**
+   * Update status from Webhook
+   */
+  async updateFastApiStatus(
+    docCode: string,
+    status: number,
+    message?: string,
+    fastApiResponse?: any,
+    payload?: any,
+  ): Promise<void> {
+    try {
+      const existing = await this.fastApiInvoiceRepository.findOne({
+        where: { docCode },
+      });
+
+      if (existing) {
+        existing.status = status;
+
+        if (fastApiResponse) {
+          existing.fastApiResponse =
+            typeof fastApiResponse === 'string'
+              ? fastApiResponse
+              : JSON.stringify(fastApiResponse);
+        } else if (message) {
+          if (!existing.fastApiResponse) {
+            existing.fastApiResponse = JSON.stringify({ message });
+          }
+        }
+
+        if (payload) {
+          existing.payload =
+            typeof payload === 'string' ? payload : JSON.stringify(payload);
+        }
+
+        await this.fastApiInvoiceRepository.save(existing);
+        this.logger.log(`[Webhook] Updated status for ${docCode} to ${status}`);
+      } else {
+        this.logger.warn(
+          `[Webhook] FastApiInvoice not found for docCode: ${docCode}`,
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `[Webhook] Error updating status for ${docCode}: ${error?.message}`,
+      );
+      throw error;
+    }
+  }
 }

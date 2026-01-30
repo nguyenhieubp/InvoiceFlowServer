@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FastApiInvoicesController } from './fast-api-invoices.controller';
+import { WebhookController } from './controllers/webhook.controller';
 import { FastApiInvoiceService } from './fast-api-invoice.service';
 import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
 import { SalesModule } from '../sales/sales.module';
@@ -10,7 +11,7 @@ import { SalesModule } from '../sales/sales.module';
     TypeOrmModule.forFeature([FastApiInvoice]),
     forwardRef(() => SalesModule),
   ],
-  controllers: [FastApiInvoicesController],
+  controllers: [FastApiInvoicesController, WebhookController],
   providers: [FastApiInvoiceService],
   exports: [FastApiInvoiceService],
 })
