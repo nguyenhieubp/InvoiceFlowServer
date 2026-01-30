@@ -48,6 +48,7 @@ export class FastApiInvoiceFlowService {
     e_mail?: string;
     gioi_tinh?: string;
     brand?: string; // [NEW]
+    tel?: string; // [NEW]
   }): Promise<any> {
     try {
       let n8nData: any = null;
@@ -61,24 +62,31 @@ export class FastApiInvoiceFlowService {
       // Priority: N8n Data > Input Data > Empty
       const payloadCode = n8nData?.code || customerData.ma_kh;
       const payloadName = n8nData?.name || customerData.ten_kh;
-      // Map other fields if N8n returns them (guessing keys based on conventions, or user snippet)
-      // User snippet only showed code/name/mobile/group_code.
-      // I will trust N8n for name.
-      // If N8n returns address/birthday, I should use them.
-      // I'll assume n8nData might have 'address', 'birthday' etc. or standard keys.
-      // Safety: Use input as fallback.
-      const payloadAddress = n8nData?.address || customerData.dia_chi;
-      const payloadBirthDate = n8nData?.birthday || customerData.ngay_sinh;
+
+      // Mapping N8n fields
+      // address_name -> address
+      const payloadAddress =
+        n8nData?.address || n8nData?.address_name || customerData.dia_chi;
+      // birthday -> birthDate
+      const payloadBirthDate =
+        n8nData?.birthday || n8nData?.birthDate || customerData.ngay_sinh;
+      // idnumber -> cccd
       const payloadCccd =
         n8nData?.idnumber || n8nData?.cccd || customerData.so_cccd;
+      // email -> email
       const payloadEmail = n8nData?.email || customerData.e_mail;
+      // sexual -> gioi_tinh
       const payloadSex =
         n8nData?.sexual || n8nData?.gioi_tinh || customerData.gioi_tinh;
+      // mobile -> tel
+      const payloadTel = n8nData?.mobile || n8nData?.phone || customerData.tel;
 
       if (n8nData) {
         this.logger.log(
           `[Flow] Synced customer ${payloadCode} from N8n (Brand: ${customerData.brand})`,
         );
+        // Debug N8n Data
+        this.logger.debug(`[Flow] N8n Data: ${JSON.stringify(n8nData)}`);
       }
 
       const result = await this.fastApiService.createOrUpdateCustomer({
@@ -89,6 +97,7 @@ export class FastApiInvoiceFlowService {
         cccd: payloadCccd,
         email: payloadEmail,
         gioi_tinh: payloadSex,
+        tel: payloadTel,
       });
 
       // Validate response: status = 1 mới là success

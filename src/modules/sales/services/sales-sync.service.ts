@@ -8,6 +8,9 @@ import { ZappyApiService } from '../../../services/zappy-api.service';
 import { LoyaltyService } from '../../../services/loyalty.service';
 import * as SalesUtils from '../../../utils/sales.utils';
 
+import { SalesInvoiceService } from '../invoice/sales-invoice.service';
+import { forwardRef, Inject } from '@nestjs/common';
+
 /**
  * SalesSyncService
  * Chịu trách nhiệm: Sync operations với external APIs (Zappy, Loyalty)
@@ -24,6 +27,8 @@ export class SalesSyncService {
     private httpService: HttpService,
     private zappyApiService: ZappyApiService,
     private loyaltyService: LoyaltyService,
+    @Inject(forwardRef(() => SalesInvoiceService))
+    private salesInvoiceService: SalesInvoiceService,
   ) {}
 
   /**
@@ -397,7 +402,10 @@ export class SalesSyncService {
             this.logger.log(
               `[syncSalesByDateRange] Đồng bộ ${brand} - ngày ${dateStr}`,
             );
-            const result = await this.syncFromZappy(dateStr, brand);
+            // Skip individual auto-push to do it in batch later (or let it run if prefer day-by-day? Plan said batch)
+            // Plan said: Call syncFromZappy with skipAutoPush: true.
+            // After loop, call salesInvoiceService.processInvoicesByDateRange once.
+            const result = await this.syncFromZappy(dateStr, brand, true);
 
             brandOrdersCount += result.ordersCount;
             brandSalesCount += result.salesCount;
@@ -438,9 +446,35 @@ export class SalesSyncService {
         );
       }
 
+      // [Auto-Push] Batch process for the whole range
+      let autoPushMessage = '';
+      if (allErrors.length === 0) {
+        this.logger.log(
+          `[Auto-Push] Triggering batch auto-push for range ${startDate} - ${endDate}`,
+        );
+        try {
+          const pushResult =
+            await this.salesInvoiceService.processInvoicesByDateRange(
+              startDate,
+              endDate,
+            );
+          this.logger.log(
+            `[Auto-Push] Batch Result: Success=${pushResult.successCount}, Failed=${pushResult.failedCount}`,
+          );
+          autoPushMessage = ` | Auto-Push: ${pushResult.successCount} thành công, ${pushResult.failedCount} thất bại`;
+        } catch (pushError: any) {
+          this.logger.error(
+            `[Auto-Push] Batch Failed: ${pushError?.message || pushError}`,
+          );
+          allErrors.push(
+            `Auto-Push Failed: ${pushError?.message || pushError}`,
+          );
+        }
+      }
+
       return {
         success: allErrors.length === 0,
-        message: `Đồng bộ thành công từ ${startDate} đến ${endDate}: ${totalOrdersCount} đơn hàng, ${totalSalesCount} sale, ${totalCustomersCount} khách hàng`,
+        message: `Đồng bộ thành công từ ${startDate} đến ${endDate}: ${totalOrdersCount} đơn hàng, ${totalSalesCount} sale, ${totalCustomersCount} khách hàng${autoPushMessage}`,
         totalOrdersCount,
         totalSalesCount,
         totalCustomersCount,
@@ -463,6 +497,7 @@ export class SalesSyncService {
   async syncFromZappy(
     date: string,
     brand?: string,
+    skipAutoPush: boolean = false,
   ): Promise<{
     success: boolean;
     message: string;
@@ -607,6 +642,26 @@ export class SalesSyncService {
           const errorMsg = `Error processing order ${order.docCode}: ${orderError?.message || orderError}`;
           this.logger.error(errorMsg);
           errors.push(errorMsg);
+        }
+      }
+
+      if (errors.length === 0 && !skipAutoPush) {
+        this.logger.log(`[Auto-Push] Triggering auto-push for date ${date}`);
+        try {
+          const pushResult =
+            await this.salesInvoiceService.processInvoicesByDateRange(
+              date,
+              date,
+            );
+          this.logger.log(
+            `[Auto-Push] Result for ${date}: Success=${pushResult.successCount}, Failed=${pushResult.failedCount}`,
+          );
+          // Append push result to message
+          // message += ` | Auto-Push: Success=${pushResult.successCount}, Failed=${pushResult.failedCount}`;
+        } catch (pushError: any) {
+          this.logger.error(
+            `[Auto-Push] Failed for ${date}: ${pushError?.message || pushError}`,
+          );
         }
       }
 
