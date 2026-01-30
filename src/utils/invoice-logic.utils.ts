@@ -87,6 +87,14 @@ export class InvoiceLogicUtils {
   }
 
   /**
+   * Helper detects Wholesale order from Sale
+   */
+  static isWholesale(sale: any): boolean {
+    const typeSale = (sale?.type_sale || '').toUpperCase().trim();
+    return typeSale === 'WHOLESALE' || typeSale === 'WS';
+  }
+
+  /**
    * Tính toán các tài khoản hạch toán (Source of Truth)
    */
   static async resolveAccountingAccounts(params: {
@@ -864,6 +872,7 @@ export class InvoiceLogicUtils {
         0,
       ),
       ck05_nt:
+        !InvoiceLogicUtils.isWholesale(sale) && // [NEW] No ck05_nt for Wholesale
         InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
           ? InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0)
           : 0,
@@ -888,7 +897,9 @@ export class InvoiceLogicUtils {
       amounts.ck05_nt = 0; // Clear ck05
       amounts.ck06_nt = 0; // Clear ck06
     } else {
-      amounts.ck06_nt = InvoiceLogicUtils.toNumber(sale.chietKhauVoucherDp1, 0);
+      amounts.ck06_nt = !InvoiceLogicUtils.isWholesale(sale) // [FIX] Zero out for Wholesale
+        ? InvoiceLogicUtils.toNumber(sale.chietKhauVoucherDp1, 0)
+        : 0;
     }
 
     // ck11 (ECOIN) logic
@@ -1022,6 +1033,18 @@ export class InvoiceLogicUtils {
           sale.voucherDp2 ? 'VOUCHER_DP2' : '',
           32,
         );
+      } else if (i === 6) {
+        // [FIX] Explicit check for ma_ck06 (Platform or Normal)
+        if (InvoiceLogicUtils.isWholesale(sale)) {
+          detailItem[maKey] = '';
+        } else if (isPlatformOrder) {
+          detailItem[maKey] = 'VC CTKM SÀN'; // [NEW] Platform Order Voucher Name
+        } else {
+          // Default logic for ck06
+          const idx = i.toString().padStart(2, '0');
+          const saleMaKey = `maCk${idx}`;
+          detailItem[maKey] = InvoiceLogicUtils.val(sale[saleMaKey] || '', 32);
+        }
       } else if (i === 8) {
         detailItem[maKey] = InvoiceLogicUtils.val(
           sale.voucherDp3 ? 'VOUCHER_DP3' : '',
@@ -1045,7 +1068,8 @@ export class InvoiceLogicUtils {
         );
       } else {
         // Default mapping for other ma_ck fields
-        if (i !== 1) {
+        if (i !== 1 && i !== 6) {
+          // [FIX] Added i!==6 because handled above
           if (i === 15 && isPlatformOrder) {
             detailItem[maKey] = 'VC CTKM SÀN'; // [NEW] Platform Order Voucher Name
           } else {

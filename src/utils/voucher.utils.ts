@@ -57,6 +57,12 @@ export function calculateMaCk05(
 export function calculateMaCk05FromSale(sale: any): string | null {
   if (!sale) return null;
 
+  // [NEW] Wholesale orders should NOT have ma_ck05 (VC HB, etc.)
+  const typeSale = (sale.type_sale || '').toUpperCase().trim();
+  if (typeSale === 'WHOLESALE' || typeSale === 'WS') {
+    return null;
+  }
+
   // Lấy productType và isGift từ sale bằng helper từ SalesUtils
   // Chú ý: Cần import SalesUtils nếu chưa có, hoặc gọi trực tiếp logic
   const productType =
