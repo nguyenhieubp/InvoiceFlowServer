@@ -60,6 +60,8 @@ export class SpecialOrderHandlerService {
     createInvoice: boolean = false,
   ): Promise<any> {
     this.logger.log(`[SpecialOrder] Bắt đầu xử lý ${description}: ${docCode}`);
+    // Payload Logging
+    const payloadLog: any = {};
     try {
       if (beforeAction) {
         await beforeAction();
@@ -82,9 +84,6 @@ export class SpecialOrderHandlerService {
       // Explode sales by Stock Transfers
       const [enrichedOrder] =
         await this.salesQueryService.enrichOrdersWithCashio([orderData]);
-
-      // Payload Logging
-      const payloadLog: any = {};
 
       // [FIX] Execute logic AFTER enrichment (e.g. N8n mapping) to overwrite ST values
       if (afterEnrichmentAction) {
@@ -182,7 +181,14 @@ export class SpecialOrderHandlerService {
       this.logger.error(
         `[SpecialOrder] Lỗi khi xử lý ${description} ${docCode}: ${error?.message || error}`,
       );
-      throw error;
+      return {
+        result: null,
+        status: STATUS.FAILED,
+        message: `Lỗi xử lý ${description}: ${error?.message || error}`,
+        guid: null,
+        fastApiResponse: null,
+        payload: payloadLog,
+      };
     }
   }
 
@@ -263,13 +269,12 @@ export class SpecialOrderHandlerService {
    * 4. GxtInvoice (S → detail, I → ndetail)
    */
   async executeServiceOrderFlow(orderData: any, docCode: string): Promise<any> {
+    // Payload Logging
+    const payloadLog: any = {};
     try {
       this.logger.log(
         `[ServiceOrderFlow] Bắt đầu xử lý đơn dịch vụ ${docCode}`,
       );
-
-      // Payload Logging
-      const payloadLog: any = {};
 
       const [enrichedOrder] =
         await this.salesQueryService.enrichOrdersWithCashio([orderData]);
@@ -571,7 +576,14 @@ export class SpecialOrderHandlerService {
       this.logger.error(
         `[ServiceOrderFlow] Lỗi khi xử lý đơn dịch vụ ${docCode}: ${error?.message || error}`,
       );
-      throw error;
+      return {
+        result: null,
+        status: STATUS.FAILED,
+        message: `Lỗi xử lý đơn dịch vụ: ${error?.message || error}`,
+        guid: null,
+        fastApiResponse: null,
+        payload: payloadLog,
+      };
     }
   }
 }
