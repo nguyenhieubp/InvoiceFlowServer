@@ -183,6 +183,10 @@ export class FastApiInvoiceFlowService {
           );
         }
       }
+
+      // [NEW] Sync Lot/Serial before submitting sales order (to prevent status=0 error)
+      await this.syncMissingLotSerial(cleanOrderData);
+
       const result = await this.fastApiService.submitSalesOrder(finalPayload);
       // Validate response: status = 1 mới là success
       if (Array.isArray(result) && result.length > 0) {
