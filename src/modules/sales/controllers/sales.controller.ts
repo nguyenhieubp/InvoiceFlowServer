@@ -280,7 +280,7 @@ export class SalesController {
     };
   }
 
-  @Post('retry-failed-invoices')
+  @Post('invoice/retry-failed')
   async retryFailedInvoices() {
     return this.salesService.retryFailedInvoices();
   }
