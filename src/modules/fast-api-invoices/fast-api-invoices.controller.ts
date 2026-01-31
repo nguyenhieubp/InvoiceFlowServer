@@ -8,7 +8,9 @@ import {
   Post,
   Body,
   BadRequestException,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FastApiInvoiceService } from './fast-api-invoice.service';
 import { SalesService } from 'src/modules/sales/services/sales.service';
 
@@ -48,6 +50,47 @@ export class FastApiInvoicesController {
     }
 
     return this.fastApiInvoiceService.getStatistics(options);
+  }
+
+  @Get('export/excel')
+  async exportExcel(
+    @Query('status') status?: string,
+    @Query('docCode') docCode?: string,
+    @Query('maKh') maKh?: string,
+    @Query('tenKh') tenKh?: string,
+    @Query('maDvcs') maDvcs?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Res() res?: Response,
+  ) {
+    const options: any = {};
+
+    if (status !== undefined && status !== '') {
+      options.status = parseInt(status);
+    }
+
+    if (docCode) options.docCode = docCode;
+    if (maKh) options.maKh = maKh;
+    if (tenKh) options.tenKh = tenKh;
+    if (maDvcs) options.maDvcs = maDvcs;
+    if (startDate) options.startDate = new Date(startDate);
+    if (endDate) options.endDate = new Date(endDate);
+
+    const buffer = await this.fastApiInvoiceService.exportExcel(options);
+
+    const fileName = `InvoiceLogs_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+    if (res) {
+      res.set({
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${fileName}"`,
+        'Content-Length': buffer.length,
+      });
+      res.send(buffer);
+    }
+
+    return buffer;
   }
 
   @Get('doc-code/:docCode')
