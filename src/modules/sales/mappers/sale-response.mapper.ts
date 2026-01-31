@@ -160,12 +160,14 @@ export function mapToSaleItemResponse(sale: any): SaleItemResponseDto {
     ma_ck02: sale.maCk02,
     ck02_nt: sale.ck02Nt,
     ma_ck03:
-      sale.maCk03 ||
-      InvoiceLogicUtils.resolveMaCk03({
-        brand: sale.brand,
-        productType: sale.productType,
-      }) ||
-      sale.muaHangCkVip,
+      sale.ck03Nt > 0
+        ? sale.maCk03 ||
+          InvoiceLogicUtils.resolveMaCk03({
+            brand: sale.brand,
+            productType: sale.productType,
+          }) ||
+          sale.muaHangCkVip
+        : null,
     ck03_nt: sale.ck03Nt,
     ma_ck04: sale.maCk04,
     ck04_nt: sale.ck04Nt,
