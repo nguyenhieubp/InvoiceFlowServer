@@ -2214,4 +2214,31 @@ export class SalesQueryService {
       throw error;
     }
   }
+
+  /**
+   * Tính tổng số đơn (distinct docCode) theo các bộ lọc
+   */
+  async countOrders(options: {
+    brand?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    search?: string;
+    typeSale?: string;
+    isProcessed?: boolean;
+    statusAsys?: boolean;
+  }): Promise<number> {
+    const query = this.saleRepository
+      .createQueryBuilder('sale')
+      .select('COUNT(DISTINCT sale.docCode)', 'count');
+
+    // Join customer ONLY if searching by customer fields
+    if (options.search && options.search.trim() !== '') {
+      query.leftJoin('sale.customer', 'customer');
+    }
+
+    this.applySaleFilters(query, options);
+
+    const result = await query.getRawOne();
+    return parseInt(result?.count || '0', 10);
+  }
 }

@@ -355,6 +355,37 @@ export class SalesController {
     }
   }
 
+  @Get('statistics/order-count')
+  countOrders(
+    @Query('brand') brand?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('search') search?: string,
+    @Query('typeSale') typeSale?: string,
+    @Query('isProcessed') isProcessed?: string,
+    @Query('statusAsys') statusAsys?: string,
+  ) {
+    return this.salesService.countOrders({
+      brand,
+      dateFrom,
+      dateTo,
+      search,
+      typeSale,
+      isProcessed:
+        isProcessed === 'true'
+          ? true
+          : isProcessed === 'false'
+            ? false
+            : undefined,
+      statusAsys:
+        statusAsys === 'true'
+          ? true
+          : statusAsys === 'false'
+            ? false
+            : undefined,
+    });
+  }
+
   @Post('stock-transfer/warehouse-retry-failed-by-date-range')
   async retryWarehouseFailedByDateRange(
     @Body('dateFrom') dateFrom: string,

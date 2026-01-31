@@ -351,4 +351,16 @@ export class SalesService {
   async retryFailedInvoices() {
     return this.salesInvoiceService.retryFailedInvoices();
   }
+
+  async countOrders(options: {
+    brand?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    search?: string;
+    typeSale?: string;
+    isProcessed?: boolean;
+    statusAsys?: boolean;
+  }) {
+    return this.salesQueryService.countOrders(options);
+  }
 }
