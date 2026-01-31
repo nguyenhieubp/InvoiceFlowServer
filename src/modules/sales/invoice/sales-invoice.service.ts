@@ -219,6 +219,7 @@ export class SalesInvoiceService {
         status: 0,
         message: `Lỗi hệ thống: ${error?.message || error}`,
         guid: null,
+        lastErrorMessage: `Lỗi hệ thống: ${error?.message || error}`,
       });
       return {
         success: false,
@@ -295,6 +296,7 @@ export class SalesInvoiceService {
     message?: string;
     guid?: string | null;
     fastApiResponse?: string;
+    lastErrorMessage?: string;
   }): Promise<FastApiInvoice> {
     return this.salesQueryService.saveFastApiInvoice(data);
   }

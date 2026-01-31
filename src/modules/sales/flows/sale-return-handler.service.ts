@@ -273,6 +273,10 @@ export class SaleReturnHandlerService {
             ? result[0].guid
             : null;
 
+      // Xử lý cashio payment (Phiếu thu tiền mặt/Giấy báo có) nếu salesOrder thành công
+      let cashioResult: any = null;
+      let paymentResult: any = null;
+
       // [NEW] 2. Update DB based on API Status
       if (responseStatus === 1) {
         responseMessage = shouldUseApiMessage
@@ -282,6 +286,11 @@ export class SaleReturnHandlerService {
         fastApiInvoice.status = STATUS.SUCCESS; // 1
         fastApiInvoice.guid = responseGuid;
         fastApiInvoice.lastErrorMessage = responseMessage;
+        fastApiInvoice.fastApiResponse = JSON.stringify({
+          salesOrder: result,
+          cashio: cashioResult,
+          payment: paymentResult,
+        });
       } else {
         responseMessage = shouldUseApiMessage
           ? `Tạo đơn hàng thất bại cho đơn hàng ${docCode}. ${apiMessage}`
@@ -289,14 +298,15 @@ export class SaleReturnHandlerService {
 
         fastApiInvoice.status = STATUS.FAILED; // 0
         fastApiInvoice.lastErrorMessage = responseMessage;
+        fastApiInvoice.fastApiResponse = JSON.stringify({
+          salesOrder: result,
+          cashio: cashioResult,
+          payment: paymentResult,
+        });
       }
       // Save payload log
-      fastApiInvoice.payload = payloadLog;
+      fastApiInvoice.payload = JSON.stringify(payloadLog);
       await this.fastApiInvoiceRepository.save(fastApiInvoice);
-
-      // Xử lý cashio payment (Phiếu thu tiền mặt/Giấy báo có) nếu salesOrder thành công
-      let cashioResult: any = null;
-      let paymentResult: any = null;
 
       return {
         success: responseStatus === 1,

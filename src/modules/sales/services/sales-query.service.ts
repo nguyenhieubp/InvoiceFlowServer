@@ -643,6 +643,7 @@ export class SalesQueryService {
     guid?: string | null;
     fastApiResponse?: string;
     payload?: string;
+    lastErrorMessage?: string;
   }): Promise<FastApiInvoice> {
     try {
       const existing = await this.fastApiInvoiceRepository.findOne({
@@ -651,14 +652,16 @@ export class SalesQueryService {
 
       if (existing) {
         existing.status = data.status;
-        existing.guid = data.guid || existing.guid;
+        existing.guid = data.guid ?? existing.guid;
         existing.fastApiResponse =
-          data.fastApiResponse || existing.fastApiResponse;
+          data.fastApiResponse ?? existing.fastApiResponse;
         if (data.payload) existing.payload = data.payload;
         if (data.maDvcs) existing.maDvcs = data.maDvcs;
         if (data.maKh) existing.maKh = data.maKh;
         if (data.tenKh) existing.tenKh = data.tenKh;
         if (data.ngayCt) existing.ngayCt = data.ngayCt;
+        if (data.lastErrorMessage !== undefined)
+          existing.lastErrorMessage = data.lastErrorMessage;
 
         const saved = await this.fastApiInvoiceRepository.save(existing);
         return Array.isArray(saved) ? saved[0] : saved;
@@ -673,6 +676,7 @@ export class SalesQueryService {
           guid: data.guid ?? null,
           fastApiResponse: data.fastApiResponse ?? null,
           payload: data.payload ?? null,
+          lastErrorMessage: data.lastErrorMessage ?? null,
         } as Partial<FastApiInvoice>);
 
         const saved = await this.fastApiInvoiceRepository.save(fastApiInvoice);

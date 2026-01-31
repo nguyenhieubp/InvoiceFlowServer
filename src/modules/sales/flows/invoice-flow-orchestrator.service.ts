@@ -99,6 +99,7 @@ export class InvoiceFlowOrchestratorService {
               ? JSON.stringify(result.fastApiResponse)
               : result?.fastApiResponse,
           payload: result.payload ? JSON.stringify(result.payload) : undefined,
+          lastErrorMessage: result.message,
         });
 
         return {
@@ -259,6 +260,7 @@ export class InvoiceFlowOrchestratorService {
       ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
       status: 0,
       guid: null,
+      lastErrorMessage: message,
     });
   }
 
@@ -295,6 +297,7 @@ export class InvoiceFlowOrchestratorService {
         guid: guid,
         fastApiResponse: JSON.stringify(fastApiResponse || result),
         payload: payload ? JSON.stringify(payload) : undefined,
+        lastErrorMessage: message,
       });
 
       if (status === STATUS.SUCCESS && shouldMarkProcessed) {
