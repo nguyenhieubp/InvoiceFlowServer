@@ -139,6 +139,7 @@ export function mapToSaleItemResponse(sale: any): SaleItemResponseDto {
     // Promotion/Discount
     maCtkmTangHang: sale.maCtkmTangHang,
     maThe: sale.maThe,
+    ma_vt_ref: sale.ma_vt_ref,
 
     // Flags
     isProcessed: sale.isProcessed,

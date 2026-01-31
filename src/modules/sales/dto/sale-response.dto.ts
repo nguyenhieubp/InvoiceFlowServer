@@ -165,6 +165,7 @@ export class SaleItemResponseDto {
   grade_discamt?: number;
   other_discamt?: number | null;
   paid_by_voucher_ecode_ecoin_bp?: number;
+  ma_vt_ref?: string;
 }
 
 /**

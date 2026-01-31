@@ -367,16 +367,21 @@ export class SalesQueryService {
       }
     });
 
-    // Pre-fetch product info for ALL Stock Transfer items to determine Batch vs Serial
-    const allStItemCodes = Array.from(
-      new Set(
-        stockTransfers
-          .map((st) => st.itemCode)
-          .filter((code): code is string => !!code),
-      ),
+    // 3. Pre-fetch product info for ALL items (Sales + Stock Transfers)
+    // to determine Batch vs Serial AND for ma_vt_ref enrichment
+    const allItemCodes = new Set<string>();
+    orders.forEach((order) => {
+      order.sales?.forEach((sale: any) => {
+        if (sale.itemCode) allItemCodes.add(sale.itemCode);
+      });
+    });
+    stockTransfers.forEach((st) => {
+      if (st.itemCode) allItemCodes.add(st.itemCode);
+    });
+
+    const loyaltyProductMap = await this.loyaltyService.fetchProducts(
+      Array.from(allItemCodes),
     );
-    const stLoyaltyProductMap =
-      await this.loyaltyService.fetchProducts(allStItemCodes);
 
     // [FIX] Pre-fetch Warehouse Code Mappings
     const allStockCodes = Array.from(
@@ -397,7 +402,7 @@ export class SalesQueryService {
       }),
     );
 
-    return orders.map((order) => {
+    const enrichedOrders = orders.map((order) => {
       const cashioRecords = cashioMap.get(order.docCode) || [];
       const ecoinCashio = cashioRecords.find((c) => c.fop_syscode === 'ECOIN');
       const voucherCashio = cashioRecords.find(
@@ -444,7 +449,7 @@ export class SalesQueryService {
         // 1. Map Stock Transfers to Sales Lines
         uniqueStockTransfers.forEach((st) => {
           // Find matching product info
-          const product = stLoyaltyProductMap.get(st.itemCode);
+          const product = loyaltyProductMap.get(st.itemCode);
           const isSerial = !!product?.trackSerial;
           const isBatch = !!product?.trackBatch;
 
@@ -601,6 +606,23 @@ export class SalesQueryService {
         cashioTotalOut: selectedCashio?.total_out || null,
       };
     });
+
+    // 4. Enrich ma_vt_ref (Voucher logic) for all exploded lines
+    const allExplodedSales: any[] = [];
+    enrichedOrders.forEach((order) => {
+      if (order.sales) {
+        allExplodedSales.push(...order.sales);
+      }
+    });
+
+    if (allExplodedSales.length > 0) {
+      await this.voucherIssueService.enrichSalesWithMaVtRef(
+        allExplodedSales,
+        loyaltyProductMap,
+      );
+    }
+
+    return enrichedOrders;
   }
 
   /**
