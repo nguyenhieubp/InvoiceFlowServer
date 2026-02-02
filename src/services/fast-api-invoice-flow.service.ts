@@ -1412,6 +1412,7 @@ export class FastApiInvoiceFlowService {
               ma_vt: maVt,
               ma_serial: soSerial,
               ten_serial: soSerial, // Mặc định tên serial = mã serial theo yêu cầu user
+              active: '0',
               action: '0',
             });
           }
