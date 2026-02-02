@@ -726,30 +726,95 @@ export class SalesQueryService {
 
   /**
    * Retroactive fix: Mark processed orders based on existing invoices
+   * OPTIMIZED: Batch fetching to eliminate N+1 queries (was 3000+ queries, now 2 queries)
    */
   async markProcessedOrdersFromInvoices(): Promise<{
     updated: number;
     message: string;
   }> {
+    // 1. Fetch all invoices (Query 1)
     const invoices = await this.invoiceRepository.find({
       where: { isPrinted: true },
     });
 
-    let updatedCount = 0;
+    // 2. Extract all potential docCodes from invoices (in-memory processing)
+    const potentialDocCodes = new Set<string>();
+
+    for (const invoice of invoices) {
+      // Add invoice.key as potential docCode
+      if (invoice.key) {
+        potentialDocCodes.add(invoice.key);
+      }
+
+      // Parse printResponse to extract additional potential docCodes
+      try {
+        if (invoice.printResponse) {
+          const printResponse = JSON.parse(invoice.printResponse);
+
+          // Extract from Message field
+          if (printResponse.Message) {
+            try {
+              const messageData = JSON.parse(printResponse.Message);
+              if (Array.isArray(messageData) && messageData.length > 0) {
+                const data = messageData[0];
+                if (data.key) {
+                  const keyParts = data.key.split('_');
+                  if (keyParts.length > 0) {
+                    potentialDocCodes.add(keyParts[0]);
+                  }
+                }
+              }
+            } catch (msgError) {
+              // Ignore parse errors
+            }
+          }
+
+          // Extract from Data field
+          if (
+            printResponse.Data &&
+            Array.isArray(printResponse.Data) &&
+            printResponse.Data.length > 0
+          ) {
+            const data = printResponse.Data[0];
+            if (data.key) {
+              const keyParts = data.key.split('_');
+              if (keyParts.length > 0) {
+                potentialDocCodes.add(keyParts[0]);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        // Ignore parse errors
+      }
+    }
+
+    // 3. Batch fetch all sales with these docCodes (Query 2)
+    const allDocCodes = Array.from(potentialDocCodes);
+    const existingSales = await this.saleRepository.find({
+      where: { docCode: In(allDocCodes) },
+      select: ['docCode'], // Only need docCode for validation
+    });
+
+    // 4. Build a Set of valid docCodes for O(1) lookup
+    const validDocCodesSet = new Set(existingSales.map((sale) => sale.docCode));
+
+    // 5. Process invoices with pre-fetched data (same logic as before, but in-memory)
     const processedDocCodes = new Set<string>();
 
     for (const invoice of invoices) {
       let docCode: string | null = null;
-      const salesByKey = await this.saleRepository.find({
-        where: { docCode: invoice.key },
-        take: 1,
-      });
-      if (salesByKey.length > 0) {
+
+      // Check invoice.key first (same priority as before)
+      if (invoice.key && validDocCodesSet.has(invoice.key)) {
         docCode = invoice.key;
       } else {
+        // Parse printResponse to find alternative docCode (same logic as before)
         try {
           if (invoice.printResponse) {
             const printResponse = JSON.parse(invoice.printResponse);
+
+            // Try Message field first
             if (printResponse.Message) {
               try {
                 const messageData = JSON.parse(printResponse.Message);
@@ -759,12 +824,7 @@ export class SalesQueryService {
                     const keyParts = data.key.split('_');
                     if (keyParts.length > 0) {
                       const potentialDocCode = keyParts[0];
-                      const salesByPotentialKey =
-                        await this.saleRepository.find({
-                          where: { docCode: potentialDocCode },
-                          take: 1,
-                        });
-                      if (salesByPotentialKey.length > 0) {
+                      if (validDocCodesSet.has(potentialDocCode)) {
                         docCode = potentialDocCode;
                       }
                     }
@@ -774,6 +834,8 @@ export class SalesQueryService {
                 // Ignore
               }
             }
+
+            // Try Data field if Message didn't work (same logic as before)
             if (
               !docCode &&
               printResponse.Data &&
@@ -785,11 +847,7 @@ export class SalesQueryService {
                 const keyParts = data.key.split('_');
                 if (keyParts.length > 0) {
                   const potentialDocCode = keyParts[0];
-                  const salesByPotentialKey = await this.saleRepository.find({
-                    where: { docCode: potentialDocCode },
-                    take: 1,
-                  });
-                  if (salesByPotentialKey.length > 0) {
+                  if (validDocCodesSet.has(potentialDocCode)) {
                     docCode = potentialDocCode;
                   }
                 }
@@ -801,16 +859,20 @@ export class SalesQueryService {
         }
       }
 
+      // Collect valid docCodes (same logic as before)
       if (docCode && !processedDocCodes.has(docCode)) {
-        const updateResult = await this.saleRepository.update(
-          { docCode },
-          { isProcessed: true },
-        );
-        if (updateResult.affected && updateResult.affected > 0) {
-          updatedCount += updateResult.affected;
-          processedDocCodes.add(docCode);
-        }
+        processedDocCodes.add(docCode);
       }
+    }
+
+    // 6. Batch update all processed docCodes in a single query
+    let updatedCount = 0;
+    if (processedDocCodes.size > 0) {
+      const updateResult = await this.saleRepository.update(
+        { docCode: In(Array.from(processedDocCodes)) },
+        { isProcessed: true },
+      );
+      updatedCount = updateResult.affected || 0;
     }
 
     return {
