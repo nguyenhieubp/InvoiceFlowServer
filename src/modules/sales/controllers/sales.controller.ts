@@ -180,6 +180,92 @@ export class SalesController {
     }
   }
 
+  @Get('export-orders')
+  async exportOrders(
+    @Res() res: Response,
+    @Query('brand') brand?: string,
+    @Query('typeSale') typeSale?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('search') search?: string,
+  ) {
+    try {
+      const XLSX = await import('xlsx');
+
+      // Get all filtered orders without pagination
+      const result = await this.salesService.findAllOrders({
+        brand,
+        typeSale,
+        dateFrom,
+        dateTo,
+        search,
+        page: 1,
+        limit: 100000, // Get all results
+      });
+
+      // Flatten data for Excel export
+      const flatData: any[] = [];
+      for (const order of result.data || []) {
+        if (order.sales && order.sales.length > 0) {
+          for (const sale of order.sales) {
+            flatData.push({
+              'Mã đơn': order.docCode,
+              Ngày: order.date,
+              'Khách hàng': order.customerName || '',
+              SĐT: order.mobile || '',
+              'Nhãn hàng': order.brand || '',
+              Loại: order.typeSale || '',
+              'Mã SP': sale.itemCode || '',
+              'Tên SP': sale.itemName || '',
+              'Số lượng': sale.qty || 0,
+              'Đơn giá': sale.price || 0,
+              'Thành tiền': sale.amount || 0,
+              'Chiết khấu': sale.discount || 0,
+              'Tổng tiền': order.totalAmount || 0,
+              'Trạng thái': order.isProcessed ? 'Đã xử lý' : 'Chưa xử lý',
+            });
+          }
+        } else {
+          flatData.push({
+            'Mã đơn': order.docCode,
+            Ngày: order.date,
+            'Khách hàng': order.customerName || '',
+            SĐT: order.mobile || '',
+            'Nhãn hàng': order.brand || '',
+            Loại: order.typeSale || '',
+            'Tổng tiền': order.totalAmount || 0,
+            'Trạng thái': order.isProcessed ? 'Đã xử lý' : 'Chưa xử lý',
+          });
+        }
+      }
+
+      // Create worksheet
+      const worksheet = XLSX.utils.json_to_sheet(flatData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Orders');
+
+      // Generate buffer
+      const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+      // Set headers for Excel download
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename=orders_${new Date().toISOString().split('T')[0]}.xlsx`,
+      );
+      res.setHeader('Content-Length', buffer.length);
+
+      return res.send(buffer);
+    } catch (error: any) {
+      throw new BadRequestException(
+        `Lỗi khi xuất dữ liệu: ${error?.message || error}`,
+      );
+    }
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.salesService.findOne(id);
