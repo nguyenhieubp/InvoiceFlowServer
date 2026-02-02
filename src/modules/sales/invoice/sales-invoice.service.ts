@@ -210,12 +210,21 @@ export class SalesInvoiceService {
       this.logger.error(
         `Unexpected error processing order ${docCode}: ${error?.message || error}`,
       );
+
+      // Try to get some metadata from orderData if it was successfully fetched
+      let orderData: any = null;
+      try {
+        orderData = await this.findByOrderCode(docCode);
+      } catch (e) {
+        // Ignore if we can't even fetch order data
+      }
+
       await this.saveFastApiInvoice({
         docCode,
-        maDvcs: '',
-        maKh: '',
-        tenKh: '',
-        ngayCt: new Date(),
+        maDvcs: orderData?.branchCode || '',
+        maKh: orderData?.customer?.code || '',
+        tenKh: orderData?.customer?.name || '',
+        ngayCt: orderData?.docDate ? new Date(orderData.docDate) : new Date(),
         status: 0,
         message: `Lỗi hệ thống: ${error?.message || error}`,
         guid: null,

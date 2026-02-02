@@ -678,9 +678,10 @@ export class SalesQueryService {
         existing.fastApiResponse =
           data.fastApiResponse ?? existing.fastApiResponse;
         if (data.payload) existing.payload = data.payload;
-        if (data.maDvcs) existing.maDvcs = data.maDvcs;
-        if (data.maKh) existing.maKh = data.maKh;
-        if (data.tenKh) existing.tenKh = data.tenKh;
+        // Use !== undefined to allow empty strings to be saved
+        if (data.maDvcs !== undefined) existing.maDvcs = data.maDvcs || '';
+        if (data.maKh !== undefined) existing.maKh = data.maKh || '';
+        if (data.tenKh !== undefined) existing.tenKh = data.tenKh || '';
         if (data.ngayCt) existing.ngayCt = data.ngayCt;
         if (data.lastErrorMessage !== undefined)
           existing.lastErrorMessage = data.lastErrorMessage;

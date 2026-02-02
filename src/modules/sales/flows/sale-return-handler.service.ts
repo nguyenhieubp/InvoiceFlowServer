@@ -42,6 +42,9 @@ export class SaleReturnHandlerService {
     guid?: string;
     fastApiResponse?: any;
     payload?: any;
+    maDvcs?: string;
+    maKh?: string;
+    tenKh?: string;
   }> {
     this.logger.log(`[SaleReturn] Bắt đầu xử lý đơn trả lại: ${docCode}`);
 
@@ -165,6 +168,9 @@ export class SaleReturnHandlerService {
         guid: responseGuid,
         fastApiResponse: result,
         payload: payloadLog,
+        maDvcs: salesReturnData?.ma_dvcs,
+        maKh: salesReturnData?.ma_kh,
+        tenKh: salesReturnData?.ong_ba,
       };
     }
 
@@ -200,6 +206,9 @@ export class SaleReturnHandlerService {
     if (!fastApiInvoice) {
       fastApiInvoice = this.fastApiInvoiceRepository.create({
         docCode,
+        maDvcs: orderData.maDvcs || orderData.branchCode || '',
+        maKh: orderData.customer?.code || '',
+        tenKh: orderData.customer?.name || '',
         ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
         status: STATUS.PROCESSING, // 2
         isManuallyCreated: false,
@@ -209,6 +218,9 @@ export class SaleReturnHandlerService {
     } else {
       fastApiInvoice.status = STATUS.PROCESSING;
       fastApiInvoice.lastErrorMessage = '';
+      fastApiInvoice.maDvcs = orderData.maDvcs || orderData.branchCode || '';
+      fastApiInvoice.maKh = orderData.customer?.code || '';
+      fastApiInvoice.tenKh = orderData.customer?.name || '';
       fastApiInvoice.updatedAt = new Date();
     }
     await this.fastApiInvoiceRepository.save(fastApiInvoice);
@@ -229,6 +241,13 @@ export class SaleReturnHandlerService {
       // Đơn có đuôi _X → Gọi API salesOrder với action: 1
       const invoiceData =
         await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
+
+      // [NEW] Update metadata from built invoiceData to ensure consistency with payload
+      fastApiInvoice.maDvcs = invoiceData.ma_dvcs || fastApiInvoice.maDvcs;
+      fastApiInvoice.maKh = invoiceData.ma_kh || fastApiInvoice.maKh;
+      fastApiInvoice.tenKh =
+        invoiceData.ten_kh || invoiceData.ong_ba || fastApiInvoice.tenKh;
+      await this.fastApiInvoiceRepository.save(fastApiInvoice);
 
       // Gọi API salesOrder với action = 1 (không cần tạo/cập nhật customer)
       let result: any;

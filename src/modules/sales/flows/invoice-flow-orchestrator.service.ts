@@ -88,9 +88,9 @@ export class InvoiceFlowOrchestratorService {
         // Save to database
         await this.salesQueryService.saveFastApiInvoice({
           docCode,
-          maDvcs: maDvcs,
-          maKh: orderData.customer?.code || '',
-          tenKh: orderData.customer?.name || '',
+          maDvcs: result.maDvcs || maDvcs,
+          maKh: result.maKh || orderData.customer?.code || '',
+          tenKh: result.tenKh || orderData.customer?.name || '',
           ngayCt: orderData.docDate ? new Date(orderData.docDate) : new Date(),
           status: result.status,
           guid: result.guid,
