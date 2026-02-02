@@ -478,8 +478,21 @@ export class SalesQueryService {
           // Find first unused sale, or fallback to any sale
           let sale: any = null;
           if (matchingSales && matchingSales.length > 0) {
-            // Try to find unused sale first
-            sale = matchingSales.find((s: any) => !usedSalesIds.has(s.id));
+            const stQty = Math.abs(Number(st.qty || 0));
+
+            // [IMPROVED] Best Fit Strategy: Prioritize exact quantity match
+            // This handles cases with duplicate item codes (e.g. 1 gift line (Qty 1) + 1 paid line (Qty 5))
+            sale = matchingSales.find(
+              (s: any) =>
+                !usedSalesIds.has(s.id) &&
+                Math.abs(Number(s.qty || 0)) === stQty,
+            );
+
+            // If no exact match, fallback to first unused
+            if (!sale) {
+              sale = matchingSales.find((s: any) => !usedSalesIds.has(s.id));
+            }
+
             // If all used, take first one (legacy behavior for 1 sale -> N splits)
             if (!sale) {
               sale = matchingSales[0];
