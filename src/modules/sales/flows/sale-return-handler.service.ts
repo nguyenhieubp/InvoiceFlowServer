@@ -10,6 +10,7 @@ import { SalesQueryService } from '../services/sales-query.service';
 import { PaymentService } from '../../payment/payment.service';
 import { SalesInvoiceService } from '../invoice/sales-invoice.service';
 import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
+import axios from 'axios';
 
 @Injectable()
 export class SaleReturnHandlerService {
@@ -74,7 +75,53 @@ export class SaleReturnHandlerService {
 
       payloadLog.salesReturn = salesReturnData;
 
-      // Gọi API salesReturn (không cần tạo/cập nhật customer)
+      // [NEW] Tạo/cập nhật customer trước khi tạo đơn trả lại
+      if (orderData.customer) {
+        try {
+          // Resolve brand from orderData (first sale line)
+          const firstSale = orderData.sales?.[0];
+          const brand = firstSale?.brand;
+
+          const getCustomer = await axios.get(
+            'https://n8n.vmt.vn/webhook/vmt/check_customer',
+            {
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              data: {
+                partner_code: orderData.customer.code,
+                source_company: brand,
+              },
+            },
+          );
+
+          const getCustomerData = getCustomer.data[0].data[0];
+
+          const customerData = {
+            ma_kh: getCustomerData.code,
+            ten_kh: getCustomerData.name,
+            dia_chi: getCustomerData.address_name,
+            ngay_sinh: getCustomerData.birthday,
+            so_cccd: getCustomerData.id_card_number,
+            e_mail: getCustomerData.email,
+            gioi_tinh: orderData.customer.sexual,
+            brand: brand,
+          };
+          this.logger.log(
+            `[SaleReturn] Tạo/cập nhật khách hàng: ${orderData.customer.code}`,
+          );
+          await this.fastApiInvoiceFlowService.createOrUpdateCustomer(
+            customerData,
+          );
+        } catch (error) {
+          this.logger.error(
+            `[SaleReturn] Lỗi tạo khách hàng: ${error?.message}`,
+            error?.stack,
+          );
+        }
+      }
+
+      // Gọi API salesReturn
       const result =
         await this.fastApiInvoiceFlowService.createSalesReturn(salesReturnData);
 
