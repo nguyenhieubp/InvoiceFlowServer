@@ -120,6 +120,17 @@ export class SalesFormattingService {
         (sale as any).ma_vt_ref || sale.serial || sale.soSerial || null;
     }
 
+    // [NEW] Resolve Ma Kho from Stock Transfer
+    let maKhoFromST: string | null = null;
+    if (saleStockTransfers.length > 0) {
+      // Use stockCode from the first assigned ST
+      maKhoFromST = saleStockTransfers[0].stockCode || null;
+      // If we have a map (from SalesQueryService), map it
+      if (maKhoFromST && warehouseCodeMap?.has(maKhoFromST)) {
+        maKhoFromST = warehouseCodeMap.get(maKhoFromST) || maKhoFromST;
+      }
+    }
+
     // Calculate fields using InvoiceLogicUtils (Unified Logic)
     const calculatedFields = await InvoiceLogicUtils.calculateSaleFields(
       sale,
@@ -129,6 +140,7 @@ export class SalesFormattingService {
       this.loyaltyService, // Pass loyaltyService for Wholesale accounts lookup
       isEmployee,
       batchSerial, // [NEW] Pass resolved batchSerial
+      maKhoFromST, // [NEW] Pass resolved maKho
     );
 
     // [FIX] Restore variables for mapping
@@ -165,6 +177,9 @@ export class SalesFormattingService {
       maPhi: calculatedFields.maPhi,
       maLo: calculatedFields.maLo,
       soSerial: calculatedFields.soSerial,
+      // [FIX] Sync other serial fields to key logic to prevent double filling (Batch vs Serial)
+      maSerial: calculatedFields.soSerial,
+      serial: calculatedFields.soSerial,
       maKho: maKhoDisplay,
       maCtkmTangHang: calculatedFields.maCtkmTangHang,
 

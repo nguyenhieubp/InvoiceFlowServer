@@ -532,7 +532,8 @@ export class InvoiceLogicUtils {
     const serialValue = batchSerialFromST || '';
 
     // Re-use logic from SalesUtils.shouldUseBatch for consistency
-    const isActuallyBatch = trackBatch === true && trackSerial !== true;
+    // [FIX] Prioritize trackBatch if both are true (matches shouldUseBatch comments)
+    const isActuallyBatch = trackBatch === true;
 
     return {
       maLo: isActuallyBatch ? serialValue : null,
@@ -1284,6 +1285,7 @@ export class InvoiceLogicUtils {
     loyaltyService?: any,
     isEmployee?: boolean, // [NEW] Accept isEmployee param
     batchSerialFromST?: string | null, // [NEW] Accept batchSerial param
+    maKhoFromST?: string | null, // [NEW] Accept maKho param
   ) {
     const orderTypes = this.getOrderTypes(sale.ordertypeName);
     const { isDoiDiem, isDauTu } = orderTypes;
@@ -1298,6 +1300,7 @@ export class InvoiceLogicUtils {
 
     const isTangHang = this.isTangHang(giaBan, tienHang);
     const maDvcs = department?.ma_dvcs || '';
+    const maBp = department?.ma_bp || '';
     const productType = sale.productType || loyaltyProduct?.productType || null;
     const productTypeUpper = productType
       ? String(productType).toUpperCase().trim()
@@ -1339,7 +1342,7 @@ export class InvoiceLogicUtils {
 
     // 4. Resolve Batch/Serial
     const { maLo, soSerial } = this.resolveBatchSerial({
-      batchSerialFromST: null, // Logic này thường từ Stock Transfer wrapper
+      batchSerialFromST: batchSerialFromST || null, // Logic này thường từ Stock Transfer wrapper
       trackBatch: !!loyaltyProduct?.trackBatch,
       trackSerial: !!loyaltyProduct?.trackSerial,
     });
@@ -1355,9 +1358,9 @@ export class InvoiceLogicUtils {
     // Cần inject logic kho sau hoặc pass vào param.
     // Tạm thời để rỗng hoặc tính trong SalesQueryService sau khi join ST
     const maKho = this.resolveMaKho({
-      maKhoFromST: null,
+      maKhoFromST: maKhoFromST || null,
       maKhoFromSale: sale.maKho || null,
-      maBp: department?.code || '', // department code ~ maBp?
+      maBp: maBp, // Fixed: use maBp from department.ma_bp
       orderTypes,
     });
 

@@ -351,16 +351,25 @@ export class SalesQueryService {
     });
 
     // Fetch stock transfers để thêm thông tin stock transfer
-    // Join theo soCode (của stock transfer) = docCode (của order)
+    // [FIX] Sử dụng helper để lấy cả mã đơn gốc cho đơn RT
+    const docCodesForST =
+      StockTransferUtils.getDocCodesForStockTransfer(docCodes);
     const stockTransfers = await this.stockTransferRepository.find({
-      where: { soCode: In(docCodes) },
+      where: { soCode: In(docCodesForST) },
     });
 
     const stockTransferMap = new Map<string, StockTransfer[]>();
     docCodes.forEach((docCode) => {
-      // Join theo soCode (của stock transfer) = docCode (của order)
+      // [FIX] Logic tìm ST cho đơn hàng (hỗ trợ đơn RT)
+      let originalOrderCode = null;
+      if (docCode.startsWith('RT')) {
+        originalOrderCode = docCode.replace(/^RT/, 'SO').replace(/_\d+$/, '');
+      }
+
       const matchingTransfers = stockTransfers.filter(
-        (st) => st.soCode === docCode,
+        (st) =>
+          st.soCode === docCode ||
+          (originalOrderCode && st.soCode === originalOrderCode),
       );
       if (matchingTransfers.length > 0) {
         stockTransferMap.set(docCode, matchingTransfers);
@@ -1134,23 +1143,6 @@ export class SalesQueryService {
       // Search mode or export: fetch all
       allSales = await fullQuery.getMany();
     }
-    // ... (Export Logic omitted) ...
-    if (isExport) {
-      // ...
-      return { sales: [], total: 0 }; // Placeholder strictly for this replacement block consistency
-    }
-
-    // ... itemCodes, branchCodes collection ...
-
-    // (We need to keep the original logic for collection, just wrapping logs)
-    // To minimize replacement size, I will just logging around the promise.all block later
-    // IMPORTANT: I need to replace the large block to insert logs effectively without breaking scope.
-
-    // Better strategy: Add logs in targeted small chunks using multi_replace or specific replace.
-    // The current replacement is too big and risks breaking things if I don't paste exact code.
-    // I will cancel this tool call and use multi_replace for inserting logs.
-
-    // 3. Export Logic (Early Return)
 
     // 4. Group by Order (Data Preparation)
     const orderMap = new Map<string, any>();
@@ -1414,7 +1406,15 @@ export class SalesQueryService {
     });
 
     for (const [docCode, sales] of enrichedSalesMap.entries()) {
-      const orderStockTransfers = stockTransfersBySoCode.get(docCode) || [];
+      // [FIX] Support lookup for RT orders using original order code
+      let orderStockTransfers = stockTransfersBySoCode.get(docCode) || [];
+      if (orderStockTransfers.length === 0 && docCode.startsWith('RT')) {
+        const originalOrderCode = docCode
+          .replace(/^RT/, 'SO')
+          .replace(/_\d+$/, '');
+        orderStockTransfers =
+          stockTransfersBySoCode.get(originalOrderCode) || [];
+      }
 
       // Group STs by ItemCode
       const stByItem = new Map<
@@ -1743,6 +1743,16 @@ export class SalesQueryService {
           });
         }
       });
+    }
+
+    if (isExport) {
+      return {
+        data: enrichedOrders,
+        total: totalOrders,
+        page,
+        limit,
+        totalPages: Math.ceil(totalOrders / limit),
+      };
     }
 
     if (isSearchMode) {

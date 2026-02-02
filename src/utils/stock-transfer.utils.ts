@@ -155,7 +155,7 @@ export function formatStockTransferForFrontend(st?: StockTransfer | null): any {
     ...st,
     materialCode: st.materialCode || null,
     itemCode: st.itemCode,
-    maKho: st.itemCode,
+    maKho: st.stockCode,
     batchSerial: st.batchSerial,
   };
 }

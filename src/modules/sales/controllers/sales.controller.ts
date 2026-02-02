@@ -14,6 +14,7 @@ import type { CreateStockTransferDto } from '../../../dto/create-stock-transfer.
 import type { Response } from 'express';
 import { mapToOrderResponse } from '../mappers/sale-response.mapper';
 import { SalesListResponseDto } from '../dto/sale-response.dto';
+import * as SalesUtils from '../../../utils/sales.utils';
 
 @Controller('sales')
 export class SalesController {
@@ -192,7 +193,7 @@ export class SalesController {
     try {
       const XLSX = await import('xlsx');
 
-      // Get all filtered orders without pagination
+      // Get all filtered orders without pagination, using standard mode with export=true for full enrichment (including Stock Transfers)
       const result = await this.salesService.findAllOrders({
         brand,
         typeSale,
@@ -201,40 +202,124 @@ export class SalesController {
         search,
         page: 1,
         limit: 100000, // Get all results
+        export: true,
       });
 
       // Flatten data for Excel export
       const flatData: any[] = [];
+      const formatDate = (date: any) => {
+        if (!date) return '';
+        const d = new Date(date);
+        if (isNaN(d.getTime())) return date;
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${day}/${month}/${year}`;
+      };
+
       for (const order of result.data || []) {
         if (order.sales && order.sales.length > 0) {
           for (const sale of order.sales) {
+            const ordertypeName = sale.ordertypeName || sale.ordertype || '';
+            const isTachThe = SalesUtils.isTachTheOrder(ordertypeName);
+
+            const partnerCode =
+              isTachThe && sale.issuePartnerCode
+                ? sale.issuePartnerCode
+                : order.customer?.code || order.partnerCode || '';
+
             flatData.push({
-              'Mã đơn': order.docCode,
-              Ngày: order.date,
-              'Khách hàng': order.customerName || '',
-              SĐT: order.mobile || '',
-              'Nhãn hàng': order.brand || '',
-              Loại: order.typeSale || '',
-              'Mã SP': sale.itemCode || '',
-              'Tên SP': sale.itemName || '',
+              '* Mã khách': partnerCode,
+              '* Ngày': formatDate(order.docDate || order.date),
+              '* Số hóa đơn': order.docCode,
+              '* Ký hiệu':
+                sale.department?.ma_dvcs ||
+                sale.branchCode ||
+                order.branchCode ||
+                '',
+              'Nhãn Hàng': order.brand || sale.brand || '',
+              'Loại Bán': order.typeSale || sale.type_sale || '',
+              'Diễn giải': order.docCode || '',
+              '* Mã hàng': sale.product?.maVatTu || sale.itemCode || '',
+              Đvt: sale.product?.dvt || sale.dvt || '',
+              'Loại đơn hàng': sale.ordertypeName || '',
+              'Loại sản phẩm':
+                sale.productType || sale.product?.productType || '',
+              'Khuyến mãi': sale.km_yn || '',
+              '* Mã kho':
+                sale.maKho ||
+                sale.stockTransfer?.stockCode ||
+                (isTachThe ? 'B' + (sale.branchCode || order.branchCode) : ''),
+              '* Mã lô': sale.maLo || '',
               'Số lượng': sale.qty || 0,
-              'Đơn giá': sale.price || 0,
-              'Thành tiền': sale.amount || 0,
-              'Chiết khấu': sale.discount || 0,
-              'Tổng tiền': order.totalAmount || 0,
-              'Trạng thái': order.isProcessed ? 'Đã xử lý' : 'Chưa xử lý',
+              'Giá bán': sale.giaBan || sale.price || 0,
+              'Tiền hàng': sale.tienHang || sale.amount || 0,
+              'Tỷ giá': sale.tyGia || 1,
+              '* Mã thuế': sale.maThue || 'VPT',
+              '* Tk nợ': sale.tkNo || '1311',
+              '* Tk doanh thu': sale.tkDoanhThuDisplay || '',
+              '* Tk giá vốn': sale.tkGiaVonDisplay || '',
+              'TK Chiết khấu': sale.tkChietKhau || '',
+              'TK Chi phí': sale.tkChiPhi || '',
+              'Mã phí': sale.maPhi || '',
+              '* Cục thuế': sale.cucThueDisplay || '',
+              'Mã thanh toán': sale.maThanhToan || '',
+              'Vụ việc': sale.vuViec || '',
+              'Bộ phận': sale.department?.ma_bp || sale.branchCode || '',
+              'Mã dịch vụ': sale.svcCode || '',
+              'Trạng thai': order.isProcessed ? 'Đã xử lý' : 'Chưa xử lý',
+              Barcode: sale.barcode || sale.product?.barcode || '',
+              'Mua hàng giảm giá': sale.ma_ck01 || sale.maCk01 || '',
+              'Chiết khấu mua hàng giảm giá':
+                sale.ck01_nt ||
+                sale.ck01Nt ||
+                sale.chietKhauMuaHangGiamGia ||
+                0,
+              'Mã CK theo chính sách': sale.ma_ck02 || sale.maCk02 || '',
+              'CK theo chính sách': sale.ck02_nt || sale.ck02Nt || 0,
+              'Mua hàng CK VIP': sale.ma_ck03 || sale.maCk03 || '',
+              'Chiết khấu mua hàng CK VIP':
+                sale.ck03_nt || sale.ck03Nt || sale.chietKhauMuaHangCkVip || 0,
+              'Thanh toán coupon': sale.ma_ck04 || sale.maCk04 || '',
+              'Chiết khấu thanh toán coupon':
+                sale.ck04_nt ||
+                sale.ck04Nt ||
+                sale.chietKhauThanhToanCoupon ||
+                0,
+              'Thanh toán voucher': sale.ma_ck05 || sale.maCk05 || '',
+              'Chiết khấu thanh toán voucher':
+                sale.ck05_nt ||
+                sale.ck05Nt ||
+                sale.chietKhauThanhToanVoucher ||
+                0,
+              'Thanh toán TK tiền ảo': sale.ma_ck11 || sale.maCk11 || '',
+              'Chiết khấu thanh toán TK tiền ảo':
+                sale.ck11_nt ||
+                sale.ck11Nt ||
+                sale.chietKhauThanhToanTkTienAo ||
+                0,
+              'Mã CTKM tặng hàng': sale.maCtkmTangHang || '',
+              'Mã thẻ': sale.maThe || '',
+              'Số serial': sale.maSerial || sale.soSerial || sale.serial || '',
+              'Mã VT tham chiếu': sale.ma_vt_ref || '',
+              'Mã kho xuất': sale.stockTransfer?.stockCode || '',
+              'Số lượng xuất kho': sale.stockTransfer?.qty
+                ? Math.abs(Number(sale.stockTransfer.qty))
+                : '',
+              'Ngày xuất kho': sale.stockTransfer?.transDate
+                ? formatDate(sale.stockTransfer.transDate)
+                : '',
+              'Mã CT': sale.stockTransfer?.docCode || '',
             });
           }
         } else {
           flatData.push({
-            'Mã đơn': order.docCode,
-            Ngày: order.date,
-            'Khách hàng': order.customerName || '',
-            SĐT: order.mobile || '',
-            'Nhãn hàng': order.brand || '',
-            Loại: order.typeSale || '',
-            'Tổng tiền': order.totalAmount || 0,
-            'Trạng thái': order.isProcessed ? 'Đã xử lý' : 'Chưa xử lý',
+            '* Mã khách': order.customer?.code || order.partnerCode || '',
+            '* Ngày': formatDate(order.docDate || order.date),
+            '* Số hóa đơn': order.docCode,
+            'Nhãn Hàng': order.brand || '',
+            'Loại Bán': order.typeSale || '',
+            'Trạng thai': order.isProcessed ? 'Đã xử lý' : 'Chưa xử lý',
           });
         }
       }
