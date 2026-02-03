@@ -32,6 +32,12 @@ export class WarehouseProcessed {
   @Column({ type: 'text', nullable: true })
   errorMessage?: string; // Thông báo lỗi nếu có
 
+  @Column({ type: 'text', nullable: true })
+  payload?: string; // Dữ liệu gửi sang Fast API (JSON string) - For debugging
+
+  @Column({ type: 'text', nullable: true })
+  fastApiResponse?: string; // Toàn bộ response từ Fast API (JSON string)
+
   @CreateDateColumn()
   createdAt: Date;
 

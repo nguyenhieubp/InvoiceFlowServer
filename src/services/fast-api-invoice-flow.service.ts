@@ -1178,7 +1178,13 @@ export class FastApiInvoiceFlowService {
       }
     }
 
-    return result;
+    // Return both payload and response for tracking
+    return {
+      payload: JSON.stringify(payload),
+      response: result,
+      // Keep backward compatibility
+      ...result,
+    };
   }
 
   /**
@@ -1371,7 +1377,13 @@ export class FastApiInvoiceFlowService {
       }
     }
 
-    return result;
+    // Return both payload and response for tracking
+    return {
+      payload: JSON.stringify(payload),
+      response: result,
+      // Keep backward compatibility
+      ...result,
+    };
   }
 
   async createPromotionFromLoyaltyAPI(promCode: string): Promise<any> {

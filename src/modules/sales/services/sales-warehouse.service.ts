@@ -191,8 +191,11 @@ export class SalesWarehouseService {
     isSuccess: boolean;
     errorMessage?: string;
   } {
-    if (Array.isArray(result) && result.length > 0) {
-      const firstItem = result[0];
+    // Handle new structure with payload and response
+    const actualResult = result?.response || result;
+
+    if (Array.isArray(actualResult) && actualResult.length > 0) {
+      const firstItem = actualResult[0];
       return {
         isSuccess: firstItem.status === 1,
         errorMessage:
@@ -202,12 +205,16 @@ export class SalesWarehouseService {
       };
     }
 
-    if (result && typeof result === 'object' && result.status !== undefined) {
+    if (
+      actualResult &&
+      typeof actualResult === 'object' &&
+      actualResult.status !== undefined
+    ) {
       return {
-        isSuccess: result.status === 1,
+        isSuccess: actualResult.status === 1,
         errorMessage:
-          result.status !== 1
-            ? result.message || 'Tạo phiếu warehouse thất bại'
+          actualResult.status !== 1
+            ? actualResult.message || 'Tạo phiếu warehouse thất bại'
             : undefined,
       };
     }
@@ -226,6 +233,12 @@ export class SalesWarehouseService {
     errorMessage?: string,
   ): Promise<void> {
     try {
+      // Extract payload and response from result
+      const payload = result?.payload || null;
+      const fastApiResponse = result?.response
+        ? JSON.stringify(result.response)
+        : JSON.stringify(result);
+
       const existing = await this.warehouseProcessedRepository.findOne({
         where: { docCode },
       });
@@ -240,6 +253,8 @@ export class SalesWarehouseService {
               result: JSON.stringify(result),
               success: isSuccess,
               errorMessage: null as any,
+              payload,
+              fastApiResponse,
             },
           );
         } else {
@@ -248,6 +263,8 @@ export class SalesWarehouseService {
           existing.result = JSON.stringify(result);
           existing.success = isSuccess;
           existing.errorMessage = errorMessage;
+          existing.payload = payload;
+          existing.fastApiResponse = fastApiResponse;
           await this.warehouseProcessedRepository.save(existing);
         }
       } else {
@@ -257,6 +274,8 @@ export class SalesWarehouseService {
           processedDate: new Date(),
           result: JSON.stringify(result),
           success: isSuccess,
+          payload,
+          fastApiResponse,
           ...(errorMessage && { errorMessage }),
         });
         await this.warehouseProcessedRepository.save(warehouseProcessed);
