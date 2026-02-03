@@ -159,12 +159,6 @@ export class SalesPayloadService {
         return checks;
       });
 
-      this.logger.log(
-        `[DEBUG] Checking Employee Status for codes: ${JSON.stringify(
-          partnerCodesToCheck,
-        )}`,
-      );
-
       const isEmployeeMap =
         await this.n8nService.checkCustomersIsEmployee(partnerCodesToCheck);
 

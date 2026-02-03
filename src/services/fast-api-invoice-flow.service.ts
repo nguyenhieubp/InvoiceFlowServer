@@ -133,8 +133,13 @@ export class FastApiInvoiceFlowService {
    * JSON body giống hóa đơn bán hàng (salesInvoice)
    * @param orderData - Dữ liệu đơn hàng
    * @param action - Action: 0 (mặc định) cho đơn hàng bán, 1 cho đơn hàng trả lại
+   * @param options - Các tùy chọn bổ sung (ví dụ: { skipLotSync: true })
    */
-  async createSalesOrder(orderData: any, action: number = 0): Promise<any> {
+  async createSalesOrder(
+    orderData: any,
+    action: number = 0,
+    options?: { skipLotSync?: boolean },
+  ): Promise<any> {
     try {
       await this.createOrUpdateCustomer({
         ma_kh: orderData.ma_kh,
@@ -177,7 +182,10 @@ export class FastApiInvoiceFlowService {
       }
 
       // [NEW] Sync Lot/Serial before submitting sales order (to prevent status=0 error)
-      await this.syncMissingLotSerial(cleanOrderData);
+      // Check skip flag to avoid redundant calls in full flow
+      if (!options?.skipLotSync) {
+        await this.syncMissingLotSerial(cleanOrderData);
+      }
 
       const result = await this.fastApiService.submitSalesOrder(finalPayload);
       // Validate response: status = 1 mới là success
@@ -225,8 +233,12 @@ export class FastApiInvoiceFlowService {
    * Tạo hóa đơn bán hàng trong Fast API
    * 2.4/ Hóa đơn bán hàng
    * FAST 2.4
+   * @param options - Các tùy chọn bổ sung (ví dụ: { skipLotSync: true })
    */
-  async createSalesInvoice(invoiceData: any): Promise<any> {
+  async createSalesInvoice(
+    invoiceData: any,
+    options?: { skipLotSync?: boolean },
+  ): Promise<any> {
     try {
       // FIX: Validate mã CTKM với Loyalty API trước khi gửi lên Fast API
       // Helper function: cắt phần sau dấu "-" để lấy mã CTKM để check (ví dụ: "PRMN.020228-R510SOCOM" → "PRMN.020228")
@@ -320,7 +332,10 @@ export class FastApiInvoiceFlowService {
       }
 
       // [NEW] Sync Lot/Serial before submitting invoice
-      await this.syncMissingLotSerial(invoiceData);
+      // Check skip flag to avoid redundant calls in full flow
+      if (!options?.skipLotSync) {
+        await this.syncMissingLotSerial(invoiceData);
+      }
 
       // Build clean payload (giống salesOrder nhưng action luôn = 0)
       const cleanInvoiceData = FastApiPayloadHelper.buildCleanPayload(
@@ -513,15 +528,23 @@ export class FastApiInvoiceFlowService {
     );
 
     try {
+      // Step 0: Sync Lot/Serial ONCE for the whole flow
+      // This prevents race conditions and redundant logs between Order and Invoice steps
+      await this.syncMissingLotSerial(invoiceData);
+
       // Step 1: Tạo/cập nhật Customer
-      // Step 2: Tạo salesOrder (đơn hàng bán)
-      const resultSalesOrder = await this.createSalesOrder(invoiceData);
+      // Step 2: Tạo salesOrder (đơn hàng bán) - Skip sync inside
+      const resultSalesOrder = await this.createSalesOrder(invoiceData, 0, {
+        skipLotSync: true,
+      });
       if (!resultSalesOrder) {
         throw new Error('Failed to create sales order');
       }
 
-      // Step 3: Tạo salesInvoice (hóa đơn bán hàng)
-      const resultSalesInvoice = await this.createSalesInvoice(invoiceData);
+      // Step 3: Tạo salesInvoice (hóa đơn bán hàng) - Skip sync inside
+      const resultSalesInvoice = await this.createSalesInvoice(invoiceData, {
+        skipLotSync: true,
+      });
       if (!resultSalesInvoice) {
         throw new Error('Failed to create sales invoice');
       }

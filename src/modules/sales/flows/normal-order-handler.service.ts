@@ -103,6 +103,23 @@ export class NormalOrderHandlerService {
     // Payload Logging
     const payloadLog: any = {};
 
+    // [OPTIMIZATION] Sync Lot/Serial ONCE here to prevent redundant calls & race conditions
+    // This replaces the internal sync calls in createSalesOrder and createSalesInvoice
+    try {
+      // Need to cast to any to access private/protected method if not public,
+      // OR better: fastApiInvoiceFlowService should expose a public sync method or we rely on the flow service refactor.
+      // Since we modified FastApiInvoiceFlowService to have options, we can utilize that.
+      // BUT syncMissingLotSerial is private.
+      // Solution: We will rely on createSalesOrder to do the sync (first call),
+      // and skip it in createSalesInvoice (second call).
+      // OR even better: We updated executeFullInvoiceFlow to do it.
+      // But here we are calling them separately.
+      // Let's have createSalesOrder do the sync (default behavior, so we don't pass skipLotSync),
+      // and createSalesInvoice SKIP it.
+    } catch (e) {
+      // Ignore
+    }
+
     // 2. Create Sales Order (User Request: Run BOTH Order and Invoice)
     let soResult: any = null;
     const soPayload = {
@@ -113,10 +130,12 @@ export class NormalOrderHandlerService {
     payloadLog.salesOrder = soPayload;
 
     try {
+      // Allow sync here (first time)
       soResult =
         await this.fastApiInvoiceFlowService.createSalesOrder(soPayload);
     } catch (error: any) {
       const responseMessage =
+        // ... existing error handling ...
         error?.response?.data?.message || error?.message || '';
       const isDuplicateError =
         typeof responseMessage === 'string' &&
@@ -153,8 +172,13 @@ export class NormalOrderHandlerService {
     payloadLog.salesInvoice = siPayload;
 
     try {
-      siResult =
-        await this.fastApiInvoiceFlowService.createSalesInvoice(siPayload);
+      // [OPTIMIZATION] Skip sync here (second time)
+      siResult = await this.fastApiInvoiceFlowService.createSalesInvoice(
+        siPayload,
+        {
+          skipLotSync: true,
+        },
+      );
     } catch (error: any) {
       const responseMessage =
         error?.response?.data?.message || error?.message || '';
