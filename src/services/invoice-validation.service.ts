@@ -49,6 +49,8 @@ export class InvoiceValidationService {
     'Đổi vỏ',
     // TT phí keep
     'TT phí keep',
+    // Xuất hàng KM cho đại lý
+    'Xuất hàng KM cho đại lý',
   ];
 
   /**
