@@ -51,6 +51,8 @@ export class InvoiceValidationService {
     'TT phí keep',
     // Xuất hàng KM cho đại lý
     'Xuất hàng KM cho đại lý',
+    // Đổi thẻ KEEP->Thẻ DV
+    'Đổi thẻ KEEP->Thẻ DV',
   ];
 
   /**
