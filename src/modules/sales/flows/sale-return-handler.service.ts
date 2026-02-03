@@ -315,6 +315,7 @@ export class SaleReturnHandlerService {
       result = await this.fastApiInvoiceFlowService.createSalesOrder(
         soPayload,
         action,
+        { skipCustomerSync: true },
       ); // action = 1 cho đơn hàng có đuôi _X
 
       // Lưu vào bảng kê hóa đơn

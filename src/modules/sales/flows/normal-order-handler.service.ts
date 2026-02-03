@@ -131,8 +131,13 @@ export class NormalOrderHandlerService {
 
     try {
       // Allow sync here (first time)
-      soResult =
-        await this.fastApiInvoiceFlowService.createSalesOrder(soPayload);
+      soResult = await this.fastApiInvoiceFlowService.createSalesOrder(
+        soPayload,
+        0,
+        {
+          skipCustomerSync: true,
+        },
+      );
     } catch (error: any) {
       const responseMessage =
         // ... existing error handling ...

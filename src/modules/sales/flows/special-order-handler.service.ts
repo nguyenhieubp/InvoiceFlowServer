@@ -101,8 +101,13 @@ export class SpecialOrderHandlerService {
       };
       payloadLog.salesOrder = soPayload;
 
-      const result =
-        await this.fastApiInvoiceFlowService.createSalesOrder(soPayload);
+      const result = await this.fastApiInvoiceFlowService.createSalesOrder(
+        soPayload,
+        0,
+        {
+          skipCustomerSync: true,
+        },
+      );
 
       let responseStatus =
         Array.isArray(result) &&
@@ -333,7 +338,9 @@ export class SpecialOrderHandlerService {
       payloadLog.salesOrder = soPayload;
 
       const salesOrderResult =
-        await this.fastApiInvoiceFlowService.createSalesOrder(soPayload);
+        await this.fastApiInvoiceFlowService.createSalesOrder(soPayload, 0, {
+          skipCustomerSync: true,
+        });
 
       // Validate Sales Order Result
       const isSoSuccess =

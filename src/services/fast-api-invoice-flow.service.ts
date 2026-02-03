@@ -138,13 +138,16 @@ export class FastApiInvoiceFlowService {
   async createSalesOrder(
     orderData: any,
     action: number = 0,
-    options?: { skipLotSync?: boolean },
+    options?: { skipLotSync?: boolean; skipCustomerSync?: boolean },
   ): Promise<any> {
     try {
-      await this.createOrUpdateCustomer({
-        ma_kh: orderData.ma_kh,
-        ten_kh: orderData.ten_kh || '',
-      });
+      // [NEW] Check skipCustomerSync flag
+      if (!options?.skipCustomerSync) {
+        await this.createOrUpdateCustomer({
+          ma_kh: orderData.ma_kh,
+          ten_kh: orderData.ten_kh || '',
+        });
+      }
       const cleanOrderData = FastApiPayloadHelper.buildCleanPayload(
         orderData,
         action,
@@ -536,6 +539,7 @@ export class FastApiInvoiceFlowService {
       // Step 2: Tạo salesOrder (đơn hàng bán) - Skip sync inside
       const resultSalesOrder = await this.createSalesOrder(invoiceData, 0, {
         skipLotSync: true,
+        skipCustomerSync: true,
       });
       if (!resultSalesOrder) {
         throw new Error('Failed to create sales order');
