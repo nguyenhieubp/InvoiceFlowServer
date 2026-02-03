@@ -197,10 +197,32 @@ export class LoyaltyService {
    * Fetch single ma_dvcs from Loyalty API by branch code
    * Wrapper around fetchLoyaltyDepartments or direct call
    */
+  private readonly maDvcsCache = new Map<
+    string,
+    { value: string; timestamp: number }
+  >();
+  private readonly CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+  /**
+   * Fetch single ma_dvcs from Loyalty API by branch code
+   * Wrapper around fetchLoyaltyDepartments or direct call
+   * [PERFORMANCE] Added In-Memory Caching to prevent N+1 HTTP calls
+   */
   async fetchMaDvcs(branchCode: string): Promise<string> {
     if (!branchCode) return '';
 
-    // 1. Try by ma_bp (existing logic)
+    // 1. Check Cache
+    const cached = this.maDvcsCache.get(branchCode);
+    if (cached) {
+      const isExpired = Date.now() - cached.timestamp > this.CACHE_TTL_MS;
+      if (!isExpired) {
+        return cached.value;
+      }
+    }
+
+    let result = '';
+
+    // 2. Try by ma_bp (existing logic)
     try {
       const url = `${this.LOYALTY_API_BASE_URL}/departments?page=1&limit=25&ma_bp=${branchCode}`;
       const response = await this.httpService.axiosRef.get(url, {
@@ -209,7 +231,7 @@ export class LoyaltyService {
       });
       const data = response?.data?.data?.items || [];
       if (Array.isArray(data) && data.length > 0) {
-        return data[0].ma_dvcs || '';
+        result = data[0].ma_dvcs || '';
       }
     } catch (error) {
       // Log warning but continue to fallback
@@ -218,24 +240,33 @@ export class LoyaltyService {
       );
     }
 
-    // 2. Fallback: Try by branchcode
-    try {
-      const url = `${this.LOYALTY_API_BASE_URL}/departments?page=1&limit=25&branchcode=${branchCode}`;
-      const response = await this.httpService.axiosRef.get(url, {
-        headers: { accept: 'application/json' },
-        timeout: this.REQUEST_TIMEOUT,
-      });
-      const data = response?.data?.data?.items || [];
-      if (Array.isArray(data) && data.length > 0) {
-        return data[0].ma_dvcs || '';
+    // 3. Fallback: Try by branchcode
+    if (!result) {
+      try {
+        const url = `${this.LOYALTY_API_BASE_URL}/departments?page=1&limit=25&branchcode=${branchCode}`;
+        const response = await this.httpService.axiosRef.get(url, {
+          headers: { accept: 'application/json' },
+          timeout: this.REQUEST_TIMEOUT,
+        });
+        const data = response?.data?.data?.items || [];
+        if (Array.isArray(data) && data.length > 0) {
+          result = data[0].ma_dvcs || '';
+        }
+      } catch (error) {
+        this.logger.warn(
+          `[LoyaltyService] Failed to fetch ma_dvcs by branchcode=${branchCode}: ${error}`,
+        );
       }
-    } catch (error) {
-      this.logger.warn(
-        `[LoyaltyService] Failed to fetch ma_dvcs by branchcode=${branchCode}: ${error}`,
-      );
     }
 
-    return '';
+    // 4. Update Cache (valid or empty)
+    // We cache empty strings too preventing repeated failed lookups
+    this.maDvcsCache.set(branchCode, {
+      value: result,
+      timestamp: Date.now(),
+    });
+
+    return result;
   }
 
   /**

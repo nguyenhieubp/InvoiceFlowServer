@@ -133,8 +133,6 @@ export class InvoiceValidationService {
       if (!isAllowed) {
         const errorMessage = `Chỉ cho phép tạo hóa đơn cho đơn hàng có Loại thuộc: [${allowedTypesStr}]. Đơn hàng ${orderData.docCode} có Loại = "${ordertypeName}"`;
 
-        this.logger.warn(`[InvoiceValidation] ${errorMessage}`);
-
         return {
           success: false,
           message: errorMessage,
@@ -147,9 +145,6 @@ export class InvoiceValidationService {
     const firstSale = orderData.sales[0];
     const ordertypeName =
       firstSale?.ordertypeName || firstSale?.ordertype || '';
-    this.logger.debug(
-      `[InvoiceValidation] Đơn hàng ${orderData.docCode} với Loại = "${ordertypeName}" được phép tạo hóa đơn`,
-    );
 
     return {
       success: true,

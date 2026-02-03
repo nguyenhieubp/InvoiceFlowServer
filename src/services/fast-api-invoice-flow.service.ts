@@ -81,14 +81,6 @@ export class FastApiInvoiceFlowService {
       // mobile -> tel
       const payloadTel = n8nData?.mobile || n8nData?.phone || customerData.tel;
 
-      if (n8nData) {
-        this.logger.log(
-          `[Flow] Synced customer ${payloadCode} from N8n (Brand: ${customerData.brand})`,
-        );
-        // Debug N8n Data
-        this.logger.debug(`[Flow] N8n Data: ${JSON.stringify(n8nData)}`);
-      }
-
       const result = await this.fastApiService.createOrUpdateCustomer({
         code: payloadCode,
         name: payloadName,

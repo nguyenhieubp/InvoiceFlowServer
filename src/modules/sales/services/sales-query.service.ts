@@ -1814,9 +1814,6 @@ export class SalesQueryService {
       const pagedOrders = Array.from(pagedOrdersMap.values());
 
       if (pagedOrders.length > 0) {
-        this.logger.debug(
-          `[findAllOrders] Final Order[0] Sales: ${pagedOrders[0].sales.length}, STs: ${pagedOrders[0].stockTransfers?.length}`,
-        );
       }
 
       return {

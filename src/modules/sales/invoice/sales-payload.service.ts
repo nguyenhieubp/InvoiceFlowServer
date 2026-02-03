@@ -9,11 +9,7 @@ import { N8nService } from '../../../services/n8n.service';
 import { CategoriesService } from '../../categories/categories.service';
 import * as _ from 'lodash';
 import * as SalesUtils from '../../../utils/sales.utils';
-import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
-import * as ConvertUtils from '../../../utils/convert.utils';
-import * as SalesCalculationUtils from '../../../utils/sales-calculation.utils';
 import { InvoiceLogicUtils } from '../../../utils/invoice-logic.utils';
-// import * as SalesFormattingUtils from '../../../utils/sales-formatting.utils'; // DEPRECATED
 import { DOC_SOURCE_TYPES } from '../constants/sales-invoice.constants';
 
 @Injectable()
