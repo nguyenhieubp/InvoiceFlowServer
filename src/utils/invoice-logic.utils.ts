@@ -605,6 +605,12 @@ export class InvoiceLogicUtils {
       if (sale.productType === 'I') {
         return '01';
       } else if (sale.productType === 'S' && sale.qty > 0) {
+        if (
+          loyaltyProduct?.materialCode === 'J00001' ||
+          loyaltyProduct?.materialCode === 'J00003'
+        ) {
+          return '01';
+        }
         return '02';
       } else if (sale.productType === 'V') {
         return '03';
