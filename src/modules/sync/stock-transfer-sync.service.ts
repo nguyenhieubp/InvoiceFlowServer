@@ -504,6 +504,7 @@ export class StockTransferSyncService {
     itemCode?: string;
     soCode?: string;
     docCode?: string;
+    doctype?: string;
   }): Promise<{
     success: boolean;
     data: StockTransfer[];
@@ -559,6 +560,19 @@ export class StockTransferSyncService {
         // Use date-parser utility with endOfDay flag
         const toDate = parseDDMMMYYYY(params.dateTo, true);
         queryBuilder.andWhere('st.transDate <= :dateTo', { dateTo: toDate });
+      }
+
+      if (params.doctype) {
+        queryBuilder.andWhere('st.doctype = :doctype', {
+          doctype: params.doctype,
+        });
+      }
+
+      // Filter by doctype
+      if (params.doctype) {
+        queryBuilder.andWhere('st.doctype = :doctype', {
+          doctype: params.doctype,
+        });
       }
 
       // Order by transDate DESC
@@ -619,6 +633,26 @@ export class StockTransferSyncService {
     };
   }> {
     try {
+      // 1. Validate Date Range (Mandatory & Max 31 days)
+      if (!params.dateFrom || !params.dateTo) {
+        throw new Error(
+          'Vui lòng chọn Từ ngày và Đến ngày (bắt buộc để đảm bảo hiệu năng).',
+        );
+      }
+
+      const fromDate = parseDDMMMYYYY(params.dateFrom);
+      const toDate = parseDDMMMYYYY(params.dateTo, true); // End of day
+
+      const diffTime = Math.abs(toDate.getTime() - fromDate.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      if (diffDays > 32) {
+        // Allow slightly more than 31 to cover month transitions safe margin
+        throw new Error(
+          'Khoảng thời gian tối đa là 1 tháng (31 ngày). Vui lòng chọn lại.',
+        );
+      }
+
       const page = params.page || 1;
       const limit = params.limit || 10;
       const skip = (page - 1) * limit;
@@ -647,36 +681,42 @@ export class StockTransferSyncService {
         });
       }
 
-      // Filter by dateFrom
-      if (params.dateFrom) {
-        const fromDate = parseDDMMMYYYY(params.dateFrom);
-        queryBuilder.andWhere('wp.processedDate >= :dateFrom', {
-          dateFrom: fromDate,
-        });
-      }
+      // Filter by dateFrom & dateTo (Already parsed)
+      queryBuilder.andWhere('wp.processedDate >= :dateFrom', {
+        dateFrom: fromDate,
+      });
+      queryBuilder.andWhere('wp.processedDate <= :dateTo', { dateTo: toDate });
 
-      // Filter by dateTo
-      if (params.dateTo) {
-        const toDate = parseDDMMMYYYY(params.dateTo, true);
-        queryBuilder.andWhere('wp.processedDate <= :dateTo', {
-          dateTo: toDate,
-        });
-      }
+      // Get list data & total count for pagination
+      // getManyAndCount is better than getCount + getMany separately
+      const [data, total] = await queryBuilder
+        .skip(skip)
+        .take(limit)
+        .getManyAndCount();
 
-      // Get total count
-      const total = await queryBuilder.getCount();
+      // OPTIMIZED STATISTICS CALCULATION
+      // Instead of fetching ALL records to memory, use SQL Aggregation
+      const statsQueryBuilder = this.warehouseProcessedRepository
+        .createQueryBuilder('wp')
+        .select('COUNT(wp.id)', 'total')
+        .addSelect(
+          `SUM(CASE WHEN wp.success = TRUE THEN 1 ELSE 0 END)`,
+          'success_count',
+        )
+        .addSelect(
+          `SUM(CASE WHEN wp.success = FALSE THEN 1 ELSE 0 END)`,
+          'failed_count',
+        )
+        .addSelect(
+          `SUM(CASE WHEN wp.ioType = 'I' THEN 1 ELSE 0 END)`,
+          'i_type_count',
+        )
+        .addSelect(
+          `SUM(CASE WHEN wp.ioType = 'O' THEN 1 ELSE 0 END)`,
+          'o_type_count',
+        );
 
-      // Apply pagination
-      queryBuilder.skip(skip).take(limit);
-
-      // Get data
-      const data = await queryBuilder.getMany();
-
-      // Calculate statistics
-      const statsQueryBuilder =
-        this.warehouseProcessedRepository.createQueryBuilder('wp');
-
-      // Apply same filters to stats query
+      // Apply SAME filters to stats query (except pagination)
       if (params.ioType) {
         statsQueryBuilder.andWhere('wp.ioType = :ioType', {
           ioType: params.ioType,
@@ -693,71 +733,23 @@ export class StockTransferSyncService {
         });
       }
 
-      // Filter by dateFrom
-      if (params.dateFrom) {
-        const parseDate = (dateStr: string): Date => {
-          const day = parseInt(dateStr.substring(0, 2));
-          const monthStr = dateStr.substring(2, 5).toUpperCase();
-          const year = parseInt(dateStr.substring(5, 9));
-          const monthMap: Record<string, number> = {
-            JAN: 0,
-            FEB: 1,
-            MAR: 2,
-            APR: 3,
-            MAY: 4,
-            JUN: 5,
-            JUL: 6,
-            AUG: 7,
-            SEP: 8,
-            OCT: 9,
-            NOV: 10,
-            DEC: 11,
-          };
-          const month = monthMap[monthStr] || 0;
-          return new Date(year, month, day);
-        };
-        const fromDate = parseDate(params.dateFrom);
-        statsQueryBuilder.andWhere('wp.processedDate >= :dateFrom', {
-          dateFrom: fromDate,
-        });
-      }
+      // Date filters are mandatory now
+      statsQueryBuilder.andWhere('wp.processedDate >= :dateFrom', {
+        dateFrom: fromDate,
+      });
+      statsQueryBuilder.andWhere('wp.processedDate <= :dateTo', {
+        dateTo: toDate,
+      });
 
-      if (params.dateTo) {
-        const parseDate = (dateStr: string): Date => {
-          const day = parseInt(dateStr.substring(0, 2));
-          const monthStr = dateStr.substring(2, 5).toUpperCase();
-          const year = parseInt(dateStr.substring(5, 9));
-          const monthMap: Record<string, number> = {
-            JAN: 0,
-            FEB: 1,
-            MAR: 2,
-            APR: 3,
-            MAY: 4,
-            JUN: 5,
-            JUL: 6,
-            AUG: 7,
-            SEP: 8,
-            OCT: 9,
-            NOV: 10,
-            DEC: 11,
-          };
-          const month = monthMap[monthStr] || 0;
-          return new Date(year, month, day, 23, 59, 59);
-        };
-        const toDate = parseDate(params.dateTo);
-        statsQueryBuilder.andWhere('wp.processedDate <= :dateTo', {
-          dateTo: toDate,
-        });
-      }
-
-      const allRecords = await statsQueryBuilder.getMany();
+      const rawStats = await statsQueryBuilder.getRawOne();
+      // Parse results (SQL returns strings for counts usually)
       const statistics = {
-        total: allRecords.length,
-        success: allRecords.filter((r) => r.success).length,
-        failed: allRecords.filter((r) => !r.success).length,
+        total: parseInt(rawStats.total || '0', 10),
+        success: parseInt(rawStats.success_count || '0', 10),
+        failed: parseInt(rawStats.failed_count || '0', 10),
         byIoType: {
-          I: allRecords.filter((r) => r.ioType === 'I').length,
-          O: allRecords.filter((r) => r.ioType === 'O').length,
+          I: parseInt(rawStats.i_type_count || '0', 10),
+          O: parseInt(rawStats.o_type_count || '0', 10),
         },
       };
 
