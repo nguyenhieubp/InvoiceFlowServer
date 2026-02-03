@@ -1013,6 +1013,20 @@ export class InvoiceLogicUtils {
 
     if (orderTypes.isDoiDiem || headerOrderTypes.isDoiDiem) amounts.ck05_nt = 0;
 
+    // [NEW] Wholesale Promotion (Zero Revenue) - Force all discounts to 0
+    if (
+      sale.ordertypeName === 'Xuất hàng KM cho đại lý' ||
+      sale.ordertype === 'Xuất hàng KM cho đại lý'
+    ) {
+      Object.keys(amounts).forEach((k) => {
+        if (k.startsWith('ck') && k.endsWith('_nt')) {
+          amounts[k] = 0;
+        }
+      });
+      // Also clear ck15_nt if it was set
+      if (amounts.ck15_nt) amounts.ck15_nt = 0;
+    }
+
     return amounts;
   }
 

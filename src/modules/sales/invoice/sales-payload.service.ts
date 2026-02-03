@@ -1322,14 +1322,6 @@ export class SalesPayloadService {
       isEmployeeMap?.get(`NV${(sale as any).issuePartnerCode}`) || // [FIX] Check NV prefix
       false;
 
-    // [DEBUG]
-    if (sale.ordertypeName === 'Xuất hàng KM cho đại lý') {
-      console.log(
-        '[DEBUG SalesPayloadService] loyaltyProduct passed:',
-        JSON.stringify(loyaltyProduct),
-      );
-    }
-
     const { maCk01, maCtkmTangHang } = await this.resolveInvoicePromotionCodes(
       sale,
       orderData,
