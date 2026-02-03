@@ -279,7 +279,26 @@ export class SalesPayloadService {
     importLines: any[],
     exportLines: any[],
   ): Promise<any> {
-    const docDate = this.parseInvoiceDate(orderData.docDate);
+    // [FIX] Use Warehouse Date (transDate) if available (request: GXT dùng ngày xuất kho)
+    // Priority: 1. Order's Stock Transfers -> 2. Line Item's Stock Transfer -> 3. Fallback to Invoice Date
+    let transDate = orderData.stockTransfers?.[0]?.transDate;
+
+    if (!transDate) {
+      const firstLine = importLines?.[0] || exportLines?.[0];
+      if (
+        firstLine?.stockTransfer?.transDate ||
+        firstLine?.stockTransfer?.transdate
+      ) {
+        transDate =
+          firstLine.stockTransfer.transDate ||
+          firstLine.stockTransfer.transdate;
+      } else if (firstLine?.transDate || firstLine?.transdate) {
+        // Some enrichment might attach it directly
+        transDate = firstLine.transDate || firstLine.transdate;
+      }
+    }
+
+    const docDate = this.parseInvoiceDate(transDate || orderData.docDate);
     const ngayCt = this.formatDateKeepLocalDay(docDate);
     const ngayLct = ngayCt;
 
