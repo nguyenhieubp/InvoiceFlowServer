@@ -186,6 +186,89 @@ export class SalesWarehouseService {
     };
   }
 
+  /**
+   * Process warehouse by date range and doctype
+   */
+  async processWarehouseByDateRangeAndDoctype(
+    dateFrom: string,
+    dateTo: string,
+    doctype?: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    totalProcessed: number;
+    successCount: number;
+    failedCount: number;
+    errors: string[];
+  }> {
+    const fromDate = SalesUtils.parseDateFromDDMMMYYYY(dateFrom);
+    const toDate = SalesUtils.parseDateFromDDMMMYYYY(dateTo);
+    toDate.setHours(23, 59, 59, 999);
+
+    // Build query conditions
+    const whereConditions: any = {
+      transDate: Between(fromDate, toDate),
+    };
+
+    if (doctype) {
+      whereConditions.doctype = doctype;
+    }
+
+    // Get all stock transfers in date range
+    const stockTransfers = await this.stockTransferRepository.find({
+      where: whereConditions,
+      order: { transDate: 'ASC', docCode: 'ASC' },
+    });
+
+    if (stockTransfers.length === 0) {
+      return {
+        success: true,
+        message: 'Không có stock transfer nào trong khoảng thời gian này',
+        totalProcessed: 0,
+        successCount: 0,
+        failedCount: 0,
+        errors: [],
+      };
+    }
+
+    // Group by docCode to get unique documents
+    const uniqueDocCodes = [...new Set(stockTransfers.map((st) => st.docCode))];
+
+    this.logger.log(
+      `[Batch Warehouse Sync] Tìm thấy ${uniqueDocCodes.length} docCode duy nhất từ ${stockTransfers.length} stock transfers`,
+    );
+
+    let successCount = 0;
+    let failedCount = 0;
+    const errors: string[] = [];
+
+    for (const docCode of uniqueDocCodes) {
+      try {
+        await this.processWarehouseFromStockTransferByDocCode(docCode);
+        successCount++;
+        this.logger.log(
+          `[Batch Warehouse Sync] ✓ Thành công: ${docCode} (${successCount}/${uniqueDocCodes.length})`,
+        );
+      } catch (error: any) {
+        failedCount++;
+        const errorMsg = error?.message || String(error);
+        errors.push(`${docCode}: ${errorMsg}`);
+        this.logger.error(
+          `[Batch Warehouse Sync] ✗ Thất bại: ${docCode} - ${errorMsg}`,
+        );
+      }
+    }
+
+    return {
+      success: failedCount === 0,
+      message: `Đã xử lý ${uniqueDocCodes.length} docCode: ${successCount} thành công, ${failedCount} thất bại`,
+      totalProcessed: uniqueDocCodes.length,
+      successCount,
+      failedCount,
+      errors: errors.slice(0, 20), // Show up to 20 errors
+    };
+  }
+
   // Private helper methods
   private validateWarehouseResult(result: any): {
     isSuccess: boolean;

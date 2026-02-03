@@ -55,6 +55,18 @@ export class SalesService {
     );
   }
 
+  async processWarehouseByDateRangeAndDoctype(
+    dateFrom: string,
+    dateTo: string,
+    doctype?: string,
+  ) {
+    return this.salesWarehouseService.processWarehouseByDateRangeAndDoctype(
+      dateFrom,
+      dateTo,
+      doctype,
+    );
+  }
+
   // ... (rest of methods)
 
   async getStatusAsys(
