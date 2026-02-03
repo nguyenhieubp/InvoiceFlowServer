@@ -274,6 +274,7 @@ export class InvoiceLogicUtils {
     maHangGiamGia: any;
     isSanTmdtOverride?: boolean;
     isEmployee?: boolean; // [NEW]
+    loyaltyProduct?: any; // [NEW]
   }) {
     const {
       sale,
@@ -284,6 +285,7 @@ export class InvoiceLogicUtils {
       promCode,
       maHangGiamGia,
       isEmployee,
+      loyaltyProduct,
     } = params;
     const { isDoiDiem, isDauTu, isThuong, isBanTaiKhoan, isSanTmdt } =
       orderTypes;
@@ -344,6 +346,28 @@ export class InvoiceLogicUtils {
         // BUT: Do NOT add .I / .S / .V suffix.
         const cutCode = SalesUtils.getPromotionDisplayCode(code) || code;
         maCtkmTangHang = cutCode.replace(/\.(I|S|V)$/, '');
+      }
+    }
+
+    // [NEW] Logic "Xuất hàng KM cho đại lý" (Wholesale Promotion)
+    // If revenue/linetotal is 0:
+    // - Group 16INAN -> CTKM.INAN
+    // - Other Groups -> GT.TANGHANG
+    const isXuatHangKmDaiLy =
+      sale.ordertypeName === 'Xuất hàng KM cho đại lý' ||
+      sale.ordertype === 'Xuất hàng KM cho đại lý';
+
+    if (isXuatHangKmDaiLy) {
+      const revenue = Number(sale.revenue || 0);
+      if (Math.abs(revenue) < 0.01) {
+        // [FIX] Use sale.product.productType to get granular code (e.g. 16INAN)
+
+        const granularProductType = loyaltyProduct?.productType || '';
+        if (granularProductType.includes('16INAN')) {
+          maCtkmTangHang = 'CTKM.INAN';
+        } else {
+          maCtkmTangHang = 'GT.TANGHANG';
+        }
       }
     }
 
@@ -1326,6 +1350,7 @@ export class InvoiceLogicUtils {
       promCode,
       maHangGiamGia,
       isEmployee, // [NEW] Pass isEmployee
+      loyaltyProduct, // [NEW] Pass loyaltyProduct
     });
 
     // 3. Resolve Accounting Accounts
@@ -1432,5 +1457,33 @@ export class InvoiceLogicUtils {
         return 'E';
       }
     }
+  }
+  static resolveKmYn(
+    sale: any,
+    maCtkmTangHang: string | null,
+    giaBan: number,
+    tienHang: number,
+  ): number {
+    // [NEW] Wholesale Promotion Logic: Force km_yn = 1 if revenue is 0
+    const isXuatHangKmDaiLy =
+      sale.ordertypeName === 'Xuất hàng KM cho đại lý' ||
+      sale.ordertype === 'Xuất hàng KM cho đại lý';
+
+    if (isXuatHangKmDaiLy && Math.abs(Number(sale.revenue || 0)) < 0.01) {
+      return 1;
+    }
+
+    const types = InvoiceLogicUtils.getOrderTypes(sale.ordertypeName);
+    if (
+      types.isDoiDv ||
+      types.isDoiVo ||
+      types.isTachThe ||
+      types.isSinhNhat ||
+      maCtkmTangHang === 'TT DAU TU'
+    ) {
+      return 0;
+    }
+
+    return InvoiceLogicUtils.isTangHang(giaBan, tienHang) ? 1 : 0;
   }
 }

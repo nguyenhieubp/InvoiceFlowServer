@@ -128,7 +128,12 @@ export function mapToSaleItemResponse(sale: any): SaleItemResponseDto {
     maPhi: sale.maPhi,
 
     // Display fields (backend calculated)
-    km_yn: sale.km_yn,
+    km_yn: InvoiceLogicUtils.resolveKmYn(
+      sale,
+      sale.maCtkmTangHang, // Note: In mapper, we might not have 'maCtkmTangHang' variable in scope, we rely on sale.maCtkmTangHang if it was calculated previously or passed
+      Number(sale.giaBan),
+      Number(sale.tienHang),
+    ),
     cucThueDisplay: sale.cucThueDisplay,
     tkDoanhThuDisplay: sale.tkDoanhThuDisplay,
     tkGiaVonDisplay: sale.tkGiaVonDisplay,

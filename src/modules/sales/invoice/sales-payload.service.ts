@@ -1024,8 +1024,9 @@ export class SalesPayloadService {
     orderData: any,
     giaBan: number,
     promCode: string | null,
-    isPlatformOrder?: boolean, // [NEW]
-    isEmployee?: boolean, // [NEW]
+    isPlatformOrder?: boolean,
+    isEmployee?: boolean,
+    loyaltyProduct?: any,
   ) {
     const orderTypes = InvoiceLogicUtils.getOrderTypes(
       sale.ordertypeName || sale.ordertype,
@@ -1055,6 +1056,7 @@ export class SalesPayloadService {
       maHangGiamGia: maHangGiamGia,
       isSanTmdtOverride: isPlatformOrder, // [NEW] Pass override
       isEmployee: isEmployee, // [NEW]
+      loyaltyProduct: loyaltyProduct, // [NEW]
     });
   }
 
@@ -1320,6 +1322,14 @@ export class SalesPayloadService {
       isEmployeeMap?.get(`NV${(sale as any).issuePartnerCode}`) || // [FIX] Check NV prefix
       false;
 
+    // [DEBUG]
+    if (sale.ordertypeName === 'Xuất hàng KM cho đại lý') {
+      console.log(
+        '[DEBUG SalesPayloadService] loyaltyProduct passed:',
+        JSON.stringify(loyaltyProduct),
+      );
+    }
+
     const { maCk01, maCtkmTangHang } = await this.resolveInvoicePromotionCodes(
       sale,
       orderData,
@@ -1327,6 +1337,7 @@ export class SalesPayloadService {
       amounts.promCode,
       isPlatformOrder, // [NEW]
       isEmployee, // [NEW]
+      loyaltyProduct, // [NEW]
     );
 
     const { tkChietKhau, tkChiPhi, maPhi } = await this.resolveInvoiceAccounts(
@@ -1403,20 +1414,12 @@ export class SalesPayloadService {
       gia_ban: Number(giaBan),
       is_reward_line: sale.isRewardLine ? 1 : 0,
       is_bundle_reward_line: sale.isBundleRewardLine ? 1 : 0,
-      km_yn:
-        (() => {
-          const types = InvoiceLogicUtils.getOrderTypes(sale.ordertypeName);
-          return (
-            types.isDoiDv ||
-            types.isDoiVo ||
-            types.isTachThe ||
-            types.isSinhNhat
-          );
-        })() || maCtkmTangHang === 'TT DAU TU'
-          ? 0
-          : InvoiceLogicUtils.isTangHang(Number(giaBan), Number(tienHang))
-            ? 1
-            : 0,
+      km_yn: InvoiceLogicUtils.resolveKmYn(
+        sale,
+        maCtkmTangHang,
+        Number(giaBan),
+        Number(tienHang),
+      ),
       dong_thuoc_goi: this.val(sale.dongThuocGoi, 32),
       trang_thai: this.val(sale.trangThai, 32),
       barcode: this.val(sale.barcode, 32),
