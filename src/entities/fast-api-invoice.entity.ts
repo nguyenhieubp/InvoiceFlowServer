@@ -46,6 +46,9 @@ export class FastApiInvoice {
   @Column({ nullable: true })
   type: string;
 
+  @Column({ type: 'text', nullable: true })
+  xemNhanh: string; // [New] Quick view for errors/status
+
   @Column({ default: false })
   isManuallyCreated: boolean;
 

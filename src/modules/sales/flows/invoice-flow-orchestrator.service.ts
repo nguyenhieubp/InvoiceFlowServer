@@ -261,6 +261,7 @@ export class InvoiceFlowOrchestratorService {
       status: 0,
       guid: null,
       lastErrorMessage: message,
+      xemNhanh: message, // [New]
     });
   }
 
@@ -298,6 +299,7 @@ export class InvoiceFlowOrchestratorService {
         fastApiResponse: JSON.stringify(fastApiResponse || result),
         payload: payload ? JSON.stringify(payload) : undefined,
         lastErrorMessage: message,
+        xemNhanh: message, // [New]
       });
 
       if (status === STATUS.SUCCESS && shouldMarkProcessed) {

@@ -349,6 +349,9 @@ export class FastApiInvoiceFlowService {
       const finalPayload =
         FastApiPayloadHelper.removeEmptyFields(cleanInvoiceData);
 
+      // [NEW] Strict Validation
+      FastApiPayloadHelper.validateSalesInvoice(finalPayload);
+
       const result = await this.fastApiService.submitSalesInvoice(finalPayload);
 
       // Validate response: status = 1 mới là success

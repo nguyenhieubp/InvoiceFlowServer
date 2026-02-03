@@ -47,7 +47,7 @@ export class FastApiPayloadHelper {
         ma_dvcs: orderData.ma_dvcs,
         ma_kh: orderData.ma_kh,
         ong_ba: orderData.ong_ba ?? null,
-        ma_gd: orderData.ma_gd ?? '1',
+        ma_gd: orderData.ma_gd ?? '2',
         ma_tt: orderData.ma_tt ?? null,
         ma_ca: orderData.ma_ca ?? null,
         hinh_thuc: orderData.hinh_thuc ?? '0',
@@ -65,6 +65,7 @@ export class FastApiPayloadHelper {
         ma_bp: orderData.ma_bp,
         tk_thue_no: orderData.tk_thue_no ?? '131111',
         ma_kenh: orderData.ma_kenh ?? 'ONLINE',
+        status: orderData.status ?? '2',
         detail: (orderData.detail || []).map((item: any) => {
           const { product, ...cleanItem } = item;
           const result: any = { ...cleanItem };
@@ -362,5 +363,67 @@ export class FastApiPayloadHelper {
     }
 
     return payload;
+  }
+  /**
+   * Validate Sales Invoice Payload strictly
+   * Checks for required fields marked with * in user request
+   */
+  static validateSalesInvoice(payload: any): void {
+    const missingFields: string[] = [];
+
+    // 1. Validate Header
+    const requiredHeaderFields = [
+      'ma_dvcs',
+      'ma_kh',
+      'ma_gd',
+      'ma_kenh',
+      'ngay_lct',
+      'ngay_ct',
+      'so_ct',
+      'so_seri',
+      'tk_thue_no',
+    ];
+
+    requiredHeaderFields.forEach((field) => {
+      if (
+        payload[field] === undefined ||
+        payload[field] === null ||
+        String(payload[field]).trim() === ''
+      ) {
+        missingFields.push(`Header: ${field}`);
+      }
+    });
+
+    // 2. Validate Details
+    if (!Array.isArray(payload.detail) || payload.detail.length === 0) {
+      missingFields.push('Detail: Empty or invalid detail list');
+    } else {
+      payload.detail.forEach((item: any, index: number) => {
+        const requiredDetailFields = [
+          'ma_vt',
+          'dvt',
+          'ma_kho',
+          'ma_thue',
+          'loai_gd',
+          'dong',
+        ];
+
+        requiredDetailFields.forEach((field) => {
+          if (
+            item[field] === undefined ||
+            item[field] === null ||
+            String(item[field]).trim() === ''
+          ) {
+            missingFields.push(`Detail[${index}]: ${field}`);
+          }
+        });
+      });
+    }
+
+    if (missingFields.length > 0) {
+      throw new Error(
+        `Missing required fields in Sales Invoice:\n${missingFields.join('\n')}`,
+      );
+    }
   }
 }

@@ -688,45 +688,46 @@ export class SalesQueryService {
     fastApiResponse?: string;
     payload?: string;
     lastErrorMessage?: string;
+    xemNhanh?: string; // [New]
   }): Promise<FastApiInvoice> {
     try {
-      const existing = await this.fastApiInvoiceRepository.findOne({
+      let invoice = await this.fastApiInvoiceRepository.findOne({
         where: { docCode: data.docCode },
       });
 
-      if (existing) {
-        existing.status = data.status;
-        existing.guid = data.guid ?? existing.guid;
-        existing.fastApiResponse =
-          data.fastApiResponse ?? existing.fastApiResponse;
-        if (data.payload) existing.payload = data.payload;
-        // Use !== undefined to allow empty strings to be saved
-        if (data.maDvcs !== undefined) existing.maDvcs = data.maDvcs || '';
-        if (data.maKh !== undefined) existing.maKh = data.maKh || '';
-        if (data.tenKh !== undefined) existing.tenKh = data.tenKh || '';
-        if (data.ngayCt) existing.ngayCt = data.ngayCt;
+      if (invoice) {
+        // Update existing
+        invoice.status = data.status;
+        if (data.maDvcs !== undefined) invoice.maDvcs = data.maDvcs;
+        if (data.maKh !== undefined) invoice.maKh = data.maKh;
+        if (data.tenKh !== undefined) invoice.tenKh = data.tenKh;
+        if (data.ngayCt !== undefined) invoice.ngayCt = data.ngayCt;
+        if (data.guid !== undefined) invoice.guid = data.guid || '';
+        if (data.fastApiResponse !== undefined)
+          invoice.fastApiResponse = data.fastApiResponse;
+        if (data.payload !== undefined) invoice.payload = data.payload;
         if (data.lastErrorMessage !== undefined)
-          existing.lastErrorMessage = data.lastErrorMessage;
-
-        const saved = await this.fastApiInvoiceRepository.save(existing);
-        return Array.isArray(saved) ? saved[0] : saved;
+          invoice.lastErrorMessage = data.lastErrorMessage;
+        if (data.xemNhanh !== undefined) invoice.xemNhanh = data.xemNhanh; // [New]
       } else {
-        const fastApiInvoice = this.fastApiInvoiceRepository.create({
+        // Create new
+        invoice = this.fastApiInvoiceRepository.create({
           docCode: data.docCode,
-          maDvcs: data.maDvcs ?? null,
-          maKh: data.maKh ?? null,
-          tenKh: data.tenKh ?? null,
-          ngayCt: data.ngayCt ?? new Date(),
+          maDvcs: data.maDvcs,
+          maKh: data.maKh,
+          tenKh: data.tenKh,
+          ngayCt: data.ngayCt || new Date(),
           status: data.status,
-          guid: data.guid ?? null,
-          fastApiResponse: data.fastApiResponse ?? null,
-          payload: data.payload ?? null,
-          lastErrorMessage: data.lastErrorMessage ?? null,
-        } as Partial<FastApiInvoice>);
-
-        const saved = await this.fastApiInvoiceRepository.save(fastApiInvoice);
-        return Array.isArray(saved) ? saved[0] : saved;
+          guid: data.guid || '',
+          fastApiResponse: data.fastApiResponse,
+          payload: data.payload,
+          lastErrorMessage: data.lastErrorMessage,
+          xemNhanh: data.xemNhanh, // [New]
+        });
       }
+
+      const saved = await this.fastApiInvoiceRepository.save(invoice);
+      return Array.isArray(saved) ? saved[0] : saved;
     } catch (error: any) {
       this.logger.error(
         `Error saving FastApiInvoice for ${data.docCode}: ${error?.message || error}`,
