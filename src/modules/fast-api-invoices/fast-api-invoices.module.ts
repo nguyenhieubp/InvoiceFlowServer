@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { HttpModule } from '@nestjs/axios';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FastApiInvoicesController } from './fast-api-invoices.controller';
 import { WebhookController } from './controllers/webhook.controller';
@@ -10,6 +11,7 @@ import { SalesModule } from '../sales/sales.module';
   imports: [
     TypeOrmModule.forFeature([FastApiInvoice]),
     forwardRef(() => SalesModule),
+    HttpModule,
   ],
   controllers: [FastApiInvoicesController, WebhookController],
   providers: [FastApiInvoiceService],

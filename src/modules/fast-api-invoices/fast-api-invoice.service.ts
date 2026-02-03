@@ -7,6 +7,8 @@ import {
   SelectQueryBuilder,
 } from 'typeorm';
 import { FastApiInvoice } from '../../entities/fast-api-invoice.entity';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
 import * as XLSX from 'xlsx';
 
 @Injectable()
@@ -16,6 +18,7 @@ export class FastApiInvoiceService {
   constructor(
     @InjectRepository(FastApiInvoice)
     private fastApiInvoiceRepository: Repository<FastApiInvoice>,
+    private httpService: HttpService,
   ) {}
 
   /**
@@ -55,6 +58,9 @@ export class FastApiInvoiceService {
     query.skip(skip).take(limit);
 
     const [items, total] = await query.getManyAndCount();
+
+    // Map branchcode to ma_dvcs via Loyalty API
+    await this.mapMaDvcs(items);
 
     return {
       items,
@@ -249,6 +255,9 @@ export class FastApiInvoiceService {
 
     const items = await query.getMany();
 
+    // Map branchcode to ma_dvcs via Loyalty API
+    await this.mapMaDvcs(items);
+
     const data = items.map((item) => ({
       'Ngày CT': item.ngayCt
         ? new Date(item.ngayCt).toLocaleDateString('vi-VN')
@@ -283,6 +292,51 @@ export class FastApiInvoiceService {
     ];
 
     return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+  }
+
+  /**
+   * Helper to map branchcode to ma_dvcs
+   */
+  private async mapMaDvcs(items: FastApiInvoice[]) {
+    if (items.length === 0) return;
+
+    try {
+      const branchCodes = [
+        ...new Set(items.map((i) => i.maDvcs).filter((c) => c)),
+      ];
+      const maDvcsMap = new Map<string, string>();
+
+      await Promise.all(
+        branchCodes.map(async (code) => {
+          try {
+            const response = await firstValueFrom(
+              this.httpService.get(`https://loyaltyapi.vmt.vn/departments`, {
+                params: { page: 1, limit: 1, branchcode: code },
+              }),
+            );
+            const apiMaDvcs = response.data?.data?.items?.[0]?.ma_dvcs;
+            if (apiMaDvcs) {
+              maDvcsMap.set(code, apiMaDvcs);
+            }
+          } catch (err) {
+            this.logger.warn(
+              `Failed to fetch department for branchcode ${code}: ${err.message}`,
+            );
+          }
+        }),
+      );
+
+      items.forEach((item) => {
+        if (item.maDvcs && maDvcsMap.has(item.maDvcs)) {
+          const mapped = maDvcsMap.get(item.maDvcs);
+          if (mapped) {
+            item.maDvcs = mapped;
+          }
+        }
+      });
+    } catch (error) {
+      this.logger.error(`Error mapping ma_dvcs: ${error.message}`);
+    }
   }
 
   /**
