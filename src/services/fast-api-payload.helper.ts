@@ -426,4 +426,58 @@ export class FastApiPayloadHelper {
       );
     }
   }
+
+  /**
+   * Validate Sales Return Payload
+   * Ensures all required fields are present before sending to Fast API.
+   */
+  static validateSalesReturn(payload: any): void {
+    const missingFields: string[] = [];
+
+    // 1. Validate Header
+    const requiredHeaderFields = [
+      'ma_dvcs',
+      'ma_kh',
+      'ma_gd',
+      'ngay_lct',
+      'ngay_ct',
+      'so_ct',
+      'so_seri',
+    ];
+
+    requiredHeaderFields.forEach((field) => {
+      if (
+        payload[field] === undefined ||
+        payload[field] === null ||
+        String(payload[field]).trim() === ''
+      ) {
+        missingFields.push(`Header: ${field}`);
+      }
+    });
+
+    // 2. Validate Details
+    if (!Array.isArray(payload.detail) || payload.detail.length === 0) {
+      missingFields.push('Detail: Empty or invalid detail list');
+    } else {
+      payload.detail.forEach((item: any, index: number) => {
+        const requiredDetailFields = ['ma_vt', 'dvt', 'ma_kho', 'ma_thue'];
+
+        requiredDetailFields.forEach((field) => {
+          if (
+            item[field] === undefined ||
+            item[field] === null ||
+            String(item[field]).trim() === ''
+          ) {
+            missingFields.push(`Detail[${index}]: ${field}`);
+          }
+        });
+      });
+    }
+
+    if (missingFields.length > 0) {
+      throw new Error(
+        `Missing required fields in Sales Return:\n${missingFields.join('\n')}`,
+      );
+    }
+  }
 }

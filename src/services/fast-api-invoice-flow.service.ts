@@ -407,6 +407,9 @@ export class FastApiInvoiceFlowService {
         false,
       );
 
+      // [NEW] Strict Validation
+      FastApiPayloadHelper.validateSalesReturn(finalPayload);
+
       const result = await this.fastApiService.submitSalesReturn(finalPayload);
 
       // Validate response: status = 1 mới là success
