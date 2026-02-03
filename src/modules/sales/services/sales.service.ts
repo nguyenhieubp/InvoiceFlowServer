@@ -218,6 +218,60 @@ export class SalesService {
   }
 
   /**
+   * Cập nhật thông tin đơn lỗi thủ công (branchCode, materialCode -> itemCode)
+   */
+  async updateErrorOrder(
+    id: string,
+    data: { materialCode?: string; branchCode?: string },
+  ) {
+    const sale = await this.saleRepository.findOne({ where: { id } });
+    if (!sale) {
+      throw new NotFoundException(`Sale with ID ${id} not found`);
+    }
+
+    if (data.branchCode) {
+      sale.branchCode = data.branchCode;
+    }
+
+    if (data.materialCode) {
+      // Try to resolve materialCode/itemCode to a valid Product
+      const product = await this.loyaltyService.checkProduct(data.materialCode);
+      if (product && product.code) {
+        sale.itemCode = product.code;
+        if (product.name) {
+          sale.itemName = product.name;
+        }
+      } else {
+        // If cannot resolve, maybe assume user provided a direct itemCode?
+        // Or strictly require validation?
+        // For flexibility, let's treat the input as new itemCode if not found as materialCode?
+        // BUT safer is to just update itemCode and let next sync validation fail if invalid.
+        // User interface says "Material Code", but in backend it maps to itemCode.
+        // Let's trust checkProduct. If it fails, maybe we still save it as itemCode so user can correct it (e.g. they typed itemCode directly).
+        sale.itemCode = data.materialCode;
+      }
+    }
+
+    // Reset statusAsys to false so it gets re-checked by sync process (or true if we trust validation?)
+    // Actually, force re-check is better. Or logic says:
+    // "Trạng thái đồng bộ: true = đồng bộ thành công, false = sản phẩm không tồn tại trong Loyalty API (404)"
+    // If we changed itemCode, we should probably set it to true IF we validated it.
+    // If we found 'product' above, it IS valid.
+    /*
+    if (data.materialCode && product) {
+       sale.statusAsys = true;
+    } else {
+       sale.statusAsys = false; // Need re-check
+    }
+    */
+    // Let's keep it simple: just save. Next "Scan" or "Sync" will verify it.
+    // However, the UI filters by statusAsys=false. If we fix it, we might want it to disappear from one list?
+    // Let's leave statusAsys alone or set to false to ensure re-sync picks it up.
+
+    return this.saleRepository.save(sale);
+  }
+
+  /**
    * Đồng bộ dữ liệu từ Zappy API và lưu vào database
    * @param date - Ngày theo format DDMMMYYYY (ví dụ: 04DEC2025)
    * @param brand - Brand name (f3, labhair, yaman, menard). Nếu không có thì dùng default

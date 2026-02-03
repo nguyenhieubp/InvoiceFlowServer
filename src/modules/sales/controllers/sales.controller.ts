@@ -491,6 +491,14 @@ export class SalesController {
     return this.salesService.syncErrorOrderByDocCode(docCode);
   }
 
+  @Post('error-order/:id')
+  async updateErrorOrder(
+    @Param('id') id: string,
+    @Body() body: { materialCode?: string; branchCode?: string },
+  ) {
+    return this.salesService.updateErrorOrder(id, body);
+  }
+
   @Post('stock-transfer/:id/warehouse')
   async processWarehouseFromStockTransfer(@Param('id') id: string) {
     try {
