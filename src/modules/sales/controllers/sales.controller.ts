@@ -569,6 +569,7 @@ export class SalesController {
   async retryWarehouseFailedByDateRange(
     @Body('dateFrom') dateFrom: string,
     @Body('dateTo') dateTo: string,
+    @Body('doctype') doctype?: string,
   ) {
     if (!dateFrom || !dateTo) {
       throw new BadRequestException(
@@ -580,6 +581,7 @@ export class SalesController {
       const result = await this.salesService.retryWarehouseFailedByDateRange(
         dateFrom,
         dateTo,
+        doctype,
       );
       return result;
     } catch (error: any) {

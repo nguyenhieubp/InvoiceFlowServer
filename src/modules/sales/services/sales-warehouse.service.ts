@@ -131,6 +131,7 @@ export class SalesWarehouseService {
   async retryWarehouseFailedByDateRange(
     dateFrom: string,
     dateTo: string,
+    doctype?: string,
   ): Promise<{
     success: boolean;
     message: string;
@@ -143,11 +144,17 @@ export class SalesWarehouseService {
     const toDate = SalesUtils.parseDateFromDDMMMYYYY(dateTo);
     toDate.setHours(23, 59, 59, 999);
 
+    const whereConditions: any = {
+      success: false,
+      processedDate: Between(fromDate, toDate),
+    };
+
+    if (doctype) {
+      whereConditions.doctype = doctype;
+    }
+
     const failedRecords = await this.warehouseProcessedRepository.find({
-      where: {
-        success: false,
-        processedDate: Between(fromDate, toDate),
-      },
+      where: whereConditions,
       order: { processedDate: 'ASC' },
     });
 

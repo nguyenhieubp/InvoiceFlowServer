@@ -48,10 +48,15 @@ export class SalesService {
     );
   }
 
-  async retryWarehouseFailedByDateRange(dateFrom: string, dateTo: string) {
+  async retryWarehouseFailedByDateRange(
+    dateFrom: string,
+    dateTo: string,
+    doctype?: string,
+  ) {
     return this.salesWarehouseService.retryWarehouseFailedByDateRange(
       dateFrom,
       dateTo,
+      doctype,
     );
   }
 
