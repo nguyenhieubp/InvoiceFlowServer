@@ -45,6 +45,13 @@ export class InvoiceValidationService {
     '08. Tách thẻ',
     '08.Tách thẻ',
     '08.  Tách thẻ',
+    // 09. Sàn TMDT
+    '09. Sàn TMDT',
+    '09.Sàn TMDT',
+    '09.  Sàn TMDT',
+    '9. Sàn TMDT',
+    '9.Sàn TMDT',
+    '9.  Sàn TMDT',
     // Đổi vỏ
     'Đổi vỏ',
     // TT phí keep
