@@ -613,6 +613,7 @@ export class StockTransferSyncService {
     ioType?: string;
     success?: boolean;
     docCode?: string;
+    doctype?: string;
   }): Promise<{
     success: boolean;
     data: WarehouseProcessed[];
@@ -657,6 +658,10 @@ export class StockTransferSyncService {
       const limit = params.limit || 10;
       const skip = (page - 1) * limit;
 
+      this.logger.log(
+        `[getWarehouseProcessed] Params: ${JSON.stringify(params)}`,
+      );
+
       const queryBuilder = this.warehouseProcessedRepository
         .createQueryBuilder('wp')
         .orderBy('wp.processedDate', 'DESC')
@@ -664,7 +669,10 @@ export class StockTransferSyncService {
 
       // Filter by ioType
       if (params.ioType) {
-        queryBuilder.andWhere('wp.ioType = :ioType', { ioType: params.ioType });
+        // Use TRIM to avoid issues with potential whitespace in DB
+        queryBuilder.andWhere('TRIM(wp.ioType) = :ioType', {
+          ioType: params.ioType.trim(),
+        });
       }
 
       // Filter by success
@@ -678,6 +686,13 @@ export class StockTransferSyncService {
       if (params.docCode) {
         queryBuilder.andWhere('wp.docCode LIKE :docCode', {
           docCode: `%${params.docCode}%`,
+        });
+      }
+
+      // Filter by doctype
+      if (params.doctype) {
+        queryBuilder.andWhere('wp.doctype = :doctype', {
+          doctype: params.doctype,
         });
       }
 
@@ -714,12 +729,16 @@ export class StockTransferSyncService {
         .addSelect(
           `SUM(CASE WHEN wp.ioType = 'O' THEN 1 ELSE 0 END)`,
           'o_type_count',
+        )
+        .addSelect(
+          `SUM(CASE WHEN wp.ioType = 'T' THEN 1 ELSE 0 END)`,
+          't_type_count',
         );
 
       // Apply SAME filters to stats query (except pagination)
       if (params.ioType) {
-        statsQueryBuilder.andWhere('wp.ioType = :ioType', {
-          ioType: params.ioType,
+        statsQueryBuilder.andWhere('TRIM(wp.ioType) = :ioType', {
+          ioType: params.ioType.trim(),
         });
       }
       if (params.success !== undefined) {
@@ -730,6 +749,11 @@ export class StockTransferSyncService {
       if (params.docCode) {
         statsQueryBuilder.andWhere('wp.docCode LIKE :docCode', {
           docCode: `%${params.docCode}%`,
+        });
+      }
+      if (params.doctype) {
+        statsQueryBuilder.andWhere('wp.doctype = :doctype', {
+          doctype: params.doctype,
         });
       }
 
@@ -750,6 +774,7 @@ export class StockTransferSyncService {
         byIoType: {
           I: parseInt(rawStats.i_type_count || '0', 10),
           O: parseInt(rawStats.o_type_count || '0', 10),
+          T: parseInt(rawStats.t_type_count || '0', 10),
         },
       };
 

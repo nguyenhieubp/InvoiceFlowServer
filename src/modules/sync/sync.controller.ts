@@ -764,6 +764,7 @@ export class SyncController {
     @Query('ioType') ioType?: string,
     @Query('success') success?: string,
     @Query('docCode') docCode?: string,
+    @Query('doctype') doctype?: string,
   ) {
     try {
       const result = await this.stockTransferSyncService.getWarehouseProcessed({
@@ -774,6 +775,7 @@ export class SyncController {
         ioType,
         success: success !== undefined ? success === 'true' : undefined,
         docCode,
+        doctype,
       });
       return result;
     } catch (error: any) {

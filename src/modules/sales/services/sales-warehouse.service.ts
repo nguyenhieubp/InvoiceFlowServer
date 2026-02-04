@@ -108,6 +108,7 @@ export class SalesWarehouseService {
         result,
         isSuccess,
         errorMessage,
+        stockTransfer.doctype,
       );
 
       if (!isSuccess) {
@@ -314,6 +315,7 @@ export class SalesWarehouseService {
     result: any,
     isSuccess: boolean,
     errorMessage?: string,
+    doctype?: string,
   ): Promise<void> {
     try {
       // Extract payload and response from result
@@ -338,6 +340,7 @@ export class SalesWarehouseService {
               errorMessage: null as any,
               payload,
               fastApiResponse,
+              doctype,
             },
           );
         } else {
@@ -348,6 +351,7 @@ export class SalesWarehouseService {
           existing.errorMessage = errorMessage;
           existing.payload = payload;
           existing.fastApiResponse = fastApiResponse;
+          if (doctype) existing.doctype = doctype;
           await this.warehouseProcessedRepository.save(existing);
         }
       } else {
@@ -359,6 +363,7 @@ export class SalesWarehouseService {
           success: isSuccess,
           payload,
           fastApiResponse,
+          doctype,
           ...(errorMessage && { errorMessage }),
         });
         await this.warehouseProcessedRepository.save(warehouseProcessed);
@@ -399,6 +404,7 @@ export class SalesWarehouseService {
         if (errorResult) {
           existing.result = JSON.stringify(errorResult);
         }
+        if (stockTransfer.doctype) existing.doctype = stockTransfer.doctype;
         await this.warehouseProcessedRepository.save(existing);
       } else {
         const warehouseProcessed = this.warehouseProcessedRepository.create({
@@ -407,6 +413,7 @@ export class SalesWarehouseService {
           processedDate: new Date(),
           errorMessage,
           success: false,
+          doctype: stockTransfer.doctype,
           ...(errorResult && { result: JSON.stringify(errorResult) }),
         });
         await this.warehouseProcessedRepository.save(warehouseProcessed);

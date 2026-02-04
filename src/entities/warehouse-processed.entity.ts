@@ -20,6 +20,9 @@ export class WarehouseProcessed {
   @Column()
   ioType: string; // 'I' hoặc 'O'
 
+  @Column({ nullable: true })
+  doctype?: string; // STOCK_REPACK, STOCK_RETURN, etc.
+
   @Column({ type: 'timestamp' })
   processedDate: Date; // Ngày xử lý
 
