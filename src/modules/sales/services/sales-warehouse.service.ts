@@ -109,6 +109,7 @@ export class SalesWarehouseService {
         isSuccess,
         errorMessage,
         stockTransfer.doctype,
+        stockTransfer.transDate,
       );
 
       if (!isSuccess) {
@@ -316,6 +317,7 @@ export class SalesWarehouseService {
     isSuccess: boolean,
     errorMessage?: string,
     doctype?: string,
+    transDate?: Date,
   ): Promise<void> {
     try {
       // Extract payload and response from result
@@ -341,6 +343,7 @@ export class SalesWarehouseService {
               payload,
               fastApiResponse,
               doctype,
+              transDate,
             },
           );
         } else {
@@ -352,6 +355,7 @@ export class SalesWarehouseService {
           existing.payload = payload;
           existing.fastApiResponse = fastApiResponse;
           if (doctype) existing.doctype = doctype;
+          if (transDate) existing.transDate = transDate;
           await this.warehouseProcessedRepository.save(existing);
         }
       } else {
@@ -364,6 +368,7 @@ export class SalesWarehouseService {
           payload,
           fastApiResponse,
           doctype,
+          transDate,
           ...(errorMessage && { errorMessage }),
         });
         await this.warehouseProcessedRepository.save(warehouseProcessed);
@@ -405,6 +410,8 @@ export class SalesWarehouseService {
           existing.result = JSON.stringify(errorResult);
         }
         if (stockTransfer.doctype) existing.doctype = stockTransfer.doctype;
+        if (stockTransfer.transDate)
+          existing.transDate = stockTransfer.transDate;
         await this.warehouseProcessedRepository.save(existing);
       } else {
         const warehouseProcessed = this.warehouseProcessedRepository.create({
@@ -414,6 +421,7 @@ export class SalesWarehouseService {
           errorMessage,
           success: false,
           doctype: stockTransfer.doctype,
+          transDate: stockTransfer.transDate,
           ...(errorResult && { result: JSON.stringify(errorResult) }),
         });
         await this.warehouseProcessedRepository.save(warehouseProcessed);

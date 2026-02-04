@@ -1321,14 +1321,32 @@ export class FastApiInvoiceFlowService {
         '';
       const unit = materialCatalog?.unit || '';
 
+      // Logic xác định ma_lo và so_serial dựa trên trackBatch và trackSerial
+      let maLo = '';
+      let soSerial = '';
+
+      if (materialCatalog) {
+        if (materialCatalog.trackBatch) {
+          maLo = stockTransfer.batchSerial || '';
+        }
+        if (materialCatalog.trackSerial) {
+          soSerial = stockTransfer.batchSerial || '';
+        }
+      } else {
+        // Fallback behavior if no catalog found (logic cũ hoặc mặc định)
+        // Hiện tại giữ nguyên logic cũ là gán cả 2 nếu không có catalog để tránh break flow
+        maLo = stockTransfer.batchSerial || '';
+        soSerial = stockTransfer.batchSerial || '';
+      }
+
       detail.push({
         ma_vt: materialCode,
         dvt: unit,
-        so_serial: stockTransfer.batchSerial || '',
+        so_serial: soSerial,
         so_luong: Math.abs(parseFloat(String(stockTransfer.qty || '0'))), // Lấy giá trị tuyệt đối
         gia_nt: 0,
         tien_nt: 0,
-        ma_lo: stockTransfer.batchSerial || '',
+        ma_lo: maLo,
         ma_bp: maBp,
         px_gia_dd: 0,
       });
@@ -1350,6 +1368,16 @@ export class FastApiInvoiceFlowService {
       so_buoc: 2, // Mặc định 2
       detail,
     };
+
+    // [NEW] Kiểm tra và đồng bộ Lô/Serial thiếu sang Fast API trước khi tạo phiếu
+    try {
+      await this.syncMissingLotSerial(payload);
+    } catch (error: any) {
+      this.logger.warn(
+        `[Warehouse Transfer] Lỗi khi đồng bộ lot/serial: ${error?.message || error}`,
+      );
+      // Không throw error để tiếp tục tạo phiếu, Fast API sẽ trả về lỗi nếu thiếu
+    }
 
     // Gọi API warehouseTransfer
     this.logger.log(
@@ -1445,13 +1473,25 @@ export class FastApiInvoiceFlowService {
         try {
           const exists = await this.loyaltyService.checkSerial(maVt, soSerial);
           if (!exists) {
-            await this.fastApiService.createOrUpdateSerial({
-              ma_vt: maVt,
-              ma_serial: soSerial,
-              ten_serial: soSerial, // Mặc định tên serial = mã serial theo yêu cầu user
-              active: '0',
-              action: '0',
-            });
+            this.logger.log(
+              `[SyncLotSerial] Serial ${soSerial} for item ${maVt} not found. Creating in Fast API & Loyalty API...`,
+            );
+
+            // Gọi đồng thời cả Fast API và Loyalty API
+            await Promise.allSettled([
+              this.fastApiService.createOrUpdateSerial({
+                ma_vt: maVt,
+                ma_serial: soSerial,
+                ten_serial: soSerial, // Mặc định tên serial = mã serial theo yêu cầu user
+                action: '0',
+              }),
+              this.loyaltyService.createSerial({
+                ma_vt: maVt,
+                ma_serial: soSerial,
+                ten_serial: soSerial,
+                ghi_chu: '',
+              }),
+            ]);
           }
         } catch (error: any) {
           this.logger.warn(

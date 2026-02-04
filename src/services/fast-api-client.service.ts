@@ -3,12 +3,16 @@ import {
   Logger,
   OnModuleInit,
   OnModuleDestroy,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { WarehouseProcessed } from '../entities/warehouse-processed.entity';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
+
+import { LoyaltyService } from './loyalty.service';
 
 @Injectable()
 export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
@@ -28,6 +32,8 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
     private readonly httpService: HttpService,
     @InjectRepository(WarehouseProcessed)
     private readonly warehouseProcessedRepository: Repository<WarehouseProcessed>,
+    @Inject(forwardRef(() => LoyaltyService))
+    private readonly loyaltyService: LoyaltyService,
   ) {}
 
   /**
@@ -1402,8 +1408,27 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
       );
 
       this.logger.log(
-        `Serial ${serialData.ma_serial} for item ${serialData.ma_vt} created/updated successfully`,
+        `Serial ${serialData.ma_serial} for item ${serialData.ma_vt} created/updated successfully in Fast API`,
       );
+
+      // [NEW] Sync sang Loyalty API
+      try {
+        await this.loyaltyService.createSerial({
+          ma_vt: serialData.ma_vt,
+          ma_serial: serialData.ma_serial,
+          ten_serial: serialData.ten_serial,
+          ghi_chu: serialData.ghi_chu || '',
+        });
+        this.logger.log(
+          `Serial ${serialData.ma_serial} synced to Loyalty API successfully`,
+        );
+      } catch (loyaltyError: any) {
+        this.logger.warn(
+          `Failed to sync serial to Loyalty API: ${loyaltyError?.message || loyaltyError}`,
+        );
+        // Không block flow chính nếu loyalty sync fail
+      }
+
       return response.data;
     } catch (error: any) {
       this.logger.error(

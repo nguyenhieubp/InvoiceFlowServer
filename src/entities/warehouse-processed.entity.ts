@@ -10,6 +10,7 @@ import {
 @Entity('warehouse_processed')
 @Index(['docCode']) // Index để query nhanh hơn
 @Index(['processedDate']) // Index cho filter theo ngày
+@Index(['transDate']) // Index cho filter theo ngày chứng từ
 export class WarehouseProcessed {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -25,6 +26,9 @@ export class WarehouseProcessed {
 
   @Column({ type: 'timestamp' })
   processedDate: Date; // Ngày xử lý
+
+  @Column({ type: 'timestamp', nullable: true })
+  transDate: Date; // Ngày chứng từ (transaction date)
 
   @Column({ type: 'text', nullable: true })
   result?: string; // Kết quả từ API (JSON string)

@@ -428,4 +428,31 @@ export class LoyaltyService {
       return false;
     }
   }
+  /**
+   * Tạo serial mới trên Loyalty API
+   * API: POST /serial-categories
+   */
+  async createSerial(serialData: {
+    ma_vt: string;
+    ma_serial: string;
+    ten_serial: string;
+    ghi_chu?: string;
+  }): Promise<any> {
+    try {
+      const url = `${this.LOYALTY_API_BASE_URL}/serial-categories`;
+      const response = await this.httpService.axiosRef.post(url, serialData, {
+        headers: {
+          'Content-Type': 'application/json',
+          accept: 'application/json',
+        },
+        timeout: this.REQUEST_TIMEOUT,
+      });
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(
+        `[LoyaltyService] createSerial error: ${error?.message || error}`,
+      );
+      throw error;
+    }
+  }
 }
