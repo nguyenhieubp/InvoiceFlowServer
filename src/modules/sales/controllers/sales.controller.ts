@@ -617,4 +617,30 @@ export class SalesController {
       );
     }
   }
+
+  @Post('stock-transfer/warehouse-delete-by-date-range')
+  async deleteWarehouseByDateRange(
+    @Body('dateFrom') dateFrom: string,
+    @Body('dateTo') dateTo: string,
+    @Body('doctype') doctype?: string,
+  ) {
+    if (!dateFrom || !dateTo) {
+      throw new BadRequestException(
+        'dateFrom và dateTo là bắt buộc (format: DDMMMYYYY, ví dụ: 01OCT2025)',
+      );
+    }
+
+    try {
+      const result = await this.salesService.deleteWarehouseTwiceByDateRange(
+        dateFrom,
+        dateTo,
+        doctype,
+      );
+      return result;
+    } catch (error: any) {
+      throw new BadRequestException(
+        error.message || 'Lỗi khi xóa thống kê warehouse',
+      );
+    }
+  }
 }

@@ -72,6 +72,18 @@ export class SalesService {
     );
   }
 
+  async deleteWarehouseTwiceByDateRange(
+    dateFrom: string,
+    dateTo: string,
+    doctype?: string,
+  ) {
+    return this.salesWarehouseService.deleteWarehouseTwiceByDateRange(
+      dateFrom,
+      dateTo,
+      doctype,
+    );
+  }
+
   // ... (rest of methods)
 
   async getStatusAsys(

@@ -658,10 +658,6 @@ export class StockTransferSyncService {
       const limit = params.limit || 10;
       const skip = (page - 1) * limit;
 
-      this.logger.log(
-        `[getWarehouseProcessed] Params: ${JSON.stringify(params)}`,
-      );
-
       const queryBuilder = this.warehouseProcessedRepository
         .createQueryBuilder('wp')
         .orderBy('wp.transDate', 'DESC')

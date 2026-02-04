@@ -146,7 +146,7 @@ export class SalesWarehouseService {
 
     const whereConditions: any = {
       success: false,
-      processedDate: Between(fromDate, toDate),
+      transDate: Between(fromDate, toDate),
     };
 
     if (doctype) {
@@ -155,7 +155,7 @@ export class SalesWarehouseService {
 
     const failedRecords = await this.warehouseProcessedRepository.find({
       where: whereConditions,
-      order: { processedDate: 'ASC' },
+      order: { transDate: 'ASC' },
     });
 
     if (failedRecords.length === 0) {
@@ -276,6 +276,49 @@ export class SalesWarehouseService {
       failedCount,
       errors: errors.slice(0, 20), // Show up to 20 errors
     };
+  }
+
+  /**
+   * Delete warehouse processed records by date range
+   */
+  async deleteWarehouseTwiceByDateRange(
+    dateFrom: string,
+    dateTo: string,
+    doctype?: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    deletedCount: number;
+  }> {
+    const fromDate = SalesUtils.parseDateFromDDMMMYYYY(dateFrom);
+    const toDate = SalesUtils.parseDateFromDDMMMYYYY(dateTo);
+    toDate.setHours(23, 59, 59, 999);
+
+    const whereConditions: any = {
+      transDate: Between(fromDate, toDate),
+    };
+
+    if (doctype) {
+      whereConditions.doctype = doctype;
+    }
+
+    try {
+      const result =
+        await this.warehouseProcessedRepository.delete(whereConditions);
+
+      return {
+        success: true,
+        message: `Đã xóa ${result.affected || 0} bản ghi`,
+        deletedCount: result.affected || 0,
+      };
+    } catch (error: any) {
+      this.logger.error(
+        `Lỗi khi xóa thống kê warehouse: ${error?.message || error}`,
+      );
+      throw new BadRequestException(
+        error.message || 'Lỗi khi xóa thống kê warehouse',
+      );
+    }
   }
 
   // Private helper methods

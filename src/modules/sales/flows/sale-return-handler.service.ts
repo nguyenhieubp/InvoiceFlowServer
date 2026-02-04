@@ -278,8 +278,22 @@ export class SaleReturnHandlerService {
     try {
       const docCodeWithoutX = this.removeSuffixX(docCode);
 
-      const orderWithoutX =
-        await this.salesInvoiceService.findByOrderCode(docCodeWithoutX);
+      let orderWithoutX;
+      try {
+        orderWithoutX =
+          await this.salesInvoiceService.findByOrderCode(docCodeWithoutX);
+      } catch (error: any) {
+        this.logger.warn(
+          `[SaleOrderWithX] Không tìm thấy đơn gốc ${docCodeWithoutX} (Error: ${error.message}). Thử lại với mã ${docCode}`,
+        );
+        orderWithoutX = await this.salesInvoiceService.findByOrderCode(docCode);
+      }
+
+      if (!orderWithoutX) {
+        throw new Error(
+          `Không tìm thấy đơn hàng gốc cho ${docCode} (đã thử ${docCodeWithoutX} và ${docCode})`,
+        );
+      }
 
       // Explode sales by Stock Transfers
       const [enrichedOrder] =
