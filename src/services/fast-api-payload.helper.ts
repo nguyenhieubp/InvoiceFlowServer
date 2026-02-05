@@ -66,6 +66,10 @@ export class FastApiPayloadHelper {
         tk_thue_no: orderData.tk_thue_no ?? '131111',
         ma_kenh: orderData.ma_kenh ?? 'ONLINE',
         status: orderData.status ?? '2',
+        // [NEW] New fields
+        dh_ngay: orderData.dh_ngay,
+        dh_so: orderData.dh_so,
+        dh_dvcs: orderData.dh_dvcs,
         detail: (orderData.detail || []).map((item: any) => {
           const { product, ...cleanItem } = item;
           const result: any = { ...cleanItem };
@@ -84,6 +88,7 @@ export class FastApiPayloadHelper {
           if ('ma_serial' in item) result.ma_serial = item.ma_serial; // Add mapping for ma_serial
           // Giữ lại ma_bp nếu có (không loại bỏ)
           if ('ma_bp' in item) result.ma_bp = item.ma_bp;
+          if ('dh_ln' in item) result.dh_ln = item.dh_ln; // [NEW]
           return result;
         }),
         cbdetail: null,

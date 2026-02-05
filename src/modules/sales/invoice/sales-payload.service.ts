@@ -189,6 +189,18 @@ export class SalesPayloadService {
               isPlatformOrder, // [NEW] Pass flag
               platformBrand, // [NEW] Pass brand
               isEmployeeMap, // [NEW] Pass map
+              // [NEW] Pass ecommerce flag
+              isEcommerce: [
+                'SHOPEE',
+                'LAZADA',
+                'TIKTOK',
+                'TIKI',
+                'WEB',
+              ].includes(
+                (orderData.channel || orderData.source || 'ONLINE')
+                  .toUpperCase()
+                  .trim(),
+              ),
             });
           }),
       );
@@ -1440,6 +1452,7 @@ export class SalesPayloadService {
       ma_nx_st: this.val(sale.ma_nx_st, 32),
       ma_nx_rt: this.val(sale.ma_nx_rt, 32),
       ma_vt_ref: this.val(sale.ma_vt_ref, 32),
+      dh_ln: context.isEcommerce ? index + 1 : undefined, // [NEW] Ecommerce line number
     });
 
     this.fillInvoiceChietKhauFields(
@@ -1465,7 +1478,14 @@ export class SalesPayloadService {
 
     const maDvcs = await this.loyaltyService.fetchMaDvcs(maBp);
 
-    // not ma_dvcs_ ???pedding
+    // [NEW] Detect Ecommerce context
+    const channel = (orderData.channel || orderData.source || 'ONLINE')
+      .toUpperCase()
+      .trim();
+    const isEcommerce = ['SHOPEE', 'LAZADA', 'TIKTOK', 'TIKI', 'WEB'].includes(
+      channel,
+    );
+
     return {
       action: 0,
       ma_dvcs: maDvcs,
@@ -1495,6 +1515,10 @@ export class SalesPayloadService {
       trans_date: transDate
         ? this.formatDateKeepLocalDay(new Date(transDate))
         : null,
+      // [NEW] New Fields
+      dh_ngay: ngayCt, // Required: Ngày đơn hàng (lấy theo ngày chứng từ)
+      dh_so: isEcommerce ? orderData.docCode : undefined, // Optional: Số đơn hàng (Ecommerce)
+      dh_dvcs: isEcommerce ? maDvcs : undefined, // Optional: Đơn vị đơn hàng (Ecommerce)
       detail,
       cbdetail,
     };
