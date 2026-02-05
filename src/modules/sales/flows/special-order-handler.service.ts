@@ -186,12 +186,19 @@ export class SpecialOrderHandlerService {
       this.logger.error(
         `[SpecialOrder] Lỗi khi xử lý ${description} ${docCode}: ${error?.message || error}`,
       );
+
+      const exceptionResponse = error?.getResponse ? error.getResponse() : null;
+      const responseData =
+        exceptionResponse?.data || error?.response?.data || null;
+
       return {
         result: null,
         status: STATUS.FAILED,
-        message: `Lỗi xử lý ${description}: ${error?.message || error}`,
+        message: `Lỗi xử lý ${description}: ${
+          exceptionResponse?.message || error?.message || error
+        }`,
         guid: null,
-        fastApiResponse: null,
+        fastApiResponse: responseData, // [NEW]
         payload: payloadLog,
       };
     }
@@ -583,12 +590,22 @@ export class SpecialOrderHandlerService {
       this.logger.error(
         `[ServiceOrderFlow] Lỗi khi xử lý đơn dịch vụ ${docCode}: ${error?.message || error}`,
       );
+
+      const exceptionResponse = error?.getResponse ? error.getResponse() : null;
+      const responseData =
+        exceptionResponse?.data ||
+        error?.response?.data ||
+        error?.response ||
+        null;
+
       return {
         result: null,
         status: STATUS.FAILED,
-        message: `Lỗi xử lý đơn dịch vụ: ${error?.message || error}`,
+        message: `Lỗi xử lý đơn dịch vụ: ${
+          exceptionResponse?.message || error?.message || error
+        }`,
         guid: null,
-        fastApiResponse: null,
+        fastApiResponse: responseData, // [NEW]
         payload: payloadLog,
       };
     }

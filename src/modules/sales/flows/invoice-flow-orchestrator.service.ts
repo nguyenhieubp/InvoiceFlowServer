@@ -72,7 +72,13 @@ export class InvoiceFlowOrchestratorService {
           const errorMessage =
             validationResult.message ||
             `Đơn hàng ${docCode} không đủ điều kiện tạo hóa đơn`;
-          await this.recordFailure(docCode, orderData, errorMessage, maDvcs);
+          await this.recordFailure(
+            docCode,
+            orderData,
+            errorMessage,
+            maDvcs,
+            null,
+          );
           return {
             success: false,
             message: errorMessage,
@@ -250,6 +256,7 @@ export class InvoiceFlowOrchestratorService {
     orderData: any,
     message: string,
     maDvcs: string,
+    fastApiResponse?: string | null,
   ) {
     this.logger.error(`Processing failed for ${docCode}: ${message}`);
     await this.salesQueryService.saveFastApiInvoice({
@@ -262,6 +269,7 @@ export class InvoiceFlowOrchestratorService {
       guid: null,
       lastErrorMessage: message,
       xemNhanh: message, // [New]
+      fastApiResponse: fastApiResponse || undefined, // [NEW] Save if available
     });
   }
 
@@ -313,7 +321,22 @@ export class InvoiceFlowOrchestratorService {
       };
     } catch (error: any) {
       const errorMessage = `Lỗi hệ thống: ${error?.message || error}`;
-      await this.recordFailure(docCode, orderData, errorMessage, maDvcs);
+
+      // [NEW] Try to extract fastApiResponse from error object if possible
+      let errorResponse: string | null = null;
+      if (error?.response?.data) {
+        errorResponse = JSON.stringify(error.response.data);
+      } else if (error instanceof Error && (error as any).response?.data) {
+        errorResponse = JSON.stringify((error as any).response.data);
+      }
+
+      await this.recordFailure(
+        docCode,
+        orderData,
+        errorMessage,
+        maDvcs,
+        errorResponse,
+      );
       return {
         success: false,
         message: errorMessage,

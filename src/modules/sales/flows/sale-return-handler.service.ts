@@ -409,8 +409,21 @@ export class SaleReturnHandlerService {
     } catch (error: any) {
       // Lấy thông báo lỗi chính xác từ Fast API response
       let errorMessage = 'Tạo đơn hàng thất bại';
+      // [NEW] Extract full response data if available
+      const exceptionResponse = error?.getResponse ? error.getResponse() : null;
+      const responseData =
+        exceptionResponse?.data || error?.response?.data || null;
 
-      if (error?.response?.data) {
+      if (responseData) {
+        if (Array.isArray(responseData) && responseData.length > 0) {
+          errorMessage =
+            responseData[0].message || responseData[0].error || errorMessage;
+        } else if (responseData.message) {
+          errorMessage = responseData.message;
+        } else if (responseData.error) {
+          errorMessage = responseData.error;
+        }
+      } else if (error?.response?.data) {
         const errorData = error.response.data;
         if (Array.isArray(errorData) && errorData.length > 0) {
           errorMessage =
@@ -447,7 +460,7 @@ export class SaleReturnHandlerService {
           success: false,
           message: formattedErrorMessage,
           error: errorMessage,
-          details: error?.response?.data || null,
+          details: responseData || error?.response?.data || null, // [NEW] Use extracted data
           timestamp: new Date().toISOString(),
         };
         fastApiInvoice.fastApiResponse = JSON.stringify(errorJson);

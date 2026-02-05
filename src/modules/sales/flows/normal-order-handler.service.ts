@@ -139,9 +139,14 @@ export class NormalOrderHandlerService {
         },
       );
     } catch (error: any) {
+      const exceptionResponse = error?.getResponse ? error.getResponse() : null;
+      const responseData =
+        exceptionResponse?.data || error?.response?.data || null;
       const responseMessage =
-        // ... existing error handling ...
-        error?.response?.data?.message || error?.message || '';
+        exceptionResponse?.message ||
+        error?.response?.data?.message ||
+        error?.message ||
+        '';
       const isDuplicateError =
         typeof responseMessage === 'string' &&
         (responseMessage.toLowerCase().includes('đã tồn tại') ||
@@ -162,7 +167,8 @@ export class NormalOrderHandlerService {
         );
         soResult = {
           status: 0,
-          message: error?.message || 'Create Sales Order Failed',
+          message: responseMessage || 'Create Sales Order Failed',
+          response: responseData, // [NEW] Keep track of detailed response
         };
       }
     }
@@ -185,8 +191,14 @@ export class NormalOrderHandlerService {
         },
       );
     } catch (error: any) {
+      const exceptionResponse = error?.getResponse ? error.getResponse() : null;
+      const responseData =
+        exceptionResponse?.data || error?.response?.data || null;
       const responseMessage =
-        error?.response?.data?.message || error?.message || '';
+        exceptionResponse?.message ||
+        error?.response?.data?.message ||
+        error?.message ||
+        '';
       const isDuplicateError =
         typeof responseMessage === 'string' &&
         (responseMessage.toLowerCase().includes('đã tồn tại') ||
@@ -209,14 +221,16 @@ export class NormalOrderHandlerService {
         // Return failure with soResult preserved
         return {
           status: 0,
-          message: `Lỗi tạo Sales Invoice: ${error?.message || error}`,
+          message: `Lỗi tạo Sales Invoice: ${responseMessage}`,
           result: {
             salesOrder: soResult,
-            salesInvoiceError: error?.message || error,
+            salesInvoiceError: responseMessage,
           },
           fastApiResponse: {
             salesOrder: soResult,
-            salesInvoiceError: error?.message || error,
+            salesInvoiceError: responseMessage,
+            salesInvoiceResponse: responseData, // [NEW]
+            salesInvoice: responseData, // Try to populate standard field if it's an array/object
           },
           payload: payloadLog,
         };

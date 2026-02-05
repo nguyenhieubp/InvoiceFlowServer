@@ -101,7 +101,10 @@ export class FastApiInvoiceFlowService {
           this.logger.error(
             `[Flow] Customer API trả về status = ${firstItem.status}: ${errorMessage}`,
           );
-          throw new BadRequestException(errorMessage);
+          throw new BadRequestException({
+            message: errorMessage,
+            data: result,
+          });
         }
       } else if (
         result &&
@@ -114,7 +117,10 @@ export class FastApiInvoiceFlowService {
           this.logger.error(
             `[Flow] Customer API trả về status = ${result.status}: ${errorMessage}`,
           );
-          throw new BadRequestException(errorMessage);
+          throw new BadRequestException({
+            message: errorMessage,
+            data: result,
+          });
         }
       }
       return result;
@@ -199,7 +205,10 @@ export class FastApiInvoiceFlowService {
           this.logger.error(
             `[Flow] Sales Order API trả về status = ${firstItem.status}: ${errorMessage}`,
           );
-          throw new BadRequestException(errorMessage);
+          throw new BadRequestException({
+            message: errorMessage,
+            data: result,
+          });
         }
       } else if (
         result &&
@@ -211,7 +220,10 @@ export class FastApiInvoiceFlowService {
           this.logger.error(
             `[Flow] Sales Order API trả về status = ${result.status}: ${errorMessage}`,
           );
-          throw new BadRequestException(errorMessage);
+          throw new BadRequestException({
+            message: errorMessage,
+            data: result,
+          });
         }
       }
 
@@ -363,7 +375,10 @@ export class FastApiInvoiceFlowService {
           this.logger.error(
             `[Flow] Sales Invoice API trả về status = ${firstItem.status}: ${errorMessage}`,
           );
-          // throw new BadRequestException(errorMessage);
+          throw new BadRequestException({
+            message: errorMessage,
+            data: result,
+          });
         }
       } else if (
         result &&
@@ -375,7 +390,10 @@ export class FastApiInvoiceFlowService {
           this.logger.error(
             `[Flow] Sales Invoice API trả về status = ${result.status}: ${errorMessage}`,
           );
-          // throw new BadRequestException(errorMessage);
+          throw new BadRequestException({
+            message: errorMessage,
+            data: result,
+          });
         }
       }
 
@@ -420,7 +438,10 @@ export class FastApiInvoiceFlowService {
           this.logger.error(
             `[Flow] Sales Return API trả về status = ${firstItem.status}: ${errorMessage}`,
           );
-          // throw new BadRequestException(errorMessage);
+          throw new BadRequestException({
+            message: errorMessage,
+            data: result,
+          });
         }
       } else if (
         result &&
@@ -432,7 +453,10 @@ export class FastApiInvoiceFlowService {
           this.logger.error(
             `[Flow] Sales Return API trả về status = ${result.status}: ${errorMessage}`,
           );
-          // throw new BadRequestException(errorMessage);
+          throw new BadRequestException({
+            message: errorMessage,
+            data: result,
+          });
         }
       }
 
@@ -481,7 +505,10 @@ export class FastApiInvoiceFlowService {
           this.logger.error(
             `[Flow] GxtInvoice API trả về status = ${firstItem.status}: ${errorMessage}`,
           );
-          // throw new BadRequestException(errorMessage);
+          throw new BadRequestException({
+            message: errorMessage,
+            data: result,
+          });
         }
       } else if (
         result &&
@@ -493,7 +520,10 @@ export class FastApiInvoiceFlowService {
           this.logger.error(
             `[Flow] GxtInvoice API trả về status = ${result.status}: ${errorMessage}`,
           );
-          // throw new BadRequestException(errorMessage);
+          throw new BadRequestException({
+            message: errorMessage,
+            data: result,
+          });
         }
       }
 
