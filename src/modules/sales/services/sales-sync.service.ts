@@ -316,7 +316,7 @@ export class SalesSyncService {
     }>;
     errors?: string[];
   }> {
-    const brands = ['f3', 'labhair', 'yaman', 'menard', 'chando'];
+    const brands = ['f3', 'labhair', 'yaman', 'menard']; // 'chando' commented out per request
     const allErrors: string[] = [];
     const brandResults: Array<{
       brand: string;
