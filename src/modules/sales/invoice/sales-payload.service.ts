@@ -68,9 +68,10 @@ export class SalesPayloadService {
       }
 
       // 2. Determine order type (from first sale)
-      const { isThuong: isNormalOrder } = InvoiceLogicUtils.getOrderTypes(
-        allSales[0]?.ordertypeName || allSales[0]?.ordertype || '',
-      );
+      const { isThuong: isNormalOrder, isSanTmdt } =
+        InvoiceLogicUtils.getOrderTypes(
+          allSales[0]?.ordertypeName || allSales[0]?.ordertype || '',
+        );
 
       // 3. Load supporting data
       const transDate = orderData.stockTransfers?.[0]?.transDate || null;
@@ -189,18 +190,8 @@ export class SalesPayloadService {
               isPlatformOrder, // [NEW] Pass flag
               platformBrand, // [NEW] Pass brand
               isEmployeeMap, // [NEW] Pass map
-              // [NEW] Pass ecommerce flag
-              isEcommerce: [
-                'SHOPEE',
-                'LAZADA',
-                'TIKTOK',
-                'TIKI',
-                'WEB',
-              ].includes(
-                (orderData.channel || orderData.source || 'ONLINE')
-                  .toUpperCase()
-                  .trim(),
-              ),
+              // [NEW] Pass ecommerce flag (Use correct logic from InvoiceLogicUtils)
+              isEcommerce: isSanTmdt,
             });
           }),
       );

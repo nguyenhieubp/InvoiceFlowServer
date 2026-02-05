@@ -14,6 +14,7 @@ import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PaymentSyncLog } from '../entities/payment-sync-log.entity';
 import { FastApiPayloadHelper } from './fast-api-payload.helper';
+import { InvoiceLogicUtils } from '../utils/invoice-logic.utils';
 
 /**
  * Service quản lý tạo invoice trong Fast API
@@ -1129,49 +1130,13 @@ export class FastApiInvoiceFlowService {
     }
 
     // Build payload từ stock transfer
-    const payload = {
-      ma_dvcs: maDvcs,
-      ma_kh: stockTransfer.branchCode || '',
-      ma_gd: '2', // Fix cứng ma_gd = 2
-      ngay_ct: stockTransfer.transDate || new Date().toISOString(),
-      so_ct: stockTransfer.docCode || '',
-      ma_nt: 'VND',
-      ty_gia: 1,
-      dien_giai:
-        stockTransfer.docDesc ||
-        `Phiếu ${stockTransfer.ioType === 'I' ? 'nhập' : 'xuất'} kho ${stockTransfer.docCode}`,
-      detail: [
-        {
-          ma_vt: materialCode,
-          dvt: unit,
-          so_serial: stockTransfer.batchSerial || '',
-          ma_kho: mappedStockCode,
-          so_luong: Math.abs(parseFloat(String(stockTransfer.qty || '0'))), // Lấy giá trị tuyệt đối
-          gia_nt: 0,
-          tien_nt: 0,
-          ma_lo: stockTransfer.batchSerial || '',
-          ma_nx: stockTransfer.lineInfo1 || '',
-          ma_vv: '',
-          so_lsx: '',
-          ma_sp: stockTransfer.itemCode || '',
-          ma_hd: '',
-          // Các field chỉ có trong warehouseRelease
-          ...(stockTransfer.ioType === 'O'
-            ? {
-                px_gia_dd: 0,
-                ma_phi: '',
-                ma_ku: '',
-                ma_phi_hh: '',
-                ma_phi_ttlk: '',
-                tien_hh_nt: 0,
-                tien_ttlk_nt: 0,
-              }
-            : {
-                pn_gia_tb: 0,
-              }),
-        },
-      ],
-    };
+    const payload = this.buildWarehouseReleasePayload(
+      stockTransfer,
+      maDvcs,
+      materialCode,
+      unit,
+      mappedStockCode,
+    );
 
     // Gọi API tương ứng (ioType đã được validate ở trên)
     let result: any;
@@ -1530,5 +1495,76 @@ export class FastApiInvoiceFlowService {
         }
       }
     }
+  }
+
+  /**
+   * Helper build payload cho Warehouse Release/Receipt
+   */
+  private buildWarehouseReleasePayload(
+    stockTransfer: any,
+    maDvcs: string,
+    materialCode: string,
+    unit: string,
+    mappedStockCode: string,
+  ): any {
+    // [NEW] Logic detect Ecommerce using InvoiceLogicUtils
+    const { isSanTmdt } = InvoiceLogicUtils.getOrderTypes(
+      stockTransfer.ordertypeName || '',
+    );
+    const finalTransDate = stockTransfer.transDate || new Date().toISOString();
+
+    // Build payload từ stock transfer
+    const payload: any = {
+      ma_dvcs: maDvcs,
+      ma_kh: stockTransfer.branchCode || '',
+      ma_gd: '2', // Fix cứng ma_gd = 2
+      ngay_ct: finalTransDate,
+      so_ct: stockTransfer.docCode || '',
+      ma_nt: 'VND',
+      ty_gia: 1,
+      dien_giai:
+        stockTransfer.docDesc ||
+        `Phiếu ${stockTransfer.ioType === 'I' ? 'nhập' : 'xuất'} kho ${stockTransfer.docCode}`,
+      ngay_ct_hda: finalTransDate, // [NEW] Required field per user request
+      detail: [
+        {
+          ma_vt: materialCode,
+          dvt: unit,
+          so_serial: stockTransfer.batchSerial || '',
+          ma_kho: mappedStockCode,
+          so_luong: Math.abs(parseFloat(String(stockTransfer.qty || '0'))), // Lấy giá trị tuyệt đối
+          gia_nt: 0,
+          tien_nt: 0,
+          ma_lo: stockTransfer.batchSerial || '',
+          ma_nx: stockTransfer.lineInfo1 || '',
+          ma_vv: '',
+          so_lsx: '',
+          ma_sp: stockTransfer.itemCode || '',
+          ma_hd: '',
+          // Các field chỉ có trong warehouseRelease
+          ...(stockTransfer.ioType === 'O'
+            ? {
+                px_gia_dd: 0,
+                ma_phi: '',
+                ma_ku: '',
+                ma_phi_hh: '',
+                ma_phi_ttlk: '',
+                tien_hh_nt: 0,
+                tien_ttlk_nt: 0,
+              }
+            : {
+                pn_gia_tb: 0,
+              }),
+        },
+      ],
+    };
+
+    // [NEW] Add fields for E-commerce orders
+    if (isSanTmdt) {
+      payload.so_ct_hda = '';
+      payload.ma_dvcs_hda = '';
+    }
+
+    return payload;
   }
 }
