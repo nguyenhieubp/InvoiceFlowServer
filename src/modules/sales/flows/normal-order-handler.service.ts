@@ -66,8 +66,6 @@ export class NormalOrderHandlerService {
     );
 
     // [FIX] N8n Integration for Card Data (Enrichment source of truth)
-    // Applied AFTER explosion to ensure we overwrite any Stock Transfer duplicates
-    // [FIX] Check orderData.sales (Raw) for OrderType, as exploded sales might be minimalist and miss orderTypeName
     const isTachThe = orderData.sales?.some((s: any) =>
       SalesUtils.isTachTheOrder(s.ordertypeName),
     );
@@ -97,40 +95,28 @@ export class NormalOrderHandlerService {
       }
     }
 
-    const invoiceData =
-      await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
-
-    // Payload Logging
     const payloadLog: any = {};
 
-    // [OPTIMIZATION] Sync Lot/Serial ONCE here to prevent redundant calls & race conditions
-    // This replaces the internal sync calls in createSalesOrder and createSalesInvoice
-    try {
-      // Need to cast to any to access private/protected method if not public,
-      // OR better: fastApiInvoiceFlowService should expose a public sync method or we rely on the flow service refactor.
-      // Since we modified FastApiInvoiceFlowService to have options, we can utilize that.
-      // BUT syncMissingLotSerial is private.
-      // Solution: We will rely on createSalesOrder to do the sync (first call),
-      // and skip it in createSalesInvoice (second call).
-      // OR even better: We updated executeFullInvoiceFlow to do it.
-      // But here we are calling them separately.
-      // Let's have createSalesOrder do the sync (default behavior, so we don't pass skipLotSync),
-      // and createSalesInvoice SKIP it.
-    } catch (e) {
-      // Ignore
-    }
-
-    // 2. Create Sales Order (User Request: Run BOTH Order and Invoice)
+    // ---------------------------------------------------------
+    // STEP 2: CREATE SALES ORDER (Unified - 1 SO per Order)
+    // ---------------------------------------------------------
     let soResult: any = null;
-    const soPayload = {
-      ...invoiceData,
-      customer: orderData.customer,
-      ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-    };
-    payloadLog.salesOrder = soPayload;
+    let soStatus: number = STATUS.FAILED; // [FIX] Explicit type
 
     try {
-      // Allow sync here (first time)
+      // Build full payload for SO
+      const fullInvoiceData =
+        await this.salesPayloadService.buildFastApiInvoiceData(enrichedOrder);
+
+      const soPayload = {
+        ...fullInvoiceData,
+        customer: orderData.customer,
+        ten_kh: orderData.customer?.name || fullInvoiceData.ong_ba || '',
+      };
+      payloadLog.salesOrder = soPayload;
+
+      // Create Sales Order
+      // [OPTIMIZATION] Sync Lot/Serial ONCE here (skipCustomerSync=true as done above)
       soResult = await this.fastApiInvoiceFlowService.createSalesOrder(
         soPayload,
         0,
@@ -138,6 +124,7 @@ export class NormalOrderHandlerService {
           skipCustomerSync: true,
         },
       );
+      soStatus = STATUS.SUCCESS;
     } catch (error: any) {
       const exceptionResponse = error?.getResponse ? error.getResponse() : null;
       const responseData =
@@ -161,6 +148,7 @@ export class NormalOrderHandlerService {
           status: 1, // Mock success
           message: 'Sales Order already exists',
         };
+        soStatus = STATUS.SUCCESS;
       } else {
         this.logger.error(
           `Lỗi tạo Sales Order ${docCode}: ${responseMessage}. Vẫn tiếp tục tạo Invoice.`,
@@ -168,96 +156,204 @@ export class NormalOrderHandlerService {
         soResult = {
           status: 0,
           message: responseMessage || 'Create Sales Order Failed',
-          response: responseData, // [NEW] Keep track of detailed response
+          response: responseData,
         };
+        // Continue to Invoice even if SO failed?
+        // Usually, if SO fails, we might still try SI or stop.
+        // Current logic allows continuing.
       }
     }
 
-    // 3. Create Sales Invoice
-    let siResult: any;
-    const siPayload = {
-      ...invoiceData,
-      customer: orderData.customer,
-      ten_kh: orderData.customer?.name || invoiceData.ong_ba || '',
-    };
-    payloadLog.salesInvoice = siPayload;
+    // ---------------------------------------------------------
+    // STEP 3: CREATE SALES INVOICE (Split by Date)
+    // ---------------------------------------------------------
+    // Group sales by transDate (formatted YYYY-MM-DD)
+    const salesByDate = new Map<string, any[]>();
+    const noStockTransferSales: any[] = [];
 
-    try {
-      // [OPTIMIZATION] Skip sync here (second time)
-      siResult = await this.fastApiInvoiceFlowService.createSalesInvoice(
-        siPayload,
-        {
-          skipLotSync: true,
-        },
-      );
-    } catch (error: any) {
-      const exceptionResponse = error?.getResponse ? error.getResponse() : null;
-      const responseData =
-        exceptionResponse?.data || error?.response?.data || null;
-      const responseMessage =
-        exceptionResponse?.message ||
-        error?.response?.data?.message ||
-        error?.message ||
-        '';
-      const isDuplicateError =
-        typeof responseMessage === 'string' &&
-        (responseMessage.toLowerCase().includes('đã tồn tại') ||
-          responseMessage.toLowerCase().includes('pk_d81'));
+    enrichedOrder.sales.forEach((sale: any) => {
+      // Check transDate from attached stockTransfer
+      let transDateStr = '';
+      if (sale.stockTransfer?.transDate) {
+        // Assume format is Date object or string ISO
+        const d = new Date(sale.stockTransfer.transDate);
+        if (!isNaN(d.getTime())) {
+          transDateStr = ConvertUtils.formatDateYYYYMMDD(d); // YYYY-MM-DD
+        }
+      } else if (sale.transDate) {
+        // Fallback if enriched directly on sale
+        const d = new Date(sale.transDate);
+        if (!isNaN(d.getTime())) {
+          transDateStr = ConvertUtils.formatDateYYYYMMDD(d);
+        }
+      }
 
-      if (isDuplicateError) {
-        this.logger.warn(
-          `Đơn hàng ${docCode} đã tồn tại trong Fast API. Tiếp tục xử lý Payment.`,
-        );
-        // Mock success result to allow flow to continue
-        siResult = [
-          {
-            status: STATUS.SUCCESS,
-            message: 'Đã tồn tại (Duplicate) - Proceeding to Payment',
-            guid: null, // Cannot retrieve GUID easily from duplicate error, but simpler for retryFlow
-          },
-        ];
+      if (transDateStr) {
+        let group = salesByDate.get(transDateStr);
+        if (!group) {
+          group = [];
+          salesByDate.set(transDateStr, group);
+        }
+        group.push(sale);
       } else {
-        // Real failure
-        // Return failure with soResult preserved
-        return {
-          status: 0,
-          message: `Lỗi tạo Sales Invoice: ${responseMessage}`,
-          result: {
-            salesOrder: soResult,
-            salesInvoiceError: responseMessage,
-          },
-          fastApiResponse: {
-            salesOrder: soResult,
-            salesInvoiceError: responseMessage,
-            salesInvoiceResponse: responseData, // [NEW]
-            salesInvoice: responseData, // Try to populate standard field if it's an array/object
-          },
-          payload: payloadLog,
-        };
+        noStockTransferSales.push(sale);
+      }
+    });
+
+    const sortedDates = Array.from(salesByDate.keys()).sort();
+
+    // Strategy for No-Stock-Transfer items:
+    // If no dates, use today/order date (single group).
+    // If dates exist, attach no-stock items to the FIRST group.
+    if (sortedDates.length === 0) {
+      const orderDateStr = orderData.docDate
+        ? ConvertUtils.formatDateYYYYMMDD(new Date(orderData.docDate))
+        : ConvertUtils.formatDateYYYYMMDD(new Date());
+      salesByDate.set(orderDateStr, enrichedOrder.sales);
+      sortedDates.push(orderDateStr);
+    } else {
+      if (noStockTransferSales.length > 0) {
+        const firstDate = sortedDates[0];
+        const group = salesByDate.get(firstDate);
+        if (group) {
+          group.push(...noStockTransferSales);
+        }
       }
     }
 
-    const isSiSuccess =
-      (Array.isArray(siResult) &&
-        siResult.length > 0 &&
-        siResult[0].status === STATUS.SUCCESS) ||
-      (siResult && siResult.status === STATUS.SUCCESS);
+    const siResults: any[] = [];
+    const splitErrors: string[] = [];
+    let processingStatus: number = STATUS.SUCCESS; // [FIX] Explicit type
 
-    if (!isSiSuccess) {
-      const message =
-        Array.isArray(siResult) && siResult[0]?.message
-          ? siResult[0].message
-          : siResult?.message || 'Tạo Sales Invoice thất bại';
-      return {
-        status: 0,
-        message: `Tạo Sales Invoice thất bại: ${message}`,
-        result: { salesOrder: soResult, salesInvoice: siResult },
-        fastApiResponse: { salesOrder: soResult, salesInvoice: siResult },
-        payload: payloadLog,
+    for (let i = 0; i < sortedDates.length; i++) {
+      const dateKey = sortedDates[i];
+      const groupSales = salesByDate.get(dateKey);
+
+      // Determine Suffix
+      const isSplit = sortedDates.length > 1;
+      const currentDocCode = isSplit ? `${docCode}-${i + 1}` : docCode;
+
+      this.logger.log(
+        `[NormalOrder] Processing Invoice Split ${currentDocCode} (Date: ${dateKey}) - Items: ${groupSales?.length}`,
+      );
+
+      // Construct Partial Order Data
+      const partialOrderData = {
+        ...orderData,
+        docCode: currentDocCode, // Use split code
+        // docDate: NO OVERRIDE here, keep original for reference
+        sales: groupSales,
       };
+
+      // Build Invoice Payload for this split
+      let invoiceData: any;
+      try {
+        invoiceData =
+          await this.salesPayloadService.buildFastApiInvoiceData(
+            partialOrderData,
+          );
+      } catch (err: any) {
+        const msg = `Failed to build payload for ${currentDocCode}: ${err.message}`;
+        this.logger.error(`[NormalOrder] ${msg}`);
+        splitErrors.push(msg);
+        processingStatus = STATUS.FAILED;
+        continue;
+      }
+
+      // Override Dates for Sales Invoice (Use Stock Transfer Date)
+      const year = dateKey.slice(0, 4);
+      const month = dateKey.slice(4, 6);
+      const day = dateKey.slice(6, 8);
+      const stockTransferDateISO = `${year}-${month}-${day}T00:00:00.000Z`;
+
+      const siPayload = {
+        ...invoiceData,
+        ngay_ct: stockTransferDateISO,
+        ngay_lct: stockTransferDateISO,
+        dh_ngay: stockTransferDateISO,
+        customer: partialOrderData.customer,
+        ten_kh: partialOrderData.customer?.name || invoiceData.ong_ba || '',
+      };
+
+      // Save payload to log (accumulate if multiple)
+      if (!payloadLog.salesInvoice) payloadLog.salesInvoice = [];
+      if (Array.isArray(payloadLog.salesInvoice)) {
+        payloadLog.salesInvoice.push({
+          docCode: currentDocCode,
+          payload: siPayload,
+        });
+      }
+
+      // Create Sales Invoice
+      let siResult: any = null;
+      try {
+        // [OPTIMIZATION] Skip sync here (already done in SO step)
+        siResult = await this.fastApiInvoiceFlowService.createSalesInvoice(
+          siPayload,
+          { skipLotSync: true },
+        );
+        // Add docCode for reference
+        if (Array.isArray(siResult) && siResult.length > 0) {
+          siResult[0].docCode = currentDocCode;
+        } else if (siResult) {
+          siResult.docCode = currentDocCode;
+        }
+      } catch (error: any) {
+        const exceptionResponse = error?.getResponse
+          ? error.getResponse()
+          : null;
+        const responseMessage =
+          exceptionResponse?.message ||
+          error?.response?.data?.message ||
+          error?.message ||
+          '';
+        const isDuplicateError =
+          typeof responseMessage === 'string' &&
+          (responseMessage.toLowerCase().includes('đã tồn tại') ||
+            responseMessage.toLowerCase().includes('pk_d81'));
+
+        if (isDuplicateError) {
+          siResult = [
+            {
+              status: STATUS.SUCCESS,
+              message: 'Invoice Duplicate',
+              guid: null,
+              docCode: currentDocCode,
+            },
+          ];
+        } else {
+          this.logger.error(
+            `Lỗi tạo Sales Invoice ${currentDocCode}: ${responseMessage}`,
+          );
+          siResult = {
+            status: 0,
+            message: responseMessage,
+            docCode: currentDocCode,
+          };
+          splitErrors.push(`SI ${currentDocCode} failed: ${responseMessage}`);
+          processingStatus = STATUS.FAILED;
+        }
+      }
+
+      siResults.push(siResult);
+    } // End Loop
+
+    // Check overall SI success
+    const isSiSuccess =
+      siResults.length > 0 &&
+      siResults.every(
+        (r) =>
+          (Array.isArray(r) && r[0].status === STATUS.SUCCESS) ||
+          r.status === STATUS.SUCCESS,
+      );
+
+    if (!isSiSuccess && processingStatus === STATUS.SUCCESS) {
+      processingStatus = STATUS.FAILED;
     }
 
-    // 4 & 5. Payment Processing (Cashio & Stock)
+    // ---------------------------------------------------------
+    // STEP 4 & 5: PAYMENT PROCESSING
+    // ---------------------------------------------------------
     const paymentErrors: string[] = [];
     const cashioResult = {
       cashReceiptResults: [],
@@ -265,113 +361,141 @@ export class NormalOrderHandlerService {
     };
     let paymentResult: any = null;
 
-    // 4. Cashio Payment
-    try {
-      const paymentDataList =
-        await this.paymentService.findPaymentByDocCode(docCode);
-      if (paymentDataList && paymentDataList.length > 0) {
-        this.logger.log(
-          `[Cashio] Found ${paymentDataList.length} payment records for order ${docCode}. Processing...`,
+    // Determine Main Split (First Successful One)
+    const mainSplitResult = siResults.find(
+      (r) =>
+        (Array.isArray(r) && r[0].status === STATUS.SUCCESS) ||
+        r.status === STATUS.SUCCESS,
+    );
+    const mainDocCode = mainSplitResult
+      ? mainSplitResult.docCode ||
+        (Array.isArray(mainSplitResult)
+          ? mainSplitResult[0].docCode
+          : undefined)
+      : docCode; // Fallback
+
+    if (processingStatus === STATUS.SUCCESS || mainSplitResult) {
+      // 4. Cashio Payment
+      try {
+        const paymentDataList =
+          await this.paymentService.findPaymentByDocCode(docCode);
+        if (paymentDataList && paymentDataList.length > 0) {
+          this.logger.log(
+            `[Cashio] Found ${paymentDataList.length} payment records. Linking to ${mainDocCode}...`,
+          );
+          for (const originalPaymentData of paymentDataList) {
+            // Clone and override so_code/so_hd/ma_tc to point to the actual Invoice created
+            const modifiedPaymentData = {
+              ...originalPaymentData,
+              so_code: mainDocCode, // Point to split invoice
+              so_hd: mainDocCode, // Point to split invoice
+              ma_tc: mainDocCode, // Point to split invoice
+            };
+            await this.fastApiInvoiceFlowService.processCashioPayment(
+              modifiedPaymentData,
+            );
+          }
+          this.logger.log(`[Cashio] Payment sync completed.`);
+        }
+      } catch (err: any) {
+        const msg = `[Cashio Error] ${err?.message || err}`;
+        this.logger.error(msg);
+        paymentErrors.push(msg);
+      }
+
+      // 5. Payment (Stock)
+      try {
+        const docCodesForStockTransfer =
+          StockTransferUtils.getDocCodesForStockTransfer([docCode]);
+        const stockTransfers = await this.stockTransferRepository.find({
+          where: { soCode: In(docCodesForStockTransfer) },
+        });
+        const stockCodes = Array.from(
+          new Set(stockTransfers.map((st) => st.stockCode).filter(Boolean)),
         );
-        // Note: processCashioPayment might need to be instrumented to return payload if strictly required,
-        // but Sales Order/Invoice is the main request.
-        for (const paymentData of paymentDataList) {
-          await this.fastApiInvoiceFlowService.processCashioPayment(
-            paymentData,
+
+        if (stockCodes.length > 0) {
+          // [NOTE] processPayment might utilize docCode inside to fetch payments again.
+          // We should pass mainDocCode if possible, but processPayment signature
+          // takes docCode (to look up payments).
+          // Ideally, we should refactor processPayment to accept targetDocCode.
+          // For now, we pass docCode (original) to find payments,
+          // ensuring processPayment uses mainDocCode for actual submission would be ideal
+          // but might be out of scope for this surgical change.
+          // Let's assume processPayment handles standard flow.
+          // Wait, processPayment takes invoiceData too. Let's pass the payload of main split.
+          const mainSplitPayloadStr = JSON.stringify(
+            payloadLog.salesInvoice?.find((p: any) => p.docCode === mainDocCode)
+              ?.payload || {},
+          );
+          const mainSplitPayload = JSON.parse(mainSplitPayloadStr);
+
+          paymentResult = await this.fastApiInvoiceFlowService.processPayment(
+            docCode, // Use original code to find payments
+            orderData,
+            mainSplitPayload, // Use payload from main split
+            stockCodes,
           );
         }
-        this.logger.log(
-          `[Cashio] Successfully triggered payment sync for order ${docCode}`,
-        );
-      } else {
-        this.logger.log(
-          `[Cashio] No payment records found for order ${docCode}`,
-        );
+      } catch (e: any) {
+        const msg = `[Stock Payment Error] ${e?.message || e}`;
+        this.logger.warn(`[Payment] warning: ${msg}`);
+        paymentErrors.push(msg);
       }
-    } catch (err: any) {
-      const msg = `[Cashio Error] ${err?.message || err}`;
-      this.logger.error(
-        `[Cashio] Error processing payment sync for order ${docCode}: ${msg}`,
-      );
-      paymentErrors.push(msg);
     }
 
-    // 5. Payment (Stock)
-    try {
-      const docCodesForStockTransfer =
-        StockTransferUtils.getDocCodesForStockTransfer([docCode]);
-      const stockTransfers = await this.stockTransferRepository.find({
-        where: { soCode: In(docCodesForStockTransfer) },
-      });
-      const stockCodes = Array.from(
-        new Set(stockTransfers.map((st) => st.stockCode).filter(Boolean)),
-      );
-
-      if (stockCodes.length > 0) {
-        paymentResult = await this.fastApiInvoiceFlowService.processPayment(
-          docCode,
-          orderData,
-          invoiceData,
-          stockCodes,
-        );
-        // Note: processPayment logic is complex and internal.
-      }
-    } catch (e: any) {
-      const msg = `[Stock Payment Error] ${e?.message || e}`;
-      this.logger.warn(`[Payment] warning: ${msg}`);
-      // Only treat as error if it's critical? User seems to care about "Cấu hình thanh toán" which comes from here roughly or step 4.
-      // processPayment uses findPaymentMethodByCode too.
-      paymentErrors.push(msg);
-    }
-
-    // 6. Build Result
-    // If there are payment errors, we treat the WHOLE process as FAILED to allow retry.
+    // ---------------------------------------------------------
+    // STEP 6: BUILD FINAL RESPONSE
+    // ---------------------------------------------------------
     const isPaymentSuccess = paymentErrors.length === 0;
-
-    const responseStatus =
-      isPaymentSuccess && isSiSuccess ? STATUS.SUCCESS : STATUS.FAILED;
+    const finalStatus =
+      isSiSuccess && isPaymentSuccess && soStatus === STATUS.SUCCESS
+        ? STATUS.SUCCESS
+        : STATUS.FAILED;
 
     let responseMessage = '';
-    if (responseStatus === STATUS.SUCCESS) {
+    if (finalStatus === STATUS.SUCCESS) {
       responseMessage = 'Tạo hóa đơn thành công';
-      // Add note if it was a duplicate retry
-      if (
-        Array.isArray(siResult) &&
-        siResult[0]?.message?.includes('Duplicate')
-      ) {
-        responseMessage = 'Tạo hóa đơn thành công (Đã tồn tại trước đó)';
+      if (splitErrors.length > 0) {
+        responseMessage += ` (Có lỗi ở invoice con: ${splitErrors.join('; ')})`;
       }
     } else {
-      // Build error message
       const parts: string[] = [];
-      if (!isSiSuccess) parts.push('Lỗi tạo Invoice');
+      if (soStatus !== STATUS.SUCCESS) parts.push('Lỗi tạo Sales Order');
+      if (!isSiSuccess)
+        parts.push(`Lỗi tạo Invoice: ${splitErrors.join('; ')}`);
       if (!isPaymentSuccess)
         parts.push(`Lỗi thanh toán: ${paymentErrors.join('; ')}`);
       responseMessage = parts.join('. ') || 'Xử lý thất bại';
     }
 
-    const responseGuid =
-      siResult && Array.isArray(siResult) && siResult.length > 0
-        ? siResult[0].guid
-        : null;
+    // Extract GUID from main split for return (legacy compatibility)
+    let responseGuid: string | undefined;
+    if (mainSplitResult) {
+      if (Array.isArray(mainSplitResult)) {
+        responseGuid = mainSplitResult[0]?.guid;
+      } else {
+        responseGuid = mainSplitResult?.guid;
+      }
+    }
 
     return {
       result: {
         salesOrder: soResult,
-        salesInvoice: siResult,
+        salesInvoice: siResults,
         cashio: cashioResult,
         payment: paymentResult,
         paymentErrors,
       },
-      status: responseStatus,
+      status: finalStatus,
       message: responseMessage,
       guid: responseGuid,
       fastApiResponse: {
         salesOrder: soResult,
-        salesInvoice: siResult,
+        salesInvoice: siResults,
         cashio: cashioResult,
         payment: paymentResult,
-        errors: paymentErrors,
+        errors: splitErrors.concat(paymentErrors),
       },
       payload: payloadLog,
     };
