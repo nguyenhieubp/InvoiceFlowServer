@@ -34,7 +34,7 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
     private readonly warehouseProcessedRepository: Repository<WarehouseProcessed>,
     @Inject(forwardRef(() => LoyaltyService))
     private readonly loyaltyService: LoyaltyService,
-  ) {}
+  ) { }
 
   /**
    * Đăng nhập và lấy token
@@ -1477,6 +1477,64 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
   /**
    * Cleanup khi module bị destroy
    */
+  /**
+   * Gọi API POCharges (Phí đơn hàng)
+   * 2.25/ Phí đơn hàng
+   */
+  async submitPOCharges(payload: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Gọi API POCharges với token
+      const endpoint = `${this.baseUrl}/POCharges`;
+      this.logger.log(`Calling FastAPI endpoint: ${endpoint}`);
+
+      const response = await firstValueFrom(
+        this.httpService.post(endpoint, payload, {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      );
+
+      this.logger.log('POCharges submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(
+        `Error submitting POCharges: ${error?.message || error}`,
+      );
+
+      // Nếu lỗi 401 (Unauthorized), refresh token và retry
+      if (error?.response?.status === 401) {
+        this.logger.log('Token expired, refreshing and retrying POCharges API...');
+        const newToken = await this.login();
+        if (newToken) {
+          try {
+            const retryResponse = await firstValueFrom(
+              this.httpService.post(`${this.baseUrl}/POCharges`, payload, {
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${newToken}`,
+                },
+              }),
+            );
+            return retryResponse.data;
+          } catch (retryError) {
+            this.logger.error(`Retry POCharges API failed: ${retryError}`);
+            throw retryError;
+          }
+        }
+      }
+
+      throw error;
+    }
+  }
+
   onModuleDestroy() {
     this.stopAutoRefresh();
   }

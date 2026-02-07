@@ -100,7 +100,12 @@ import { SalesSyncService } from './services/sales-sync.service';
     SpecialOrderHandlerService,
     NormalOrderHandlerService,
     SaleReturnHandlerService,
+    // Export new handler services
+    SpecialOrderHandlerService,
+    NormalOrderHandlerService,
+    SaleReturnHandlerService,
     InvoiceFlowOrchestratorService,
+    FastApiClientService,
   ],
 })
-export class SalesModule {}
+export class SalesModule { }

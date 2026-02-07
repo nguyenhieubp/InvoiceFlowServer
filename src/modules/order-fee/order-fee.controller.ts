@@ -4,7 +4,8 @@ import { Repository } from 'typeorm';
 import { OrderFee } from '../../entities/order-fee.entity';
 import { ShopeeFee } from '../../entities/shopee-fee.entity';
 import { TikTokFee } from '../../entities/tiktok-fee.entity';
-import { Between, ILike } from 'typeorm';
+import { Between, ILike, In } from 'typeorm';
+import { PlatformFeeImportShopee } from '../../entities/platform-fee-import-shopee.entity';
 
 @Controller('order-fees')
 export class OrderFeeController {
@@ -17,6 +18,9 @@ export class OrderFeeController {
 
     @InjectRepository(TikTokFee)
     private tiktokFeeRepository: Repository<TikTokFee>,
+
+    @InjectRepository(PlatformFeeImportShopee)
+    private platformFeeImportShopeeRepo: Repository<PlatformFeeImportShopee>,
   ) { }
 
   /**
@@ -182,8 +186,27 @@ export class OrderFeeController {
       order: { orderCreatedAt: 'DESC' },
     });
 
+    // Merge with Imported Data to get missing fees (shippingFeeSaver etc)
+    const orderSns = data.map((i) => i.orderSn).filter(Boolean);
+    let importedFees: PlatformFeeImportShopee[] = [];
+    if (orderSns.length > 0) {
+      importedFees = await this.platformFeeImportShopeeRepo.find({
+        where: { maSan: In(orderSns) },
+      });
+    }
+
+    const mergedData = data.map((item) => {
+      const imported = importedFees.find((imp) => imp.maSan === item.orderSn);
+      return {
+        ...item,
+        shippingFeeSaver: imported?.chiPhiDichVuShippingFeeSaver164010 || 0,
+        marketingFee: imported?.phiPiShipDoMktDangKy164010 || 0,
+        affiliateFee: imported?.phiHoaHongTiepThiLienKet21150050 || 0,
+      };
+    });
+
     return {
-      data,
+      data: mergedData,
       meta: {
         total,
         page: Number(page),

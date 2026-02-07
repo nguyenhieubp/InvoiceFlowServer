@@ -27,6 +27,7 @@ import { ShopeeFeesModule } from './modules/shopee-fees/shopee-fees.module';
 import { TikTokFeesModule } from './modules/tiktok-fees/tiktok-fees.module';
 import { PurchaseOrderModule } from './modules/purchase-order/purchase-order.module';
 import { GoodsReceiptModule } from './modules/goods-receipt/goods-receipt.module';
+import { FastIntegrationModule } from './modules/fast-integration/fast-integration.module';
 
 @Module({
   imports: [
@@ -70,9 +71,10 @@ import { GoodsReceiptModule } from './modules/goods-receipt/goods-receipt.module
     TikTokFeesModule,
     PurchaseOrderModule,
     GoodsReceiptModule,
+    FastIntegrationModule,
     TypeOrmModule.forFeature([Sale]),
   ],
   controllers: [AppController],
   providers: [AppService, SyncTask],
 })
-export class AppModule {}
+export class AppModule { }

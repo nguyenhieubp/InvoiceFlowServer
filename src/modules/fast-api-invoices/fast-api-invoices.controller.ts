@@ -19,7 +19,7 @@ export class FastApiInvoicesController {
   constructor(
     private readonly fastApiInvoiceService: FastApiInvoiceService,
     private readonly salesService: SalesService,
-  ) {}
+  ) { }
 
   @Get('test')
   async test() {
