@@ -17,7 +17,7 @@ export class OrderFeeController {
 
     @InjectRepository(TikTokFee)
     private tiktokFeeRepository: Repository<TikTokFee>,
-  ) {}
+  ) { }
 
   /**
    * GET /order-fees
@@ -155,17 +155,24 @@ export class OrderFeeController {
     @Query('endDate') endDate?: string,
   ) {
     const skip = (page - 1) * limit;
-    const where: any = {};
+    const baseWhere: any = {};
 
-    if (brand) where.brand = brand;
-    if (search) where.erpOrderCode = ILike(`%${search}%`);
+    if (brand) baseWhere.brand = brand;
 
     if (startDate && endDate) {
       const start = new Date(startDate);
       start.setHours(0, 0, 0, 0);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
-      where.orderCreatedAt = Between(start, end);
+      baseWhere.orderCreatedAt = Between(start, end);
+    }
+
+    let where: any = baseWhere;
+    if (search) {
+      where = [
+        { ...baseWhere, erpOrderCode: ILike(`%${search}%`) },
+        { ...baseWhere, orderSn: ILike(`%${search}%`) },
+      ];
     }
 
     const [data, total] = await this.shopeeFeeRepository.findAndCount({
