@@ -685,18 +685,11 @@ export class StockTransferSyncService {
         });
       }
 
-      // Filter by doctype
-      if (params.doctype) {
-        queryBuilder.andWhere('wp.doctype = :doctype', {
-          doctype: params.doctype,
-        });
-      }
-
       // Filter by dateFrom & dateTo (Already parsed)
-      queryBuilder.andWhere('wp.transDate >= :dateFrom', {
+      queryBuilder.andWhere('wp.processedDate >= :dateFrom', {
         dateFrom: fromDate,
       });
-      queryBuilder.andWhere('wp.transDate <= :dateTo', { dateTo: toDate });
+      queryBuilder.andWhere('wp.processedDate <= :dateTo', { dateTo: toDate });
 
       // Get list data & total count for pagination
       // getManyAndCount is better than getCount + getMany separately
@@ -725,10 +718,6 @@ export class StockTransferSyncService {
         .addSelect(
           `SUM(CASE WHEN wp.ioType = 'O' THEN 1 ELSE 0 END)`,
           'o_type_count',
-        )
-        .addSelect(
-          `SUM(CASE WHEN wp.ioType = 'T' THEN 1 ELSE 0 END)`,
-          't_type_count',
         );
 
       // Apply SAME filters to stats query (except pagination)
@@ -747,17 +736,12 @@ export class StockTransferSyncService {
           docCode: `%${params.docCode}%`,
         });
       }
-      if (params.doctype) {
-        statsQueryBuilder.andWhere('wp.doctype = :doctype', {
-          doctype: params.doctype,
-        });
-      }
 
       // Date filters are mandatory now
-      statsQueryBuilder.andWhere('wp.transDate >= :dateFrom', {
+      statsQueryBuilder.andWhere('wp.processedDate >= :dateFrom', {
         dateFrom: fromDate,
       });
-      statsQueryBuilder.andWhere('wp.transDate <= :dateTo', {
+      statsQueryBuilder.andWhere('wp.processedDate <= :dateTo', {
         dateTo: toDate,
       });
 
@@ -770,7 +754,6 @@ export class StockTransferSyncService {
         byIoType: {
           I: parseInt(rawStats.i_type_count || '0', 10),
           O: parseInt(rawStats.o_type_count || '0', 10),
-          T: parseInt(rawStats.t_type_count || '0', 10),
         },
       };
 

@@ -505,8 +505,8 @@ export class InvoiceLogicUtils {
         Number(sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0) +
         Number(
           sale.paid_by_voucher_ecode_ecoin_bp ||
-          sale.chietKhauThanhToanVoucher ||
-          0,
+            sale.chietKhauThanhToanVoucher ||
+            0,
         );
 
       let calcTienHangGoc = Number(
@@ -613,7 +613,13 @@ export class InvoiceLogicUtils {
         }
         return '02';
       } else if (sale.productType === 'V') {
-        const specialVCodes = ['I00398', 'I00399', 'I00400', 'I00401', 'I00402'];
+        const specialVCodes = [
+          'I00398',
+          'I00399',
+          'I00400',
+          'I00401',
+          'I00402',
+        ];
         if (specialVCodes.includes(loyaltyProduct?.materialCode)) {
           return '01';
         }
@@ -967,7 +973,7 @@ export class InvoiceLogicUtils {
       ),
       ck05_nt:
         !InvoiceLogicUtils.isWholesale(sale) && // [NEW] No ck05_nt for Wholesale
-          InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
+        InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
           ? InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0)
           : 0,
       ck07_nt: InvoiceLogicUtils.toNumber(sale.chietKhauVoucherDp2, 0),
@@ -1148,8 +1154,8 @@ export class InvoiceLogicUtils {
         );
         const { isDoiDiem: isDoiDiemHeader } = InvoiceLogicUtils.getOrderTypes(
           orderData.sales?.[0]?.ordertype ||
-          orderData.sales?.[0]?.ordertypeName ||
-          '',
+            orderData.sales?.[0]?.ordertypeName ||
+            '',
         );
 
         if (isDoiDiem || isDoiDiemHeader) {
@@ -1192,21 +1198,24 @@ export class InvoiceLogicUtils {
           32,
         );
       } else if (i === 11) {
+        detailItem[key] = 0; // [FIX] Force ck11_nt to 0
+        detailItem[maKey] = '';
+
         // Note: SalesUtils.generateTkTienAoLabel needed.
         // Reuse logic or import SalesUtils? SalesUtils does NOT import InvoiceLogicUtils (yet).
         // SalesUtils is a lower level util?
         // Actually InvoiceLogicUtils imports SalesUtils. So it is fine to call SalesUtils here.
-        detailItem[maKey] = InvoiceLogicUtils.val(
-          detailItem.ck11_nt > 0 || sale.thanhToanTkTienAo
-            ? sale.maCk11 ||
-            SalesUtils.generateTkTienAoLabel(
-              orderData.docDate,
-              orderData.customer?.brand ||
-              orderData.sales?.[0]?.customer?.brand,
-            )
-            : '',
-          32,
-        );
+        // detailItem[maKey] = InvoiceLogicUtils.val(
+        //   detailItem.ck11_nt > 0 || sale.thanhToanTkTienAo
+        //     ? sale.maCk11 ||
+        //         SalesUtils.generateTkTienAoLabel(
+        //           orderData.docDate,
+        //           orderData.customer?.brand ||
+        //             orderData.sales?.[0]?.customer?.brand,
+        //         )
+        //     : '',
+        //   32,
+        // );
       } else {
         // Default mapping for other ma_ck fields
         if (i !== 1 && i !== 6) {
@@ -1443,18 +1452,18 @@ export class InvoiceLogicUtils {
       // [NEW] Wholesale fields
       maCk02:
         (sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS') &&
-          (sale.disc_tm > 0 || sale.disc_amt > 0)
+        (sale.disc_tm > 0 || sale.disc_amt > 0)
           ? this.resolveWholesalePromotionCode({
-            product: loyaltyProduct,
-            distTm:
-              Number(sale.disc_tm || 0) > 0
-                ? Number(sale.disc_tm)
-                : Number(sale.disc_amt || 0),
-          })
+              product: loyaltyProduct,
+              distTm:
+                Number(sale.disc_tm || 0) > 0
+                  ? Number(sale.disc_tm)
+                  : Number(sale.disc_amt || 0),
+            })
           : null,
       ck02Nt:
         (sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS') &&
-          (sale.disc_tm > 0 || sale.disc_amt > 0)
+        (sale.disc_tm > 0 || sale.disc_amt > 0)
           ? Number(sale.disc_tm || sale.disc_amt || 0)
           : 0,
     };
