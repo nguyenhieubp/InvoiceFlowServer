@@ -523,6 +523,35 @@ export class SalesQueryService {
               grade_discamt: Number(sale.grade_discamt || 0) * ratio,
               revenue_wsale: Number(sale.revenue_wsale || 0) * ratio,
               revenue_retail: Number(sale.revenue_retail || 0) * ratio,
+
+              // [NEW] Proportional Discount Allocation for FAST API fields
+              ck01_nt: Number(sale.ck01_nt || 0) * ratio,
+              ck02_nt: Number(sale.ck02_nt || 0) * ratio,
+              ck03_nt: Number(sale.ck03_nt || 0) * ratio,
+              ck04_nt: Number(sale.ck04_nt || 0) * ratio,
+              ck05_nt: Number(sale.ck05_nt || 0) * ratio,
+              ck06_nt: Number(sale.ck06_nt || 0) * ratio,
+              ck07_nt: Number(sale.ck07_nt || 0) * ratio,
+              ck08_nt: Number(sale.ck08_nt || 0) * ratio,
+              ck09_nt: Number(sale.ck09_nt || 0) * ratio,
+              ck10_nt: Number(sale.ck10_nt || 0) * ratio,
+              ck11_nt: Number(sale.ck11_nt || 0) * ratio,
+
+              // [NEW] Proportional Discount Allocation for UI Display
+              ck01Nt: Number(sale.ck01Nt || 0) * ratio,
+              ck02Nt: Number(sale.ck02Nt || 0) * ratio,
+              ck03Nt: Number(sale.ck03Nt || 0) * ratio,
+              ck04Nt: Number(sale.ck04Nt || 0) * ratio,
+              ck05Nt: Number(sale.ck05Nt || 0) * ratio,
+              ck06Nt: Number(sale.ck06Nt || 0) * ratio,
+              ck07Nt: Number(sale.ck07Nt || 0) * ratio,
+              ck08Nt: Number(sale.ck08Nt || 0) * ratio,
+              ck09Nt: Number(sale.ck09Nt || 0) * ratio,
+              ck10Nt: Number(sale.ck10Nt || 0) * ratio,
+              ck11Nt: Number(sale.ck11Nt || 0) * ratio,
+
+              disc_ctkm: Number(sale.disc_ctkm || 0) * ratio,
+
               itemcost: Number(sale.itemcost || 0) * ratio,
               totalcost: Number(sale.totalcost || 0) * ratio,
               ck_tm: Number(sale.ck_tm || 0) * ratio,
