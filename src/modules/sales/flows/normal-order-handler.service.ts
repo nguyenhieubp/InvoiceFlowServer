@@ -174,19 +174,18 @@ export class NormalOrderHandlerService {
     enrichedOrder.sales.forEach((sale: any) => {
       // Check transDate from attached stockTransfer
       let transDateStr = '';
-      if (sale.stockTransfer?.transDate) {
-        // Assume format is Date object or string ISO
-        const d = new Date(sale.stockTransfer.transDate);
+      const rawTransDate = sale.stockTransfer?.transDate || sale.transDate;
+      if (rawTransDate) {
+        // Handle both Date objects and strings
+        const d = new Date(rawTransDate);
         if (!isNaN(d.getTime())) {
-          transDateStr = ConvertUtils.formatDateYYYYMMDD(d); // YYYY-MM-DD
-        }
-      } else if (sale.transDate) {
-        // Fallback if enriched directly on sale
-        const d = new Date(sale.transDate);
-        if (!isNaN(d.getTime())) {
-          transDateStr = ConvertUtils.formatDateYYYYMMDD(d);
+          transDateStr = ConvertUtils.formatDateYYYYMMDD(d); // YYYYMMDD
         }
       }
+
+      this.logger.debug(
+        `[NormalOrder] Sale item ${sale.itemCode}: transDate=${rawTransDate} -> key=${transDateStr}`,
+      );
 
       if (transDateStr) {
         let group = salesByDate.get(transDateStr);
@@ -229,9 +228,8 @@ export class NormalOrderHandlerService {
       const dateKey = sortedDates[i];
       const groupSales = salesByDate.get(dateKey);
 
-      // Determine Suffix
-      const isSplit = sortedDates.length > 1;
-      const currentDocCode = isSplit ? `${docCode}-${i + 1}` : docCode;
+      // Determine Suffix (REMOVED as per user request)
+      const currentDocCode = docCode;
 
       this.logger.log(
         `[NormalOrder] Processing Invoice Split ${currentDocCode} (Date: ${dateKey}) - Items: ${groupSales?.length}`,
@@ -271,6 +269,7 @@ export class NormalOrderHandlerService {
         ngay_ct: stockTransferDateISO,
         ngay_lct: stockTransferDateISO,
         dh_ngay: stockTransferDateISO,
+        trans_date: stockTransferDateISO,
         customer: partialOrderData.customer,
         ten_kh: partialOrderData.customer?.name || invoiceData.ong_ba || '',
       };
