@@ -328,7 +328,10 @@ export class SalesQueryService {
    * Enrich orders với cashio data
    * Logic: 1 sale item with N stock transfers → N exploded sale lines
    */
-  async enrichOrdersWithCashio(orders: any[]): Promise<any[]> {
+  async enrichOrdersWithCashio(
+    orders: any[],
+    preFilteredStockTransfers?: StockTransfer[],
+  ): Promise<any[]> {
     const docCodes = orders.map((o) => o.docCode);
     if (docCodes.length === 0) return orders;
 
@@ -350,13 +353,19 @@ export class SalesQueryService {
       cashioMap.get(docCode)!.push(cashio);
     });
 
-    // Fetch stock transfers để thêm thông tin stock transfer
-    // [FIX] Sử dụng helper để lấy cả mã đơn gốc cho đơn RT
-    const docCodesForST =
-      StockTransferUtils.getDocCodesForStockTransfer(docCodes);
-    const stockTransfers = await this.stockTransferRepository.find({
-      where: { soCode: In(docCodesForST) },
-    });
+    // Use pre-filtered stock transfers if provided, otherwise fetch all
+    let stockTransfers: StockTransfer[];
+    if (preFilteredStockTransfers) {
+      stockTransfers = preFilteredStockTransfers;
+    } else {
+      // Fetch stock transfers để thêm thông tin stock transfer
+      // [FIX] Sử dụng helper để lấy cả mã đơn gốc cho đơn RT
+      const docCodesForST =
+        StockTransferUtils.getDocCodesForStockTransfer(docCodes);
+      stockTransfers = await this.stockTransferRepository.find({
+        where: { soCode: In(docCodesForST) },
+      });
+    }
 
     const stockTransferMap = new Map<string, StockTransfer[]>();
     docCodes.forEach((docCode) => {
@@ -988,7 +997,7 @@ export class SalesQueryService {
       );
     }
 
-    // Date logic
+    // Date logic - Filter by Export Date (StockTransfer.transDate)
     let startDate: Date | undefined;
     let endDate: Date | undefined;
 
@@ -1002,51 +1011,61 @@ export class SalesQueryService {
       endDate.setHours(23, 59, 59, 999);
     }
 
-    if (startDate && endDate) {
-      query.andWhere(
-        'sale.docDate >= :startDate AND sale.docDate <= :endDate',
-        {
-          startDate,
-          endDate,
-        },
+    // Join StockTransfer to filter by export date (transDate)
+    // Use INNER JOIN to exclude items without matching stock transfers
+    if (startDate || endDate || date) {
+      query.innerJoin(
+        StockTransfer,
+        'st_filter',
+        'st_filter.soCode = sale.docCode AND st_filter.itemCode = sale.itemCode',
       );
-    } else if (startDate) {
-      query.andWhere('sale.docDate >= :startDate', { startDate });
-    } else if (endDate) {
-      query.andWhere('sale.docDate <= :endDate', { endDate });
-    } else if (date) {
-      // Special format DDMMMYYYY
-      const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
-      if (dateMatch) {
-        const [, day, monthStr, year] = dateMatch;
-        const monthMap: { [key: string]: number } = {
-          JAN: 0,
-          FEB: 1,
-          MAR: 2,
-          APR: 3,
-          MAY: 4,
-          JUN: 5,
-          JUL: 6,
-          AUG: 7,
-          SEP: 8,
-          OCT: 9,
-          NOV: 10,
-          DEC: 11,
-        };
-        const month = monthMap[monthStr.toUpperCase()];
-        if (month !== undefined) {
-          const dateObj = new Date(parseInt(year), month, parseInt(day));
-          const startOfDay = new Date(dateObj);
-          startOfDay.setHours(0, 0, 0, 0);
-          const endOfDay = new Date(dateObj);
-          endOfDay.setHours(23, 59, 59, 999);
-          query.andWhere(
-            'sale.docDate >= :startDate AND sale.docDate <= :endDate',
-            {
-              startDate: startOfDay,
-              endDate: endOfDay,
-            },
-          );
+
+      if (startDate && endDate) {
+        query.andWhere(
+          'st_filter.transDate >= :startDate AND st_filter.transDate <= :endDate',
+          {
+            startDate,
+            endDate,
+          },
+        );
+      } else if (startDate) {
+        query.andWhere('st_filter.transDate >= :startDate', { startDate });
+      } else if (endDate) {
+        query.andWhere('st_filter.transDate <= :endDate', { endDate });
+      } else if (date) {
+        // Special format DDMMMYYYY
+        const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+        if (dateMatch) {
+          const [, day, monthStr, year] = dateMatch;
+          const monthMap: { [key: string]: number } = {
+            JAN: 0,
+            FEB: 1,
+            MAR: 2,
+            APR: 3,
+            MAY: 4,
+            JUN: 5,
+            JUL: 6,
+            AUG: 7,
+            SEP: 8,
+            OCT: 9,
+            NOV: 10,
+            DEC: 11,
+          };
+          const month = monthMap[monthStr.toUpperCase()];
+          if (month !== undefined) {
+            const dateObj = new Date(parseInt(year), month, parseInt(day));
+            const startOfDay = new Date(dateObj);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(dateObj);
+            endOfDay.setHours(23, 59, 59, 999);
+            query.andWhere(
+              'st_filter.transDate >= :startDate AND st_filter.transDate <= :endDate',
+              {
+                startDate: startOfDay,
+                endDate: endOfDay,
+              },
+            );
+          }
         }
       }
     } else if (brand && !startDate && !endDate && !date) {
@@ -1261,12 +1280,23 @@ export class SalesQueryService {
     const docCodesForStockTransfer =
       StockTransferUtils.getDocCodesForStockTransfer(docCodes);
 
-    const stockTransfers =
+    // Create a set of (soCode, itemCode) pairs from filtered sales
+    const saleItemKeys = new Set(
+      allSalesData.map((sale) => `${sale.docCode}_${sale.itemCode}`),
+    );
+
+    // Fetch stock transfers and filter to only include those matching filtered sales
+    const allStockTransfers =
       docCodesForStockTransfer.length > 0
         ? await this.stockTransferRepository.find({
             where: { soCode: In(docCodesForStockTransfer) },
           })
         : [];
+
+    // Filter stock transfers to only include items that are in the filtered sales
+    const stockTransfers = allStockTransfers.filter((st) =>
+      saleItemKeys.has(`${st.soCode}_${st.itemCode}`),
+    );
 
     const stockTransferItemCodes = Array.from(
       new Set(
@@ -1670,7 +1700,11 @@ export class SalesQueryService {
 
     // 10. Enrich with Cashio (Explosion)
     // This explodes sales based on Stock Transfers. Fields like Qty are reset here.
-    const enrichedOrders = await this.enrichOrdersWithCashio(orders);
+    // Pass pre-filtered stock transfers to prevent phantom items
+    const enrichedOrders = await this.enrichOrdersWithCashio(
+      orders,
+      stockTransfers,
+    );
 
     // [FIX] N8n Integration for Card Data (Enrichment source of truth)
     // Applied AFTER explosion to ensure we overwrite any Stock Transfer duplicates or Qty resets
