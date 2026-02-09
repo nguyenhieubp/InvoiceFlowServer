@@ -335,7 +335,7 @@ export class InvoiceLogicUtils {
         CDV: 'CDV.KMDIEM',
         LHV: 'LHV.KMDIEM',
       };
-      maCtkmTangHang = mapMaDvcsToKmDiem[maDvcs] || 'TTM.KMDIEM';
+      maCtkmTangHang = mapMaDvcsToKmDiem[maDvcs] || '';
       maCk01 = ''; // Đổi điểm không có ck01
     } else if (isTangHang) {
       if (isDauTu) {

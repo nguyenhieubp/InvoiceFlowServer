@@ -1666,6 +1666,16 @@ export class SalesQueryService {
             }
           }
 
+          // [FIX] Final clearing for Point Exchange orders
+          // Even if override set ck05_nt, we must clear it for Point Exchange
+          const orderTypes = InvoiceLogicUtils.getOrderTypes(sale.ordertypeName);
+          if (orderTypes.isDoiDiem) {
+            overrideDiscount.ck05_nt = 0;
+            overrideDiscount.ck05Nt = 0;
+            overrideDiscount.ma_ck05 = null;
+            overrideDiscount.maCk05 = null;
+          }
+
 
           // Cache materialType for later use in verification loop
           if (sale.itemCode && loyaltyProduct?.materialType) {
