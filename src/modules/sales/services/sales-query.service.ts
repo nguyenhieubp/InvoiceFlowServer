@@ -1628,15 +1628,24 @@ export class SalesQueryService {
               if (InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0) {
                 const amount = InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0);
 
+                // [FIX] Determine ma_ck11 based on Brand & Product Type
+                const currentBrand = (sale.brand || '').trim().toUpperCase();
+                const pType = (sale.productType || '').toUpperCase();
+
+                const maCk11 = InvoiceLogicUtils.resolveMaCk11({
+                  brand: currentBrand,
+                  productType: pType,
+                });
+
                 overrideDiscount.ck11_nt = amount;
                 overrideDiscount.ck05_nt = 0;
-                overrideDiscount.ma_ck11 = 'ECOIN';
+                overrideDiscount.ma_ck11 = maCk11;
                 overrideDiscount.ma_ck05 = null;
 
                 // Also override display fields for UI consistency
                 overrideDiscount.ck11Nt = amount;
                 overrideDiscount.ck05Nt = 0;
-                overrideDiscount.maCk11 = 'ECOIN';
+                overrideDiscount.maCk11 = maCk11;
                 overrideDiscount.maCk05 = null;
               }
             } else if (voucherRecord) {

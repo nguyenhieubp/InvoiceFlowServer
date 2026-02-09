@@ -872,6 +872,38 @@ export class InvoiceLogicUtils {
     return null;
   }
   /**
+   * Resolve ma_ck11 (Thanh toán TK tiền ảo) based on Brand and Product Type
+   * [NEW] Centralized logic compatible with SalesQueryService
+   */
+  static resolveMaCk11(params: {
+    brand: string;
+    productType: string | null;
+  }): string | null {
+    const { brand, productType } = params;
+    const normBrand = (brand || '').trim().toUpperCase();
+    const type = (productType || '').trim().toUpperCase();
+
+    // Mapping Logic (Source of Truth)
+    const brandMap: Record<string, any> = {
+      'YAMAN': { I: 'BTH CKVIP SP', S: 'BTH CKVIP DV' },
+      'F3': { I: 'FBV CKVIP SP', S: 'FBV CKVIP DV' },
+      'FACIALBAR': { I: 'FBV CKVIP SP', S: 'FBV CKVIP DV' },
+      'LABHAIR': { I: 'LHV CKVIP SP', S: 'LHV CKVIP DV' },
+      'MENARD': { I: 'MN CKVIP SP', S: 'MN CKVIP DV', V: 'MN CKVIP VC' }
+    };
+
+    let effectiveBrand = normBrand;
+    // Map common aliases if needed
+    if (effectiveBrand === 'BTH') effectiveBrand = 'YAMAN';
+    if (effectiveBrand === 'LHV') effectiveBrand = 'LABHAIR';
+
+    const typeMap = brandMap[effectiveBrand];
+
+    if (!typeMap) return null;
+
+    return typeMap[type] || null;
+  }
+  /**
    * Xác định xem sale item có phải là hàng tặng (Giá = 0) hay không
    * Source of Truth cho cả Frontend Display và Fast API Payload (km_yn)
    */
@@ -1217,25 +1249,22 @@ export class InvoiceLogicUtils {
           32,
         );
       } else if (i === 11) {
-        // ck11 removed硬编码
-      } else if (i === 12) {
-        detailItem[maKey] = '';
+        // [FIX] ma_ck11 Logic (Centralized)
+        if (detailItem.ck11_nt > 0) {
+          const brand =
+            orderData.brand ||
+            '';
 
-        // Note: SalesUtils.generateTkTienAoLabel needed.
-        // Reuse logic or import SalesUtils? SalesUtils does NOT import InvoiceLogicUtils (yet).
-        // SalesUtils is a lower level util?
-        // Actually InvoiceLogicUtils imports SalesUtils. So it is fine to call SalesUtils here.
-        // detailItem[maKey] = InvoiceLogicUtils.val(
-        //   detailItem.ck11_nt > 0 || sale.thanhToanTkTienAo
-        //     ? sale.maCk11 ||
-        //         SalesUtils.generateTkTienAoLabel(
-        //           orderData.docDate,
-        //           orderData.customer?.brand ||
-        //             orderData.sales?.[0]?.customer?.brand,
-        //         )
-        //     : '',
-        //   32,
-        // );
+          const resolvedCode = InvoiceLogicUtils.resolveMaCk11({
+            brand,
+            productType: sale.productType,
+          });
+
+          detailItem[maKey] = InvoiceLogicUtils.val(resolvedCode || sale.maCk11 || '', 32);
+        } else {
+          detailItem[maKey] = '';
+        }
+
       } else {
         // Default mapping for other ma_ck fields
         if (i !== 1 && i !== 6) {
