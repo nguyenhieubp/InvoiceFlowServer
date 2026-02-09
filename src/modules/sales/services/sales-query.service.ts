@@ -1463,6 +1463,29 @@ export class SalesQueryService {
       partnerCodesToCheckForAll,
     );
 
+    // We need to use enrichOrdersWithCashio but it takes Order objects.
+    // Let's reconstruct minimal order objects.
+    const minimalOrders = Array.from(enrichedSalesMap.entries()).map(([docCode, sales]) => {
+      const firstSale = sales[0];
+      return {
+        docCode,
+        docDate: firstSale.docDate,
+        sales: sales,
+        // cashioData will be attached here
+      };
+    });
+
+    // Call enrichment
+    const minimalOrdersEnriched = await this.enrichOrdersWithCashio(minimalOrders);
+
+    // Map cashioData back to enrichedSalesMap context or directly to logic
+    const orderCashioMap = new Map<string, any[]>();
+    minimalOrdersEnriched.forEach(o => {
+      if ((o as any).cashioData) {
+        orderCashioMap.set(o.docCode, (o as any).cashioData);
+      }
+    });
+
     // [FIX] Robust 1-1 Stock Transfer Matching Logic (Batch for all orders)
     const saleIdToStockTransferMap = new Map<
       string,
@@ -1579,6 +1602,10 @@ export class SalesQueryService {
               warehouseCodeMap.get(assignedSt.stockCode) ||
               assignedSt.stockCode;
           }
+
+          // [NEW] Inject Cashio Data for Discount Calculation
+          const cashioData = orderCashioMap.get(docCode);
+
           const calculatedFields = await InvoiceLogicUtils.calculateSaleFields(
             sale,
             loyaltyProduct,
@@ -1586,6 +1613,50 @@ export class SalesQueryService {
             sale.branchCode,
           );
           calculatedFields.maKho = maKhoFromStockTransfer;
+
+          // [NEW] Recalculate Discount Fields based on Cashio Logic (ECOIN vs VOUCHER)
+          // Use calculateInvoiceAmounts logic re-applied here
+          // This is critical to sync GET API with Payload
+          const overrideDiscount: any = {};
+
+          if (cashioData && cashioData.length > 0) {
+            const ecoinRecord = cashioData.find((c: any) => String(c.fop_syscode).trim().toUpperCase() === 'ECOIN');
+            const voucherRecord = cashioData.find((c: any) => String(c.fop_syscode).trim().toUpperCase() === 'VOUCHER');
+
+            if (ecoinRecord) {
+              // ECOIN -> ck11
+              if (InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0) {
+                const amount = InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0);
+
+                overrideDiscount.ck11_nt = amount;
+                overrideDiscount.ck05_nt = 0;
+                overrideDiscount.ma_ck11 = 'ECOIN';
+                overrideDiscount.ma_ck05 = null;
+
+                // Also override display fields for UI consistency
+                overrideDiscount.ck11Nt = amount;
+                overrideDiscount.ck05Nt = 0;
+                overrideDiscount.maCk11 = 'ECOIN';
+                overrideDiscount.maCk05 = null;
+              }
+            } else if (voucherRecord) {
+              // VOUCHER -> ck05
+              if (InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0) {
+                const amount = InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0);
+                overrideDiscount.ck05_nt = amount;
+                overrideDiscount.ck11_nt = 0;
+                overrideDiscount.ma_ck05 = 'VOUCHER';
+                overrideDiscount.ma_ck11 = null;
+
+                // Also override display fields for UI consistency
+                overrideDiscount.ck05Nt = amount;
+                overrideDiscount.ck11Nt = 0;
+                overrideDiscount.maCk05 = 'VOUCHER';
+                overrideDiscount.maCk11 = null;
+              }
+            }
+          }
+
 
           // Cache materialType for later use in verification loop
           if (sale.itemCode && loyaltyProduct?.materialType) {
@@ -1633,6 +1704,12 @@ export class SalesQueryService {
 
           const enrichedSale =
             await this.salesFormattingService.formatSingleSale(sale, context);
+
+          // [NEW] Apply Override Discount Logic (ECOIN/VOUCHER logic calculated above)
+          // Essential for syncing GET API with Fast API Payload logic
+          if (Object.keys(overrideDiscount).length > 0) {
+            Object.assign(enrichedSale, overrideDiscount);
+          }
 
           // [NEW] Override svcCode with looked-up materialCode if available
           // (Service does this too, but let's keep consistent with existing flow if explicit override needed)
