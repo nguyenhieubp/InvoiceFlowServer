@@ -50,7 +50,7 @@ export class SalesQueryService {
     private fastApiInvoiceRepository: Repository<FastApiInvoice>,
     @InjectRepository(Invoice)
     private invoiceRepository: Repository<Invoice>,
-  ) {}
+  ) { }
 
   /**
    * Find one sale by ID
@@ -1012,8 +1012,9 @@ export class SalesQueryService {
     }
 
     // Join StockTransfer to filter by export date (transDate)
-    // Use INNER JOIN to exclude items without matching stock transfers
-    if (startDate || endDate || date) {
+    // OPTIMIZATION: Skip date filter if searching by docCode (search param)
+    // When searching for specific order, we want ALL items regardless of stock transfer date
+    if ((startDate || endDate || date) && !search) {
       query.innerJoin(
         StockTransfer,
         'st_filter',
@@ -1221,19 +1222,19 @@ export class SalesQueryService {
           docSourceType: sale.docSourceType,
           customer: sale.customer
             ? {
-                code: sale.customer.code || sale.partnerCode || null,
-                brand: sale.customer.brand || null,
-                name: sale.customer.name || null,
-                mobile: sale.customer.mobile || null,
-              }
+              code: sale.customer.code || sale.partnerCode || null,
+              brand: sale.customer.brand || null,
+              name: sale.customer.name || null,
+              mobile: sale.customer.mobile || null,
+            }
             : sale.partnerCode
               ? {
-                  code: sale.partnerCode || null,
-                  brand: null,
-                  name: null,
-                  mobile: null,
-                  id: null,
-                }
+                code: sale.partnerCode || null,
+                brand: null,
+                name: null,
+                mobile: null,
+                id: null,
+              }
               : null,
           totalRevenue: 0,
           totalQty: 0,
@@ -1289,8 +1290,8 @@ export class SalesQueryService {
     const allStockTransfers =
       docCodesForStockTransfer.length > 0
         ? await this.stockTransferRepository.find({
-            where: { soCode: In(docCodesForStockTransfer) },
-          })
+          where: { soCode: In(docCodesForStockTransfer) },
+        })
         : [];
 
     // Filter stock transfers to only include items that are in the filtered sales
@@ -2048,19 +2049,19 @@ export class SalesQueryService {
           docSourceType: sale.docSourceType,
           customer: sale.customer
             ? {
-                code: sale.customer.code || sale.partnerCode || null,
-                brand: sale.customer.brand || null,
-                name: sale.customer.name || null,
-                mobile: sale.customer.mobile || null,
-              }
+              code: sale.customer.code || sale.partnerCode || null,
+              brand: sale.customer.brand || null,
+              name: sale.customer.name || null,
+              mobile: sale.customer.mobile || null,
+            }
             : sale.partnerCode
               ? {
-                  code: sale.partnerCode || null,
-                  brand: null,
-                  name: null,
-                  mobile: null,
-                  id: null,
-                }
+                code: sale.partnerCode || null,
+                brand: null,
+                name: null,
+                mobile: null,
+                id: null,
+              }
               : null,
           totalRevenue: 0,
           totalQty: 0,

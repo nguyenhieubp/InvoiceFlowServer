@@ -70,27 +70,33 @@ export class FastApiPayloadHelper {
         dh_ngay: orderData.dh_ngay,
         dh_so: orderData.dh_so,
         dh_dvcs: orderData.dh_dvcs,
-        detail: (orderData.detail || []).map((item: any) => {
-          const { product, ...cleanItem } = item;
-          const result: any = { ...cleanItem };
+        detail: (orderData.detail || [])
+          .filter((item: any) => {
+            // [FILTER] Only include items with ma_kho (warehouse code)
+            // Items without ma_kho are deferred delivery items (chưa xuất kho)
+            return item.ma_kho && String(item.ma_kho).trim() !== '';
+          })
+          .map((item: any) => {
+            const { product, ...cleanItem } = item;
+            const result: any = { ...cleanItem };
 
-          // FIX: Loại bỏ tien_hang cho giao dịch "03. Đổi điểm" (Point Redemption)
-          // Kiểm tra xem có phải đơn đổi điểm không (ma_ctkm_th chứa "KMDIEM")
-          const isDoiDiem =
-            item.ma_ctkm_th && String(item.ma_ctkm_th).includes('KMDIEM');
-          if (isDoiDiem && 'tien_hang' in result) {
-            delete result.tien_hang;
-          }
+            // FIX: Loại bỏ tien_hang cho giao dịch "03. Đổi điểm" (Point Redemption)
+            // Kiểm tra xem có phải đơn đổi điểm không (ma_ctkm_th chứa "KMDIEM")
+            const isDoiDiem =
+              item.ma_ctkm_th && String(item.ma_ctkm_th).includes('KMDIEM');
+            if (isDoiDiem && 'tien_hang' in result) {
+              delete result.tien_hang;
+            }
 
-          // Giữ lại ma_lo và so_serial (kể cả null)
-          if ('ma_lo' in item) result.ma_lo = item.ma_lo;
-          if ('so_serial' in item) result.so_serial = item.so_serial;
-          if ('ma_serial' in item) result.ma_serial = item.ma_serial; // Add mapping for ma_serial
-          // Giữ lại ma_bp nếu có (không loại bỏ)
-          if ('ma_bp' in item) result.ma_bp = item.ma_bp;
-          if ('dh_ln' in item) result.dh_ln = item.dh_ln; // [NEW]
-          return result;
-        }),
+            // Giữ lại ma_lo và so_serial (kể cả null)
+            if ('ma_lo' in item) result.ma_lo = item.ma_lo;
+            if ('so_serial' in item) result.so_serial = item.so_serial;
+            if ('ma_serial' in item) result.ma_serial = item.ma_serial; // Add mapping for ma_serial
+            // Giữ lại ma_bp nếu có (không loại bỏ)
+            if ('ma_bp' in item) result.ma_bp = item.ma_bp;
+            if ('dh_ln' in item) result.dh_ln = item.dh_ln; // [NEW]
+            return result;
+          }),
         cbdetail: null,
       };
     }
