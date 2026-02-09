@@ -505,8 +505,8 @@ export class InvoiceLogicUtils {
         Number(sale.chietKhauMuaHangCkVip || sale.grade_discamt || 0) +
         Number(
           sale.paid_by_voucher_ecode_ecoin_bp ||
-            sale.chietKhauThanhToanVoucher ||
-            0,
+          sale.chietKhauThanhToanVoucher ||
+          0,
         );
 
       let calcTienHangGoc = Number(
@@ -935,10 +935,9 @@ export class InvoiceLogicUtils {
     orderData: any; // Header data (sales[0] usually) or explicit header
     allocationRatio: number;
     isPlatformOrder?: boolean;
-    cashioData?: any[]; // Optional, for ECoin logic
-  }) {
-    const { sale, orderData, allocationRatio, isPlatformOrder, cashioData } =
-      params;
+    cashioData?: any[]; // Optional, for ECoin logic (NEW: Pass cashio data for payment method check)
+  }): any {
+    const { sale, orderData, allocationRatio, isPlatformOrder, cashioData } = params;
 
     // Determine header order types safely
     const headerSale = orderData?.sales?.[0] || {};
@@ -973,7 +972,7 @@ export class InvoiceLogicUtils {
       ),
       ck05_nt:
         !InvoiceLogicUtils.isWholesale(sale) && // [NEW] No ck05_nt for Wholesale
-        InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
+          InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
           ? InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0)
           : 0,
       ck07_nt: InvoiceLogicUtils.toNumber(sale.chietKhauVoucherDp2, 0),
@@ -1002,20 +1001,40 @@ export class InvoiceLogicUtils {
         : 0;
     }
 
-    // ck11 (ECOIN) logic
-    let ck11_nt = InvoiceLogicUtils.toNumber(
-      sale.chietKhauThanhToanTkTienAo || sale.chietKhau11,
-      0,
-    );
-    if (
-      ck11_nt === 0 &&
-      InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0 &&
-      cashioData
-    ) {
-      const ecoin = cashioData.find((c: any) => c.fop_syscode === 'ECOIN');
-      if (ecoin?.total_in)
-        ck11_nt = InvoiceLogicUtils.toNumber(ecoin.total_in, 0);
+    // [SIMPLIFIED] ck05 vs ck11 logic - Strictly follow fop_syscode
+    // Rule: ECOIN → ck11_nt, VOUCHER → ck05_nt, NO OVERLAP
+    let ck11_nt = 0;
+
+    // Check payment method from cashioData
+    const ecoinRecord = cashioData?.find((c: any) => c.fop_syscode === 'ECOIN');
+    const voucherRecord = cashioData?.find((c: any) => c.fop_syscode === 'VOUCHER');
+
+    // Helper to get amount (Fallback to sale.paid_by_voucher if cashio.total_in is 0)
+    const getDiscountAmount = (record: any) => {
+      const totalIn = InvoiceLogicUtils.toNumber(record?.total_in, 0);
+      return totalIn > 0 ? totalIn : InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0);
+    };
+
+    if (ecoinRecord) {
+      // ECOIN payment → ck11_nt ONLY
+      // [FIX] If total_in is 0, fallback to paid_by_voucher
+      ck11_nt = getDiscountAmount(ecoinRecord);
+      amounts.ck05_nt = 0; // Clear voucher (which was preset above)
+    } else if (voucherRecord) {
+      // VOUCHER payment → ck05_nt ONLY
+      if (!InvoiceLogicUtils.isWholesale(sale) && !isPlatformOrder) {
+        amounts.ck05_nt = getDiscountAmount(voucherRecord);
+      }
+      ck11_nt = 0; // Clear ECOIN
+    } else {
+      // No ECOIN/VOUCHER in cashioData → fallback to sale fields
+      // ck05_nt is already set above based on paid_by_voucher_ecode_ecoin_bp
+      ck11_nt = InvoiceLogicUtils.toNumber(
+        sale.chietKhauThanhToanTkTienAo || sale.chietKhau11,
+        0,
+      );
     }
+
     amounts.ck11_nt = ck11_nt;
 
     // Allocation
@@ -1154,8 +1173,8 @@ export class InvoiceLogicUtils {
         );
         const { isDoiDiem: isDoiDiemHeader } = InvoiceLogicUtils.getOrderTypes(
           orderData.sales?.[0]?.ordertype ||
-            orderData.sales?.[0]?.ordertypeName ||
-            '',
+          orderData.sales?.[0]?.ordertypeName ||
+          '',
         );
 
         if (isDoiDiem || isDoiDiemHeader) {
@@ -1198,7 +1217,8 @@ export class InvoiceLogicUtils {
           32,
         );
       } else if (i === 11) {
-        detailItem[key] = 0; // [FIX] Force ck11_nt to 0
+        // ck11 removed硬编码
+      } else if (i === 12) {
         detailItem[maKey] = '';
 
         // Note: SalesUtils.generateTkTienAoLabel needed.
@@ -1452,18 +1472,18 @@ export class InvoiceLogicUtils {
       // [NEW] Wholesale fields
       maCk02:
         (sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS') &&
-        (sale.disc_tm > 0 || sale.disc_amt > 0)
+          (sale.disc_tm > 0 || sale.disc_amt > 0)
           ? this.resolveWholesalePromotionCode({
-              product: loyaltyProduct,
-              distTm:
-                Number(sale.disc_tm || 0) > 0
-                  ? Number(sale.disc_tm)
-                  : Number(sale.disc_amt || 0),
-            })
+            product: loyaltyProduct,
+            distTm:
+              Number(sale.disc_tm || 0) > 0
+                ? Number(sale.disc_tm)
+                : Number(sale.disc_amt || 0),
+          })
           : null,
       ck02Nt:
         (sale.type_sale === 'WHOLESALE' || sale.type_sale === 'WS') &&
-        (sale.disc_tm > 0 || sale.disc_amt > 0)
+          (sale.disc_tm > 0 || sale.disc_amt > 0)
           ? Number(sale.disc_tm || sale.disc_amt || 0)
           : 0,
     };

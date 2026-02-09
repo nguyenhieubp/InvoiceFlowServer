@@ -27,7 +27,7 @@ export class NormalOrderHandlerService {
     private n8nService: N8nService,
     @Inject(forwardRef(() => PaymentService))
     private paymentService: PaymentService,
-  ) {}
+  ) { }
 
   /**
    * Helper xử lý đơn thường và đơn bán tài khoản
@@ -237,7 +237,7 @@ export class NormalOrderHandlerService {
 
       // Construct Partial Order Data
       const partialOrderData = {
-        ...orderData,
+        ...enrichedOrder, // [FIX] Use enrichedOrder to include cashioData
         docCode: currentDocCode, // Use split code
         // docDate: NO OVERRIDE here, keep original for reference
         sales: groupSales,
@@ -368,9 +368,9 @@ export class NormalOrderHandlerService {
     );
     const mainDocCode = mainSplitResult
       ? mainSplitResult.docCode ||
-        (Array.isArray(mainSplitResult)
-          ? mainSplitResult[0].docCode
-          : undefined)
+      (Array.isArray(mainSplitResult)
+        ? mainSplitResult[0].docCode
+        : undefined)
       : docCode; // Fallback
 
     if (processingStatus === STATUS.SUCCESS || mainSplitResult) {

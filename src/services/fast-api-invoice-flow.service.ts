@@ -194,7 +194,7 @@ export class FastApiInvoiceFlowService {
       // [NEW] Sync Lot/Serial before submitting sales order (to prevent status=0 error)
       // Check skip flag to avoid redundant calls in full flow
       if (!options?.skipLotSync) {
-        await this.syncMissingLotSerial(cleanOrderData);
+        await this.syncMissingLotSerial(orderData);
       }
 
       const result = await this.fastApiService.submitSalesOrder(finalPayload);
