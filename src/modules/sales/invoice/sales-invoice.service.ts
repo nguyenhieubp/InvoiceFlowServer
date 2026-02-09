@@ -36,7 +36,7 @@ export class SalesInvoiceService {
     private saleReturnHandlerService: SaleReturnHandlerService,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private salesPayloadService: SalesPayloadService,
-  ) {}
+  ) { }
 
   /**
    * Tạo hóa đơn qua Fast API từ đơn hàng
@@ -85,42 +85,43 @@ export class SalesInvoiceService {
 
       const hasX = /_X$/.test(docCode);
 
-      if (_.isEmpty(stockTransfers)) {
-        if (hasX) {
-          // [AUTO-FLOW] For _X orders:
-          // 1. Process Action 0 (Original Order)
-          // 2. Process Action 1 (Cancellation Order)
-          this.logger.log(
-            `[AutoFlow] Detected _X order ${docCode}. Executing Action 0 -> Action 1 sequence.`,
-          );
+      // [CRITICAL] Check _X FIRST before stock transfer check
+      // Cancelled orders (_X) should ONLY create Sales Order (Action 0->1), NEVER Sales Invoice
+      if (hasX) {
+        this.logger.log(
+          `[AutoFlow] Detected _X order ${docCode}. Executing Action 0 -> Action 1 sequence.`,
+        );
 
-          // Step 1: Action 0
-          try {
-            await this.saleReturnHandlerService.handleSaleOrderWithUnderscoreX(
-              orderData,
-              docCode,
-              0,
-            );
-          } catch (e) {
-            this.logger.warn(
-              `[AutoFlow] Action 0 failed or already exists for ${docCode}: ${e.message}. Continuing to Action 1.`,
-            );
-            // Continue even if Action 0 fails (maybe it already exists)
-          }
-
-          // Step 2: Action 1 (The actual _X order processing)
-          return await this.saleReturnHandlerService.handleSaleOrderWithUnderscoreX(
+        // Step 1: Action 0
+        try {
+          await this.saleReturnHandlerService.handleSaleOrderWithUnderscoreX(
             orderData,
             docCode,
-            1,
-          );
-        } else {
-          return await this.saleReturnHandlerService.handleSaleOrderWithUnderscoreX(
-            orderData,
-            docCode ?? '',
             0,
           );
+        } catch (e) {
+          this.logger.warn(
+            `[AutoFlow] Action 0 failed or already exists for ${docCode}: ${e.message}. Continuing to Action 1.`,
+          );
+          // Continue even if Action 0 fails (maybe it already exists)
         }
+
+        // Step 2: Action 1 (The actual _X order processing)
+        return await this.saleReturnHandlerService.handleSaleOrderWithUnderscoreX(
+          orderData,
+          docCode,
+          1,
+        );
+      }
+
+      // [SECONDARY] Check stock transfer for non-_X orders
+      if (_.isEmpty(stockTransfers)) {
+        // No stock transfer, no _X -> Create Sales Order only (Action 0)
+        return await this.saleReturnHandlerService.handleSaleOrderWithUnderscoreX(
+          orderData,
+          docCode ?? '',
+          0,
+        );
       }
 
       // Có stock transfer (hoặc trường hợp còn lại) -> xử lý bình thường

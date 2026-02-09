@@ -66,10 +66,10 @@ export class FastApiPayloadHelper {
         tk_thue_no: orderData.tk_thue_no ?? '131111',
         ma_kenh: orderData.ma_kenh ?? 'ONLINE',
         status: orderData.status ?? '2',
-        // [NEW] New fields
-        dh_ngay: orderData.dh_ngay,
-        dh_so: orderData.dh_so,
-        dh_dvcs: orderData.dh_dvcs,
+        // [NEW] New fields - with fallbacks
+        dh_ngay: orderData.dh_ngay || orderData.ngay_ct,
+        dh_so: orderData.dh_so || orderData.so_ct,
+        dh_dvcs: orderData.dh_dvcs || orderData.ma_dvcs,
         detail: (orderData.detail || [])
           .filter((item: any) => {
             // [FILTER] Only include items with ma_kho (warehouse code)
@@ -115,6 +115,7 @@ export class FastApiPayloadHelper {
       ngay_ct: orderData.ngay_ct,
       so_ct: orderData.so_ct,
       so_seri: orderData.so_seri,
+      dh_so: orderData.dh_so || orderData.so_ct,
       ma_nt: orderData.ma_nt ?? 'VND',
       ty_gia:
         typeof orderData.ty_gia === 'number'
