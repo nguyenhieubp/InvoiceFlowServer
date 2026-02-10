@@ -451,9 +451,10 @@ export class SalesQueryService {
           return false;
         }
 
-        // Chỉ lấy các record có doctype = 'SALE_STOCKOUT' hoặc qty < 0 (xuất kho)
-        const isStockOut =
-          st.doctype === 'SALE_STOCKOUT' || Number(st.qty || 0) < 0;
+        // Chỉ lấy các record có ioType = 'O' (Output - Xuất kho)
+        // Bỏ qua các record ioType = 'I' (Input - Nhập/Trả lại)
+        // User Request: "Các đơn hàng khi join với bên stocktranfer chỉ khớp với các đơn xuất kho ioType: O"
+        const isStockOut = st.ioType === 'O';
         return isStockOut;
       });
 
@@ -1584,23 +1585,19 @@ export class SalesQueryService {
         { st: StockTransfer[]; rt: StockTransfer[] }
       >();
       orderStockTransfers.forEach((st) => {
-        // Logic to find match key: materialCode or itemCode
-        // We need to match with logic used in findByOrderCode roughly
-        // We'll use itemCode as primary key if available, or materialCode
-        // The sales loop below will verify.
+        // [FIX] User Request: Only join with ioType: O (Output)
+        // This ensures Returns match with Original Output ST, avoiding duplication
+        if (st.ioType !== 'O') return;
 
-        // To match logic in findByOrderCode, we used itemCode if available
+        // Logic to find match key: itemCode
         const key = st.itemCode;
         if (!key) return; // limit capability if no itemCode
 
         if (!stByItem.has(key)) stByItem.set(key, { st: [], rt: [] });
         const m = stByItem.get(key)!;
 
-        if (st.docCode.startsWith('ST') || Number(st.qty || 0) < 0) {
-          m.st.push(st);
-        } else {
-          m.rt.push(st);
-        }
+        // Always push to 'st' bucket since we only have Output transfers
+        m.st.push(st);
       });
 
       // Loop sales and assign
