@@ -56,7 +56,11 @@ export function buildStockTransferMaps(
 
     if (!materialCode) continue;
 
-    const orderDocCode = transfer.soCode || transfer.docCode;
+    // Use docCode for SALE_RETURN (RT), soCode for SALE_STOCKOUT (SO)
+    const orderDocCode =
+      transfer.doctype === 'SALE_RETURN'
+        ? transfer.docCode
+        : transfer.soCode || transfer.docCode;
     const key = `${orderDocCode}_${materialCode}`;
 
     if (!stockTransferMap.has(key)) stockTransferMap.set(key, []);

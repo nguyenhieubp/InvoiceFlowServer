@@ -50,7 +50,7 @@ export class SalesQueryService {
     private fastApiInvoiceRepository: Repository<FastApiInvoice>,
     @InjectRepository(Invoice)
     private invoiceRepository: Repository<Invoice>,
-  ) { }
+  ) {}
 
   /**
    * Find one sale by ID
@@ -342,11 +342,13 @@ export class SalesQueryService {
     if (docCodes.length === 0) return orders;
 
     // [OPTIMIZATION] Use pre-fetched cashio records if available
-    const cashioRecords = prefetchedData?.cashioRecords ?? await this.dailyCashioRepository
-      .createQueryBuilder('cashio')
-      .where('cashio.so_code IN (:...docCodes)', { docCodes })
-      .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
-      .getMany();
+    const cashioRecords =
+      prefetchedData?.cashioRecords ??
+      (await this.dailyCashioRepository
+        .createQueryBuilder('cashio')
+        .where('cashio.so_code IN (:...docCodes)', { docCodes })
+        .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
+        .getMany());
 
     // OPTIMIZED: Build map in single pass O(m) instead of nested loop O(n×m)
     const cashioMap = new Map<string, DailyCashio[]>();
@@ -405,9 +407,9 @@ export class SalesQueryService {
     });
 
     // [OPTIMIZATION] Use pre-fetched product map if available
-    const loyaltyProductMap = prefetchedData?.loyaltyProductMap ?? await this.loyaltyService.fetchProducts(
-      Array.from(allItemCodes),
-    );
+    const loyaltyProductMap =
+      prefetchedData?.loyaltyProductMap ??
+      (await this.loyaltyService.fetchProducts(Array.from(allItemCodes)));
 
     // [OPTIMIZATION] Use pre-fetched warehouse code map if available
     let warehouseCodeMap: Map<string, string>;
@@ -1032,7 +1034,7 @@ export class SalesQueryService {
       query.innerJoin(
         StockTransfer,
         'st_filter',
-        'st_filter.soCode = sale.docCode AND st_filter.itemCode = sale.itemCode',
+        '(st_filter.soCode = sale.docCode OR st_filter.docCode = sale.docCode) AND st_filter.itemCode = sale.itemCode',
       );
 
       if (startDate && endDate) {
@@ -1128,7 +1130,9 @@ export class SalesQueryService {
     } = options;
 
     const perfStart = Date.now();
-    this.logger.log(`[findAllOrders] Starting query: page=${page}, limit=${limit}, dateFrom=${dateFrom}, dateTo=${dateTo}`);
+    this.logger.log(
+      `[findAllOrders] Starting query: page=${page}, limit=${limit}, dateFrom=${dateFrom}, dateTo=${dateTo}`,
+    );
 
     // [OPTIMIZATION] Skip expensive COUNT query to avoid timeout
     // Instead, we'll fetch limit+1 and check if there are more results
@@ -1156,7 +1160,6 @@ export class SalesQueryService {
       ...(needsDateJoinOnFullQuery ? { date, dateFrom, dateTo } : {}),
       search,
     });
-
 
     let allSales: Sale[];
 
@@ -1193,35 +1196,60 @@ export class SalesQueryService {
         let startDate: Date | undefined;
         let endDate: Date | undefined;
 
-        if (dateFrom) { startDate = new Date(dateFrom); startDate.setHours(0, 0, 0, 0); }
-        if (dateTo) { endDate = new Date(dateTo); endDate.setHours(23, 59, 59, 999); }
+        if (dateFrom) {
+          startDate = new Date(dateFrom);
+          startDate.setHours(0, 0, 0, 0);
+        }
+        if (dateTo) {
+          endDate = new Date(dateTo);
+          endDate.setHours(23, 59, 59, 999);
+        }
 
         if (date && !startDate && !endDate) {
           const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
           if (dateMatch) {
             const [, day, monthStr, year] = dateMatch;
             const monthMap: { [key: string]: number } = {
-              JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
-              JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+              JAN: 0,
+              FEB: 1,
+              MAR: 2,
+              APR: 3,
+              MAY: 4,
+              JUN: 5,
+              JUL: 6,
+              AUG: 7,
+              SEP: 8,
+              OCT: 9,
+              NOV: 10,
+              DEC: 11,
             };
             const month = monthMap[monthStr.toUpperCase()];
             if (month !== undefined) {
               const dateObj = new Date(parseInt(year), month, parseInt(day));
-              startDate = new Date(dateObj); startDate.setHours(0, 0, 0, 0);
-              endDate = new Date(dateObj); endDate.setHours(23, 59, 59, 999);
+              startDate = new Date(dateObj);
+              startDate.setHours(0, 0, 0, 0);
+              endDate = new Date(dateObj);
+              endDate.setHours(23, 59, 59, 999);
             }
           }
         }
 
         if (startDate && endDate) {
-          docCodeSubquery.andWhere('sale.docDate >= :docDateStart AND sale.docDate <= :docDateEnd', {
+          docCodeSubquery.andWhere(
+            'sale.docDate >= :docDateStart AND sale.docDate <= :docDateEnd',
+            {
+              docDateStart: startDate,
+              docDateEnd: endDate,
+            },
+          );
+        } else if (startDate) {
+          docCodeSubquery.andWhere('sale.docDate >= :docDateStart', {
             docDateStart: startDate,
+          });
+        } else if (endDate) {
+          docCodeSubquery.andWhere('sale.docDate <= :docDateEnd', {
             docDateEnd: endDate,
           });
-        } else if (startDate) {
-          docCodeSubquery.andWhere('sale.docDate >= :docDateStart', { docDateStart: startDate });
-        } else if (endDate) {
-          docCodeSubquery.andWhere('sale.docDate <= :docDateEnd', { docDateEnd: endDate });
         }
       }
 
@@ -1232,41 +1260,72 @@ export class SalesQueryService {
       const countQuery = this.saleRepository
         .createQueryBuilder('sale')
         .select('COUNT(DISTINCT sale.docCode)', 'total');
-      this.applySaleFilters(countQuery, { brand, isProcessed, statusAsys, typeSale, search });
+      this.applySaleFilters(countQuery, {
+        brand,
+        isProcessed,
+        statusAsys,
+        typeSale,
+        search,
+      });
 
       // Apply same date filter to count query
       if ((dateFrom || dateTo || date) && !search) {
         let startDate: Date | undefined;
         let endDate: Date | undefined;
-        if (dateFrom) { startDate = new Date(dateFrom); startDate.setHours(0, 0, 0, 0); }
-        if (dateTo) { endDate = new Date(dateTo); endDate.setHours(23, 59, 59, 999); }
+        if (dateFrom) {
+          startDate = new Date(dateFrom);
+          startDate.setHours(0, 0, 0, 0);
+        }
+        if (dateTo) {
+          endDate = new Date(dateTo);
+          endDate.setHours(23, 59, 59, 999);
+        }
 
         if (date && !startDate && !endDate) {
           const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
           if (dateMatch) {
             const [, day, monthStr, year] = dateMatch;
             const monthMap: { [key: string]: number } = {
-              JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
-              JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+              JAN: 0,
+              FEB: 1,
+              MAR: 2,
+              APR: 3,
+              MAY: 4,
+              JUN: 5,
+              JUL: 6,
+              AUG: 7,
+              SEP: 8,
+              OCT: 9,
+              NOV: 10,
+              DEC: 11,
             };
             const month = monthMap[monthStr.toUpperCase()];
             if (month !== undefined) {
               const dateObj = new Date(parseInt(year), month, parseInt(day));
-              startDate = new Date(dateObj); startDate.setHours(0, 0, 0, 0);
-              endDate = new Date(dateObj); endDate.setHours(23, 59, 59, 999);
+              startDate = new Date(dateObj);
+              startDate.setHours(0, 0, 0, 0);
+              endDate = new Date(dateObj);
+              endDate.setHours(23, 59, 59, 999);
             }
           }
         }
 
         if (startDate && endDate) {
-          countQuery.andWhere('sale.docDate >= :docDateStart AND sale.docDate <= :docDateEnd', {
+          countQuery.andWhere(
+            'sale.docDate >= :docDateStart AND sale.docDate <= :docDateEnd',
+            {
+              docDateStart: startDate,
+              docDateEnd: endDate,
+            },
+          );
+        } else if (startDate) {
+          countQuery.andWhere('sale.docDate >= :docDateStart', {
             docDateStart: startDate,
+          });
+        } else if (endDate) {
+          countQuery.andWhere('sale.docDate <= :docDateEnd', {
             docDateEnd: endDate,
           });
-        } else if (startDate) {
-          countQuery.andWhere('sale.docDate >= :docDateStart', { docDateStart: startDate });
-        } else if (endDate) {
-          countQuery.andWhere('sale.docDate <= :docDateEnd', { docDateEnd: endDate });
         }
       }
 
@@ -1276,13 +1335,16 @@ export class SalesQueryService {
         docCodeSubquery.getRawMany(),
         countQuery.getRawOne(),
       ]);
-      this.logger.log(`[findAllOrders] DocCode subquery + COUNT took ${Date.now() - t1}ms`);
+      this.logger.log(
+        `[findAllOrders] DocCode subquery + COUNT took ${Date.now() - t1}ms`,
+      );
 
       totalOrders = parseInt(countResult?.total || '0', 10);
 
-      const trimmedResults = docCodeResults.length > limit
-        ? docCodeResults.slice(0, limit)
-        : docCodeResults;
+      const trimmedResults =
+        docCodeResults.length > limit
+          ? docCodeResults.slice(0, limit)
+          : docCodeResults;
       const docCodes = trimmedResults.map((r) => r.docCode);
 
       if (docCodes.length === 0) {
@@ -1292,7 +1354,9 @@ export class SalesQueryService {
         const t2 = Date.now();
         fullQuery.andWhere('sale.docCode IN (:...docCodes)', { docCodes });
         allSales = await fullQuery.getMany();
-        this.logger.log(`[findAllOrders] Full sales query took ${Date.now() - t2}ms, fetched ${allSales.length} sale items`);
+        this.logger.log(
+          `[findAllOrders] Full sales query took ${Date.now() - t2}ms, fetched ${allSales.length} sale items`,
+        );
       }
     } else {
       // Search mode or export: fetch all
@@ -1314,19 +1378,19 @@ export class SalesQueryService {
           docSourceType: sale.docSourceType,
           customer: sale.customer
             ? {
-              code: sale.customer.code || sale.partnerCode || null,
-              brand: sale.customer.brand || null,
-              name: sale.customer.name || null,
-              mobile: sale.customer.mobile || null,
-            }
+                code: sale.customer.code || sale.partnerCode || null,
+                brand: sale.customer.brand || null,
+                name: sale.customer.name || null,
+                mobile: sale.customer.mobile || null,
+              }
             : sale.partnerCode
               ? {
-                code: sale.partnerCode || null,
-                brand: null,
-                name: null,
-                mobile: null,
-                id: null,
-              }
+                  code: sale.partnerCode || null,
+                  brand: null,
+                  name: null,
+                  mobile: null,
+                  id: null,
+                }
               : null,
           totalRevenue: 0,
           totalQty: 0,
@@ -1419,7 +1483,9 @@ export class SalesQueryService {
     ] = await Promise.all([
       // 1. Stock transfers
       docCodesForStockTransfer.length > 0
-        ? this.stockTransferRepository.find({ where: { soCode: In(docCodesForStockTransfer) } })
+        ? this.stockTransferRepository.find({
+            where: { soCode: In(docCodesForStockTransfer) },
+          })
         : Promise.resolve([] as StockTransfer[]),
       // 2. Departments
       this.loyaltyService.fetchLoyaltyDepartments(branchCodes),
@@ -1431,7 +1497,9 @@ export class SalesQueryService {
         : Promise.resolve(new Map<string, string>()),
       // 5. Order fees
       docCodes.length > 0
-        ? this.orderFeeRepository.find({ where: { erpOrderCode: In(docCodes) } })
+        ? this.orderFeeRepository.find({
+            where: { erpOrderCode: In(docCodes) },
+          })
         : Promise.resolve([] as OrderFee[]),
       // 6. Employee status check
       this.n8nService.checkCustomersIsEmployee(partnerCodesToCheckForAll),
@@ -1443,17 +1511,22 @@ export class SalesQueryService {
       // Previously called enrichOrdersWithCashio which re-fetched ST + products from DB/API
       docCodes.length > 0
         ? this.dailyCashioRepository
-          .createQueryBuilder('cashio')
-          .where('cashio.so_code IN (:...docCodes)', { docCodes })
-          .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
-          .getMany()
+            .createQueryBuilder('cashio')
+            .where('cashio.so_code IN (:...docCodes)', { docCodes })
+            .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
+            .getMany()
         : Promise.resolve([] as DailyCashio[]),
     ]);
-    this.logger.log(`[findAllOrders] Parallel batch fetch (8 calls) took ${Date.now() - t3}ms`);
+    this.logger.log(
+      `[findAllOrders] Parallel batch fetch (8 calls) took ${Date.now() - t3}ms`,
+    );
 
     // Process stock transfers (depends on allStockTransfers result)
-    const stockTransfers = allStockTransfers.filter((st) =>
-      saleItemKeys.has(`${st.soCode}_${st.itemCode}`),
+    // Support both SO and RT orders by checking both soCode and docCode
+    const stockTransfers = allStockTransfers.filter(
+      (st) =>
+        saleItemKeys.has(`${st.soCode}_${st.itemCode}`) ||
+        saleItemKeys.has(`${st.docCode}_${st.itemCode}`),
     );
     const stockTransferItemCodes = Array.from(
       new Set(
@@ -1468,9 +1541,14 @@ export class SalesQueryService {
 
     // Fetch products AFTER stock transfers (needs allItemCodes including ST item codes)
     const t4 = Date.now();
-    const loyaltyProductMap = await this.loyaltyService.fetchProducts(allItemCodes);
-    this.logger.log(`[findAllOrders] Product fetch took ${Date.now() - t4}ms, ${loyaltyProductMap.size} products`);
-    this.logger.log(`[findAllOrders] - Departments: ${departmentMap.size}, Warehouses: ${warehouseCodeMap.size}`);
+    const loyaltyProductMap =
+      await this.loyaltyService.fetchProducts(allItemCodes);
+    this.logger.log(
+      `[findAllOrders] Product fetch took ${Date.now() - t4}ms, ${loyaltyProductMap.size} products`,
+    );
+    this.logger.log(
+      `[findAllOrders] - Departments: ${departmentMap.size}, Warehouses: ${warehouseCodeMap.size}`,
+    );
 
     // Build OrderFee map
     const orderFeeMap = new Map<string, OrderFee>();
@@ -1561,11 +1639,13 @@ export class SalesQueryService {
     // Group Stock Transfers by SO Code for efficiency
     const stockTransfersBySoCode = new Map<string, StockTransfer[]>();
     stockTransfers.forEach((st) => {
-      const soCode = st.soCode || st.docCode; // Fallback? usually soCode is key
-      if (!stockTransfersBySoCode.has(soCode)) {
-        stockTransfersBySoCode.set(soCode, []);
+      // Use docCode for RT stock transfers (SALE_RETURN), soCode for others
+      const key =
+        st.doctype === 'SALE_RETURN' ? st.docCode : st.soCode || st.docCode;
+      if (!stockTransfersBySoCode.has(key)) {
+        stockTransfersBySoCode.set(key, []);
       }
-      stockTransfersBySoCode.get(soCode)!.push(st);
+      stockTransfersBySoCode.get(key)!.push(st);
     });
 
     for (const [docCode, sales] of enrichedSalesMap.entries()) {
@@ -1587,7 +1667,8 @@ export class SalesQueryService {
       orderStockTransfers.forEach((st) => {
         // [FIX] User Request: Only join with ioType: O (Output)
         // This ensures Returns match with Original Output ST, avoiding duplication
-        if (st.ioType !== 'O') return;
+        // EXCEPTION: For SALE_RETURN (RT), we need the Input transfer (ioType: I)
+        if (st.ioType !== 'O' && st.doctype !== 'SALE_RETURN') return;
 
         // Logic to find match key: itemCode
         const key = st.itemCode;
@@ -1596,8 +1677,12 @@ export class SalesQueryService {
         if (!stByItem.has(key)) stByItem.set(key, { st: [], rt: [] });
         const m = stByItem.get(key)!;
 
-        // Always push to 'st' bucket since we only have Output transfers
-        m.st.push(st);
+        // Distribute to correct bucket
+        if (st.doctype === 'SALE_RETURN') {
+          m.rt.push(st);
+        } else {
+          m.st.push(st);
+        }
       });
 
       // Loop sales and assign
@@ -1657,12 +1742,13 @@ export class SalesQueryService {
           if (assignedSt) saleStockTransfers.push(assignedSt);
           if (assignedRt) saleStockTransfers.push(assignedRt);
 
-          // [FIX] Resolve MaKho from assigned ST directly
+          // [FIX] Resolve MaKho from assigned ST directly (check both ST and RT)
+          const stockTransfer = assignedSt || assignedRt;
           let maKhoFromStockTransfer = '';
-          if (assignedSt?.stockCode) {
+          if (stockTransfer?.stockCode) {
             maKhoFromStockTransfer =
-              warehouseCodeMap.get(assignedSt.stockCode) ||
-              assignedSt.stockCode;
+              warehouseCodeMap.get(stockTransfer.stockCode) ||
+              stockTransfer.stockCode;
           }
 
           // [NEW] Inject Cashio Data for Discount Calculation
@@ -1682,13 +1768,27 @@ export class SalesQueryService {
           const overrideDiscount: any = {};
 
           if (cashioData && cashioData.length > 0) {
-            const ecoinRecord = cashioData.find((c: any) => String(c.fop_syscode).trim().toUpperCase() === 'ECOIN');
-            const voucherRecord = cashioData.find((c: any) => String(c.fop_syscode).trim().toUpperCase() === 'VOUCHER');
+            const ecoinRecord = cashioData.find(
+              (c: any) =>
+                String(c.fop_syscode).trim().toUpperCase() === 'ECOIN',
+            );
+            const voucherRecord = cashioData.find(
+              (c: any) =>
+                String(c.fop_syscode).trim().toUpperCase() === 'VOUCHER',
+            );
 
             if (ecoinRecord) {
               // ECOIN -> ck11
-              if (InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0) {
-                const amount = InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0);
+              if (
+                InvoiceLogicUtils.toNumber(
+                  sale.paid_by_voucher_ecode_ecoin_bp,
+                  0,
+                ) > 0
+              ) {
+                const amount = InvoiceLogicUtils.toNumber(
+                  sale.paid_by_voucher_ecode_ecoin_bp,
+                  0,
+                );
 
                 // [FIX] Determine ma_ck11 based on Brand & Product Type
                 const currentBrand = (sale.brand || '').trim().toUpperCase();
@@ -1712,8 +1812,16 @@ export class SalesQueryService {
               }
             } else if (voucherRecord) {
               // VOUCHER -> ck05
-              if (InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0) {
-                const amount = InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0);
+              if (
+                InvoiceLogicUtils.toNumber(
+                  sale.paid_by_voucher_ecode_ecoin_bp,
+                  0,
+                ) > 0
+              ) {
+                const amount = InvoiceLogicUtils.toNumber(
+                  sale.paid_by_voucher_ecode_ecoin_bp,
+                  0,
+                );
                 overrideDiscount.ck05_nt = amount;
                 overrideDiscount.ck11_nt = 0;
                 overrideDiscount.ma_ck05 = 'VOUCHER';
@@ -1730,14 +1838,15 @@ export class SalesQueryService {
 
           // [FIX] Final clearing for Point Exchange orders
           // Even if override set ck05_nt, we must clear it for Point Exchange
-          const orderTypes = InvoiceLogicUtils.getOrderTypes(sale.ordertypeName);
+          const orderTypes = InvoiceLogicUtils.getOrderTypes(
+            sale.ordertypeName,
+          );
           if (orderTypes.isDoiDiem) {
             overrideDiscount.ck05_nt = 0;
             overrideDiscount.ck05Nt = 0;
             overrideDiscount.ma_ck05 = null;
             overrideDiscount.maCk05 = null;
           }
-
 
           // Cache materialType for later use in verification loop
           if (sale.itemCode && loyaltyProduct?.materialType) {
@@ -1786,6 +1895,10 @@ export class SalesQueryService {
           const enrichedSale =
             await this.salesFormattingService.formatSingleSale(sale, context);
 
+          // [FIX] Explicitly add single stockTransfer field for backward compatibility/FE usage
+          // Priority: assignedSt > assignedRt
+          enrichedSale.stockTransfer = assignedSt || assignedRt || null;
+
           // [NEW] Apply Override Discount Logic (ECOIN/VOUCHER logic calculated above)
           // Essential for syncing GET API with Fast API Payload logic
           if (Object.keys(overrideDiscount).length > 0) {
@@ -1812,7 +1925,9 @@ export class SalesQueryService {
     // Wait for all formatting to complete in parallel
     const tFormat = Date.now();
     const allEnrichedSales = await Promise.all(formatPromises);
-    this.logger.log(`[findAllOrders] Format sales (${formatPromises.length} items) took ${Date.now() - tFormat}ms`);
+    this.logger.log(
+      `[findAllOrders] Format sales (${formatPromises.length} items) took ${Date.now() - tFormat}ms`,
+    );
 
     // Clear and repopulate enrichedSalesMap with formatted sales
     enrichedSalesMap.clear();
@@ -1835,7 +1950,6 @@ export class SalesQueryService {
     // [OPTIMIZATION] Removed pre-explosion enrichWithMaVtRef call — redundant
     // The post-explosion call (after enrichOrdersWithCashio #2) covers ALL lines
 
-
     // 9. Sort and return
     const orders = Array.from(orderMap.values()).sort((a, b) => {
       // Sort by latest date first
@@ -1856,7 +1970,9 @@ export class SalesQueryService {
         skipMaVtRef: true, // Caller handles enrichWithMaVtRef post-explosion (L1904)
       },
     );
-    this.logger.log(`[findAllOrders] enrichOrdersWithCashio (explosion) took ${Date.now() - tExplosion}ms`);
+    this.logger.log(
+      `[findAllOrders] enrichOrdersWithCashio (explosion) took ${Date.now() - tExplosion}ms`,
+    );
 
     // [FIX] N8n Integration for Card Data (Enrichment source of truth)
     // Applied AFTER explosion to ensure we overwrite any Stock Transfer duplicates or Qty resets
@@ -1936,7 +2052,9 @@ export class SalesQueryService {
         explodedSalesForEnrichment,
         loyaltyProductMap,
       );
-      this.logger.log(`[findAllOrders] enrichWithMaVtRef (${explodedSalesForEnrichment.length} lines) took ${Date.now() - tMaVtRef}ms`);
+      this.logger.log(
+        `[findAllOrders] enrichWithMaVtRef (${explodedSalesForEnrichment.length} lines) took ${Date.now() - tMaVtRef}ms`,
+      );
 
       // [New] Override maThe for Voucher items (Type 94) with Ecode (ma_vt_ref)
       // Frontend requires maThe to show the serial/ecode
@@ -2062,7 +2180,9 @@ export class SalesQueryService {
       };
     });
 
-    this.logger.log(`[findAllOrders] TOTAL execution time: ${Date.now() - perfStart}ms`);
+    this.logger.log(
+      `[findAllOrders] TOTAL execution time: ${Date.now() - perfStart}ms`,
+    );
 
     return {
       data: ordersWithSingleSale,
@@ -2201,19 +2321,19 @@ export class SalesQueryService {
           docSourceType: sale.docSourceType,
           customer: sale.customer
             ? {
-              code: sale.customer.code || sale.partnerCode || null,
-              brand: sale.customer.brand || null,
-              name: sale.customer.name || null,
-              mobile: sale.customer.mobile || null,
-            }
+                code: sale.customer.code || sale.partnerCode || null,
+                brand: sale.customer.brand || null,
+                name: sale.customer.name || null,
+                mobile: sale.customer.mobile || null,
+              }
             : sale.partnerCode
               ? {
-                code: sale.partnerCode || null,
-                brand: null,
-                name: null,
-                mobile: null,
-                id: null,
-              }
+                  code: sale.partnerCode || null,
+                  brand: null,
+                  name: null,
+                  mobile: null,
+                  id: null,
+                }
               : null,
           totalRevenue: 0,
           totalQty: 0,
