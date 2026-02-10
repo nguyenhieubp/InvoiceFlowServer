@@ -1548,22 +1548,8 @@ export class SalesQueryService {
     });
 
     // Build Stock Transfer Maps
-    const { stockTransferMap, stockTransferByDocCodeMap } =
-      StockTransferUtils.buildStockTransferMaps(
-        stockTransfers,
-        loyaltyProductMap,
-        docCodes,
-      );
 
     // Pre-build map for O(1) lookup instead of filter in loop
-    const stockTransferByItemCodeMap = new Map<string, StockTransfer[]>();
-    stockTransfers.forEach((st) => {
-      const key = `${st.soCode}_${st.itemCode}`;
-      if (!stockTransferByItemCodeMap.has(key)) {
-        stockTransferByItemCodeMap.set(key, []);
-      }
-      stockTransferByItemCodeMap.get(key)!.push(st);
-    });
 
     // 6. Card Data Logic (preserved legacy behavior)
     const getMaThe = new Map<string, string>();
@@ -1608,82 +1594,11 @@ export class SalesQueryService {
     });
 
     // [FIX] Robust 1-1 Stock Transfer Matching Logic (Batch for all orders)
-    const saleIdToStockTransferMap = new Map<
-      string,
-      { st: StockTransfer | null; rt: StockTransfer | null }
-    >();
-
-    // Group Stock Transfers by SO Code for efficiency
-    const stockTransfersBySoCode = new Map<string, StockTransfer[]>();
-    stockTransfers.forEach((st) => {
-      // Use docCode for RT stock transfers (SALE_RETURN), soCode for others
-      const key =
-        st.doctype === 'SALE_RETURN' ? st.docCode : st.soCode || st.docCode;
-      if (!stockTransfersBySoCode.has(key)) {
-        stockTransfersBySoCode.set(key, []);
-      }
-      stockTransfersBySoCode.get(key)!.push(st);
-    });
-
-    for (const [docCode, sales] of enrichedSalesMap.entries()) {
-      // [FIX] Support lookup for RT orders using original order code
-      let orderStockTransfers = stockTransfersBySoCode.get(docCode) || [];
-      if (orderStockTransfers.length === 0 && docCode.startsWith('RT')) {
-        const originalOrderCode = docCode
-          .replace(/^RT/, 'SO')
-          .replace(/_\d+$/, '');
-        orderStockTransfers =
-          stockTransfersBySoCode.get(originalOrderCode) || [];
-      }
-
-      // Group STs by ItemCode
-      const stByItem = new Map<
-        string,
-        { st: StockTransfer[]; rt: StockTransfer[] }
-      >();
-      orderStockTransfers.forEach((st) => {
-        // [FIX] User Request: Only join with ioType: O (Output)
-        // This ensures Returns match with Original Output ST, avoiding duplication
-        // EXCEPTION: For SALE_RETURN (RT), we need the Input transfer (ioType: I)
-        if (st.ioType !== 'O' && st.doctype !== 'SALE_RETURN') return;
-
-        // Logic to find match key: itemCode
-        const key = st.itemCode;
-        if (!key) return; // limit capability if no itemCode
-
-        if (!stByItem.has(key)) stByItem.set(key, { st: [], rt: [] });
-        const m = stByItem.get(key)!;
-
-        // Distribute to correct bucket
-        if (st.doctype === 'SALE_RETURN') {
-          m.rt.push(st);
-        } else {
-          m.st.push(st);
-        }
-      });
-
-      // Loop sales and assign
-      sales.forEach((sale) => {
-        if (!sale.id) return;
-        const key = sale.itemCode; // Primary match key
-
-        if (key && stByItem.has(key)) {
-          const m = stByItem.get(key)!;
-          const assignedSt = m.st.shift() || null;
-          const assignedRt = m.rt.shift() || null;
-          saleIdToStockTransferMap.set(sale.id, {
-            st: assignedSt,
-            rt: assignedRt,
-          });
-        } else {
-          // Fallback? If logic relies on materialCode?
-          // Current findAllOrders logic relied on materialCode heavily.
-          // findByOrderCode used itemCode primarily.
-          // Let's stick to itemCode for consistency.
-          saleIdToStockTransferMap.set(sale.id, { st: null, rt: null });
-        }
-      });
-    }
+    // Refactored to private method for clarity and debugging
+    const saleIdToStockTransferMap = this.matchStockTransfersForOrders(
+      enrichedSalesMap,
+      stockTransfers,
+    );
 
     // 8. Format Sales for Frontend
     // OPTIMIZED: Parallelize formatSaleForFrontend calls instead of sequential
@@ -2637,5 +2552,89 @@ export class SalesQueryService {
 
     const result = await query.getRawOne();
     return parseInt(result?.count || '0', 10);
+  }
+
+  /**
+   * Refactored Helper: Match Stock Transfers to Sales Lines
+   * Handles complex logic for SO (Output) and RT (Input) matching
+   */
+  private matchStockTransfersForOrders(
+    enrichedSalesMap: Map<string, any[]>,
+    stockTransfers: StockTransfer[],
+  ): Map<string, { st: StockTransfer | null; rt: StockTransfer | null }> {
+    const saleIdToStockTransferMap = new Map<
+      string,
+      { st: StockTransfer | null; rt: StockTransfer | null }
+    >();
+
+    // Group Stock Transfers by SO Code for efficiency
+    const stockTransfersBySoCode = new Map<string, StockTransfer[]>();
+    stockTransfers.forEach((st) => {
+      // Use docCode for RT stock transfers (SALE_RETURN), soCode for others
+      const key =
+        st.doctype === 'SALE_RETURN' ? st.docCode : st.soCode || st.docCode;
+      if (!stockTransfersBySoCode.has(key)) {
+        stockTransfersBySoCode.set(key, []);
+      }
+      stockTransfersBySoCode.get(key)!.push(st);
+    });
+
+    for (const [docCode, sales] of enrichedSalesMap.entries()) {
+      // [FIX] Support lookup for RT orders using original order code
+      let orderStockTransfers = stockTransfersBySoCode.get(docCode) || [];
+      if (orderStockTransfers.length === 0 && docCode.startsWith('RT')) {
+        const originalOrderCode = docCode
+          .replace(/^RT/, 'SO')
+          .replace(/_\d+$/, '');
+        orderStockTransfers =
+          stockTransfersBySoCode.get(originalOrderCode) || [];
+      }
+
+      // Group STs by ItemCode
+      const stByItem = new Map<
+        string,
+        { st: StockTransfer[]; rt: StockTransfer[] }
+      >();
+      orderStockTransfers.forEach((st) => {
+        // [FIX] User Request: Only join with ioType: O (Output)
+        // This ensures Returns match with Original Output ST, avoiding duplication
+        // EXCEPTION: For SALE_RETURN (RT), we need the Input transfer (ioType: I)
+        if (st.ioType !== 'O' && st.doctype !== 'SALE_RETURN') return;
+
+        // Logic to find match key: itemCode
+        const key = st.itemCode;
+        if (!key) return; // limit capability if no itemCode
+
+        if (!stByItem.has(key)) stByItem.set(key, { st: [], rt: [] });
+        const m = stByItem.get(key)!;
+
+        // Distribute to correct bucket
+        if (st.doctype === 'SALE_RETURN') {
+          m.rt.push(st);
+        } else {
+          m.st.push(st);
+        }
+      });
+
+      // Loop sales and assign
+      sales.forEach((sale) => {
+        if (!sale.id) return;
+        const key = sale.itemCode; // Primary match key
+
+        if (key && stByItem.has(key)) {
+          const m = stByItem.get(key)!;
+          const assignedSt = m.st.shift() || null;
+          const assignedRt = m.rt.shift() || null;
+          saleIdToStockTransferMap.set(sale.id, {
+            st: assignedSt,
+            rt: assignedRt,
+          });
+        } else {
+          saleIdToStockTransferMap.set(sale.id, { st: null, rt: null });
+        }
+      });
+    }
+
+    return saleIdToStockTransferMap;
   }
 }

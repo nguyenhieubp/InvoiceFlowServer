@@ -33,7 +33,7 @@ export class FastApiInvoiceFlowService {
     @InjectRepository(PaymentSyncLog)
     private readonly paymentSyncLogRepository: Repository<PaymentSyncLog>,
     private readonly n8nService: N8nService,
-  ) { }
+  ) {}
 
   /**
    * Tạo/cập nhật khách hàng trong Fast API
@@ -59,21 +59,16 @@ export class FastApiInvoiceFlowService {
 
       // Mapping N8n fields
       // address_name -> address
-      const payloadAddress =
-        n8nData?.address || n8nData?.address_name;
+      const payloadAddress = n8nData?.address || n8nData?.address_name;
       // birthday -> birthDate
-      const payloadBirthDate =
-        n8nData?.birthday || n8nData?.birthDate;
+      const payloadBirthDate = n8nData?.birthday || n8nData?.birthDate;
       // idnumber -> cccd
-      const payloadCccd =
-        n8nData?.idnumber || n8nData?.cccd;
+      const payloadCccd = n8nData?.idnumber || n8nData?.cccd;
       // email -> email
       const payloadEmail = n8nData?.email;
       // sexual -> gioi_tinh
-      const payloadSex =
-        n8nData?.sexual || n8nData?.gioi_tinh;
+      const payloadSex = n8nData?.sexual || n8nData?.gioi_tinh;
       // mobile -> tel
-
 
       const result = await this.fastApiService.createOrUpdateCustomer({
         code: payloadCode,
@@ -799,8 +794,8 @@ export class FastApiInvoiceFlowService {
       const departmentMap =
         branchCodes.size > 0
           ? await this.loyaltyService.fetchLoyaltyDepartments(
-            Array.from(branchCodes),
-          )
+              Array.from(branchCodes),
+            )
           : new Map();
 
       const paymentResults: any[] = [];
@@ -1536,17 +1531,17 @@ export class FastApiInvoiceFlowService {
           // Các field chỉ có trong warehouseRelease
           ...(stockTransfer.ioType === 'O'
             ? {
-              px_gia_dd: 0,
-              ma_phi: '',
-              ma_ku: '',
-              ma_phi_hh: '',
-              ma_phi_ttlk: '',
-              tien_hh_nt: 0,
-              tien_ttlk_nt: 0,
-            }
+                px_gia_dd: 0,
+                ma_phi: '',
+                ma_ku: '',
+                ma_phi_hh: '',
+                ma_phi_ttlk: '',
+                tien_hh_nt: 0,
+                tien_ttlk_nt: 0,
+              }
             : {
-              pn_gia_tb: 0,
-            }),
+                pn_gia_tb: 0,
+              }),
         },
       ],
     };
