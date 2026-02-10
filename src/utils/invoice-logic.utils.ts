@@ -884,25 +884,21 @@ export class InvoiceLogicUtils {
     const normBrand = (brand || '').trim().toUpperCase();
     const type = (productType || '').trim().toUpperCase();
 
-    // Mapping Logic (Source of Truth)
-    const brandMap: Record<string, any> = {
-      'YAMAN': { I: 'BTH CKVIP SP', S: 'BTH CKVIP DV' },
-      'F3': { I: 'FBV CKVIP SP', S: 'FBV CKVIP DV' },
-      'FACIALBAR': { I: 'FBV CKVIP SP', S: 'FBV CKVIP DV' },
-      'LABHAIR': { I: 'LHV CKVIP SP', S: 'LHV CKVIP DV' },
-      'MENARD': { I: 'MN CKVIP SP', S: 'MN CKVIP DV', V: 'MN CKVIP VC' }
+    // [UPDATED] 2026-02-10: Simplified Brand-based mapping per user request
+    const brandMap: Record<string, string> = {
+      'F3': 'FBV.TKECOIN',
+      'FACIALBAR': 'FBV.TKECOIN',
+      'LABHAIR': 'LHVTT.VCDV',
+      'MENARD': 'MN.TKDV',
+      'YAMAN': '', // Explicitly empty
     };
 
     let effectiveBrand = normBrand;
-    // Map common aliases if needed
+    // Map common aliases
     if (effectiveBrand === 'BTH') effectiveBrand = 'YAMAN';
     if (effectiveBrand === 'LHV') effectiveBrand = 'LABHAIR';
 
-    const typeMap = brandMap[effectiveBrand];
-
-    if (!typeMap) return null;
-
-    return typeMap[type] || null;
+    return brandMap[effectiveBrand] || null;
   }
   /**
    * Xác định xem sale item có phải là hàng tặng (Giá = 0) hay không
