@@ -45,7 +45,7 @@ export class SpecialOrderHandlerService {
 
     @Inject(forwardRef(() => PaymentService))
     private paymentService: PaymentService,
-  ) {}
+  ) { }
 
   /**
    * Helper xử lý các đơn hàng đặc biệt (Đổi điểm, Tặng sinh nhật, Đầu tư...)
@@ -71,13 +71,7 @@ export class SpecialOrderHandlerService {
       if (orderData.customer?.code) {
         await this.fastApiInvoiceFlowService.createOrUpdateCustomer({
           ma_kh: SalesUtils.normalizeMaKh(orderData.customer.code),
-          ten_kh: orderData.customer.name || '',
-          dia_chi: orderData.customer.address || undefined,
-          so_cccd: orderData.customer.idnumber || undefined,
-          ngay_sinh: orderData.customer?.birthday
-            ? ConvertUtils.formatDateYYYYMMDD(orderData.customer.birthday)
-            : undefined,
-          gioi_tinh: orderData.customer.sexual || undefined,
+          brand: orderData.brand || orderData.sourceCompany,
         });
       }
 
@@ -111,8 +105,8 @@ export class SpecialOrderHandlerService {
 
       let responseStatus =
         Array.isArray(result) &&
-        result.length > 0 &&
-        result[0].status === STATUS.SUCCESS
+          result.length > 0 &&
+          result[0].status === STATUS.SUCCESS
           ? STATUS.SUCCESS
           : STATUS.FAILED;
       let apiMessage =
@@ -194,9 +188,8 @@ export class SpecialOrderHandlerService {
       return {
         result: null,
         status: STATUS.FAILED,
-        message: `Lỗi xử lý ${description}: ${
-          exceptionResponse?.message || error?.message || error
-        }`,
+        message: `Lỗi xử lý ${description}: ${exceptionResponse?.message || error?.message || error
+          }`,
         guid: null,
         fastApiResponse: responseData, // [NEW]
         payload: payloadLog,
@@ -300,13 +293,7 @@ export class SpecialOrderHandlerService {
       if (orderData.customer?.code) {
         await this.fastApiInvoiceFlowService.createOrUpdateCustomer({
           ma_kh: SalesUtils.normalizeMaKh(orderData.customer.code),
-          ten_kh: orderData.customer.name || '',
-          dia_chi: orderData.customer.address || undefined,
-          so_cccd: orderData.customer.idnumber || undefined,
-          ngay_sinh: orderData.customer?.birthday
-            ? ConvertUtils.formatDateYYYYMMDD(orderData.customer.birthday)
-            : undefined,
-          gioi_tinh: orderData.customer.sexual || undefined,
+          brand: orderData.brand || orderData.sourceCompany,
         });
       }
 
@@ -601,9 +588,8 @@ export class SpecialOrderHandlerService {
       return {
         result: null,
         status: STATUS.FAILED,
-        message: `Lỗi xử lý đơn dịch vụ: ${
-          exceptionResponse?.message || error?.message || error
-        }`,
+        message: `Lỗi xử lý đơn dịch vụ: ${exceptionResponse?.message || error?.message || error
+          }`,
         guid: null,
         fastApiResponse: responseData, // [NEW]
         payload: payloadLog,

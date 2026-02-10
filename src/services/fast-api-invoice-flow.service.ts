@@ -42,14 +42,7 @@ export class FastApiInvoiceFlowService {
    */
   async createOrUpdateCustomer(customerData: {
     ma_kh: string;
-    ten_kh: string;
-    dia_chi?: string;
-    ngay_sinh?: string;
-    so_cccd?: string;
-    e_mail?: string;
-    gioi_tinh?: string;
-    brand?: string; // [NEW]
-    tel?: string; // [NEW]
+    brand?: string;
   }): Promise<any> {
     try {
       let n8nData: any = null;
@@ -61,26 +54,26 @@ export class FastApiInvoiceFlowService {
       }
 
       // Priority: N8n Data > Input Data > Empty
-      const payloadCode = n8nData?.code || customerData.ma_kh;
-      const payloadName = n8nData?.name || customerData.ten_kh;
+      const payloadCode = n8nData?.code;
+      const payloadName = n8nData?.name;
 
       // Mapping N8n fields
       // address_name -> address
       const payloadAddress =
-        n8nData?.address || n8nData?.address_name || customerData.dia_chi;
+        n8nData?.address || n8nData?.address_name;
       // birthday -> birthDate
       const payloadBirthDate =
-        n8nData?.birthday || n8nData?.birthDate || customerData.ngay_sinh;
+        n8nData?.birthday || n8nData?.birthDate;
       // idnumber -> cccd
       const payloadCccd =
-        n8nData?.idnumber || n8nData?.cccd || customerData.so_cccd;
+        n8nData?.idnumber || n8nData?.cccd;
       // email -> email
-      const payloadEmail = n8nData?.email || customerData.e_mail;
+      const payloadEmail = n8nData?.email;
       // sexual -> gioi_tinh
       const payloadSex =
-        n8nData?.sexual || n8nData?.gioi_tinh || customerData.gioi_tinh;
+        n8nData?.sexual || n8nData?.gioi_tinh;
       // mobile -> tel
-      const payloadTel = n8nData?.mobile || n8nData?.phone || customerData.tel;
+
 
       const result = await this.fastApiService.createOrUpdateCustomer({
         code: payloadCode,
@@ -90,7 +83,6 @@ export class FastApiInvoiceFlowService {
         cccd: payloadCccd,
         email: payloadEmail,
         gioi_tinh: payloadSex,
-        tel: payloadTel,
       });
 
       // Validate response: status = 1 mới là success
@@ -148,13 +140,6 @@ export class FastApiInvoiceFlowService {
     options?: { skipLotSync?: boolean; skipCustomerSync?: boolean },
   ): Promise<any> {
     try {
-      // [NEW] Check skipCustomerSync flag
-      if (!options?.skipCustomerSync) {
-        await this.createOrUpdateCustomer({
-          ma_kh: orderData.ma_kh,
-          ten_kh: orderData.ten_kh || '',
-        });
-      }
       const cleanOrderData = FastApiPayloadHelper.buildCleanPayload(
         orderData,
         action,
@@ -573,7 +558,14 @@ export class FastApiInvoiceFlowService {
       await this.syncMissingLotSerial(invoiceData);
 
       // Step 1: Tạo/cập nhật Customer
-      // Step 2: Tạo salesOrder (đơn hàng bán) - Skip sync inside
+      if (!invoiceData.skipCustomerSync) {
+        await this.createOrUpdateCustomer({
+          ma_kh: invoiceData.ma_kh,
+          brand: invoiceData.brand || invoiceData.sourceCompany,
+        });
+      }
+
+      // Step 2: Tạo salesOrder (đơn hàng bán) - Skip sync inside because we did it above
       const resultSalesOrder = await this.createSalesOrder(invoiceData, 0, {
         skipLotSync: true,
         skipCustomerSync: true,

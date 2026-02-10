@@ -49,14 +49,7 @@ export class NormalOrderHandlerService {
     if (orderData.customer?.code) {
       await this.fastApiInvoiceFlowService.createOrUpdateCustomer({
         ma_kh: SalesUtils.normalizeMaKh(orderData.customer.code),
-        ten_kh: orderData.customer.name || '',
-        dia_chi: orderData.customer.address || undefined,
-        so_cccd: orderData.customer.idnumber || undefined,
-        ngay_sinh: orderData.customer?.birthday
-          ? ConvertUtils.formatDateYYYYMMDD(orderData.customer.birthday)
-          : undefined,
-        gioi_tinh: orderData.customer.sexual || undefined,
-        brand: orderData.sourceCompany || orderData.brand, // [NEW] Pass brand/sourceCompany
+        brand: orderData.sourceCompany || orderData.brand,
       });
     }
 

@@ -1041,10 +1041,11 @@ export class InvoiceLogicUtils {
     const ecoinRecord = cashioData?.find((c: any) => c.fop_syscode === 'ECOIN');
     const voucherRecord = cashioData?.find((c: any) => c.fop_syscode === 'VOUCHER');
 
-    // Helper to get amount (Fallback to sale.paid_by_voucher if cashio.total_in is 0)
+    // Helper to get amount (ALWAYS use sale distributed amount)
     const getDiscountAmount = (record: any) => {
-      const totalIn = InvoiceLogicUtils.toNumber(record?.total_in, 0);
-      return totalIn > 0 ? totalIn : InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0);
+      // [FIX] Always use the distributed item amount (paid_by_voucher_ecode_ecoin_bp)
+      // Do NOT use record.total_in because that is the Global Payment Amount useful only for single-line orders or checks
+      return InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0);
     };
 
     if (ecoinRecord) {
