@@ -1160,51 +1160,12 @@ export class SalesQueryService {
     let allSales: Sale[];
 
     if (!isExport && !isSearchMode) {
-      // === [OPTIMIZATION] Subquery-based pagination (avoids materializing 46K+ soCodes) ===
-      // Instead of fetching all soCodes into memory, use a SQL subquery that lets the DB optimize.
+      // === [OPTIMIZATION] Direct sale.docDate filtering ===
+      // Previously used stock_transfers.transDate pre-filter (~15s full table scan, no index).
+      // Now filter by sale.docDate directly (fast, on sales table).
+      // Explosion step still uses actual stock_transfer data for accuracy.
 
-      // Build date filter for stock_transfer subquery
-      let stDateCondition = '';
-      const stParams: Record<string, any> = {};
-
-      if ((dateFrom || dateTo || date) && !search) {
-        let stStartDate: Date | undefined;
-        let stEndDate: Date | undefined;
-        if (dateFrom) { stStartDate = new Date(dateFrom); stStartDate.setHours(0, 0, 0, 0); }
-        if (dateTo) { stEndDate = new Date(dateTo); stEndDate.setHours(23, 59, 59, 999); }
-
-        if (stStartDate && stEndDate) {
-          stDateCondition = 'st_sub."transDate" >= :stStart AND st_sub."transDate" <= :stEnd';
-          stParams.stStart = stStartDate;
-          stParams.stEnd = stEndDate;
-        } else if (stStartDate) {
-          stDateCondition = 'st_sub."transDate" >= :stStart';
-          stParams.stStart = stStartDate;
-        } else if (stEndDate) {
-          stDateCondition = 'st_sub."transDate" <= :stEnd';
-          stParams.stEnd = stEndDate;
-        } else if (date) {
-          const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
-          if (dateMatch) {
-            const [, day, monthStr, year] = dateMatch;
-            const monthMap: { [key: string]: number } = {
-              JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
-              JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
-            };
-            const month = monthMap[monthStr.toUpperCase()];
-            if (month !== undefined) {
-              const dateObj = new Date(parseInt(year), month, parseInt(day));
-              const sod = new Date(dateObj); sod.setHours(0, 0, 0, 0);
-              const eod = new Date(dateObj); eod.setHours(23, 59, 59, 999);
-              stDateCondition = 'st_sub."transDate" >= :stStart AND st_sub."transDate" <= :stEnd';
-              stParams.stStart = sod;
-              stParams.stEnd = eod;
-            }
-          }
-        }
-      }
-
-      // Step 1: Get distinct docCodes with pagination
+      // Build docCode pagination query
       const docCodeSubquery = this.saleRepository
         .createQueryBuilder('sale')
         .select('sale.docCode', 'docCode')
@@ -1217,7 +1178,7 @@ export class SalesQueryService {
         docCodeSubquery.leftJoin('sale.customer', 'customer');
       }
 
-      // Apply non-date filters
+      // Apply non-date filters (brand, search, status, etc.)
       this.applySaleFilters(docCodeSubquery, {
         brand,
         isProcessed,
@@ -1226,37 +1187,102 @@ export class SalesQueryService {
         search,
       });
 
-      // [OPTIMIZATION] Use EXISTS instead of IN — PG can early-terminate per row
-      // and use hash semi-join, avoiding full subquery materialization
-      if (stDateCondition) {
-        const stTableName = this.stockTransferRepository.metadata.tableName;
-        docCodeSubquery.andWhere(
-          `EXISTS (SELECT 1 FROM ${stTableName} st_sub WHERE st_sub."soCode" = sale."docCode" AND ${stDateCondition})`,
-          stParams,
-        );
+      // [OPTIMIZATION] Filter by sale.docDate directly (no stock_transfer JOIN)
+      if ((dateFrom || dateTo || date) && !search) {
+        let startDate: Date | undefined;
+        let endDate: Date | undefined;
+
+        if (dateFrom) { startDate = new Date(dateFrom); startDate.setHours(0, 0, 0, 0); }
+        if (dateTo) { endDate = new Date(dateTo); endDate.setHours(23, 59, 59, 999); }
+
+        if (date && !startDate && !endDate) {
+          const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+          if (dateMatch) {
+            const [, day, monthStr, year] = dateMatch;
+            const monthMap: { [key: string]: number } = {
+              JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+              JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+            };
+            const month = monthMap[monthStr.toUpperCase()];
+            if (month !== undefined) {
+              const dateObj = new Date(parseInt(year), month, parseInt(day));
+              startDate = new Date(dateObj); startDate.setHours(0, 0, 0, 0);
+              endDate = new Date(dateObj); endDate.setHours(23, 59, 59, 999);
+            }
+          }
+        }
+
+        if (startDate && endDate) {
+          docCodeSubquery.andWhere('sale.docDate >= :docDateStart AND sale.docDate <= :docDateEnd', {
+            docDateStart: startDate,
+            docDateEnd: endDate,
+          });
+        } else if (startDate) {
+          docCodeSubquery.andWhere('sale.docDate >= :docDateStart', { docDateStart: startDate });
+        } else if (endDate) {
+          docCodeSubquery.andWhere('sale.docDate <= :docDateEnd', { docDateEnd: endDate });
+        }
       }
 
-      // Paginate at order level (fetch limit+1 to detect if there are more)
       const offset = (page - 1) * limit;
       docCodeSubquery.skip(offset).take(limit + 1);
 
-      const t1 = Date.now();
-      const docCodeResults = await docCodeSubquery.getRawMany();
-      this.logger.log(`[findAllOrders] DocCode subquery took ${Date.now() - t1}ms`);
+      // Build parallel COUNT query (same filters, no pagination)
+      const countQuery = this.saleRepository
+        .createQueryBuilder('sale')
+        .select('COUNT(DISTINCT sale.docCode)', 'total');
+      this.applySaleFilters(countQuery, { brand, isProcessed, statusAsys, typeSale, search });
 
-      // Check if there are more results (we fetched limit+1)
-      const hasMore = docCodeResults.length > limit;
+      // Apply same date filter to count query
+      if ((dateFrom || dateTo || date) && !search) {
+        let startDate: Date | undefined;
+        let endDate: Date | undefined;
+        if (dateFrom) { startDate = new Date(dateFrom); startDate.setHours(0, 0, 0, 0); }
+        if (dateTo) { endDate = new Date(dateTo); endDate.setHours(23, 59, 59, 999); }
 
-      // Trim to exact limit
-      const trimmedResults = hasMore ? docCodeResults.slice(0, limit) : docCodeResults;
-      const docCodes = trimmedResults.map((r) => r.docCode);
+        if (date && !startDate && !endDate) {
+          const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+          if (dateMatch) {
+            const [, day, monthStr, year] = dateMatch;
+            const monthMap: { [key: string]: number } = {
+              JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+              JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+            };
+            const month = monthMap[monthStr.toUpperCase()];
+            if (month !== undefined) {
+              const dateObj = new Date(parseInt(year), month, parseInt(day));
+              startDate = new Date(dateObj); startDate.setHours(0, 0, 0, 0);
+              endDate = new Date(dateObj); endDate.setHours(23, 59, 59, 999);
+            }
+          }
+        }
 
-      // Calculate totalOrders based on hasMore
-      if (hasMore) {
-        totalOrders = (page * limit) + 1; // At least one more page
-      } else {
-        totalOrders = ((page - 1) * limit) + docCodes.length; // Exact total
+        if (startDate && endDate) {
+          countQuery.andWhere('sale.docDate >= :docDateStart AND sale.docDate <= :docDateEnd', {
+            docDateStart: startDate,
+            docDateEnd: endDate,
+          });
+        } else if (startDate) {
+          countQuery.andWhere('sale.docDate >= :docDateStart', { docDateStart: startDate });
+        } else if (endDate) {
+          countQuery.andWhere('sale.docDate <= :docDateEnd', { docDateEnd: endDate });
+        }
       }
+
+      // Run pagination + COUNT in parallel
+      const t1 = Date.now();
+      const [docCodeResults, countResult] = await Promise.all([
+        docCodeSubquery.getRawMany(),
+        countQuery.getRawOne(),
+      ]);
+      this.logger.log(`[findAllOrders] DocCode subquery + COUNT took ${Date.now() - t1}ms`);
+
+      totalOrders = parseInt(countResult?.total || '0', 10);
+
+      const trimmedResults = docCodeResults.length > limit
+        ? docCodeResults.slice(0, limit)
+        : docCodeResults;
+      const docCodes = trimmedResults.map((r) => r.docCode);
 
       if (docCodes.length === 0) {
         allSales = [];
