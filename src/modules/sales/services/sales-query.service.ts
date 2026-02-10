@@ -1129,11 +1129,6 @@ export class SalesQueryService {
       typeSale,
     } = options;
 
-    const perfStart = Date.now();
-    this.logger.log(
-      `[findAllOrders] Starting query: page=${page}, limit=${limit}, dateFrom=${dateFrom}, dateTo=${dateTo}`,
-    );
-
     // [OPTIMIZATION] Skip expensive COUNT query to avoid timeout
     // Instead, we'll fetch limit+1 and check if there are more results
     // This eliminates 10-15s COUNT overhead on large date ranges
@@ -1330,14 +1325,10 @@ export class SalesQueryService {
       }
 
       // Run pagination + COUNT in parallel
-      const t1 = Date.now();
       const [docCodeResults, countResult] = await Promise.all([
         docCodeSubquery.getRawMany(),
         countQuery.getRawOne(),
       ]);
-      this.logger.log(
-        `[findAllOrders] DocCode subquery + COUNT took ${Date.now() - t1}ms`,
-      );
 
       totalOrders = parseInt(countResult?.total || '0', 10);
 
@@ -1351,12 +1342,8 @@ export class SalesQueryService {
         allSales = [];
       } else {
         // Step 2: Fetch all sales for these docCodes
-        const t2 = Date.now();
         fullQuery.andWhere('sale.docCode IN (:...docCodes)', { docCodes });
         allSales = await fullQuery.getMany();
-        this.logger.log(
-          `[findAllOrders] Full sales query took ${Date.now() - t2}ms, fetched ${allSales.length} sale items`,
-        );
       }
     } else {
       // Search mode or export: fetch all
@@ -1470,7 +1457,6 @@ export class SalesQueryService {
 
     // === [OPTIMIZATION] Run ALL independent fetches in parallel ===
     // Previously these were 7+ sequential calls (~5-8s). Now runs in parallel (~1-2s).
-    const t3 = Date.now();
     const [
       allStockTransfers,
       departmentMap,
@@ -1517,9 +1503,6 @@ export class SalesQueryService {
             .getMany()
         : Promise.resolve([] as DailyCashio[]),
     ]);
-    this.logger.log(
-      `[findAllOrders] Parallel batch fetch (8 calls) took ${Date.now() - t3}ms`,
-    );
 
     // Process stock transfers (depends on allStockTransfers result)
     // Support both SO and RT orders by checking both soCode and docCode
@@ -1540,15 +1523,9 @@ export class SalesQueryService {
     );
 
     // Fetch products AFTER stock transfers (needs allItemCodes including ST item codes)
-    const t4 = Date.now();
+
     const loyaltyProductMap =
       await this.loyaltyService.fetchProducts(allItemCodes);
-    this.logger.log(
-      `[findAllOrders] Product fetch took ${Date.now() - t4}ms, ${loyaltyProductMap.size} products`,
-    );
-    this.logger.log(
-      `[findAllOrders] - Departments: ${departmentMap.size}, Warehouses: ${warehouseCodeMap.size}`,
-    );
 
     // Build OrderFee map
     const orderFeeMap = new Map<string, OrderFee>();
@@ -1722,13 +1699,6 @@ export class SalesQueryService {
           const department = sale.branchCode
             ? departmentMap.get(sale.branchCode) || null
             : null;
-
-          // Debug: Log when department is missing
-          if (!department && sale.branchCode) {
-            this.logger.warn(
-              `[DEBUG] Department not found for branchCode: ${sale.branchCode}, docCode: ${docCode}`,
-            );
-          }
 
           const maThe = getMaThe.get(loyaltyProduct?.materialCode || '') || '';
           sale.maThe = maThe;
@@ -1923,11 +1893,7 @@ export class SalesQueryService {
     }
 
     // Wait for all formatting to complete in parallel
-    const tFormat = Date.now();
     const allEnrichedSales = await Promise.all(formatPromises);
-    this.logger.log(
-      `[findAllOrders] Format sales (${formatPromises.length} items) took ${Date.now() - tFormat}ms`,
-    );
 
     // Clear and repopulate enrichedSalesMap with formatted sales
     enrichedSalesMap.clear();
@@ -1959,7 +1925,7 @@ export class SalesQueryService {
     // 10. Enrich with Cashio (Explosion)
     // This explodes sales based on Stock Transfers. Fields like Qty are reset here.
     // Pass pre-filtered stock transfers to prevent phantom items
-    const tExplosion = Date.now();
+    // Pass pre-filtered stock transfers to prevent phantom items
     const enrichedOrders = await this.enrichOrdersWithCashio(
       orders,
       stockTransfers,
@@ -1969,9 +1935,6 @@ export class SalesQueryService {
         warehouseCodeMap,
         skipMaVtRef: true, // Caller handles enrichWithMaVtRef post-explosion (L1904)
       },
-    );
-    this.logger.log(
-      `[findAllOrders] enrichOrdersWithCashio (explosion) took ${Date.now() - tExplosion}ms`,
     );
 
     // [FIX] N8n Integration for Card Data (Enrichment source of truth)
@@ -1991,7 +1954,6 @@ export class SalesQueryService {
     // Execute parallel requests for card data with concurrency limit
     const cardDataMap = new Map<string, any>(); // Map<docCode, cardData>
     if (docCodesNeedingCardData.length > 0) {
-      const startN8N = Date.now();
       const MAX_CONCURRENT = 5;
       const chunks: string[][] = [];
       for (let i = 0; i < docCodesNeedingCardData.length; i += MAX_CONCURRENT) {
@@ -2020,9 +1982,6 @@ export class SalesQueryService {
           }
         });
       }
-      this.logger.log(
-        `[findAllOrders] N8N Card Fetching (${docCodesNeedingCardData.length} items) took ${Date.now() - startN8N}ms`,
-      );
     }
 
     // Apply card data to ENRICHED orders
@@ -2047,13 +2006,9 @@ export class SalesQueryService {
     });
 
     if (explodedSalesForEnrichment.length > 0) {
-      const tMaVtRef = Date.now();
       await this.voucherIssueService.enrichSalesWithMaVtRef(
         explodedSalesForEnrichment,
         loyaltyProductMap,
-      );
-      this.logger.log(
-        `[findAllOrders] enrichWithMaVtRef (${explodedSalesForEnrichment.length} lines) took ${Date.now() - tMaVtRef}ms`,
       );
 
       // [New] Override maThe for Voucher items (Type 94) with Ecode (ma_vt_ref)
@@ -2179,10 +2134,6 @@ export class SalesQueryService {
         sales: [realSale],
       };
     });
-
-    this.logger.log(
-      `[findAllOrders] TOTAL execution time: ${Date.now() - perfStart}ms`,
-    );
 
     return {
       data: ordersWithSingleSale,
