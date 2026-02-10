@@ -752,7 +752,8 @@ export class InvoiceLogicUtils {
     }
 
     let val = sale.disc_ctkm;
-    if (val === null || val === undefined) {
+    // [FIX] Fallback if disc_ctkm is null, undefined OR 0 (since SalesQueryService might default it to 0)
+    if (!val || Number(val) === 0) {
       val = sale.chietKhauMuaHangGiamGia;
     }
 
