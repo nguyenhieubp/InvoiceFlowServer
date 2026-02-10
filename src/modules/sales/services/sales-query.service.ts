@@ -331,11 +331,18 @@ export class SalesQueryService {
   async enrichOrdersWithCashio(
     orders: any[],
     preFilteredStockTransfers?: StockTransfer[],
+    prefetchedData?: {
+      cashioRecords?: DailyCashio[];
+      loyaltyProductMap?: Map<string, any>;
+      warehouseCodeMap?: Map<string, string>;
+      skipMaVtRef?: boolean;
+    },
   ): Promise<any[]> {
     const docCodes = orders.map((o) => o.docCode);
     if (docCodes.length === 0) return orders;
 
-    const cashioRecords = await this.dailyCashioRepository
+    // [OPTIMIZATION] Use pre-fetched cashio records if available
+    const cashioRecords = prefetchedData?.cashioRecords ?? await this.dailyCashioRepository
       .createQueryBuilder('cashio')
       .where('cashio.so_code IN (:...docCodes)', { docCodes })
       .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
@@ -397,28 +404,33 @@ export class SalesQueryService {
       if (st.itemCode) allItemCodes.add(st.itemCode);
     });
 
-    const loyaltyProductMap = await this.loyaltyService.fetchProducts(
+    // [OPTIMIZATION] Use pre-fetched product map if available
+    const loyaltyProductMap = prefetchedData?.loyaltyProductMap ?? await this.loyaltyService.fetchProducts(
       Array.from(allItemCodes),
     );
 
-    // [FIX] Pre-fetch Warehouse Code Mappings
-    const allStockCodes = Array.from(
-      new Set(
-        stockTransfers
-          .map((st) => st.stockCode)
-          .filter((code): code is string => !!code),
-      ),
-    );
-    const warehouseCodeMap = new Map<string, string>();
-    // Note: mapWarehouseCode needs to be awaited sequentially or parallelized.
-    await Promise.all(
-      allStockCodes.map(async (code) => {
-        const mapped = await this.categoriesService.mapWarehouseCode(code);
-        if (mapped) {
-          warehouseCodeMap.set(code, mapped);
-        }
-      }),
-    );
+    // [OPTIMIZATION] Use pre-fetched warehouse code map if available
+    let warehouseCodeMap: Map<string, string>;
+    if (prefetchedData?.warehouseCodeMap) {
+      warehouseCodeMap = prefetchedData.warehouseCodeMap;
+    } else {
+      const allStockCodes = Array.from(
+        new Set(
+          stockTransfers
+            .map((st) => st.stockCode)
+            .filter((code): code is string => !!code),
+        ),
+      );
+      warehouseCodeMap = new Map<string, string>();
+      await Promise.all(
+        allStockCodes.map(async (code) => {
+          const mapped = await this.categoriesService.mapWarehouseCode(code);
+          if (mapped) {
+            warehouseCodeMap.set(code, mapped);
+          }
+        }),
+      );
+    }
 
     const enrichedOrders = orders.map((order) => {
       const cashioRecords = cashioMap.get(order.docCode) || [];
@@ -675,7 +687,8 @@ export class SalesQueryService {
       }
     });
 
-    if (allExplodedSales.length > 0) {
+    // [OPTIMIZATION] Skip if caller already handles enrichWithMaVtRef post-explosion
+    if (allExplodedSales.length > 0 && !prefetchedData?.skipMaVtRef) {
       await this.voucherIssueService.enrichSalesWithMaVtRef(
         allExplodedSales,
         loyaltyProductMap,
@@ -1113,29 +1126,13 @@ export class SalesQueryService {
       typeSale,
     } = options;
 
-    const countQuery = this.saleRepository
-      .createQueryBuilder('sale')
-      .select('COUNT(DISTINCT sale.docCode)', 'count'); // Use COUNT(DISTINCT) for accurate order count
+    const perfStart = Date.now();
+    this.logger.log(`[findAllOrders] Starting query: page=${page}, limit=${limit}, dateFrom=${dateFrom}, dateTo=${dateTo}`);
 
-    // Join customer ONLY if searching by customer fields
-    if (search && search.trim() !== '') {
-      countQuery.leftJoin('sale.customer', 'customer');
-    }
-
-    // Apply shared filters
-    this.applySaleFilters(countQuery, {
-      brand,
-      isProcessed,
-      statusAsys,
-      typeSale,
-      date,
-      dateFrom,
-      dateTo,
-      search,
-    });
-
-    const totalResult = await countQuery.getRawOne();
-    const totalOrders = parseInt(totalResult?.count || '0', 10); // Count of distinct orders
+    // [OPTIMIZATION] Skip expensive COUNT query to avoid timeout
+    // Instead, we'll fetch limit+1 and check if there are more results
+    // This eliminates 10-15s COUNT overhead on large date ranges
+    let totalOrders = -1; // Unknown total (will be calculated after fetch)
 
     // 2. Main Query
     const fullQuery = this.saleRepository
@@ -1145,62 +1142,130 @@ export class SalesQueryService {
       .addOrderBy('sale.docCode', 'ASC')
       .addOrderBy('sale.id', 'ASC');
 
+    // [OPTIMIZATION] In pagination mode, skip date params to avoid INNER JOIN on fullQuery
+    // DocCodes are already date-filtered by the two-step ST approach
+    // For search/export modes, date params are still needed
+    const isSearchMode = !!search;
+    const needsDateJoinOnFullQuery = isExport || isSearchMode;
     this.applySaleFilters(fullQuery, {
       brand,
       isProcessed,
       statusAsys,
       typeSale,
-      date,
-      dateFrom,
-      dateTo,
+      ...(needsDateJoinOnFullQuery ? { date, dateFrom, dateTo } : {}),
       search,
     });
 
-    const isSearchMode = !!search && totalOrders < 2000;
 
     let allSales: Sale[];
 
     if (!isExport && !isSearchMode) {
-      // FIXED PAGINATION: Get exact limit number of orders
+      // === [OPTIMIZATION] Subquery-based pagination (avoids materializing 46K+ soCodes) ===
+      // Instead of fetching all soCodes into memory, use a SQL subquery that lets the DB optimize.
+
+      // Build date filter for stock_transfer subquery
+      let stDateCondition = '';
+      const stParams: Record<string, any> = {};
+
+      if ((dateFrom || dateTo || date) && !search) {
+        let stStartDate: Date | undefined;
+        let stEndDate: Date | undefined;
+        if (dateFrom) { stStartDate = new Date(dateFrom); stStartDate.setHours(0, 0, 0, 0); }
+        if (dateTo) { stEndDate = new Date(dateTo); stEndDate.setHours(23, 59, 59, 999); }
+
+        if (stStartDate && stEndDate) {
+          stDateCondition = 'st_sub."transDate" >= :stStart AND st_sub."transDate" <= :stEnd';
+          stParams.stStart = stStartDate;
+          stParams.stEnd = stEndDate;
+        } else if (stStartDate) {
+          stDateCondition = 'st_sub."transDate" >= :stStart';
+          stParams.stStart = stStartDate;
+        } else if (stEndDate) {
+          stDateCondition = 'st_sub."transDate" <= :stEnd';
+          stParams.stEnd = stEndDate;
+        } else if (date) {
+          const dateMatch = date.match(/^(\d{2})([A-Z]{3})(\d{4})$/i);
+          if (dateMatch) {
+            const [, day, monthStr, year] = dateMatch;
+            const monthMap: { [key: string]: number } = {
+              JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+              JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+            };
+            const month = monthMap[monthStr.toUpperCase()];
+            if (month !== undefined) {
+              const dateObj = new Date(parseInt(year), month, parseInt(day));
+              const sod = new Date(dateObj); sod.setHours(0, 0, 0, 0);
+              const eod = new Date(dateObj); eod.setHours(23, 59, 59, 999);
+              stDateCondition = 'st_sub."transDate" >= :stStart AND st_sub."transDate" <= :stEnd';
+              stParams.stStart = sod;
+              stParams.stEnd = eod;
+            }
+          }
+        }
+      }
+
       // Step 1: Get distinct docCodes with pagination
       const docCodeSubquery = this.saleRepository
         .createQueryBuilder('sale')
         .select('sale.docCode', 'docCode')
-        .addSelect('MAX(sale.docDate)', 'docDate') // Need this for ORDER BY
+        .addSelect('MAX(sale.docDate)', 'docDate')
         .groupBy('sale.docCode')
         .orderBy('MAX(sale.docDate)', 'DESC')
         .addOrderBy('sale.docCode', 'ASC');
 
-      // (filters...)
-      // Join customer IF searching (needed for filter)
       if (search && search.trim() !== '') {
         docCodeSubquery.leftJoin('sale.customer', 'customer');
       }
 
+      // Apply non-date filters
       this.applySaleFilters(docCodeSubquery, {
         brand,
         isProcessed,
         statusAsys,
         typeSale,
-        date,
-        dateFrom,
-        dateTo,
         search,
       });
 
-      // Paginate at order level
-      const offset = (page - 1) * limit;
-      docCodeSubquery.skip(offset).take(limit);
+      // [OPTIMIZATION] Use EXISTS instead of IN — PG can early-terminate per row
+      // and use hash semi-join, avoiding full subquery materialization
+      if (stDateCondition) {
+        const stTableName = this.stockTransferRepository.metadata.tableName;
+        docCodeSubquery.andWhere(
+          `EXISTS (SELECT 1 FROM ${stTableName} st_sub WHERE st_sub."soCode" = sale."docCode" AND ${stDateCondition})`,
+          stParams,
+        );
+      }
 
+      // Paginate at order level (fetch limit+1 to detect if there are more)
+      const offset = (page - 1) * limit;
+      docCodeSubquery.skip(offset).take(limit + 1);
+
+      const t1 = Date.now();
       const docCodeResults = await docCodeSubquery.getRawMany();
-      const docCodes = docCodeResults.map((r) => r.docCode);
+      this.logger.log(`[findAllOrders] DocCode subquery took ${Date.now() - t1}ms`);
+
+      // Check if there are more results (we fetched limit+1)
+      const hasMore = docCodeResults.length > limit;
+
+      // Trim to exact limit
+      const trimmedResults = hasMore ? docCodeResults.slice(0, limit) : docCodeResults;
+      const docCodes = trimmedResults.map((r) => r.docCode);
+
+      // Calculate totalOrders based on hasMore
+      if (hasMore) {
+        totalOrders = (page * limit) + 1; // At least one more page
+      } else {
+        totalOrders = ((page - 1) * limit) + docCodes.length; // Exact total
+      }
 
       if (docCodes.length === 0) {
         allSales = [];
       } else {
         // Step 2: Fetch all sales for these docCodes
+        const t2 = Date.now();
         fullQuery.andWhere('sale.docCode IN (:...docCodes)', { docCodes });
         allSales = await fullQuery.getMany();
+        this.logger.log(`[findAllOrders] Full sales query took ${Date.now() - t2}ms, fetched ${allSales.length} sale items`);
       }
     } else {
       // Search mode or export: fetch all
@@ -1286,28 +1351,7 @@ export class SalesQueryService {
       allSalesData.map((sale) => `${sale.docCode}_${sale.itemCode}`),
     );
 
-    // Fetch stock transfers and filter to only include those matching filtered sales
-    const allStockTransfers =
-      docCodesForStockTransfer.length > 0
-        ? await this.stockTransferRepository.find({
-          where: { soCode: In(docCodesForStockTransfer) },
-        })
-        : [];
-
-    // Filter stock transfers to only include items that are in the filtered sales
-    const stockTransfers = allStockTransfers.filter((st) =>
-      saleItemKeys.has(`${st.soCode}_${st.itemCode}`),
-    );
-
-    const stockTransferItemCodes = Array.from(
-      new Set(
-        stockTransfers
-          .map((st) => st.itemCode)
-          .filter((code): code is string => !!code && code.trim() !== ''),
-      ),
-    );
-
-    // Collect all svc_codes for batch lookup
+    // === [OPTIMIZATION] Collect identifiers for parallel fetching ===
     const svcCodes = Array.from(
       new Set(
         allSalesData
@@ -1316,37 +1360,98 @@ export class SalesQueryService {
       ),
     );
 
+    // Prepare employee check params early (only depends on allSalesData)
+    const firstSaleForBrand = allSalesData[0];
+    const brandForEmployeeCheck =
+      firstSaleForBrand?.customer?.brand ||
+      firstSaleForBrand?.brand ||
+      'menard';
+    const partnerCodesToCheckForAll = Array.from(
+      new Set(
+        allSalesData
+          .flatMap((s) => [s.partnerCode, (s as any).issuePartnerCode])
+          .filter((c): c is string => !!c && c.trim() !== ''),
+      ),
+    ).map((partnerCode) => ({
+      partnerCode,
+      sourceCompany: brandForEmployeeCheck,
+    }));
+
+    // === [OPTIMIZATION] Run ALL independent fetches in parallel ===
+    // Previously these were 7+ sequential calls (~5-8s). Now runs in parallel (~1-2s).
+    const t3 = Date.now();
+    const [
+      allStockTransfers,
+      departmentMap,
+      warehouseCodeMap,
+      svcCodeMap,
+      orderFeesRaw,
+      isEmployeeMapForAll,
+      cardDataForFirst,
+      cashioRecords,
+    ] = await Promise.all([
+      // 1. Stock transfers
+      docCodesForStockTransfer.length > 0
+        ? this.stockTransferRepository.find({ where: { soCode: In(docCodesForStockTransfer) } })
+        : Promise.resolve([] as StockTransfer[]),
+      // 2. Departments
+      this.loyaltyService.fetchLoyaltyDepartments(branchCodes),
+      // 3. Warehouse codes
+      this.categoriesService.getWarehouseCodeMap(),
+      // 4. SVC code -> materialCode mapping
+      svcCodes.length > 0
+        ? this.loyaltyService.fetchMaterialCodesBySvcCodes(svcCodes)
+        : Promise.resolve(new Map<string, string>()),
+      // 5. Order fees
+      docCodes.length > 0
+        ? this.orderFeeRepository.find({ where: { erpOrderCode: In(docCodes) } })
+        : Promise.resolve([] as OrderFee[]),
+      // 6. Employee status check
+      this.n8nService.checkCustomersIsEmployee(partnerCodesToCheckForAll),
+      // 7. N8n card data for first order
+      docCodes.length > 0
+        ? this.n8nService.fetchCardData(docCodes[0]).catch(() => [null])
+        : Promise.resolve([null] as any[]),
+      // 8. [NEW] DailyCashio records — replaces redundant enrichOrdersWithCashio call #1
+      // Previously called enrichOrdersWithCashio which re-fetched ST + products from DB/API
+      docCodes.length > 0
+        ? this.dailyCashioRepository
+          .createQueryBuilder('cashio')
+          .where('cashio.so_code IN (:...docCodes)', { docCodes })
+          .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
+          .getMany()
+        : Promise.resolve([] as DailyCashio[]),
+    ]);
+    this.logger.log(`[findAllOrders] Parallel batch fetch (8 calls) took ${Date.now() - t3}ms`);
+
+    // Process stock transfers (depends on allStockTransfers result)
+    const stockTransfers = allStockTransfers.filter((st) =>
+      saleItemKeys.has(`${st.soCode}_${st.itemCode}`),
+    );
+    const stockTransferItemCodes = Array.from(
+      new Set(
+        stockTransfers
+          .map((st) => st.itemCode)
+          .filter((code): code is string => !!code && code.trim() !== ''),
+      ),
+    );
     const allItemCodes = Array.from(
       new Set([...itemCodes, ...stockTransferItemCodes]),
     );
 
-    // Batch Fetching
-    const [loyaltyProductMap, departmentMap, warehouseCodeMap] =
-      await Promise.all([
-        this.loyaltyService.fetchProducts(allItemCodes),
-        this.loyaltyService.fetchLoyaltyDepartments(branchCodes),
-        this.categoriesService.getWarehouseCodeMap(),
-      ]);
+    // Fetch products AFTER stock transfers (needs allItemCodes including ST item codes)
+    const t4 = Date.now();
+    const loyaltyProductMap = await this.loyaltyService.fetchProducts(allItemCodes);
+    this.logger.log(`[findAllOrders] Product fetch took ${Date.now() - t4}ms, ${loyaltyProductMap.size} products`);
+    this.logger.log(`[findAllOrders] - Departments: ${departmentMap.size}, Warehouses: ${warehouseCodeMap.size}`);
 
-    // Batch lookup svc_code -> materialCode using optimized method
-    let svcCodeMap = new Map<string, string>();
-    if (svcCodes.length > 0) {
-      svcCodeMap =
-        await this.loyaltyService.fetchMaterialCodesBySvcCodes(svcCodes);
-    }
+    // Build OrderFee map
+    const orderFeeMap = new Map<string, OrderFee>();
+    orderFeesRaw.forEach((fee) => {
+      orderFeeMap.set(fee.erpOrderCode, fee);
+    });
 
-    // [NEW] Batch fetch OrderFees for platform voucher enrichment
-    let orderFeeMap = new Map<string, OrderFee>();
-    if (docCodes.length > 0) {
-      const orderFees = await this.orderFeeRepository.find({
-        where: { erpOrderCode: In(docCodes) },
-      });
-      orderFees.forEach((fee) => {
-        orderFeeMap.set(fee.erpOrderCode, fee);
-      });
-    }
-
-    // [NEW] Enrich sales with platform voucher data (VC CTKM SÀN)
+    // Enrich sales with platform voucher data (VC CTKM SÀN)
     allSalesData.forEach((sale) => {
       const orderFee = orderFeeMap.get(sale.docCode);
       if (orderFee?.rawData?.raw_data?.voucher_from_seller) {
@@ -1368,7 +1473,7 @@ export class SalesQueryService {
         docCodes,
       );
 
-    // OPTIMIZED: Pre-build map for O(1) lookup instead of filter in loop
+    // Pre-build map for O(1) lookup instead of filter in loop
     const stockTransferByItemCodeMap = new Map<string, StockTransfer[]>();
     stockTransfers.forEach((st) => {
       const key = `${st.soCode}_${st.itemCode}`;
@@ -1378,52 +1483,23 @@ export class SalesQueryService {
       stockTransferByItemCodeMap.get(key)!.push(st);
     });
 
-    // 6. Fix N+1: Batch Fetch Card Data Logic
-    // Identify orders that need card data (Tach The orders)
-    // We need to look at enriched data normally, but we can do a quick check on raw sales
-    // Or we can just collect docCodes where we "suspect" card data is needed.
-    // However, the original logic checked 'isTachTheOrder' on *formatted* sales.
-    // To be safe and efficient, we can check basic conditions on raw 'ordertype' if possible,
-    // or just wait until we format. But formatting happens per item.
-    // Let's optimize: Gather all docCodes.
-    // The previous logic only fetched for `docCodes[0]` (the first order) strictly in one place
-    // and then inside a loop for 'hasTachThe'.
-
-    // Optimization:
-    // a. Fetch card data for the FIRST order (legacy logic preserved, maybe for global context?)
-    //    Original code: `const [dataCard] = await this.n8nService.fetchCardData(docCodes[0]);`
-    //    This seems to populate `getMaThe` map which is used for ALL sales.
-    //    Wait, `getMaThe` is built ONLY from the response of `docCodes[0]`.
-    //    This looks like a bug or a very specific feature for the first generic order.
-    //    I will preserve this behavior but it looks suspicious.
-
+    // 6. Card Data Logic (preserved legacy behavior)
     const getMaThe = new Map<string, string>();
-    if (docCodes.length > 0) {
-      try {
-        const [dataCard] = await this.n8nService.fetchCardData(docCodes[0]);
-        if (dataCard && dataCard.data) {
-          // FIX N+1: Extract all service_item_names first
-          const serviceItemNames = dataCard.data
-            .map((card) => card?.service_item_name)
-            .filter((name): name is string => !!name && name.trim() !== '');
-
-          // Batch fetch all products at once
-          const productMap =
-            await this.loyaltyService.checkProductsBatch(serviceItemNames);
-
-          // Map products to serials
-          for (const card of dataCard.data) {
-            if (!card?.service_item_name || !card?.serial) {
-              continue;
-            }
-            const itemProduct = productMap.get(card.service_item_name);
-            if (itemProduct) {
-              getMaThe.set(itemProduct.materialCode, card.serial);
-            }
-          }
+    const [dataCard] = cardDataForFirst;
+    if (dataCard && dataCard.data) {
+      const serviceItemNames = dataCard.data
+        .map((card) => card?.service_item_name)
+        .filter((name): name is string => !!name && name.trim() !== '');
+      const productMap =
+        await this.loyaltyService.checkProductsBatch(serviceItemNames);
+      for (const card of dataCard.data) {
+        if (!card?.service_item_name || !card?.serial) {
+          continue;
         }
-      } catch (e) {
-        // Ignore error
+        const itemProduct = productMap.get(card.service_item_name);
+        if (itemProduct) {
+          getMaThe.set(itemProduct.materialCode, card.serial);
+        }
       }
     }
 
@@ -1434,56 +1510,19 @@ export class SalesQueryService {
       if (!enrichedSalesMap.has(docCode)) {
         enrichedSalesMap.set(docCode, []);
       }
-      // Temporarily store raw sales in enrichedSalesMap for later processing
       enrichedSalesMap.get(docCode)!.push(sale);
     }
 
-    // 7. Pre-fetch Employee Status via API (similar to findByOrderCode)
-    // Collect unique partnerCodes from all sales
-    const firstSaleForBrand = allSalesData[0];
-    const brandForEmployeeCheck =
-      firstSaleForBrand?.customer?.brand ||
-      firstSaleForBrand?.brand ||
-      'menard';
-    const partnerCodesToCheckForAll = Array.from(
-      new Set(
-        allSalesData
-          .flatMap((s) => [s.partnerCode, (s as any).issuePartnerCode])
-          .filter((c): c is string => !!c && c.trim() !== ''),
-      ),
-    ).map((partnerCode) => ({
-      partnerCode,
-      sourceCompany: brandForEmployeeCheck,
-    }));
-
-    // 7. Pre-fetch Employee Status via API
-    // ... (existing helper logic)
-
-    const isEmployeeMapForAll = await this.n8nService.checkCustomersIsEmployee(
-      partnerCodesToCheckForAll,
-    );
-
-    // We need to use enrichOrdersWithCashio but it takes Order objects.
-    // Let's reconstruct minimal order objects.
-    const minimalOrders = Array.from(enrichedSalesMap.entries()).map(([docCode, sales]) => {
-      const firstSale = sales[0];
-      return {
-        docCode,
-        docDate: firstSale.docDate,
-        sales: sales,
-        // cashioData will be attached here
-      };
-    });
-
-    // Call enrichment
-    const minimalOrdersEnriched = await this.enrichOrdersWithCashio(minimalOrders);
-
-    // Map cashioData back to enrichedSalesMap context or directly to logic
+    // [OPTIMIZATION] Build orderCashioMap directly from queried records
+    // Replaces enrichOrdersWithCashio call #1 which redundantly re-fetched ST and products
     const orderCashioMap = new Map<string, any[]>();
-    minimalOrdersEnriched.forEach(o => {
-      if ((o as any).cashioData) {
-        orderCashioMap.set(o.docCode, (o as any).cashioData);
+    cashioRecords.forEach((cashio) => {
+      const docCode = cashio.so_code || cashio.master_code;
+      if (!docCode) return;
+      if (!orderCashioMap.has(docCode)) {
+        orderCashioMap.set(docCode, []);
       }
+      orderCashioMap.get(docCode)!.push(cashio);
     });
 
     // [FIX] Robust 1-1 Stock Transfer Matching Logic (Batch for all orders)
@@ -1748,7 +1787,9 @@ export class SalesQueryService {
     }
 
     // Wait for all formatting to complete in parallel
+    const tFormat = Date.now();
     const allEnrichedSales = await Promise.all(formatPromises);
+    this.logger.log(`[findAllOrders] Format sales (${formatPromises.length} items) took ${Date.now() - tFormat}ms`);
 
     // Clear and repopulate enrichedSalesMap with formatted sales
     enrichedSalesMap.clear();
@@ -1762,32 +1803,15 @@ export class SalesQueryService {
     }
 
     // 8. Update orders with formatted sales (Critical step restored)
-    // [OPTIMIZATION] Collect all sales for batch enrichment
-    const allSalesForEnrichment: any[] = [];
-    const verificationTasks: Promise<void>[] = [];
-
     for (const [docCode, sales] of enrichedSalesMap.entries()) {
       const order = orderMap.get(docCode);
       if (order) {
-        allSalesForEnrichment.push(...sales);
         order.sales = sales; // Assign FORMATTED sales to order
       }
     }
+    // [OPTIMIZATION] Removed pre-explosion enrichWithMaVtRef call — redundant
+    // The post-explosion call (after enrichOrdersWithCashio #2) covers ALL lines
 
-    // [MOVED] Resolve ma_vt_ref (Before Explosion)
-    if (allSalesForEnrichment.length > 0) {
-      verificationTasks.push(
-        this.voucherIssueService.enrichSalesWithMaVtRef(
-          allSalesForEnrichment,
-          loyaltyProductMap,
-        ),
-      );
-    }
-
-    // Wait for all verification tasks to complete
-    if (verificationTasks.length > 0) {
-      await Promise.all(verificationTasks);
-    }
 
     // 9. Sort and return
     const orders = Array.from(orderMap.values()).sort((a, b) => {
@@ -1798,10 +1822,18 @@ export class SalesQueryService {
     // 10. Enrich with Cashio (Explosion)
     // This explodes sales based on Stock Transfers. Fields like Qty are reset here.
     // Pass pre-filtered stock transfers to prevent phantom items
+    const tExplosion = Date.now();
     const enrichedOrders = await this.enrichOrdersWithCashio(
       orders,
       stockTransfers,
+      {
+        cashioRecords,
+        loyaltyProductMap,
+        warehouseCodeMap,
+        skipMaVtRef: true, // Caller handles enrichWithMaVtRef post-explosion (L1904)
+      },
     );
+    this.logger.log(`[findAllOrders] enrichOrdersWithCashio (explosion) took ${Date.now() - tExplosion}ms`);
 
     // [FIX] N8n Integration for Card Data (Enrichment source of truth)
     // Applied AFTER explosion to ensure we overwrite any Stock Transfer duplicates or Qty resets
@@ -1876,10 +1908,12 @@ export class SalesQueryService {
     });
 
     if (explodedSalesForEnrichment.length > 0) {
+      const tMaVtRef = Date.now();
       await this.voucherIssueService.enrichSalesWithMaVtRef(
         explodedSalesForEnrichment,
         loyaltyProductMap,
       );
+      this.logger.log(`[findAllOrders] enrichWithMaVtRef (${explodedSalesForEnrichment.length} lines) took ${Date.now() - tMaVtRef}ms`);
 
       // [New] Override maThe for Voucher items (Type 94) with Ecode (ma_vt_ref)
       // Frontend requires maThe to show the serial/ecode
@@ -2005,8 +2039,7 @@ export class SalesQueryService {
       };
     });
 
-    // Use totalOrders from count query, not enrichedOrders.length
-    // enrichedOrders.length is limited by query, not total count
+    this.logger.log(`[findAllOrders] TOTAL execution time: ${Date.now() - perfStart}ms`);
 
     return {
       data: ordersWithSingleSale,
