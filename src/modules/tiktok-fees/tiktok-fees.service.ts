@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, Like } from 'typeorm';
 import { OrderFee } from '../../entities/order-fee.entity';
+import { PlatformFeeImportTiktok } from '../../entities/platform-fee-import-tiktok.entity';
 
 @Injectable()
 export class TikTokFeesService {
@@ -10,7 +11,9 @@ export class TikTokFeesService {
   constructor(
     @InjectRepository(OrderFee)
     private orderFeeRepository: Repository<OrderFee>,
-  ) {}
+    @InjectRepository(PlatformFeeImportTiktok)
+    private tiktokImportRepository: Repository<PlatformFeeImportTiktok>,
+  ) { }
 
   /**
    * Get all TikTok fees with pagination and filters
@@ -67,8 +70,31 @@ export class TikTokFeesService {
       .getMany();
 
     // Extract fields from rawData for display (TikTok structure)
+    const erpOrderCodes = data.map((f) => f.erpOrderCode).filter(Boolean);
+    let importFees: any[] = [];
+    if (erpOrderCodes.length > 0) {
+      importFees = await this.tiktokImportRepository.find({
+        where: {
+          maNoiBoSp: Between(
+            erpOrderCodes[0],
+            erpOrderCodes[erpOrderCodes.length - 1],
+          ), // Optimization: range query if sorted, else In()
+          // For safety use In if valid
+        },
+      });
+      // Better to use In() for exact matching
+      importFees = await this.tiktokImportRepository
+        .createQueryBuilder('imp')
+        .where('imp.maNoiBoSp IN (:...codes)', { codes: erpOrderCodes })
+        .getMany();
+    }
+
     const formattedData = data.map((fee) => {
       const payment = fee.rawData?.payment || {};
+      const importFee = importFees.find(
+        (imp) => imp.maNoiBoSp === fee.erpOrderCode,
+      );
+
       return {
         id: fee.id,
         brand: fee.brand,
@@ -90,6 +116,11 @@ export class TikTokFeesService {
         shippingFeeSellerDiscount: payment.shippingFeeSellerDiscount,
         shippingFeeCofundedDiscount: payment.shippingFeeCofundedDiscount,
         shippingFeePlatformDiscount: payment.shippingFeePlatformDiscount,
+        // Restoring missing fee fields for sync (Prefer Import Data)
+        tiktokCommission: importFee?.phiHoaHongTraChoTiktok454164020 || payment.tiktokCommission || 0,
+        transactionFee: importFee?.phiGiaoDichTyLe5164020 || payment.transactionFee || 0,
+        sfpServiceFee: importFee?.phiDichVuSfp6164020 || payment.sfpServiceFee || 0,
+        affiliateCommission: importFee?.phiHoaHongTiepThiLienKet150050 || payment.affiliateCommission || 0,
         rawData: fee.rawData, // TikTok has different structure, return full data
       };
     });

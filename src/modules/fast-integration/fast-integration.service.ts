@@ -155,17 +155,45 @@ export class FastIntegrationService {
         } finally {
             // Save Audit Log
             try {
-                await this.auditRepo.save({
-                    dh_so: master.dh_so,
-                    dh_ngay: master.dh_ngay ? new Date(master.dh_ngay) : null,
-                    action: 'SYNC_PO_CHARGES',
-                    payload: mergedPayloadForAudit || payload,
-                    response: result,
-                    status: status,
-                    error: errorMessage,
+                let logDate: Date | null = null;
+                try {
+                    if (master.dh_ngay) {
+                        const parsedDate = new Date(master.dh_ngay);
+                        if (!isNaN(parsedDate.getTime())) {
+                            logDate = parsedDate;
+                        } else {
+                            this.logger.warn(`[FastIntegration] Invalid date format for dh_ngay: ${master.dh_ngay}, defaulting to null`);
+                        }
+                    }
+                } catch (dateError: any) {
+                    this.logger.warn(`[FastIntegration] Error parsing date: ${dateError.message}`);
+                }
+
+                // Check if audit log exists for this order
+                let auditLog = await this.auditRepo.findOne({
+                    where: { dh_so: master.dh_so, action: 'SYNC_PO_CHARGES' }
                 });
-            } catch (auditError) {
-                this.logger.error(`[FastIntegration] Failed to save audit log: ${auditError.message}`);
+
+                if (auditLog) {
+                    auditLog.dh_ngay = logDate;
+                    auditLog.payload = mergedPayloadForAudit || payload;
+                    auditLog.response = result;
+                    auditLog.status = status;
+                    auditLog.error = errorMessage;
+                    await this.auditRepo.save(auditLog);
+                } else {
+                    await this.auditRepo.save({
+                        dh_so: master.dh_so,
+                        dh_ngay: logDate,
+                        action: 'SYNC_PO_CHARGES',
+                        payload: mergedPayloadForAudit || payload,
+                        response: result,
+                        status: status,
+                        error: errorMessage,
+                    });
+                }
+            } catch (auditError: any) {
+                this.logger.error(`[FastIntegration] CRITICAL: Failed to save audit log for ${master.dh_so}: ${auditError.message}`, auditError.stack);
             }
         }
     }

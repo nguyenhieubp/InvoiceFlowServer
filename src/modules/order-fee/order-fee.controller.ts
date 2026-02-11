@@ -6,6 +6,7 @@ import { ShopeeFee } from '../../entities/shopee-fee.entity';
 import { TikTokFee } from '../../entities/tiktok-fee.entity';
 import { Between, ILike, In } from 'typeorm';
 import { PlatformFeeImportShopee } from '../../entities/platform-fee-import-shopee.entity';
+import { PlatformFeeImportTiktok } from '../../entities/platform-fee-import-tiktok.entity';
 
 @Controller('order-fees')
 export class OrderFeeController {
@@ -21,6 +22,9 @@ export class OrderFeeController {
 
     @InjectRepository(PlatformFeeImportShopee)
     private platformFeeImportShopeeRepo: Repository<PlatformFeeImportShopee>,
+
+    @InjectRepository(PlatformFeeImportTiktok)
+    private platformFeeImportTiktokRepo: Repository<PlatformFeeImportTiktok>,
   ) { }
 
   /**
@@ -249,8 +253,61 @@ export class OrderFeeController {
       order: { orderCreatedAt: 'DESC' },
     });
 
+    // Merge with Imported Data
+    const erpOrderCodes = data.map((f) => f.erpOrderCode).filter(Boolean);
+    let importFees: PlatformFeeImportTiktok[] = [];
+    if (erpOrderCodes.length > 0) {
+      importFees = await this.platformFeeImportTiktokRepo.find({
+        where: { maNoiBoSp: In(erpOrderCodes) },
+      });
+      console.log(`[TikTokFees] Found ${importFees.length} import records for ${erpOrderCodes.length} orders`);
+    }
+
+    const mergedData = data.map((fee) => {
+      const importFee = importFees.find(
+        (imp) => imp.maNoiBoSp === fee.erpOrderCode,
+      );
+
+      // Explicitly construct object to ensure keys are present and use camelCase
+      const mapped = {
+        id: fee.id,
+        brand: fee.brand,
+        platform: fee.platform,
+        erpOrderCode: fee.erpOrderCode,
+        orderSn: fee.orderSn,
+        orderStatus: fee.orderStatus,
+        orderCreatedAt: fee.orderCreatedAt,
+        syncedAt: fee.syncedAt,
+        tax: Number(fee.tax),
+        currency: fee.currency,
+        subTotal: Number(fee.subTotal),
+        shippingFee: Number(fee.shippingFee),
+        totalAmount: Number(fee.totalAmount),
+        sellerDiscount: Number(fee.sellerDiscount),
+        platformDiscount: Number(fee.platformDiscount),
+        originalShippingFee: Number(fee.originalShippingFee),
+        originalTotalProductPrice: Number(fee.originalTotalProductPrice),
+        shippingFeeSellerDiscount: Number(fee.shippingFeeSellerDiscount),
+        shippingFeeCofundedDiscount: Number(fee.shippingFeeCofundedDiscount),
+        shippingFeePlatformDiscount: Number(fee.shippingFeePlatformDiscount),
+        createdAt: fee.createdAt,
+        updatedAt: fee.updatedAt,
+
+        // Fee fields from Import
+        tiktokCommission: Number(importFee?.phiHoaHongTraChoTiktok454164020 || 0),
+        transactionFee: Number(importFee?.phiGiaoDichTyLe5164020 || 0),
+        sfpServiceFee: Number(importFee?.phiDichVuSfp6164020 || 0),
+        affiliateCommission: Number(importFee?.phiHoaHongTiepThiLienKet150050 || 0),
+      };
+      return mapped;
+    });
+
+    if (mergedData.length > 0) {
+      console.log('[TikTokFees] Sample Merged Item Keys:', Object.keys(mergedData[0]));
+    }
+
     return {
-      data,
+      data: mergedData,
       meta: {
         total,
         page: Number(page),

@@ -6,9 +6,10 @@ import { TikTokFee } from '../../entities/tiktok-fee.entity';
 import { OrderFeeController } from './order-fee.controller';
 
 import { PlatformFeeImportShopee } from '../../entities/platform-fee-import-shopee.entity';
+import { PlatformFeeImportTiktok } from '../../entities/platform-fee-import-tiktok.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([OrderFee, ShopeeFee, TikTokFee, PlatformFeeImportShopee])],
+  imports: [TypeOrmModule.forFeature([OrderFee, ShopeeFee, TikTokFee, PlatformFeeImportShopee, PlatformFeeImportTiktok])],
   controllers: [OrderFeeController],
   providers: [],
   exports: [],
