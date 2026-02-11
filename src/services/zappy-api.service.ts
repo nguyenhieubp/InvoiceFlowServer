@@ -26,7 +26,7 @@ export class ZappyApiService {
     menard: 'https://vmterp.com/ords/erp/retail/api',
   };
 
-  constructor(private readonly httpService: HttpService) {}
+  constructor(private readonly httpService: HttpService) { }
 
   /**
    * Lấy base URL cho brand
@@ -635,6 +635,7 @@ export class ZappyApiService {
         disc_ctkm: zappySale.disc_ctkm,
         svc_code: zappySale.svc_code,
         disc_reasons: zappySale.disc_reasons,
+        svc_serial: zappySale.svc_serial,
       };
 
       const docDate = this.parseZappyDate(zappySale.docdate);

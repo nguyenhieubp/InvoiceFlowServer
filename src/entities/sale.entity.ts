@@ -181,6 +181,9 @@ export class Sale {
   @Column({ nullable: true })
   disc_reasons?: string;
 
+  @Column({ nullable: true })
+  svc_serial?: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

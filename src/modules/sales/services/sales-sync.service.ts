@@ -29,7 +29,7 @@ export class SalesSyncService {
     private loyaltyService: LoyaltyService,
     @Inject(forwardRef(() => SalesInvoiceService))
     private salesInvoiceService: SalesInvoiceService,
-  ) {}
+  ) { }
 
   /**
    * Đồng bộ lại đơn lỗi - check lại với Loyalty API
@@ -513,7 +513,7 @@ export class SalesSyncService {
       let cashData: any[] = [];
       try {
         cashData = await this.zappyApiService.getDailyCash(date, brand);
-      } catch (error) {}
+      } catch (error) { }
 
       // 2. Process cash data map
       const cashMapBySoCode = new Map<string, any[]>();
@@ -964,6 +964,7 @@ export class SalesSyncService {
             type_sale: 'RETAIL',
             disc_tm: saleItem.disc_tm,
             disc_ctkm: saleItem.disc_ctkm,
+            svc_serial: saleItem.svc_serial,
           };
 
           if (existingSale) {
