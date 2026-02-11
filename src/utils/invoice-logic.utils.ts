@@ -1236,10 +1236,9 @@ export class InvoiceLogicUtils {
         } else if (isPlatformOrder) {
           detailItem[maKey] = 'VC CTKM SÀN'; // [NEW] Platform Order Voucher Name
         } else {
-          // Default logic for ck06
-          const idx = i.toString().padStart(2, '0');
-          const saleMaKey = `maCk${idx}`;
-          detailItem[maKey] = InvoiceLogicUtils.val(sale[saleMaKey] || '', 32);
+          // [FIX] ma_ck06 only for Platform Orders or explicitly defined cases
+          // User Request: "Phải kiểm tra nó là đơn sàn thì mới có giá trị"
+          detailItem[maKey] = '';
         }
       } else if (i === 8) {
         detailItem[maKey] = InvoiceLogicUtils.val(
