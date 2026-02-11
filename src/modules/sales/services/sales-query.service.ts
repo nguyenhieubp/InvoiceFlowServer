@@ -50,7 +50,7 @@ export class SalesQueryService {
     private fastApiInvoiceRepository: Repository<FastApiInvoice>,
     @InjectRepository(Invoice)
     private invoiceRepository: Repository<Invoice>,
-  ) {}
+  ) { }
 
   /**
    * Find one sale by ID
@@ -111,7 +111,10 @@ export class SalesQueryService {
     const docCodesForStockTransfer =
       StockTransferUtils.getDocCodesForStockTransfer([docCode]);
     const stockTransfers = await this.stockTransferRepository.find({
-      where: { soCode: In(docCodesForStockTransfer) },
+      where: [
+        { soCode: In(docCodesForStockTransfer) },
+        { docCode: In(docCodesForStockTransfer) },
+      ],
       order: { createdAt: 'ASC' }, // [FIX] Ensure FIFO for sequential matching
     });
 
@@ -210,9 +213,10 @@ export class SalesQueryService {
 
         // Resolve Ma Kho directly
         let maKhoFromStockTransfer = '';
-        if (assignedSt?.stockCode) {
+        const targetSt = assignedSt || assignedRt;
+        if (targetSt?.stockCode) {
           maKhoFromStockTransfer =
-            warehouseCodeMap?.get(assignedSt.stockCode) || assignedSt.stockCode;
+            warehouseCodeMap?.get(targetSt.stockCode) || targetSt.stockCode;
         }
 
         const calculatedFields = await InvoiceLogicUtils.calculateSaleFields(
@@ -291,7 +295,7 @@ export class SalesQueryService {
         // [EXPAND] Return keys for Fast API Payload reuse
         return {
           ...enriched,
-          stockTransfer: assignedSt || undefined,
+          stockTransfer: assignedSt || assignedRt || undefined,
           ma_nx_st: assignedSt?.docCode || null,
           ma_nx_rt: assignedRt?.docCode || null,
         };
@@ -372,7 +376,10 @@ export class SalesQueryService {
       const docCodesForST =
         StockTransferUtils.getDocCodesForStockTransfer(docCodes);
       stockTransfers = await this.stockTransferRepository.find({
-        where: { soCode: In(docCodesForST) },
+        where: [
+          { soCode: In(docCodesForST) },
+          { docCode: In(docCodesForST) },
+        ],
       });
     }
 
@@ -387,6 +394,7 @@ export class SalesQueryService {
       const matchingTransfers = stockTransfers.filter(
         (st) =>
           st.soCode === docCode ||
+          st.docCode === docCode ||
           (originalOrderCode && st.soCode === originalOrderCode),
       );
       if (matchingTransfers.length > 0) {
@@ -1365,19 +1373,19 @@ export class SalesQueryService {
           docSourceType: sale.docSourceType,
           customer: sale.customer
             ? {
-                code: sale.customer.code || sale.partnerCode || null,
-                brand: sale.customer.brand || null,
-                name: sale.customer.name || null,
-                mobile: sale.customer.mobile || null,
-              }
+              code: sale.customer.code || sale.partnerCode || null,
+              brand: sale.customer.brand || null,
+              name: sale.customer.name || null,
+              mobile: sale.customer.mobile || null,
+            }
             : sale.partnerCode
               ? {
-                  code: sale.partnerCode || null,
-                  brand: null,
-                  name: null,
-                  mobile: null,
-                  id: null,
-                }
+                code: sale.partnerCode || null,
+                brand: null,
+                name: null,
+                mobile: null,
+                id: null,
+              }
               : null,
           totalRevenue: 0,
           totalQty: 0,
@@ -1470,8 +1478,8 @@ export class SalesQueryService {
       // 1. Stock transfers
       docCodesForStockTransfer.length > 0
         ? this.stockTransferRepository.find({
-            where: { soCode: In(docCodesForStockTransfer) },
-          })
+          where: { soCode: In(docCodesForStockTransfer) },
+        })
         : Promise.resolve([] as StockTransfer[]),
       // 2. Departments
       this.loyaltyService.fetchLoyaltyDepartments(branchCodes),
@@ -1484,8 +1492,8 @@ export class SalesQueryService {
       // 5. Order fees
       docCodes.length > 0
         ? this.orderFeeRepository.find({
-            where: { erpOrderCode: In(docCodes) },
-          })
+          where: { erpOrderCode: In(docCodes) },
+        })
         : Promise.resolve([] as OrderFee[]),
       // 6. Employee status check
       this.n8nService.checkCustomersIsEmployee(partnerCodesToCheckForAll),
@@ -1497,10 +1505,10 @@ export class SalesQueryService {
       // Previously called enrichOrdersWithCashio which re-fetched ST + products from DB/API
       docCodes.length > 0
         ? this.dailyCashioRepository
-            .createQueryBuilder('cashio')
-            .where('cashio.so_code IN (:...docCodes)', { docCodes })
-            .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
-            .getMany()
+          .createQueryBuilder('cashio')
+          .where('cashio.so_code IN (:...docCodes)', { docCodes })
+          .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
+          .getMany()
         : Promise.resolve([] as DailyCashio[]),
     ]);
 
@@ -2187,19 +2195,19 @@ export class SalesQueryService {
           docSourceType: sale.docSourceType,
           customer: sale.customer
             ? {
-                code: sale.customer.code || sale.partnerCode || null,
-                brand: sale.customer.brand || null,
-                name: sale.customer.name || null,
-                mobile: sale.customer.mobile || null,
-              }
+              code: sale.customer.code || sale.partnerCode || null,
+              brand: sale.customer.brand || null,
+              name: sale.customer.name || null,
+              mobile: sale.customer.mobile || null,
+            }
             : sale.partnerCode
               ? {
-                  code: sale.partnerCode || null,
-                  brand: null,
-                  name: null,
-                  mobile: null,
-                  id: null,
-                }
+                code: sale.partnerCode || null,
+                brand: null,
+                name: null,
+                mobile: null,
+                id: null,
+              }
               : null,
           totalRevenue: 0,
           totalQty: 0,

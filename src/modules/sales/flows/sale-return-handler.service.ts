@@ -28,7 +28,7 @@ export class SaleReturnHandlerService {
     private paymentService: PaymentService,
     @Inject(forwardRef(() => SalesInvoiceService))
     private salesInvoiceService: SalesInvoiceService,
-  ) {}
+  ) { }
 
   /**
    * Xử lý đơn hàng trả lại (SALE_RETURN)
@@ -57,7 +57,7 @@ export class SaleReturnHandlerService {
     const docCodesForStockTransfer =
       StockTransferUtils.getDocCodesForStockTransfer([docCode]);
     const stockTransfers = await this.stockTransferRepository.find({
-      where: { soCode: In(docCodesForStockTransfer) },
+      where: { docCode: In(docCodesForStockTransfer) },
     });
 
     // Case 1: Có stock transfer → Gọi API salesReturn
@@ -127,8 +127,8 @@ export class SaleReturnHandlerService {
 
       const responseStatus =
         Array.isArray(result) &&
-        result.length > 0 &&
-        result[0].status === STATUS.SUCCESS
+          result.length > 0 &&
+          result[0].status === STATUS.SUCCESS
           ? STATUS.SUCCESS
           : STATUS.FAILED;
       const apiMessage =
@@ -149,8 +149,8 @@ export class SaleReturnHandlerService {
 
       const responseGuid =
         Array.isArray(result) &&
-        result.length > 0 &&
-        Array.isArray(result[0].guid)
+          result.length > 0 &&
+          Array.isArray(result[0].guid)
           ? result[0].guid[0]
           : Array.isArray(result) && result.length > 0
             ? result[0].guid
@@ -347,8 +347,8 @@ export class SaleReturnHandlerService {
 
       const responseGuid =
         Array.isArray(result) &&
-        result.length > 0 &&
-        Array.isArray(result[0].guid)
+          result.length > 0 &&
+          Array.isArray(result[0].guid)
           ? result[0].guid[0]
           : Array.isArray(result) && result.length > 0
             ? result[0].guid

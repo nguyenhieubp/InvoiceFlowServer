@@ -16,14 +16,15 @@ export function getDocCodesForStockTransfer(docCodes: string[]): string[] {
   for (const docCode of docCodes) {
     result.add(docCode);
 
-    // Nếu là đơn trả lại (RT), thêm mã đơn gốc (SO) vào danh sách
-    if (docCode.startsWith('RT')) {
-      // RT33.00121928_1 -> SO33.00121928 (chuyển RT thành SO, bỏ _1)
-      const originalOrderCode = docCode
-        .replace(/^RT/, 'SO')
-        .replace(/_\d+$/, '');
-      result.add(originalOrderCode);
-    }
+    // [MODIFIED] User Request: Do NOT add Original SO code for RT orders.
+    // RT Orders should match directly with Stock Transfer docCode (RT... -> ST...)
+    // if (docCode.startsWith('RT')) {
+    //   // RT33.00121928_1 -> SO33.00121928 (chuyển RT thành SO, bỏ _1)
+    //   const originalOrderCode = docCode
+    //     .replace(/^RT/, 'SO')
+    //     .replace(/_\d+$/, '');
+    //   result.add(originalOrderCode);
+    // }
   }
 
   return Array.from(result);

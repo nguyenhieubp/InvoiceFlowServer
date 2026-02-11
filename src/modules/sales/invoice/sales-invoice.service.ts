@@ -73,9 +73,16 @@ export class SalesInvoiceService {
       const orderData = await this.findByOrderCode(docCode);
       const docCodesForStockTransfer =
         StockTransferUtils.getDocCodesForStockTransfer([docCode]);
-      const stockTransfers = await this.stockTransferRepository.find({
-        where: { soCode: In(docCodesForStockTransfer) },
-      });
+      let stockTransfers;
+      if (orderData.docSourceType === 'SALE_RETURN') {
+        stockTransfers = await this.stockTransferRepository.find({
+          where: { docCode: In(docCodesForStockTransfer) },
+        });
+      } else {
+        stockTransfers = await this.stockTransferRepository.find({
+          where: { soCode: In(docCodesForStockTransfer) },
+        });
+      }
 
       if (!orderData || !orderData.sales || orderData.sales.length === 0) {
         throw new NotFoundException(
