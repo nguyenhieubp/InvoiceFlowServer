@@ -25,6 +25,9 @@ export class PlatformFeeMap {
   @Column({ name: 'internal_code', type: 'varchar', length: 100 })
   internalCode: string;
 
+  @Column({ name: 'system_code', type: 'varchar', length: 100, nullable: true })
+  systemCode: string | null;
+
   @Column({ name: 'account_code', type: 'varchar', length: 50 })
   accountCode: string;
 

@@ -33,7 +33,7 @@ export class PlatformFeeImportService {
 
     @InjectDataSource()
     private readonly dataSource: DataSource,
-  ) {}
+  ) { }
 
   async importFromExcel(
     file: Express.Multer.File,
@@ -313,7 +313,7 @@ export class PlatformFeeImportService {
         'ma cac ben tiep thi lien ket',
       ]));
       e.sanTmdt = this.toText(getValue(['sàn tmđt', 'san tmdt', 'sàn tmđt shopee']));
-      
+
       // MKT columns
       const rowKeysShopee = Object.keys(row);
       const mktColumns = rowKeysShopee
@@ -408,7 +408,7 @@ export class PlatformFeeImportService {
         'ma cac ben tiep thi lien ket',
       ]));
       e.sanTmdt = this.toText(getValue(['sàn tmđt', 'san tmdt', 'sàn tmđt tiktok']));
-      
+
       // MKT columns
       const rowKeysTiktok = Object.keys(row);
       const mktColumns = rowKeysTiktok
@@ -707,7 +707,7 @@ export class PlatformFeeImportService {
 
     if (params?.search) {
       qb.andWhere(
-        '(fm.rawFeeName ILIKE :search OR fm.normalizedFeeName ILIKE :search OR fm.internalCode ILIKE :search OR fm.accountCode ILIKE :search)',
+        '(fm.rawFeeName ILIKE :search OR fm.normalizedFeeName ILIKE :search OR fm.internalCode ILIKE :search OR fm.accountCode ILIKE :search OR fm.systemCode ILIKE :search)',
         { search: `%${params.search}%` },
       );
     }
@@ -734,6 +734,7 @@ export class PlatformFeeImportService {
     platform: string;
     rawFeeName: string;
     internalCode: string;
+    systemCode?: string;
     accountCode: string;
     description?: string;
     active?: boolean;
@@ -762,6 +763,7 @@ export class PlatformFeeImportService {
       rawFeeName: data.rawFeeName,
       normalizedFeeName: normalized,
       internalCode: data.internalCode,
+      systemCode: data.systemCode || null,
       accountCode: data.accountCode,
       description: data.description || null,
       active: data.active !== undefined ? data.active : true,
@@ -776,6 +778,7 @@ export class PlatformFeeImportService {
       platform?: string;
       rawFeeName?: string;
       internalCode?: string;
+      systemCode?: string;
       accountCode?: string;
       description?: string;
       active?: boolean;
@@ -811,8 +814,9 @@ export class PlatformFeeImportService {
     }
 
     if (data.platform) feeMap.platform = data.platform;
-    if (data.internalCode) feeMap.internalCode = data.internalCode;
-    if (data.accountCode) feeMap.accountCode = data.accountCode;
+    if (data.internalCode !== undefined) feeMap.internalCode = data.internalCode;
+    if (data.systemCode !== undefined) feeMap.systemCode = data.systemCode || null;
+    if (data.accountCode !== undefined) feeMap.accountCode = data.accountCode;
     if (data.description !== undefined) feeMap.description = data.description;
     if (data.active !== undefined) feeMap.active = data.active;
 
