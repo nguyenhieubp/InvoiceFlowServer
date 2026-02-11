@@ -242,12 +242,14 @@ export class SalesFormattingService {
         )
         : 0,
 
-      maCk06: !InvoiceLogicUtils.isWholesale(sale)
-        ? sale.voucherDp1 || null
-        : null,
-      ck06Nt: !InvoiceLogicUtils.isWholesale(sale)
-        ? Number(sale.chietKhauVoucherDp1 || 0)
-        : 0,
+      maCk06:
+        !InvoiceLogicUtils.isWholesale(sale) && isPlatformOrder
+          ? sale.voucherDp1 || 'VC CTKM SÀN'
+          : null,
+      ck06Nt:
+        !InvoiceLogicUtils.isWholesale(sale) && isPlatformOrder
+          ? Number(sale.chietKhauVoucherDp1 || 0)
+          : 0,
 
       maCk07: (sale as any).voucherDp2 || null,
       ck07Nt: Number((sale as any).chietKhauVoucherDp2 || 0),
