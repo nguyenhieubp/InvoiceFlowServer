@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { POChargeHistory } from './entities/po-charge-history.entity';
+import { AuditPo } from './entities/audit-po.entity';
 import { FastApiClientService } from '../../services/fast-api-client.service';
 
 
@@ -18,6 +19,8 @@ export class FastIntegrationService {
         private readonly fastApiClient: FastApiClientService,
         @InjectRepository(POChargeHistory)
         private readonly historyRepo: Repository<POChargeHistory>,
+        @InjectRepository(AuditPo)
+        private readonly auditRepo: Repository<AuditPo>,
     ) { }
 
     /**
@@ -47,6 +50,11 @@ export class FastIntegrationService {
             `[FastIntegration] Syncing POCharges for order ${master.dh_so} (Merge Logic)...`,
         );
 
+        let result: any;
+        let errorMessage: string | null = null;
+        let status: string = 'SUCCESS';
+        let mergedPayloadForAudit: any = null;
+
         try {
             // 1. Fetch Existing History
             const existingHistory = await this.historyRepo.find({
@@ -54,14 +62,11 @@ export class FastIntegrationService {
             });
 
             // 2. In-Memory Merge
-            // Map existing history by 'dong'
             const historyMap = new Map<number, POChargeHistory>();
             for (const h of existingHistory) {
                 historyMap.set(h.dong, h);
             }
 
-            // Merge incoming payload into map (create new or update)
-            // Note: We use POChargeHistory objects (or clear copies) to track state
             for (const item of detail) {
                 let entry = historyMap.get(item.dong);
                 if (!entry) {
@@ -79,34 +84,15 @@ export class FastIntegrationService {
                     historyMap.set(item.dong, entry);
                 }
 
-                // Accumulate values from payload (instead of overwrite)
-                // This handles cases where multiple payload items map to same 'dong' but different fields
-                // or if we just want to ADD to existing history (though current logic seems to be "merge" as in "update latest state")
-
-                // User requirement "Nó ko lấy được giá trị" implies value might be lost.
-                // If the DB has 0, and payload has 1221, it becomes 1221.
-                // If DB has 1221, and payload has 0. 
-                //    Number(0) !== 0 is False. So it keeps 1221. This is correct for "Update only provided fields".
-
-                // BUT, what if the user wants to OVERWRITE with the new payload? 
-                // If payload says 1221, and we have 0, we set 1221.
-                // The logical issue might be if `item.dong` is duplicated in `detail` array?
-                // In the user's payload, `dong` is unique (1,2,3,4,5).
-
-                // Let's ensure we are using the incoming value if it exists.
                 if (item.cp01_nt !== undefined && item.cp01_nt !== null) entry.cp01_nt = safeNumber(item.cp01_nt);
                 if (item.cp02_nt !== undefined && item.cp02_nt !== null) entry.cp02_nt = safeNumber(item.cp02_nt);
                 if (item.cp03_nt !== undefined && item.cp03_nt !== null) entry.cp03_nt = safeNumber(item.cp03_nt);
                 if (item.cp04_nt !== undefined && item.cp04_nt !== null) entry.cp04_nt = safeNumber(item.cp04_nt);
                 if (item.cp05_nt !== undefined && item.cp05_nt !== null) entry.cp05_nt = safeNumber(item.cp05_nt);
                 if (item.cp06_nt !== undefined && item.cp06_nt !== null) entry.cp06_nt = safeNumber(item.cp06_nt);
-
-                // Update metadata
                 entry.ma_cp = item.ma_cp;
             }
 
-            // Prepare final merged list for API
-            // Sort by 'dong' ASC
             const finalMergedList = Array.from(historyMap.values()).sort(
                 (a, b) => a.dong - b.dong,
             );
@@ -124,12 +110,13 @@ export class FastIntegrationService {
                     cp06_nt: safeNumber(h.cp06_nt),
                 })),
             };
+            mergedPayloadForAudit = mergedPayload;
 
             // 3. Submit to Fast API
             this.logger.log(
                 `[FastIntegration] Submitting merged payload: ${JSON.stringify(mergedPayload.detail)}`,
             );
-            const result = await this.fastApiClient.submitPOCharges(mergedPayload);
+            result = await this.fastApiClient.submitPOCharges(mergedPayload);
 
             // 4. Validate Response
             let isSuccess = false;
@@ -140,10 +127,11 @@ export class FastIntegrationService {
             }
 
             if (!isSuccess) {
-                const errorMsg = Array.isArray(result)
+                status = 'ERROR';
+                errorMessage = Array.isArray(result)
                     ? result[0]?.message
                     : result?.message || 'Sync POCharges failed (unknown status)';
-                throw new BadRequestException(errorMsg);
+                throw new BadRequestException(errorMessage);
             }
 
             // 5. If Success -> Persist History
@@ -158,10 +146,64 @@ export class FastIntegrationService {
 
             return result;
         } catch (error: any) {
+            status = 'ERROR';
+            errorMessage = error?.message || String(error);
             this.logger.error(
-                `[FastIntegration] Failed to sync POCharges for ${master.dh_so}: ${error?.message || error}`,
+                `[FastIntegration] Failed to sync POCharges for ${master.dh_so}: ${errorMessage}`,
             );
             throw error;
+        } finally {
+            // Save Audit Log
+            try {
+                await this.auditRepo.save({
+                    dh_so: master.dh_so,
+                    dh_ngay: master.dh_ngay ? new Date(master.dh_ngay) : null,
+                    action: 'SYNC_PO_CHARGES',
+                    payload: mergedPayloadForAudit || payload,
+                    response: result,
+                    status: status,
+                    error: errorMessage,
+                });
+            } catch (auditError) {
+                this.logger.error(`[FastIntegration] Failed to save audit log: ${auditError.message}`);
+            }
         }
+    }
+
+    async getAuditLogs(search?: string, dateFrom?: string, dateTo?: string): Promise<AuditPo[]> {
+        const query = this.auditRepo.createQueryBuilder('audit')
+            .orderBy('audit.created_at', 'DESC')
+            .take(50); // Limit to latest 50 for performance
+
+        if (search) {
+            query.andWhere('audit.dh_so ILIKE :search', { search: `%${search}%` });
+        }
+
+        if (dateFrom) {
+            query.andWhere('audit.dh_ngay >= :dateFrom', { dateFrom: new Date(dateFrom) });
+        }
+
+        if (dateTo) {
+            // End of day for dateTo (though dh_ngay is usually just a date)
+            const endOfDay = new Date(dateTo);
+            endOfDay.setHours(23, 59, 59, 999);
+            query.andWhere('audit.dh_ngay <= :dateTo', { dateTo: endOfDay });
+        }
+
+        return query.getMany();
+    }
+
+    async retrySync(id: number): Promise<any> {
+        const audit = await this.auditRepo.findOne({ where: { id } });
+        if (!audit) {
+            throw new BadRequestException(`Audit log #${id} not found`);
+        }
+
+        if (!audit.payload) {
+            throw new BadRequestException(`Audit log #${id} has no payload to retry`);
+        }
+
+        this.logger.log(`[FastIntegration] Retrying sync for PO ${audit.dh_so} from audit #${id}`);
+        return this.syncPOCharges(audit.payload);
     }
 }
