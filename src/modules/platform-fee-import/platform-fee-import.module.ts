@@ -6,6 +6,8 @@ import { PlatformFeeImportShopee } from '../../entities/platform-fee-import-shop
 import { PlatformFeeImportTiktok } from '../../entities/platform-fee-import-tiktok.entity';
 import { PlatformFeeImportLazada } from '../../entities/platform-fee-import-lazada.entity';
 import { PlatformFeeMap } from '../../entities/platform-fee-map.entity';
+import { ShopeeFee } from '../../entities/shopee-fee.entity';
+import { TikTokFee } from '../../entities/tiktok-fee.entity';
 
 @Module({
   imports: [
@@ -14,10 +16,12 @@ import { PlatformFeeMap } from '../../entities/platform-fee-map.entity';
       PlatformFeeImportTiktok,
       PlatformFeeImportLazada,
       PlatformFeeMap,
+      ShopeeFee,
+      TikTokFee,
     ]),
   ],
   controllers: [PlatformFeeImportController],
   providers: [PlatformFeeImportService],
   exports: [PlatformFeeImportService],
 })
-export class PlatformFeeImportModule {}
+export class PlatformFeeImportModule { }

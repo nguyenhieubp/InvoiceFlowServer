@@ -6,6 +6,9 @@ import { PlatformFeeImportShopee } from '../../entities/platform-fee-import-shop
 import { PlatformFeeImportTiktok } from '../../entities/platform-fee-import-tiktok.entity';
 import { PlatformFeeImportLazada } from '../../entities/platform-fee-import-lazada.entity';
 import { PlatformFeeMap } from '../../entities/platform-fee-map.entity';
+import { ShopeeFee } from '../../entities/shopee-fee.entity';
+import { TikTokFee } from '../../entities/tiktok-fee.entity';
+import { In } from 'typeorm';
 // Using crypto for UUID generation (built-in Node.js)
 
 type Platform = 'shopee' | 'tiktok' | 'lazada';
@@ -30,6 +33,12 @@ export class PlatformFeeImportService {
 
     @InjectRepository(PlatformFeeMap)
     private readonly feeMapRepo: Repository<PlatformFeeMap>,
+
+    @InjectRepository(ShopeeFee)
+    private readonly shopeeFeeRepo: Repository<ShopeeFee>,
+
+    @InjectRepository(TikTokFee)
+    private readonly tiktokFeeRepo: Repository<TikTokFee>,
 
     @InjectDataSource()
     private readonly dataSource: DataSource,
@@ -548,8 +557,44 @@ export class PlatformFeeImportService {
 
     const [data, total] = await qb.getManyAndCount();
 
+    // Enrich with ERP Order Code and Order Date
+    let enrichedData: any[] = data;
+    const orderSns = data.map((i: any) => i.maSan).filter(Boolean);
+
+    if (orderSns.length > 0) {
+      if (params.platform === 'shopee') {
+        const fees = await this.shopeeFeeRepo.find({
+          where: { orderSn: In(orderSns) },
+          select: ['orderSn', 'erpOrderCode', 'orderCreatedAt'],
+        });
+
+        enrichedData = data.map((item: any) => {
+          const fee = fees.find((f) => f.orderSn === item.maSan);
+          return {
+            ...item,
+            erpOrderCode: fee?.erpOrderCode || null,
+            orderDate: fee?.orderCreatedAt || null,
+          };
+        });
+      } else if (params.platform === 'tiktok') {
+        const fees = await this.tiktokFeeRepo.find({
+          where: { orderSn: In(orderSns) },
+          select: ['orderSn', 'erpOrderCode', 'orderCreatedAt'],
+        });
+
+        enrichedData = data.map((item: any) => {
+          const fee = fees.find((f) => f.orderSn === item.maSan);
+          return {
+            ...item,
+            erpOrderCode: fee?.erpOrderCode || null,
+            orderDate: fee?.orderCreatedAt || null,
+          };
+        });
+      }
+    }
+
     return {
-      data,
+      data: enrichedData,
       meta: {
         total,
         page,

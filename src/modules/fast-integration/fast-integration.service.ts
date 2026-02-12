@@ -169,29 +169,16 @@ export class FastIntegrationService {
                     this.logger.warn(`[FastIntegration] Error parsing date: ${dateError.message}`);
                 }
 
-                // Check if audit log exists for this order
-                let auditLog = await this.auditRepo.findOne({
-                    where: { dh_so: master.dh_so, action: 'SYNC_PO_CHARGES' }
+                // Always create a new audit log
+                await this.auditRepo.save({
+                    dh_so: master.dh_so,
+                    dh_ngay: logDate,
+                    action: 'SYNC_PO_CHARGES',
+                    payload: mergedPayloadForAudit || payload,
+                    response: result,
+                    status: status,
+                    error: errorMessage,
                 });
-
-                if (auditLog) {
-                    auditLog.dh_ngay = logDate;
-                    auditLog.payload = mergedPayloadForAudit || payload;
-                    auditLog.response = result;
-                    auditLog.status = status;
-                    auditLog.error = errorMessage;
-                    await this.auditRepo.save(auditLog);
-                } else {
-                    await this.auditRepo.save({
-                        dh_so: master.dh_so,
-                        dh_ngay: logDate,
-                        action: 'SYNC_PO_CHARGES',
-                        payload: mergedPayloadForAudit || payload,
-                        response: result,
-                        status: status,
-                        error: errorMessage,
-                    });
-                }
             } catch (auditError: any) {
                 this.logger.error(`[FastIntegration] CRITICAL: Failed to save audit log for ${master.dh_so}: ${auditError.message}`, auditError.stack);
             }

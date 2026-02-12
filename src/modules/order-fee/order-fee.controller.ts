@@ -7,6 +7,7 @@ import { TikTokFee } from '../../entities/tiktok-fee.entity';
 import { Between, ILike, In } from 'typeorm';
 import { PlatformFeeImportShopee } from '../../entities/platform-fee-import-shopee.entity';
 import { PlatformFeeImportTiktok } from '../../entities/platform-fee-import-tiktok.entity';
+import { Sale } from '../../entities/sale.entity';
 
 @Controller('order-fees')
 export class OrderFeeController {
@@ -25,6 +26,9 @@ export class OrderFeeController {
 
     @InjectRepository(PlatformFeeImportTiktok)
     private platformFeeImportTiktokRepo: Repository<PlatformFeeImportTiktok>,
+
+    @InjectRepository(Sale)
+    private saleRepository: Repository<Sale>,
   ) { }
 
   /**
@@ -209,8 +213,35 @@ export class OrderFeeController {
       };
     });
 
+    // Valid ERP Order Codes
+    const erpOrderCodes = mergedData.map((i) => i.erpOrderCode).filter(Boolean);
+
+    // Fetch Invoice Date from Sales
+    let salesMap = new Map<string, Date>();
+    if (erpOrderCodes.length > 0) {
+      const sales = await this.saleRepository
+        .createQueryBuilder('sales')
+        .select(['sales.docCode', 'sales.docDate'])
+        .where('sales.docCode IN (:...code)', { code: erpOrderCodes })
+        .distinctOn(['sales.docCode'])
+        .getMany();
+
+      sales.forEach((s) => {
+        if (s.docCode && s.docDate) {
+          salesMap.set(s.docCode, s.docDate);
+        }
+      });
+    }
+
+    const finalData = mergedData.map((item) => {
+      return {
+        ...item,
+        invoiceDate: salesMap.get(item.erpOrderCode) || null,
+      };
+    });
+
     return {
-      data: mergedData,
+      data: finalData,
       meta: {
         total,
         page: Number(page),
@@ -301,10 +332,6 @@ export class OrderFeeController {
       };
       return mapped;
     });
-
-    if (mergedData.length > 0) {
-      console.log('[TikTokFees] Sample Merged Item Keys:', Object.keys(mergedData[0]));
-    }
 
     return {
       data: mergedData,

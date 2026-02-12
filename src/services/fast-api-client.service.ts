@@ -796,10 +796,6 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
         }),
       );
 
-      this.logger.log('Stock transfer submitted successfully');
-      // this.logger.log('==================Stock Transfer API Response:');
-      // this.logger.log(JSON.stringify(response.data, null, 2));
-      // this.logger.log('==================End of Stock Transfer API Response');
       return response.data;
     } catch (error: any) {
       // Log chi tiết lỗi
