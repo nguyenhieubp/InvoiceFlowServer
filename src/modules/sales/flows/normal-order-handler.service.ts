@@ -261,7 +261,6 @@ export class NormalOrderHandlerService {
         ...invoiceData,
         ngay_ct: stockTransferDateISO,
         ngay_lct: stockTransferDateISO,
-        dh_ngay: stockTransferDateISO,
         trans_date: stockTransferDateISO,
         customer: partialOrderData.customer,
         ten_kh: partialOrderData.customer?.name || invoiceData.ong_ba || '',

@@ -1231,15 +1231,16 @@ export class InvoiceLogicUtils {
         );
       } else if (i === 6) {
         // [FIX] Explicit check for ma_ck06 (Platform or Normal)
-        if (InvoiceLogicUtils.isWholesale(sale)) {
-          detailItem[maKey] = '';
-        } else if (isPlatformOrder) {
-          detailItem[maKey] = 'VC CTKM SÀN'; // [NEW] Platform Order Voucher Name
-        } else {
-          // [FIX] ma_ck06 only for Platform Orders or explicitly defined cases
-          // User Request: "Phải kiểm tra nó là đơn sàn thì mới có giá trị"
-          detailItem[maKey] = '';
-        }
+        // if (InvoiceLogicUtils.isWholesale(sale)) {
+        //   detailItem[maKey] = '';
+        // } else if (isPlatformOrder) {
+        //   detailItem[maKey] = 'VC CTKM SÀN'; // [NEW] Platform Order Voucher Name
+        // } else {
+        //   // [FIX] ma_ck06 only for Platform Orders or explicitly defined cases
+        //   // User Request: "Phải kiểm tra nó là đơn sàn thì mới có giá trị"
+        //   detailItem[maKey] = '';
+        // }
+        detailItem[maKey] = '';
       } else if (i === 8) {
         detailItem[maKey] = InvoiceLogicUtils.val(
           sale.voucherDp3 ? 'VOUCHER_DP3' : '',

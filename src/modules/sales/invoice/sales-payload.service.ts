@@ -26,7 +26,7 @@ export class SalesPayloadService {
     private loyaltyService: LoyaltyService,
     private n8nService: N8nService,
     private categoriesService: CategoriesService,
-  ) {}
+  ) { }
 
   /**
    * Build invoice data cho Fast API (format mới)
@@ -720,8 +720,8 @@ export class SalesPayloadService {
     const dbProducts =
       itemCodes.length > 0
         ? await this.productItemRepository.find({
-            where: { maERP: In(itemCodes) },
-          })
+          where: { maERP: In(itemCodes) },
+        })
         : [];
     const dbProductMap = new Map(dbProducts.map((p) => [p.maERP, p]));
 
@@ -1443,7 +1443,7 @@ export class SalesPayloadService {
       ma_nx_st: this.val(sale.ma_nx_st, 32),
       ma_nx_rt: this.val(sale.ma_nx_rt, 32),
       ma_vt_ref: this.val(sale.ma_vt_ref, 32),
-      dh_ln: context.isEcommerce ? index + 1 : undefined, // [NEW] Ecommerce line number
+      dh_ln: context.isEcommerce || context.isPlatformOrder ? index + 1 : undefined, // [NEW] Ecommerce/Platform line number
     });
 
     this.fillInvoiceChietKhauFields(
@@ -1487,9 +1487,9 @@ export class SalesPayloadService {
       ma_ca: firstSale?.maCa || null,
       hinh_thuc:
         firstSale &&
-        ['WHOLESALE', 'WS'].includes(
-          (firstSale.type_sale || '').toUpperCase().trim(),
-        )
+          ['WHOLESALE', 'WS'].includes(
+            (firstSale.type_sale || '').toUpperCase().trim(),
+          )
           ? '1'
           : '0',
       dien_giai: orderData.docCode || null,
