@@ -798,83 +798,57 @@ export class PlatformFeeImportService {
     });
 
     if (existing) {
-      throw new BadRequestException(
-        `Mapping đã tồn tại cho platform "${data.platform}" và tên phí "${data.rawFeeName}"`,
-      );
+      // Update
+      const updated = this.feeMapRepo.merge(existing, {
+        ...data,
+        normalizedFeeName: normalized,
+      });
+      return this.feeMapRepo.save(updated);
     }
 
-    const feeMap = this.feeMapRepo.create({
-      platform: data.platform,
-      rawFeeName: data.rawFeeName,
+    // Create new
+    const newMap = this.feeMapRepo.create({
+      ...data,
       normalizedFeeName: normalized,
-      internalCode: data.internalCode,
-      systemCode: data.systemCode || null,
-      accountCode: data.accountCode,
-      description: data.description || null,
-      active: data.active !== undefined ? data.active : true,
     });
-
-    return await this.feeMapRepo.save(feeMap);
+    return this.feeMapRepo.save(newMap);
   }
 
-  async updateFeeMap(
-    id: string,
-    data: {
-      platform?: string;
-      rawFeeName?: string;
-      internalCode?: string;
-      systemCode?: string;
-      accountCode?: string;
-      description?: string;
-      active?: boolean;
-    },
-  ) {
-    const feeMap = await this.feeMapRepo.findOne({ where: { id } });
-    if (!feeMap) {
-      throw new BadRequestException('Không tìm thấy mapping phí');
+  async updateFeeMap(id: string, data: any) {
+    const existing = await this.feeMapRepo.findOne({ where: { id } });
+    if (!existing) {
+      throw new BadRequestException('Không tìm thấy bản ghi');
     }
 
     if (data.rawFeeName) {
-      const normalized = this.normalizeFeeName(data.rawFeeName);
-      if (!normalized) {
-        throw new BadRequestException('Tên phí không hợp lệ');
-      }
-
-      // Check if another record exists with same platform + normalized name
-      const existing = await this.feeMapRepo.findOne({
-        where: {
-          platform: data.platform || feeMap.platform,
-          normalizedFeeName: normalized,
-        },
-      });
-
-      if (existing && existing.id !== id) {
-        throw new BadRequestException(
-          `Mapping đã tồn tại cho platform "${data.platform || feeMap.platform}" và tên phí "${data.rawFeeName}"`,
-        );
-      }
-
-      feeMap.rawFeeName = data.rawFeeName;
-      feeMap.normalizedFeeName = normalized;
+      data.normalizedFeeName = this.normalizeFeeName(data.rawFeeName);
     }
 
-    if (data.platform) feeMap.platform = data.platform;
-    if (data.internalCode !== undefined) feeMap.internalCode = data.internalCode;
-    if (data.systemCode !== undefined) feeMap.systemCode = data.systemCode || null;
-    if (data.accountCode !== undefined) feeMap.accountCode = data.accountCode;
-    if (data.description !== undefined) feeMap.description = data.description;
-    if (data.active !== undefined) feeMap.active = data.active;
-
-    return await this.feeMapRepo.save(feeMap);
+    const updated = this.feeMapRepo.merge(existing, data);
+    return this.feeMapRepo.save(updated);
   }
 
   async deleteFeeMap(id: string) {
-    const feeMap = await this.feeMapRepo.findOne({ where: { id } });
-    if (!feeMap) {
-      throw new BadRequestException('Không tìm thấy mapping phí');
+    return this.feeMapRepo.delete(id);
+  }
+
+  async update(platform: string, id: string, data: any) {
+    const repo = this.getRepositoryByPlatform(platform as Platform);
+    const entity = await repo.findOne({ where: { id } as any });
+
+    if (!entity) {
+      throw new BadRequestException('Không tìm thấy bản ghi');
     }
 
-    await this.feeMapRepo.remove(feeMap);
-    return { message: 'Xóa mapping phí thành công' };
+    // Filter out restricted fields if necessary, or just merge
+    // Explicitly exclude ID and critical fields from update if needed
+    delete data.id;
+    delete data.createdAt;
+    delete data.updatedAt;
+
+    // Merge data
+    const updatedEntity = (repo as any).merge(entity, data);
+
+    return (repo as any).save(updatedEntity);
   }
 }

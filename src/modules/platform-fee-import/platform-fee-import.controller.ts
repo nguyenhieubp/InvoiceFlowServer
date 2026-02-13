@@ -21,7 +21,7 @@ import { ImportPlatformFeeDto } from './dto/import-platform-fee.dto';
 export class PlatformFeeImportController {
   constructor(
     private readonly platformFeeImportService: PlatformFeeImportService,
-  ) {}
+  ) { }
 
   @Post('import')
   @UseInterceptors(FileInterceptor('file'))
@@ -163,6 +163,20 @@ export class PlatformFeeImportController {
   @Put('fee-map/:id')
   async updateFeeMap(@Param('id') id: string, @Body() body: any) {
     return this.platformFeeImportService.updateFeeMap(id, body);
+  }
+
+  @Put('fee/:platform/:id')
+  async update(
+    @Param('platform') platform: string,
+    @Param('id') id: string,
+    @Body() body: any,
+  ) {
+    if (!['shopee', 'tiktok', 'lazada'].includes(platform)) {
+      throw new BadRequestException(
+        'Platform không hợp lệ. Phải là shopee, tiktok hoặc lazada',
+      );
+    }
+    return this.platformFeeImportService.update(platform, id, body);
   }
 
   @Delete('fee-map/:id')
