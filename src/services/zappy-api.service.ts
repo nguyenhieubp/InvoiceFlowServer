@@ -26,7 +26,7 @@ export class ZappyApiService {
     menard: 'https://vmterp.com/ords/erp/retail/api',
   };
 
-  constructor(private readonly httpService: HttpService) { }
+  constructor(private readonly httpService: HttpService) {}
 
   /**
    * Lấy base URL cho brand
@@ -556,6 +556,37 @@ export class ZappyApiService {
         `Error fetching daily GR from Zappy API: ${error?.message || error}`,
       );
       throw error;
+    }
+  }
+
+  /**
+   * Lấy thông tin partner từ mã SVC serial (mã thẻ)
+   * Dùng cho đơn "08. Tách thẻ" để lấy issue_partner_code thay thế N8N get_card
+   * @param serial - Mã thẻ (svc_serial)
+   * @param brand - Brand name (f3, labhair, yaman, menard)
+   * @returns { partner_code, partner_name, ... } hoặc null
+   */
+  async getPartnerFromSvc(serial: string, brand?: string): Promise<any | null> {
+    if (!serial || serial.trim() === '') return null;
+    const baseUrl = this.getBaseUrlForBrand(brand);
+    const url = `${baseUrl}/get_partner_from_svc?P_SERIAL=${encodeURIComponent(serial.trim())}`;
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: { accept: 'application/json' },
+          timeout: 10000,
+        }),
+      );
+      const rawData = response?.data?.data;
+      if (Array.isArray(rawData) && rawData.length > 0) {
+        return rawData[0];
+      }
+      return null;
+    } catch (error: any) {
+      this.logger.warn(
+        `[getPartnerFromSvc] Error for serial "${serial}" (brand: ${brand}): ${error?.message}`,
+      );
+      return null;
     }
   }
 

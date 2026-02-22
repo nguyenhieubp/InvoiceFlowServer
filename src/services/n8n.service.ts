@@ -197,6 +197,37 @@ export class N8nService {
   }
 
   /**
+   * Map issue_partner_code từ svc_serial vào sales (thay thế N8N get_card flow)
+   * @param sales - Danh sách sales (đã có svc_serial / maThe)
+   * @param partnerMap - Map<svc_serial, { partner_code, partner_name, ... }> từ Zappy
+   */
+  mapSvcSerialToSales(sales: any[], partnerMap: Map<string, any>): void {
+    if (!partnerMap || partnerMap.size === 0) return;
+
+    sales.forEach((sale: any) => {
+      const svcSerial = sale.svc_serial || sale.maThe;
+      if (!svcSerial) return;
+
+      const partner = partnerMap.get(svcSerial);
+      if (!partner) return;
+
+      // Gán issue_partner_code từ API response
+      if (partner.partner_code) {
+        sale.issuePartnerCode = partner.partner_code;
+      }
+      if (partner.partner_name) {
+        sale.issuePartnerName = partner.partner_name;
+      }
+
+      // maThe đã có sẵn từ svc_serial (không cần gán lại)
+      // Nhưng đảm bảo soSerial nhất quán
+      if (svcSerial && !sale.soSerial) {
+        sale.soSerial = svcSerial;
+      }
+    });
+  }
+
+  /**
    * Check generic customer info via N8n webhook
    * @param partnerCode - Mã khách hàng
    * @param sourceCompany - Brand

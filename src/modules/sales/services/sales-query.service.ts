@@ -50,7 +50,7 @@ export class SalesQueryService {
     private fastApiInvoiceRepository: Repository<FastApiInvoice>,
     @InjectRepository(Invoice)
     private invoiceRepository: Repository<Invoice>,
-  ) { }
+  ) {}
 
   /**
    * Find one sale by ID
@@ -161,27 +161,38 @@ export class SalesQueryService {
       }
     });
 
-    // 5. Card Data (for Tach The orders)
+    // 5. Card Data (for Tach The orders) — via svc_serial instead of N8N
+    const firstSale = sales[0];
+    const brand = firstSale?.customer?.brand || platformBrand || 'menard';
     const hasTachThe = sales.some((s) =>
       SalesUtils.isTachTheOrder(s.ordertypeName),
     );
-    let cardData: any = null;
+    let tachTheSvcPartnerMap = new Map<string, any>();
     if (hasTachThe) {
-      try {
-        const cardResponse =
-          await this.n8nService.fetchCardDataWithRetry(docCode);
-        cardData = this.n8nService.parseCardData(cardResponse);
-      } catch (e) {
-        this.logger.warn(
-          `Failed to fetch card data for ${docCode}: ${e.message}`,
+      const tachTheBrand = firstSale?.brand || brand;
+      const svcSerials = [
+        ...new Set(
+          sales
+            .filter((s) => SalesUtils.isTachTheOrder(s.ordertypeName))
+            .map((s) => s.svc_serial || s.maThe)
+            .filter((v): v is string => !!v && v.trim() !== ''),
+        ),
+      ];
+      if (svcSerials.length > 0) {
+        await Promise.all(
+          svcSerials.map(async (serial) => {
+            const partner = await this.zappyApiService.getPartnerFromSvc(
+              serial,
+              tachTheBrand,
+            );
+            if (partner) tachTheSvcPartnerMap.set(serial, partner);
+          }),
         );
       }
     }
 
     // 5.1. Pre-fetch Employee Status via API
     // Collect unique partnerCodes and issuePartnerCodes
-    const firstSale = sales[0];
-    const brand = firstSale?.customer?.brand || platformBrand || 'menard';
     const partnerCodesToCheck = Array.from(
       new Set(
         sales
@@ -302,9 +313,9 @@ export class SalesQueryService {
       }),
     );
 
-    // 7. Apply Card Data (Group Level logic applied to list)
-    if (cardData) {
-      this.n8nService.mapIssuePartnerCodeToSales(enrichedSales, cardData);
+    // 7. Apply Tach The enrichment (svc_serial → issuePartnerCode)
+    if (tachTheSvcPartnerMap.size > 0) {
+      this.n8nService.mapSvcSerialToSales(enrichedSales, tachTheSvcPartnerMap);
     }
 
     // 8. Enrich ma_vt_ref (Voucher logic)
@@ -376,10 +387,7 @@ export class SalesQueryService {
       const docCodesForST =
         StockTransferUtils.getDocCodesForStockTransfer(docCodes);
       stockTransfers = await this.stockTransferRepository.find({
-        where: [
-          { soCode: In(docCodesForST) },
-          { docCode: In(docCodesForST) },
-        ],
+        where: [{ soCode: In(docCodesForST) }, { docCode: In(docCodesForST) }],
       });
     }
 
@@ -1373,19 +1381,19 @@ export class SalesQueryService {
           docSourceType: sale.docSourceType,
           customer: sale.customer
             ? {
-              code: sale.customer.code || sale.partnerCode || null,
-              brand: sale.customer.brand || null,
-              name: sale.customer.name || null,
-              mobile: sale.customer.mobile || null,
-            }
+                code: sale.customer.code || sale.partnerCode || null,
+                brand: sale.customer.brand || null,
+                name: sale.customer.name || null,
+                mobile: sale.customer.mobile || null,
+              }
             : sale.partnerCode
               ? {
-                code: sale.partnerCode || null,
-                brand: null,
-                name: null,
-                mobile: null,
-                id: null,
-              }
+                  code: sale.partnerCode || null,
+                  brand: null,
+                  name: null,
+                  mobile: null,
+                  id: null,
+                }
               : null,
           totalRevenue: 0,
           totalQty: 0,
@@ -1478,8 +1486,8 @@ export class SalesQueryService {
       // 1. Stock transfers
       docCodesForStockTransfer.length > 0
         ? this.stockTransferRepository.find({
-          where: { soCode: In(docCodesForStockTransfer) },
-        })
+            where: { soCode: In(docCodesForStockTransfer) },
+          })
         : Promise.resolve([] as StockTransfer[]),
       // 2. Departments
       this.loyaltyService.fetchLoyaltyDepartments(branchCodes),
@@ -1492,8 +1500,8 @@ export class SalesQueryService {
       // 5. Order fees
       docCodes.length > 0
         ? this.orderFeeRepository.find({
-          where: { erpOrderCode: In(docCodes) },
-        })
+            where: { erpOrderCode: In(docCodes) },
+          })
         : Promise.resolve([] as OrderFee[]),
       // 6. Employee status check
       this.n8nService.checkCustomersIsEmployee(partnerCodesToCheckForAll),
@@ -1505,10 +1513,10 @@ export class SalesQueryService {
       // Previously called enrichOrdersWithCashio which re-fetched ST + products from DB/API
       docCodes.length > 0
         ? this.dailyCashioRepository
-          .createQueryBuilder('cashio')
-          .where('cashio.so_code IN (:...docCodes)', { docCodes })
-          .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
-          .getMany()
+            .createQueryBuilder('cashio')
+            .where('cashio.so_code IN (:...docCodes)', { docCodes })
+            .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
+            .getMany()
         : Promise.resolve([] as DailyCashio[]),
     ]);
 
@@ -1623,9 +1631,7 @@ export class SalesQueryService {
             ? departmentMap.get(sale.branchCode) || null
             : null;
 
-          const maThe = getMaThe.get(loyaltyProduct?.materialCode || '') || '';
-          sale.maThe = maThe;
-          const saleMaterialCode = loyaltyProduct?.materialCode;
+          sale.maThe = sale.svc_serial;
 
           // [FIX] Use Pre-assigned Stock Transfers
           const { st: assignedSt, rt: assignedRt } =
@@ -1860,61 +1866,56 @@ export class SalesQueryService {
       },
     );
 
-    // [FIX] N8n Integration for Card Data (Enrichment source of truth)
-    // Applied AFTER explosion to ensure we overwrite any Stock Transfer duplicates or Qty resets
-    // Collect docCodes that require card data fetching
-    const docCodesNeedingCardData: string[] = [];
-    enrichedOrders.forEach((order) => {
-      if (
-        order.sales?.some((s: any) =>
-          SalesUtils.isTachTheOrder(s.ordertypeName),
-        )
-      ) {
-        docCodesNeedingCardData.push(order.docCode);
-      }
-    });
+    // [FIX] Tach The enrichment via svc_serial → Zappy get_partner_from_svc
+    // Applied AFTER explosion to ensure we overwrite any ST-derived data
+    const tachTheSales = enrichedOrders.flatMap((order) =>
+      (order.sales || []).filter((s: any) =>
+        SalesUtils.isTachTheOrder(s.ordertypeName),
+      ),
+    );
+    const allSvcSerials = [
+      ...new Set(
+        tachTheSales
+          .map((s: any) => s.svc_serial || s.maThe)
+          .filter((v): v is string => !!v && v.trim() !== ''),
+      ),
+    ];
 
-    // Execute parallel requests for card data with concurrency limit
-    const cardDataMap = new Map<string, any>(); // Map<docCode, cardData>
-    if (docCodesNeedingCardData.length > 0) {
+    const svcPartnerMap = new Map<string, any>();
+    if (allSvcSerials.length > 0) {
+      // Resolve brand (use first tach the sale's brand)
+      const getBrandForSerial = (serial: string): string => {
+        const sale = tachTheSales.find(
+          (s: any) => (s.svc_serial || s.maThe) === serial,
+        );
+        return sale?.brand || sale?.customer?.brand || 'f3';
+      };
+
       const MAX_CONCURRENT = 5;
       const chunks: string[][] = [];
-      for (let i = 0; i < docCodesNeedingCardData.length; i += MAX_CONCURRENT) {
-        chunks.push(docCodesNeedingCardData.slice(i, i + MAX_CONCURRENT));
+      for (let i = 0; i < allSvcSerials.length; i += MAX_CONCURRENT) {
+        chunks.push(allSvcSerials.slice(i, i + MAX_CONCURRENT));
       }
-
       for (const chunk of chunks) {
-        const cardDataPromises = chunk.map(async (docCode) => {
-          try {
-            const cardResponse =
-              await this.n8nService.fetchCardDataWithRetry(docCode);
-            const cardData = this.n8nService.parseCardData(cardResponse);
-            return { docCode, cardData };
-          } catch (e) {
-            this.logger.warn(
-              `Failed to fetch card data for ${docCode}: ${e.message}`,
+        await Promise.all(
+          chunk.map(async (serial) => {
+            const brand = getBrandForSerial(serial);
+            const partner = await this.zappyApiService.getPartnerFromSvc(
+              serial,
+              brand,
             );
-            return { docCode, cardData: null };
-          }
-        });
-
-        const results = await Promise.all(cardDataPromises);
-        results.forEach((res) => {
-          if (res.cardData) {
-            cardDataMap.set(res.docCode, res.cardData);
-          }
-        });
+            if (partner) svcPartnerMap.set(serial, partner);
+          }),
+        );
       }
     }
 
-    // Apply card data to ENRICHED orders
-    enrichedOrders.forEach((order) => {
-      if (cardDataMap.has(order.docCode)) {
-        const cardData = cardDataMap.get(order.docCode);
-        // Use the CONSUMPTION logic to map data to enriched sales
-        this.n8nService.mapIssuePartnerCodeToSales(order.sales || [], cardData);
-      }
-    });
+    // Apply svc partner data to all enriched orders
+    if (svcPartnerMap.size > 0) {
+      enrichedOrders.forEach((order) => {
+        this.n8nService.mapSvcSerialToSales(order.sales || [], svcPartnerMap);
+      });
+    }
     // CX4772
     // [CRITICAL] Re-enrich ma_vt_ref AFTER explosion
     // enrichOrdersWithCashio creates new sale lines from stock transfers
@@ -2195,19 +2196,19 @@ export class SalesQueryService {
           docSourceType: sale.docSourceType,
           customer: sale.customer
             ? {
-              code: sale.customer.code || sale.partnerCode || null,
-              brand: sale.customer.brand || null,
-              name: sale.customer.name || null,
-              mobile: sale.customer.mobile || null,
-            }
+                code: sale.customer.code || sale.partnerCode || null,
+                brand: sale.customer.brand || null,
+                name: sale.customer.name || null,
+                mobile: sale.customer.mobile || null,
+              }
             : sale.partnerCode
               ? {
-                code: sale.partnerCode || null,
-                brand: null,
-                name: null,
-                mobile: null,
-                id: null,
-              }
+                  code: sale.partnerCode || null,
+                  brand: null,
+                  name: null,
+                  mobile: null,
+                  id: null,
+                }
               : null,
           totalRevenue: 0,
           totalQty: 0,
@@ -2343,8 +2344,12 @@ export class SalesQueryService {
           ? departmentMap.get(sale.branchCode) || null
           : null;
 
-        const maThe = getMaThe.get(loyaltyProduct?.materialCode || '') || '';
-        sale.maThe = maThe;
+        const maThe = getMaThe.get(loyaltyProduct?.materialCode || '');
+        if (maThe) {
+          sale.maThe = maThe;
+        } else if (!sale.maThe && sale.svc_serial) {
+          sale.maThe = sale.svc_serial;
+        }
 
         const calculatedFields = await InvoiceLogicUtils.calculateSaleFields(
           sale,

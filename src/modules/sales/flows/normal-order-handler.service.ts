@@ -8,6 +8,7 @@ import { SalesQueryService } from '../services/sales-query.service';
 import { PaymentService } from '../../payment/payment.service';
 import { forwardRef, Inject } from '@nestjs/common';
 import { N8nService } from '../../../services/n8n.service';
+import { ZappyApiService } from '../../../services/zappy-api.service';
 import * as SalesUtils from '../../../utils/sales.utils';
 import * as ConvertUtils from '../../../utils/convert.utils';
 import * as StockTransferUtils from '../../../utils/stock-transfer.utils';
@@ -25,9 +26,10 @@ export class NormalOrderHandlerService {
     private salesPayloadService: SalesPayloadService,
     private salesQueryService: SalesQueryService,
     private n8nService: N8nService,
+    private zappyApiService: ZappyApiService,
     @Inject(forwardRef(() => PaymentService))
     private paymentService: PaymentService,
-  ) { }
+  ) {}
 
   /**
    * Helper xử lý đơn thường và đơn bán tài khoản
@@ -65,26 +67,40 @@ export class NormalOrderHandlerService {
 
     if (isTachThe) {
       this.logger.log(
-        `[NormalOrder] Detected Tách Thẻ order ${docCode}, fetching Card Data from N8n (After Explosion)...`,
+        `[NormalOrder] Tách Thẻ ${docCode}: enriching issuePartnerCode via svc_serial...`,
       );
       try {
-        const cardResponse =
-          await this.n8nService.fetchCardDataWithRetry(docCode);
-        const cardData = this.n8nService.parseCardData(cardResponse);
-        if (cardData && cardData.length > 0) {
-          // Use the CONSUMPTION logic to map data to enriched sales
-          this.n8nService.mapIssuePartnerCodeToSales(
-            enrichedOrder.sales,
-            cardData,
+        const brand = orderData.brand || orderData.customer?.brand || 'f3';
+        // Collect unique svc_serials from enriched sales
+        const svcSerials = [
+          ...new Set(
+            (enrichedOrder.sales as any[])
+              .map((s) => s.svc_serial || s.maThe)
+              .filter((v): v is string => !!v && v.trim() !== ''),
+          ),
+        ];
+        if (svcSerials.length > 0) {
+          const partnerMap = new Map<string, any>();
+          await Promise.all(
+            svcSerials.map(async (serial) => {
+              const partner = await this.zappyApiService.getPartnerFromSvc(
+                serial,
+                brand,
+              );
+              if (partner) partnerMap.set(serial, partner);
+            }),
           );
+          this.n8nService.mapSvcSerialToSales(enrichedOrder.sales, partnerMap);
           this.logger.log(
-            `[NormalOrder] Successfully enriched sales with N8n Card Data`,
+            `[NormalOrder] Enriched ${partnerMap.size}/${svcSerials.length} serials with partner data`,
           );
         } else {
-          this.logger.warn(`[NormalOrder] N8n returned no card data`);
+          this.logger.warn(
+            `[NormalOrder] No svc_serial found for Tách Thẻ order ${docCode}`,
+          );
         }
       } catch (err) {
-        this.logger.error(`[NormalOrder] Failed to enrich from N8n: ${err}`);
+        this.logger.error(`[NormalOrder] Failed to enrich svc_serial: ${err}`);
       }
     }
 
@@ -360,9 +376,9 @@ export class NormalOrderHandlerService {
     );
     const mainDocCode = mainSplitResult
       ? mainSplitResult.docCode ||
-      (Array.isArray(mainSplitResult)
-        ? mainSplitResult[0].docCode
-        : undefined)
+        (Array.isArray(mainSplitResult)
+          ? mainSplitResult[0].docCode
+          : undefined)
       : docCode; // Fallback
 
     if (processingStatus === STATUS.SUCCESS || mainSplitResult) {

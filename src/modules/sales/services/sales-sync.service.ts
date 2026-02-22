@@ -29,7 +29,7 @@ export class SalesSyncService {
     private loyaltyService: LoyaltyService,
     @Inject(forwardRef(() => SalesInvoiceService))
     private salesInvoiceService: SalesInvoiceService,
-  ) { }
+  ) {}
 
   /**
    * Đồng bộ lại đơn lỗi - check lại với Loyalty API
@@ -513,7 +513,7 @@ export class SalesSyncService {
       let cashData: any[] = [];
       try {
         cashData = await this.zappyApiService.getDailyCash(date, brand);
-      } catch (error) { }
+      } catch (error) {}
 
       // 2. Process cash data map
       const cashMapBySoCode = new Map<string, any[]>();
@@ -949,7 +949,7 @@ export class SalesSyncService {
             saleperson_id: SalesUtils.validateInteger(saleItem.saleperson_id),
             partner_name: saleItem.partner_name,
             order_source: saleItem.order_source,
-            maThe: saleItem.mvc_serial,
+            maThe: saleItem.svc_serial,
 
             productType: productType,
             voucherDp1: voucherRefno,
