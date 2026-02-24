@@ -50,7 +50,7 @@ export class SalesQueryService {
     private fastApiInvoiceRepository: Repository<FastApiInvoice>,
     @InjectRepository(Invoice)
     private invoiceRepository: Repository<Invoice>,
-  ) {}
+  ) { }
 
   /**
    * Find one sale by ID
@@ -246,12 +246,6 @@ export class SalesQueryService {
           // Add other fields if FormatUtils needs them from order
         };
 
-        // Get employee status from pre-fetched map
-        const isEmployee =
-          isEmployeeMap.get(sale.partnerCode) ||
-          isEmployeeMap.get((sale as any).issuePartnerCode) ||
-          false;
-
         // [NEW] Use SalesFormattingService instead of Utils
 
         // Temporarily attach assigned transfers for the service to pick up
@@ -277,11 +271,6 @@ export class SalesQueryService {
           // To maintain compatibility with existing variables:
           warehouseCodeMap,
           svcCodeMap: undefined, // Not used in findByOrderCode scope
-          getMaTheMap: undefined, // Not used, passed via sale.maThe? Service checks map.
-          // The service checks `getMaTheMap`. We should pass it if we have it?
-          // `findByOrderCode` doesn't seem to fetch `getMaTheMap`?
-          // It fetches `cardData` LATER.
-          // So for `findByOrderCode`, `getMaTheMap` is empty at this stage.
           orderMap: new Map([[docCode, mockOrder]]),
           isEmployeeMap,
           includeStockTransfers: true,
@@ -1381,19 +1370,19 @@ export class SalesQueryService {
           docSourceType: sale.docSourceType,
           customer: sale.customer
             ? {
-                code: sale.customer.code || sale.partnerCode || null,
-                brand: sale.customer.brand || null,
-                name: sale.customer.name || null,
-                mobile: sale.customer.mobile || null,
-              }
+              code: sale.customer.code || sale.partnerCode || null,
+              brand: sale.customer.brand || null,
+              name: sale.customer.name || null,
+              mobile: sale.customer.mobile || null,
+            }
             : sale.partnerCode
               ? {
-                  code: sale.partnerCode || null,
-                  brand: null,
-                  name: null,
-                  mobile: null,
-                  id: null,
-                }
+                code: sale.partnerCode || null,
+                brand: null,
+                name: null,
+                mobile: null,
+                id: null,
+              }
               : null,
           totalRevenue: 0,
           totalQty: 0,
@@ -1486,8 +1475,8 @@ export class SalesQueryService {
       // 1. Stock transfers
       docCodesForStockTransfer.length > 0
         ? this.stockTransferRepository.find({
-            where: { soCode: In(docCodesForStockTransfer) },
-          })
+          where: { soCode: In(docCodesForStockTransfer) },
+        })
         : Promise.resolve([] as StockTransfer[]),
       // 2. Departments
       this.loyaltyService.fetchLoyaltyDepartments(branchCodes),
@@ -1500,23 +1489,21 @@ export class SalesQueryService {
       // 5. Order fees
       docCodes.length > 0
         ? this.orderFeeRepository.find({
-            where: { erpOrderCode: In(docCodes) },
-          })
+          where: { erpOrderCode: In(docCodes) },
+        })
         : Promise.resolve([] as OrderFee[]),
       // 6. Employee status check
       this.n8nService.checkCustomersIsEmployee(partnerCodesToCheckForAll),
-      // 7. N8n card data for first order
-      docCodes.length > 0
-        ? this.n8nService.fetchCardData(docCodes[0]).catch(() => [null])
-        : Promise.resolve([null] as any[]),
+      // 7. (Removed) N8n card data
+      Promise.resolve([null] as any[]),
       // 8. [NEW] DailyCashio records — replaces redundant enrichOrdersWithCashio call #1
       // Previously called enrichOrdersWithCashio which re-fetched ST + products from DB/API
       docCodes.length > 0
         ? this.dailyCashioRepository
-            .createQueryBuilder('cashio')
-            .where('cashio.so_code IN (:...docCodes)', { docCodes })
-            .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
-            .getMany()
+          .createQueryBuilder('cashio')
+          .where('cashio.so_code IN (:...docCodes)', { docCodes })
+          .orWhere('cashio.master_code IN (:...docCodes)', { docCodes })
+          .getMany()
         : Promise.resolve([] as DailyCashio[]),
     ]);
 
@@ -1756,16 +1743,6 @@ export class SalesQueryService {
             }
           }
 
-          // [FIX] Apply card data from legacy fetch (mimic Backend Payload logic)
-          // We must use loyaltyProduct.materialCode as the key
-          const matCode = loyaltyProduct?.materialCode;
-          if (matCode && getMaThe.has(matCode) && !sale.maThe) {
-            const serialFromCard = getMaThe.get(matCode);
-            sale.maThe = serialFromCard;
-            // Also fill soSerial as fallback
-            if (!sale.soSerial) sale.soSerial = serialFromCard;
-          }
-
           const order = orderMap.get(sale.docCode);
 
           // Get employee status from pre-fetched map
@@ -1785,7 +1762,6 @@ export class SalesQueryService {
             orderFeeMap,
             warehouseCodeMap,
             svcCodeMap,
-            getMaTheMap: getMaThe,
             orderMap,
             isEmployeeMap: isEmployeeMapForAll,
             includeStockTransfers: true,
@@ -2196,19 +2172,19 @@ export class SalesQueryService {
           docSourceType: sale.docSourceType,
           customer: sale.customer
             ? {
-                code: sale.customer.code || sale.partnerCode || null,
-                brand: sale.customer.brand || null,
-                name: sale.customer.name || null,
-                mobile: sale.customer.mobile || null,
-              }
+              code: sale.customer.code || sale.partnerCode || null,
+              brand: sale.customer.brand || null,
+              name: sale.customer.name || null,
+              mobile: sale.customer.mobile || null,
+            }
             : sale.partnerCode
               ? {
-                  code: sale.partnerCode || null,
-                  brand: null,
-                  name: null,
-                  mobile: null,
-                  id: null,
-                }
+                code: sale.partnerCode || null,
+                brand: null,
+                name: null,
+                mobile: null,
+                id: null,
+              }
               : null,
           totalRevenue: 0,
           totalQty: 0,
@@ -2281,29 +2257,24 @@ export class SalesQueryService {
         await this.loyaltyService.fetchMaterialCodesBySvcCodes(svcCodes);
     }
 
-    // Fetch Cards (Tach The)
-    const getMaThe = new Map<string, string>();
+    // Fetch Cards (Tach The) by Zappy API
     if (docCodes.length > 0) {
       try {
-        const [dataCard] = await this.n8nService.fetchCardData(docCodes[0]);
-        if (dataCard && dataCard.data) {
-          // FIX N+1: Extract all service_item_names first
-          const serviceItemNames = dataCard.data
-            .map((card) => card?.service_item_name)
-            .filter((name): name is string => !!name && name.trim() !== '');
+        const tachTheSales = allSalesData.filter((s) => SalesUtils.isTachTheOrder(s.ordertypeName));
+        if (tachTheSales.length > 0) {
+          const brand = allSalesData[0]?.customer?.brand || allSalesData[0]?.brand || 'menard';
+          await Promise.all(
+            tachTheSales.map(async (sale) => {
+              const serialToLookup = sale.svc_serial || sale.maThe;
+              if (!serialToLookup) return;
 
-          // Batch fetch all products at once
-          const productMap =
-            await this.loyaltyService.checkProductsBatch(serviceItemNames);
-
-          // Map products to serials
-          for (const card of dataCard.data) {
-            if (!card?.service_item_name || !card?.serial) continue;
-            const itemProduct = productMap.get(card.service_item_name);
-            if (itemProduct) {
-              getMaThe.set(itemProduct.materialCode, card.serial);
-            }
-          }
+              const partnerInfo = await this.zappyApiService.getPartnerFromSvc(serialToLookup, brand);
+              if (partnerInfo && partnerInfo.custcode) {
+                // Chỉ lấy API để suy ra mã khách hàng
+                (sale as any).issuePartnerCode = partnerInfo.custcode;
+              }
+            })
+          );
         }
       } catch (e) {
         // Ignore error
@@ -2344,27 +2315,9 @@ export class SalesQueryService {
           ? departmentMap.get(sale.branchCode) || null
           : null;
 
-        const maThe = getMaThe.get(loyaltyProduct?.materialCode || '');
-        if (maThe) {
-          sale.maThe = maThe;
-        } else if (!sale.maThe && sale.svc_serial) {
+        if (!sale.maThe && sale.svc_serial) {
           sale.maThe = sale.svc_serial;
         }
-
-        const calculatedFields = await InvoiceLogicUtils.calculateSaleFields(
-          sale,
-          loyaltyProduct,
-          department,
-          sale.branchCode,
-        );
-
-        const order = orderMap.get(sale.docCode);
-
-        // Get employee status from pre-fetched map
-        const isEmployeeAggregated =
-          isEmployeeMapAggregated.get(sale.partnerCode) ||
-          isEmployeeMapAggregated.get((sale as any).issuePartnerCode) ||
-          false;
 
         // Use empty stock transfers for this aggregation view
         // [NEW] Use SalesFormattingService
@@ -2386,7 +2339,6 @@ export class SalesQueryService {
           orderFeeMap: orderFeeMap,
           warehouseCodeMap,
           svcCodeMap,
-          getMaTheMap: getMaThe,
           orderMap: orderMap,
           isEmployeeMap: isEmployeeMapAggregated,
           includeStockTransfers: false,

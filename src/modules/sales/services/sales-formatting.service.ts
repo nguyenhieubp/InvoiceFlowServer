@@ -16,7 +16,6 @@ export interface FormattingContext {
   orderFeeMap?: Map<string, OrderFee>;
   warehouseCodeMap?: Map<string, string>;
   svcCodeMap?: Map<string, string>;
-  getMaTheMap?: Map<string, string>;
   orderMap?: Map<string, any>;
   isEmployeeMap?: Map<string, boolean>; // [NEW] Pre-fetched employee status
   includeStockTransfers?: boolean;
@@ -34,7 +33,7 @@ export class SalesFormattingService {
   constructor(
     private categoriesService: CategoriesService,
     private loyaltyService: LoyaltyService,
-  ) {}
+  ) { }
 
   /**
    * Format multiple sales in parallel
@@ -64,7 +63,6 @@ export class SalesFormattingService {
       orderFeeMap,
       warehouseCodeMap,
       svcCodeMap,
-      getMaTheMap,
       orderMap,
       isEmployeeMap,
       includeStockTransfers = false,
@@ -87,11 +85,8 @@ export class SalesFormattingService {
       );
     }
 
-    // Get maThe if available
-    const maThe = getMaTheMap?.get(loyaltyProduct?.materialCode || '');
-    if (maThe) {
-      sale.maThe = maThe;
-    } else if (!sale.maThe && sale.svc_serial) {
+    // Get maThe from Database (svc_serial)
+    if (!sale.maThe && sale.svc_serial) {
       sale.maThe = sale.svc_serial;
     }
 
@@ -219,29 +214,29 @@ export class SalesFormattingService {
 
       maCk05:
         !InvoiceLogicUtils.isWholesale(sale) && // [FIX] No maCk05 for Wholesale
-        Number(
-          sale.paid_by_voucher_ecode_ecoin_bp ||
+          Number(
+            sale.paid_by_voucher_ecode_ecoin_bp ||
             (sale as any).chietKhauThanhToanVoucher ||
             0,
-        ) > 0
+          ) > 0
           ? InvoiceLogicUtils.resolveVoucherCode({
-              sale: {
-                ...sale,
-                customer:
-                  sale.customer || orderMap?.get(sale.docCode)?.customer,
-              },
-              customer: sale.customer || orderMap?.get(sale.docCode)?.customer,
-              brand: platformBrand || sale.brand || '',
-            }) ||
-            (sale as any).maCk05 ||
-            null
+            sale: {
+              ...sale,
+              customer:
+                sale.customer || orderMap?.get(sale.docCode)?.customer,
+            },
+            customer: sale.customer || orderMap?.get(sale.docCode)?.customer,
+            brand: platformBrand || sale.brand || '',
+          }) ||
+          (sale as any).maCk05 ||
+          null
           : null,
       ck05Nt: !InvoiceLogicUtils.isWholesale(sale) // [FIX] Zero out for Wholesale
         ? Number(
-            sale.paid_by_voucher_ecode_ecoin_bp ||
-              (sale as any).chietKhauThanhToanVoucher ||
-              0,
-          )
+          sale.paid_by_voucher_ecode_ecoin_bp ||
+          (sale as any).chietKhauThanhToanVoucher ||
+          0,
+        )
         : 0,
 
       maCk06:
@@ -294,32 +289,32 @@ export class SalesFormattingService {
       // [FIX] Explicitly Map Department Object
       department: department
         ? {
-            ma_bp: department.ma_bp || null,
-            branchcode: department.branchcode || null,
-            ma_dvcs: department.ma_dvcs || null,
-            ma_dvcs_ht: department.ma_dvcs_ht || null,
-            type: department.type || null,
-          }
+          ma_bp: department.ma_bp || null,
+          branchcode: department.branchcode || null,
+          ma_dvcs: department.ma_dvcs || null,
+          ma_dvcs_ht: department.ma_dvcs_ht || null,
+          type: department.type || null,
+        }
         : null,
 
       // [FIX] Enriched Product Object
       product: loyaltyProduct
         ? {
-            productType:
-              loyaltyProduct.productType || loyaltyProduct.producttype,
-            dvt: loyaltyProduct.unit || null,
-            maVatTu: loyaltyProduct.materialCode || sale.itemCode,
-            tenVatTu: loyaltyProduct.name || null,
-            trackInventory: loyaltyProduct.trackInventory ?? null,
-            trackSerial: !!loyaltyProduct.trackSerial,
-            trackBatch: !!loyaltyProduct.trackBatch,
-            trackStocktake: !!loyaltyProduct.trackStocktake,
-            tkChietKhau: loyaltyProduct.tkChietKhau || null,
-            tkDoanhThuBanLe: loyaltyProduct.tkDoanhThuBanLe || null,
-            tkDoanhThuBanBuon: loyaltyProduct.tkDoanhThuBanBuon || null,
-            tkGiaVonBanLe: loyaltyProduct.tkGiaVonBanLe || null,
-            tkGiaVonBanBuon: loyaltyProduct.tkGiaVonBanBuon || null,
-          }
+          productType:
+            loyaltyProduct.productType || loyaltyProduct.producttype,
+          dvt: loyaltyProduct.unit || null,
+          maVatTu: loyaltyProduct.materialCode || sale.itemCode,
+          tenVatTu: loyaltyProduct.name || null,
+          trackInventory: loyaltyProduct.trackInventory ?? null,
+          trackSerial: !!loyaltyProduct.trackSerial,
+          trackBatch: !!loyaltyProduct.trackBatch,
+          trackStocktake: !!loyaltyProduct.trackStocktake,
+          tkChietKhau: loyaltyProduct.tkChietKhau || null,
+          tkDoanhThuBanLe: loyaltyProduct.tkDoanhThuBanLe || null,
+          tkDoanhThuBanBuon: loyaltyProduct.tkDoanhThuBanBuon || null,
+          tkGiaVonBanLe: loyaltyProduct.tkGiaVonBanLe || null,
+          tkGiaVonBanBuon: loyaltyProduct.tkGiaVonBanBuon || null,
+        }
         : (sale as any).product,
 
       // Platform Info
@@ -358,7 +353,6 @@ export class SalesFormattingService {
     orderFeeMap?: Map<string, OrderFee>;
     warehouseCodeMap?: Map<string, string>;
     svcCodeMap?: Map<string, string>;
-    getMaTheMap?: Map<string, string>;
     orderMap?: Map<string, any>;
     isEmployeeMap?: Map<string, boolean>;
     includeStockTransfers?: boolean;
@@ -370,7 +364,6 @@ export class SalesFormattingService {
       orderFeeMap: options.orderFeeMap,
       warehouseCodeMap: options.warehouseCodeMap,
       svcCodeMap: options.svcCodeMap,
-      getMaTheMap: options.getMaTheMap,
       orderMap: options.orderMap,
       isEmployeeMap: options.isEmployeeMap,
       includeStockTransfers: options.includeStockTransfers ?? false,

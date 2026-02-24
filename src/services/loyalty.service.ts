@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
+import * as dns from 'dns';
+
+// Fix cho lỗi ENOTFOUND trên Node 17+ (ưu tiên phân giải IPv4 thay vì IPv6)
+dns.setDefaultResultOrder('ipv4first');
 
 @Injectable()
 export class LoyaltyService {
@@ -7,7 +11,7 @@ export class LoyaltyService {
   private readonly LOYALTY_API_BASE_URL = 'https://loyaltyapi.vmt.vn';
   private readonly REQUEST_TIMEOUT = 5000; // 5 seconds
 
-  constructor(private readonly httpService: HttpService) {}
+  constructor(private readonly httpService: HttpService) { }
 
   /**
    * Kiểm tra và fetch product từ Loyalty API

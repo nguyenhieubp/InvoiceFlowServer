@@ -4,9 +4,10 @@ import { Repository, In } from 'typeorm';
 import { ProductItem } from '../../../entities/product-item.entity';
 import { StockTransfer } from '../../../entities/stock-transfer.entity';
 import { OrderFee } from '../../../entities/order-fee.entity';
+import { CategoriesService } from '../../categories/categories.service';
+import { ZappyApiService } from '../../../services/zappy-api.service';
 import { LoyaltyService } from '../../../services/loyalty.service';
 import { N8nService } from '../../../services/n8n.service';
-import { CategoriesService } from '../../categories/categories.service';
 import * as _ from 'lodash';
 import * as SalesUtils from '../../../utils/sales.utils';
 import { InvoiceLogicUtils } from '../../../utils/invoice-logic.utils';
@@ -26,6 +27,7 @@ export class SalesPayloadService {
     private loyaltyService: LoyaltyService,
     private n8nService: N8nService,
     private categoriesService: CategoriesService,
+    private zappyApiService: ZappyApiService,
   ) { }
 
   /**
@@ -78,7 +80,7 @@ export class SalesPayloadService {
       // [REF] Removed redundant getInvoiceStockTransferMap
 
       const cardSerialMap = await this.getInvoiceCardSerialMap(
-        orderData.docCode,
+        orderData,
       );
 
       // [New] Batch lookup svc_code -> materialCode for FAST API
@@ -936,35 +938,50 @@ export class SalesPayloadService {
   }
 
   private async getInvoiceCardSerialMap(
-    docCode: string,
+    orderData: any,
   ): Promise<Map<string, string>> {
     const map = new Map<string, string>();
-    const [dataCard] = await this.n8nService.fetchCardData(docCode);
+    const docCode = orderData.docCode;
 
-    if (!Array.isArray(dataCard?.data) || dataCard.data.length === 0) {
+    // Nếu không có sales thì bỏ qua
+    if (!orderData || !orderData.sales || orderData.sales.length === 0) {
       return map;
     }
 
-    // Batch fetch instead of N+1 query
-    const itemCodes = dataCard.data
-      .map((card) => card?.service_item_name)
-      .filter(Boolean);
+    const brand = orderData.sourceCompany || orderData.brand;
+    const tachTheSales = orderData.sales.filter((s: any) =>
+      SalesUtils.isTachTheOrder(s.ordertypeName || s.ordertype)
+    );
 
-    if (itemCodes.length === 0) {
-      return map;
-    }
+    if (tachTheSales.length === 0) return map;
 
-    // Fetch all products in one batch call
-    const products = await this.loyaltyService.fetchProducts(itemCodes);
+    await Promise.all(
+      tachTheSales.map(async (sale: any) => {
+        const serialToLookup = sale.svc_serial || sale.maThe;
+        if (!serialToLookup) return;
 
-    // Map serial numbers
-    for (const card of dataCard.data) {
-      if (!card?.service_item_name || !card?.serial) continue;
-      const product = products.get(card.service_item_name);
-      if (product?.materialCode) {
-        map.set(product.materialCode, card.serial);
-      }
-    }
+        try {
+          // Lấy thông tin từ Zappy
+          const partnerInfo = await this.zappyApiService.getPartnerFromSvc(
+            serialToLookup,
+            brand,
+          );
+
+          if (partnerInfo && partnerInfo.serial) {
+            const materialCode =
+              (sale.svc_code) ||
+              SalesUtils.getMaterialCode(sale, sale.product) ||
+              sale.itemCode;
+
+            if (materialCode) {
+              map.set(materialCode, partnerInfo.serial);
+            }
+          }
+        } catch (error) {
+          this.logger.warn(`Failed to fetch Zappy partner for ${serialToLookup}: ${error}`);
+        }
+      })
+    );
 
     return map;
   }

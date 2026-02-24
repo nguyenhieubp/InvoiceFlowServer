@@ -26,7 +26,7 @@ export class ZappyApiService {
     menard: 'https://vmterp.com/ords/erp/retail/api',
   };
 
-  constructor(private readonly httpService: HttpService) {}
+  constructor(private readonly httpService: HttpService) { }
 
   /**
    * Lấy base URL cho brand

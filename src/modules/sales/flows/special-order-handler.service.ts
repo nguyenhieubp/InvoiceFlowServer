@@ -8,9 +8,9 @@ import { InvoiceItem } from '../../../entities/invoice-item.entity';
 import { StockTransfer } from '../../../entities/stock-transfer.entity';
 import { FastApiInvoiceFlowService } from '../../../services/fast-api-invoice-flow.service';
 import { N8nService } from '../../../services/n8n.service';
+import { ZappyApiService } from '../../../services/zappy-api.service';
 import { SalesPayloadService } from '../invoice/sales-payload.service';
 import { SalesQueryService } from '../services/sales-query.service';
-
 import { PaymentService } from '../../payment/payment.service';
 import { forwardRef, Inject } from '@nestjs/common';
 import * as SalesUtils from '../../../utils/sales.utils';
@@ -40,6 +40,7 @@ export class SpecialOrderHandlerService {
     private stockTransferRepository: Repository<StockTransfer>,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
     private n8nService: N8nService,
+    private zappyApiService: ZappyApiService,
     private salesPayloadService: SalesPayloadService,
     private salesQueryService: SalesQueryService,
 
@@ -207,47 +208,59 @@ export class SpecialOrderHandlerService {
       ORDER_TYPES.CARD_SEPARATION,
       undefined, // No beforeAction
       async (enrichedOrder) => {
-        // Gọi API get_card để lấy issue_partner_code cho đơn "08. Tách thẻ"
-        // [FIX] Apply to ENRICHED sales (After explosion)
+        // [FIX] Cập nhật thay thế `n8n get_card` webhook bằng `Zappy API getPartnerFromSvc`
         try {
-          const cardResponse =
-            await this.n8nService.fetchCardDataWithRetry(docCode);
-          const cardData = this.n8nService.parseCardData(cardResponse);
-          this.n8nService.mapIssuePartnerCodeToSales(
-            enrichedOrder.sales || [],
-            cardData,
-          );
+          const sales = enrichedOrder.sales || [];
+          if (sales.length === 0) return;
 
-          this.logger.log(
-            `[SpecialOrder] Successfully enriched sales with N8n Card Data (After Explosion)`,
-          );
+          const uniqueCustomers = new Map<string, any>();
+          const brand = orderData.sourceCompany || orderData.brand;
 
-          // [NEW] Sync all customers involved in Split Card (Source & Destination)
-          // cardData contains { issue_partner_code, issue_partner_name, ... }
-          if (Array.isArray(cardData) && cardData.length > 0) {
-            const uniqueCustomers = new Map<string, any>();
+          await Promise.all(
+            sales.map(async (sale: any) => {
+              const serialToLookup = sale.svc_serial || sale.maThe;
+              if (!serialToLookup) return;
 
-            for (const card of cardData) {
-              if (
-                card.issue_partner_code &&
-                !uniqueCustomers.has(card.issue_partner_code)
-              ) {
-                uniqueCustomers.set(card.issue_partner_code, {
-                  ma_kh: card.issue_partner_code,
-                  ten_kh: card.issue_partner_name || card.issue_partner_code,
-                  // Note: N8n might not return full address/email, but we prioritize syncing code & name
-                  dia_chi: '',
-                  e_mail: '',
-                  so_cccd: '',
-                  ngay_sinh: '',
-                  gioi_tinh: '',
-                  brand: orderData.sourceCompany || orderData.brand, // [NEW]
-                });
+              // Tìm data partner từ Zappy
+              const partnerInfo = await this.zappyApiService.getPartnerFromSvc(
+                serialToLookup,
+                brand,
+              );
+
+              if (partnerInfo && partnerInfo.custcode) {
+                // Ánh xạ sang các trường của ERP & hóa đơn
+                sale.issuePartnerCode = partnerInfo.custcode;
+
+                // Đồng bộ Serial
+                if (partnerInfo.serial) {
+                  sale.maThe = partnerInfo.serial;
+                  if (!sale.soSerial) {
+                    sale.soSerial = partnerInfo.serial;
+                  }
+                }
+
+                // Customer Info để lưu vào `uniqueCustomers` 
+                // Zappy trả về `custcode` và `custname`
+                if (!uniqueCustomers.has(partnerInfo.custcode)) {
+                  uniqueCustomers.set(partnerInfo.custcode, {
+                    ma_kh: partnerInfo.custcode,
+                    ten_kh: partnerInfo.custname || partnerInfo.custcode,
+                    dia_chi: '',
+                    e_mail: '',
+                    so_cccd: '',
+                    ngay_sinh: '',
+                    gioi_tinh: '',
+                    brand: brand,
+                  });
+                }
               }
-            }
+            }),
+          );
 
+          // Sync customers
+          if (uniqueCustomers.size > 0) {
             this.logger.log(
-              `[SpecialOrder] Found ${uniqueCustomers.size} customers from N8n to sync: ${Array.from(uniqueCustomers.keys()).join(', ')}`,
+              `[SpecialOrder/Tách Thẻ] Found ${uniqueCustomers.size} customers from Zappy to sync: ${Array.from(uniqueCustomers.keys()).join(', ')}`,
             );
 
             for (const cust of uniqueCustomers.values()) {
@@ -257,7 +270,7 @@ export class SpecialOrderHandlerService {
         } catch (e) {
           // Ignore error as per original logic, but log it
           this.logger.warn(
-            `[SpecialOrder] Failed to n8n enrich: ${e?.message || e}`,
+            `[SpecialOrder/Tách Thẻ] Failed to enrich via Zappy API: ${e?.message || e}`,
           );
         }
       },
