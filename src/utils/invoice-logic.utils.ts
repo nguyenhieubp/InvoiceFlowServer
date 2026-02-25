@@ -743,8 +743,8 @@ export class InvoiceLogicUtils {
     // Check wholesale alias defined in system
     const isWholesale = typeSale === 'WHOLESALE' || typeSale === 'WS';
 
-    if (isWholesale && sale.disc_ctkm > 0) {
-      return sale.disc_ctkm;
+    if (isWholesale) {
+      return Number(sale.disc_ctkm || 0) > 0 ? sale.disc_ctkm : '-';
     }
 
     if (isDoiDiem) {
@@ -1000,8 +1000,7 @@ export class InvoiceLogicUtils {
         0,
       ),
       ck05_nt:
-        !InvoiceLogicUtils.isWholesale(sale) && // [NEW] No ck05_nt for Wholesale
-          InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
+        InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0) > 0
           ? InvoiceLogicUtils.toNumber(sale.paid_by_voucher_ecode_ecoin_bp, 0)
           : 0,
       ck07_nt: InvoiceLogicUtils.toNumber(sale.chietKhauVoucherDp2, 0),
@@ -1025,9 +1024,7 @@ export class InvoiceLogicUtils {
       amounts.ck05_nt = 0; // Clear ck05
       amounts.ck06_nt = 0; // Clear ck06
     } else {
-      amounts.ck06_nt = !InvoiceLogicUtils.isWholesale(sale) // [FIX] Zero out for Wholesale
-        ? InvoiceLogicUtils.toNumber(sale.chietKhauVoucherDp1, 0)
-        : 0;
+      amounts.ck06_nt = InvoiceLogicUtils.toNumber(sale.chietKhauVoucherDp1, 0);
     }
 
     // [SIMPLIFIED] ck05 vs ck11 logic - Strictly follow fop_syscode
@@ -1052,7 +1049,7 @@ export class InvoiceLogicUtils {
       amounts.ck05_nt = 0; // Clear voucher (which was preset above)
     } else if (voucherRecord) {
       // VOUCHER payment → ck05_nt ONLY
-      if (!InvoiceLogicUtils.isWholesale(sale) && !isPlatformOrder) {
+      if (!isPlatformOrder) {
         amounts.ck05_nt = getDiscountAmount(voucherRecord);
       }
       ck11_nt = 0; // Clear ECOIN

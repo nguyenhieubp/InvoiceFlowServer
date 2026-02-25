@@ -213,12 +213,11 @@ export class SalesFormattingService {
       ck04Nt: Number((sale as any).chietKhauThanhToanCoupon || 0),
 
       maCk05:
-        !InvoiceLogicUtils.isWholesale(sale) && // [FIX] No maCk05 for Wholesale
-          Number(
-            sale.paid_by_voucher_ecode_ecoin_bp ||
-            (sale as any).chietKhauThanhToanVoucher ||
-            0,
-          ) > 0
+        Number(
+          sale.paid_by_voucher_ecode_ecoin_bp ||
+          (sale as any).chietKhauThanhToanVoucher ||
+          0,
+        ) > 0
           ? InvoiceLogicUtils.resolveVoucherCode({
             sale: {
               ...sale,
@@ -231,20 +230,18 @@ export class SalesFormattingService {
           (sale as any).maCk05 ||
           null
           : null,
-      ck05Nt: !InvoiceLogicUtils.isWholesale(sale) // [FIX] Zero out for Wholesale
-        ? Number(
-          sale.paid_by_voucher_ecode_ecoin_bp ||
-          (sale as any).chietKhauThanhToanVoucher ||
-          0,
-        )
-        : 0,
+      ck05Nt: Number(
+        sale.paid_by_voucher_ecode_ecoin_bp ||
+        (sale as any).chietKhauThanhToanVoucher ||
+        0,
+      ),
 
       maCk06:
-        !InvoiceLogicUtils.isWholesale(sale) && isPlatformOrder
+        isPlatformOrder
           ? sale.voucherDp1 || 'VC CTKM SÀN'
           : null,
       ck06Nt:
-        !InvoiceLogicUtils.isWholesale(sale) && isPlatformOrder
+        isPlatformOrder
           ? Number(sale.chietKhauVoucherDp1 || 0)
           : 0,
 
