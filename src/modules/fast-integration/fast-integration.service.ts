@@ -343,9 +343,17 @@ export class FastIntegrationService {
     if (!audit) {
       throw new NotFoundException(`Audit log #${id} không tồn tại`);
     }
+    const dhSo = audit.dh_so;
+
+    // Cascade: delete po_charge_history for this order
+    if (dhSo) {
+      await this.historyRepo.delete({ dh_so: dhSo });
+      this.logger.log(`[FastIntegration] Deleted po_charge_history for ${dhSo}`);
+    }
+
     await this.auditRepo.delete(id);
-    this.logger.log(`[FastIntegration] Deleted audit log #${id} (${audit.dh_so})`);
-    return { success: true, message: `Đã xoá log #${id}` };
+    this.logger.log(`[FastIntegration] Deleted audit log #${id} (${dhSo})`);
+    return { success: true, message: `Đã xoá log #${id} và lịch sử phí của ${dhSo}` };
   }
 
   /**
@@ -374,16 +382,25 @@ export class FastIntegrationService {
       query.andWhere('audit.status = :status', { status: status.toUpperCase() });
     }
 
-    const logsToDelete = await query.select('audit.id').getMany();
+    const logsToDelete = await query.select(['audit.id', 'audit.dh_so']).getMany();
     const ids = logsToDelete.map(l => l.id);
 
     if (ids.length === 0) {
       return { success: true, message: 'Không có log nào để xoá', deleted: 0 };
     }
 
+    // Cascade: delete po_charge_history for all affected orders
+    const uniqueDhSo = [...new Set(logsToDelete.map(l => l.dh_so).filter((s): s is string => !!s))];
+    if (uniqueDhSo.length > 0) {
+      for (const dhSo of uniqueDhSo) {
+        await this.historyRepo.delete({ dh_so: dhSo });
+      }
+      this.logger.log(`[FastIntegration] Deleted po_charge_history for ${uniqueDhSo.length} orders`);
+    }
+
     const result = await this.auditRepo.delete(ids);
     const deleted = result.affected || 0;
     this.logger.log(`[FastIntegration] Deleted ${deleted} audit logs (${startDate} -> ${endDate})`);
-    return { success: true, message: `Đã xoá ${deleted} log`, deleted };
+    return { success: true, message: `Đã xoá ${deleted} log và lịch sử phí tương ứng`, deleted };
   }
 }
