@@ -14,6 +14,27 @@ export class LoyaltyService {
   constructor(private readonly httpService: HttpService) { }
 
   /**
+   * Lấy donVi (ĐVCS) của kho từ Loyalty API
+   * @param maErp - Mã ERP của kho (= stockCode từ stock transfer)
+   * @returns donVi string nếu tìm thấy, null nếu không
+   */
+  async fetchWarehouseDonVi(maErp: string | null | undefined): Promise<string | null> {
+    if (!maErp || maErp.trim() === '') return null;
+    try {
+      const response = await this.httpService.axiosRef.get(
+        `${this.LOYALTY_API_BASE_URL}/warehouse-categories/by-erp/${encodeURIComponent(maErp.trim())}`,
+        { headers: { accept: 'application/json' }, timeout: this.REQUEST_TIMEOUT },
+      );
+      return response?.data?.data?.item?.donVi || null;
+    } catch (error: any) {
+      if (error?.response?.status !== 404) {
+        this.logger.warn(`[LoyaltyService] fetchWarehouseDonVi(${maErp}) error: ${error?.message}`);
+      }
+      return null;
+    }
+  }
+
+  /**
    * Kiểm tra và fetch product từ Loyalty API
    * Thử endpoint /material-catalogs/code/ trước, nếu không có thì thử /material-catalogs/old-code/,
    * cuối cùng thử /material-catalogs/material-code/

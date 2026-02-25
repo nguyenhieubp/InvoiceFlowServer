@@ -1176,6 +1176,46 @@ export class FastApiInvoiceFlowService {
   }
 
   /**
+   * Xử lý I/O kép (xuất + nhập) cho STOCK_TRANSFER khi 2 kho khác ĐVCS
+   * Bước 1: Xuất kho từ stockCode (ioType = O)
+   * Bước 2: Nhập kho sang relatedStockCode (ioType = I)
+   */
+  async processWarehouseIOFromStockTransfer(stockTransfer: any): Promise<any> {
+    const docCode = stockTransfer.docCode;
+    this.logger.log(
+      `[Warehouse IO] Bắt đầu xuất+nhập kho khác ĐVCS cho ${docCode}`,
+    );
+
+    // Bước 1: Xuất kho (ioType = O, dùng stockCode)
+    const stForRelease = {
+      ...stockTransfer,
+      doctype: 'STOCK_IO',
+      ioType: 'O',
+      soCode: 'null',
+      // stockCode giữ nguyên → kho xuất
+    };
+    this.logger.log(`[Warehouse IO] Bước 1: Xuất kho ${stockTransfer.stockCode}`);
+    const releaseResult = await this.processWarehouseFromStockTransfer(stForRelease);
+
+    // Bước 2: Nhập kho (ioType = I, dùng relatedStockCode làm stockCode)
+    const stForReceipt = {
+      ...stockTransfer,
+      doctype: 'STOCK_IO',
+      ioType: 'I',
+      soCode: 'null',
+      stockCode: stockTransfer.relatedStockCode, // kho nhập
+    };
+    this.logger.log(`[Warehouse IO] Bước 2: Nhập kho ${stockTransfer.relatedStockCode}`);
+    const receiptResult = await this.processWarehouseFromStockTransfer(stForReceipt);
+
+    return {
+      payload: JSON.stringify({ release: stForRelease, receipt: stForReceipt }),
+      response: { releaseResult, receiptResult },
+      status: 1, // Nếu không throw thì thành công
+    };
+  }
+
+  /**
    * Xử lý warehouse transfer từ stock transfer (điều chuyển kho)
    * Xử lý điều chuyển kho
    * @param stockTransfers - Mảng các stock transfer cùng docCode

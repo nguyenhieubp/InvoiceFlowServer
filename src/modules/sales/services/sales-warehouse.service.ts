@@ -9,6 +9,7 @@ import { Repository, Between } from 'typeorm';
 import { StockTransfer } from '../../../entities/stock-transfer.entity';
 import { WarehouseProcessed } from '../../../entities/warehouse-processed.entity';
 import { FastApiInvoiceFlowService } from '../../../services/fast-api-invoice-flow.service';
+import { LoyaltyService } from '../../../services/loyalty.service';
 import * as SalesUtils from '../../../utils/sales.utils';
 
 /**
@@ -25,7 +26,8 @@ export class SalesWarehouseService {
     @InjectRepository(WarehouseProcessed)
     private warehouseProcessedRepository: Repository<WarehouseProcessed>,
     private fastApiInvoiceFlowService: FastApiInvoiceFlowService,
-  ) {}
+    private loyaltyService: LoyaltyService,
+  ) { }
 
   /**
    * Get stock transfer by ID
@@ -87,10 +89,29 @@ export class SalesWarehouseService {
           order: { createdAt: 'ASC' },
         });
 
-        result =
-          await this.fastApiInvoiceFlowService.processWarehouseTransferFromStockTransfers(
-            stockTransferList,
+        // Lookup ĐVCS for both warehouses
+        const [donViKho, donViKhoLienQuan] = await Promise.all([
+          this.loyaltyService.fetchWarehouseDonVi(stockTransfer.stockCode),
+          this.loyaltyService.fetchWarehouseDonVi(stockTransfer.relatedStockCode),
+        ]);
+
+        if (donViKho && donViKhoLienQuan && donViKho !== donViKhoLienQuan) {
+          // Khác ĐVCS → chỉ log, KHÔNG gọi API nào
+          this.logger.warn(
+            `[Warehouse] SKIP docCode=${stockTransfer.docCode}: ĐVCS Kho=${donViKho} khác ĐVCS Kho LQ=${donViKhoLienQuan} → bỏ qua, chưa hỗ trợ`,
           );
+          throw new BadRequestException(
+            `Không thể xử lý: ĐVCS Kho (${donViKho}) khác ĐVCS Kho liên quan (${donViKhoLienQuan}). Chức năng đang phát triển.`,
+          );
+        }
+
+        // Cùng ĐVCS → dùng luồng điều chuyển kho
+        this.logger.log(
+          `[Warehouse] docCode=${stockTransfer.docCode}: ĐVCS=${donViKho || 'N/A'} → dùng luồng điều chuyển kho`,
+        );
+        result = await this.fastApiInvoiceFlowService.processWarehouseTransferFromStockTransfers(
+          stockTransferList,
+        );
         ioTypeForTracking = 'T';
       } else {
         result =

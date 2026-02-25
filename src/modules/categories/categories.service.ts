@@ -66,7 +66,7 @@ export class CategoriesService {
     @InjectDataSource()
     private dataSource: DataSource,
     private httpService: HttpService,
-  ) {}
+  ) { }
 
   // Cache for ecommerce customers
   private ecommerceCache: Map<string, EcommerceCustomer> | null = null;
@@ -1308,6 +1308,19 @@ export class CategoriesService {
     });
 
     return mapping ? mapping.maMoi : null;
+  }
+
+  /**
+   * Lấy donVi (ĐVCS) theo mã ERP của kho
+   * @param maErp - Mã ERP của kho (= stockCode từ stock transfer)
+   * @returns donVi nếu tìm thấy, null nếu không
+   */
+  async getDonViByErpCode(maErp: string | null | undefined): Promise<string | null> {
+    if (!maErp || maErp.trim() === '') return null;
+    const warehouseItem = await this.warehouseItemRepository.findOne({
+      where: { maERP: maErp.trim() },
+    });
+    return warehouseItem?.donVi || null;
   }
 
   async createWarehouseCodeMapping(

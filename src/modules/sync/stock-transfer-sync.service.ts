@@ -21,7 +21,7 @@ export class StockTransferSyncService {
     private httpService: HttpService,
     private zappyApiService: ZappyApiService,
     private loyaltyService: LoyaltyService,
-  ) {}
+  ) { }
 
   /**
    * Helper function để validate integer value
@@ -587,9 +587,33 @@ export class StockTransferSyncService {
 
       const totalPages = Math.ceil(total / limit);
 
+      // Enrich data với donVi từ Loyalty API (batch fetch cho unique codes)
+      const uniqueCodes = Array.from(
+        new Set([
+          ...data.map((st) => st.stockCode).filter(Boolean),
+          ...data.map((st) => st.relatedStockCode).filter(Boolean),
+        ]),
+      ) as string[];
+
+      const donViMap = new Map<string, string | null>();
+      if (uniqueCodes.length > 0) {
+        await Promise.all(
+          uniqueCodes.map(async (code) => {
+            const donVi = await this.loyaltyService.fetchWarehouseDonVi(code);
+            donViMap.set(code, donVi);
+          }),
+        );
+      }
+
+      const enrichedData = data.map((st) => ({
+        ...st,
+        donViKho: st.stockCode ? (donViMap.get(st.stockCode) ?? null) : null,
+        donViKhoLQ: st.relatedStockCode ? (donViMap.get(st.relatedStockCode) ?? null) : null,
+      }));
+
       return {
         success: true,
-        data,
+        data: enrichedData,
         pagination: {
           page,
           limit,
