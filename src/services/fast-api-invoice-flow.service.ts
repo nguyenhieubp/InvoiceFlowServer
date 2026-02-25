@@ -153,6 +153,14 @@ export class FastApiInvoiceFlowService {
       }
 
       for (const item of uniquePromotions.values()) {
+        const promoCode = (item.ma_ck01 || item.ma_ctkm_th || '').trim();
+        const hasValidSuffix = promoCode.endsWith('.I') || promoCode.endsWith('.S') || promoCode.endsWith('.V');
+
+        // [MODIFIED] Only call promotion API for .I, .S, .V codes
+        if (!hasValidSuffix) {
+          continue;
+        }
+
         // NOTE: ma_bp thay bằng dvcs theo yêu cầu BA
         const dataPayload = {
           ma_ctkm: item.ma_ck01 || item.ma_ctkm_th,
@@ -300,6 +308,14 @@ export class FastApiInvoiceFlowService {
 
       // Validate từng mã CTKM với Loyalty API (chỉ check phần trước dấu "-")
       for (const sale of invoiceData.detail) {
+        const promoCode = (sale.ma_ck01 || sale.ma_ctkm_th || '').trim();
+        const hasValidSuffix = promoCode.endsWith('.I') || promoCode.endsWith('.S') || promoCode.endsWith('.V');
+
+        // [MODIFIED] Only call create promotion API for .I, .S, .V codes
+        if (!hasValidSuffix) {
+          continue;
+        }
+
         const promotionData = {
           ma_ctkm: sale.ma_ck01 || sale.ma_ctkm_th || '',
           ten_ctkm: sale.ma_ck01 || sale.ma_ctkm_th || '',

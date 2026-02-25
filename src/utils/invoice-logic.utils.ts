@@ -110,6 +110,7 @@ export class InvoiceLogicUtils {
     isTangHang: boolean;
     hasMaCtkm: boolean;
     hasMaCtkmTangHang: boolean;
+    maCtkmTangHang?: string | null; // [NEW] Accept the actual code string to override wholesale category prefixes
     loyaltyService?: any; // Allow injecting service
   }): Promise<AccountingAccounts> {
     const {
@@ -160,6 +161,7 @@ export class InvoiceLogicUtils {
         productTypeWholesaleUpper,
         isEcode,
         loyaltyService,
+        params.maCtkmTangHang || null, // [NEW] Pass the string value here
       );
 
       if (wholesaleAccounts) {
@@ -219,6 +221,7 @@ export class InvoiceLogicUtils {
     productType: string | null,
     isEcode: boolean,
     loyaltyService?: any,
+    maCtkmTangHang?: string | null, // [NEW] Added to allow overriding with GT.TANGHANG etc.
   ): Promise<Partial<AccountingAccounts> | null> {
     if (!isWholesale) return null;
 
@@ -228,16 +231,21 @@ export class InvoiceLogicUtils {
 
     let promotionCode = '';
 
-    if (isEcode) {
-      // Ecode Logic
-      if (category === 'MP') promotionCode = 'CKCSBH.E.MP';
-      else if (category === 'TPCN') promotionCode = 'CKCSBH.E.TPCN';
-      else if (category === 'CCDC') promotionCode = 'CKCSBH.E.CCDC';
+    // [NEW] If there's a specific tang hang promotion code like GT.TANGHANG for this wholesale order, use it directly
+    if (maCtkmTangHang && maCtkmTangHang.trim() !== '') {
+      promotionCode = maCtkmTangHang.trim();
     } else {
-      // Non-Ecode Logic
-      if (category === 'MP') promotionCode = 'CKCSBH.MP';
-      else if (category === 'TPCN') promotionCode = 'CKCSBH.TPCN';
-      else if (category === 'CCDC') promotionCode = 'CKCSBH.CCDC';
+      if (isEcode) {
+        // Ecode Logic
+        if (category === 'MP') promotionCode = 'CKCSBH.E.MP';
+        else if (category === 'TPCN') promotionCode = 'CKCSBH.E.TPCN';
+        else if (category === 'CCDC') promotionCode = 'CKCSBH.E.CCDC';
+      } else {
+        // Non-Ecode Logic
+        if (category === 'MP') promotionCode = 'CKCSBH.MP';
+        else if (category === 'TPCN') promotionCode = 'CKCSBH.TPCN';
+        else if (category === 'CCDC') promotionCode = 'CKCSBH.CCDC';
+      }
     }
 
     if (promotionCode && loyaltyService) {

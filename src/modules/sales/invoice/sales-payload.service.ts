@@ -1091,6 +1091,7 @@ export class SalesPayloadService {
       isTangHang,
       hasMaCtkm: !!(maCk01 || maCtkmTangHang),
       hasMaCtkmTangHang: !!maCtkmTangHang,
+      maCtkmTangHang: maCtkmTangHang, // [NEW] Pass the explicit value, e.g. GT.TANGHANG
       loyaltyService: this.loyaltyService,
     });
   }
