@@ -1,9 +1,11 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Between } from 'typeorm';
 import { POChargeHistory } from './entities/po-charge-history.entity';
 import { AuditPo } from './entities/audit-po.entity';
 import { FastApiClientService } from '../../services/fast-api-client.service';
+import { SHOPEE_FEE_CONFIG, TIKTOK_FEE_CONFIG } from './constants/fee-config.constant';
+import { OrderFeeService } from '../order-fee/order-fee.service';
 
 function safeNumber(val: any): number {
   const num = Number(val);
@@ -20,7 +22,8 @@ export class FastIntegrationService {
     private readonly historyRepo: Repository<POChargeHistory>,
     @InjectRepository(AuditPo)
     private readonly auditRepo: Repository<AuditPo>,
-  ) {}
+    private readonly orderFeeService: OrderFeeService,
+  ) { }
 
   /**
    * Đẩy phí đơn hàng lên Fast API (POCharges)
@@ -269,28 +272,119 @@ export class FastIntegrationService {
     }
   }
 
+  async batchSyncPOCharges(startDate: string, endDate: string, platform?: string): Promise<any> {
+    this.logger.log(`[FastIntegration] Starting batch sync PO Charges for ${startDate} to ${endDate} (Platform: ${platform || 'ALL'})`);
+
+    try {
+      const startStr = startDate;
+      const endStr = endDate;
+
+      let fees: any[] = [];
+
+      if (!platform || platform.toLowerCase() === 'shopee') {
+        const result = await this.orderFeeService.findShopeeFees(1, 100000, undefined, undefined, startStr, endStr);
+        fees = fees.concat(result.data.map(item => ({ ...item, platform: 'shopee' })));
+      }
+
+      if (!platform || platform.toLowerCase() === 'tiktok') {
+        const result = await this.orderFeeService.findTikTokFees(1, 100000, undefined, undefined, startStr, endStr);
+        fees = fees.concat(result.data.map(item => ({ ...item, platform: 'tiktok' })));
+      }
+
+      this.logger.log(`[FastIntegration] Found ${fees.length} fees to sync`);
+
+      const results: any[] = [];
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const item of fees) {
+        if (!item.erpOrderCode) {
+          this.logger.warn(`[FastIntegration] Order missing erpOrderCode, skipping.`);
+          failCount++;
+          continue;
+        }
+
+        const master = {
+          dh_so: item.erpOrderCode,
+          dh_ngay: item.invoiceDate
+            ? new Date(item.invoiceDate).toISOString()
+            : (item.orderCreatedAt ? new Date(item.orderCreatedAt).toISOString() : new Date().toISOString()),
+          dh_dvcs: "TTM",
+        };
+
+        const details: any[] = [];
+        const config = (item.platform || '').toLowerCase() === 'tiktok' ? TIKTOK_FEE_CONFIG : SHOPEE_FEE_CONFIG;
+
+        config.forEach((rule) => {
+          const value = Number(item[rule.field]);
+          if (value && value !== 0 && !isNaN(value)) {
+            const code = rule.defaultCode;
+
+            const detail = {
+              dong: rule.row,
+              ma_cp: code,
+              cp01_nt: 0,
+              cp02_nt: 0,
+              cp03_nt: 0,
+              cp04_nt: 0,
+              cp05_nt: 0,
+              cp06_nt: 0,
+            };
+
+            if (rule.targetCol === "cp02_nt") {
+              detail.cp02_nt = value;
+            } else {
+              detail.cp01_nt = value;
+            }
+            details.push(detail);
+          }
+        });
+
+        if (details.length === 0) {
+          continue;
+        }
+
+        try {
+          await this.syncPOCharges({ master, detail: details });
+          successCount++;
+        } catch (error: any) {
+          failCount++;
+          results.push({ order: item.erpOrderCode, error: error.message });
+        }
+      }
+
+      return { success: true, message: `Thành công ${successCount}, Thất bại ${failCount}`, total: fees.length, errors: results };
+    } catch (error: any) {
+      throw new BadRequestException(`Batch sync failed: ${error.message}`);
+    }
+  }
+
   async getAuditLogs(
     search?: string,
     dateFrom?: string,
     dateTo?: string,
+    status?: string,
   ): Promise<AuditPo[]> {
     const query = this.auditRepo
       .createQueryBuilder('audit')
       .orderBy('audit.created_at', 'DESC')
-      .take(50); // Limit to latest 50 for performance
+      .take(500);
 
     if (search) {
       query.andWhere('audit.dh_so ILIKE :search', { search: `%${search}%` });
     }
 
+    if (status) {
+      query.andWhere('audit.status = :status', { status: status.toUpperCase() });
+    }
+
     if (dateFrom) {
-      query.andWhere('audit.dh_ngay >= :dateFrom', {
-        dateFrom: new Date(dateFrom),
-      });
+      const start = new Date(dateFrom);
+      start.setHours(0, 0, 0, 0);
+      query.andWhere('audit.dh_ngay >= :dateFrom', { dateFrom: start });
     }
 
     if (dateTo) {
-      // End of day for dateTo (though dh_ngay is usually just a date)
       const endOfDay = new Date(dateTo);
       endOfDay.setHours(23, 59, 59, 999);
       query.andWhere('audit.dh_ngay <= :dateTo', { dateTo: endOfDay });
@@ -313,5 +407,57 @@ export class FastIntegrationService {
       `[FastIntegration] Retrying sync for PO ${audit.dh_so} from audit #${id}`,
     );
     return this.syncPOCharges(audit.payload);
+  }
+
+  /**
+   * Xoá một audit log theo ID
+   */
+  async deleteAuditLog(id: number): Promise<{ success: boolean; message: string }> {
+    const audit = await this.auditRepo.findOne({ where: { id } });
+    if (!audit) {
+      throw new NotFoundException(`Audit log #${id} không tồn tại`);
+    }
+    await this.auditRepo.delete(id);
+    this.logger.log(`[FastIntegration] Deleted audit log #${id} (${audit.dh_so})`);
+    return { success: true, message: `Đã xoá log #${id}` };
+  }
+
+  /**
+   * Xoá nhiều audit log theo khoảng ngày (created_at)
+   */
+  async deleteAuditLogsByDateRange(
+    startDate: string,
+    endDate: string,
+    status?: string,
+  ): Promise<{ success: boolean; message: string; deleted: number }> {
+    if (!startDate || !endDate) {
+      throw new BadRequestException('startDate và endDate là bắt buộc');
+    }
+
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const query = this.auditRepo
+      .createQueryBuilder('audit')
+      .where('audit.dh_ngay >= :start', { start })
+      .andWhere('audit.dh_ngay <= :end', { end });
+
+    if (status) {
+      query.andWhere('audit.status = :status', { status: status.toUpperCase() });
+    }
+
+    const logsToDelete = await query.select('audit.id').getMany();
+    const ids = logsToDelete.map(l => l.id);
+
+    if (ids.length === 0) {
+      return { success: true, message: 'Không có log nào để xoá', deleted: 0 };
+    }
+
+    const result = await this.auditRepo.delete(ids);
+    const deleted = result.affected || 0;
+    this.logger.log(`[FastIntegration] Deleted ${deleted} audit logs (${startDate} -> ${endDate})`);
+    return { success: true, message: `Đã xoá ${deleted} log`, deleted };
   }
 }
