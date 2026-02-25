@@ -145,6 +145,12 @@ export class PlatformFeeImportShopee {
   @Column({ name: 'row_number', type: 'int', nullable: true })
   rowNumber: number | null;
 
+  @Column({ name: 'is_synced', type: 'boolean', default: false })
+  isSynced: boolean;
+
+  @Column({ name: 'synced_at', type: 'timestamp', nullable: true })
+  syncedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

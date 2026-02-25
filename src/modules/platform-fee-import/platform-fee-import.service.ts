@@ -851,4 +851,43 @@ export class PlatformFeeImportService {
 
     return (repo as any).save(updatedEntity);
   }
+
+  /**
+   * Xo\u00e1 m\u1ed9t b\u1ea3n ghi phi\u00ean nh\u1eadp. Ch\u1eb7n n\u1ebfu \u0111\u00e3 \u0111\u01b0\u1ee3c \u0111\u1ea9y sang Fast.
+   */
+  async deleteFee(platform: string, id: string): Promise<{ success: boolean; message: string }> {
+    const repo = this.getRepositoryByPlatform(platform as Platform);
+    const entity = await (repo as any).findOne({ where: { id } });
+    if (!entity) {
+      throw new BadRequestException('Kh\u00f4ng t\u00ecm th\u1ea5y b\u1ea3n ghi');
+    }
+    if (entity.isSynced) {
+      throw new BadRequestException('\u0110\u00e3 \u0111\u01b0\u1ee3c \u0111\u1ea9y sang Fast, kh\u00f4ng th\u1ec3 xo\u00e1');
+    }
+    await (repo as any).delete(id);
+    return { success: true, message: 'Xo\u00e1 th\u00e0nh c\u00f4ng' };
+  }
+
+  /**
+   * Xo\u00e1 nhi\u1ec1u b\u1ea3n ghi theo importBatchId (ch\u1ec9 xo\u00e1 nh\u1eefng b\u1ea3n ghi ch\u01b0a sync).
+   */
+  async deleteFeesByBatch(platform: string, importBatchId: string): Promise<{ success: boolean; deleted: number }> {
+    const repo = this.getRepositoryByPlatform(platform as Platform);
+    const entities = await (repo as any).find({ where: { importBatchId, isSynced: false } });
+    if (entities.length === 0) {
+      return { success: true, deleted: 0 };
+    }
+    const ids = entities.map((e: any) => e.id);
+    const result = await (repo as any).delete(ids);
+    return { success: true, deleted: result.affected || 0 };
+  }
+
+  /**
+   * \u0110\u00e1nh d\u1ea5u m\u1ed9t b\u1ea3n ghi l\u00e0 \u0111\u00e3 \u0111\u01b0\u1ee3c \u0111\u1ea9y sang Fast.
+   */
+  async markAsSynced(platform: string, id: string): Promise<{ success: boolean }> {
+    const repo = this.getRepositoryByPlatform(platform as Platform);
+    await (repo as any).update(id, { isSynced: true, syncedAt: new Date() });
+    return { success: true };
+  }
 }

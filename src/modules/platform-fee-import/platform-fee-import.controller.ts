@@ -173,10 +173,43 @@ export class PlatformFeeImportController {
   ) {
     if (!['shopee', 'tiktok', 'lazada'].includes(platform)) {
       throw new BadRequestException(
-        'Platform không hợp lệ. Phải là shopee, tiktok hoặc lazada',
+        'Platform kh\u00f4ng h\u1ee3p l\u1ec7. Ph\u1ea3i l\u00e0 shopee, tiktok ho\u1eb7c lazada',
       );
     }
     return this.platformFeeImportService.update(platform, id, body);
+  }
+
+  @Delete('fee/:platform/:id')
+  async deleteFee(
+    @Param('platform') platform: string,
+    @Param('id') id: string,
+  ) {
+    if (!['shopee', 'tiktok', 'lazada'].includes(platform)) {
+      throw new BadRequestException('Platform kh\u00f4ng h\u1ee3p l\u1ec7');
+    }
+    return this.platformFeeImportService.deleteFee(platform, id);
+  }
+
+  @Delete('fee/:platform/batch/:batchId')
+  async deleteFeesByBatch(
+    @Param('platform') platform: string,
+    @Param('batchId') batchId: string,
+  ) {
+    if (!['shopee', 'tiktok', 'lazada'].includes(platform)) {
+      throw new BadRequestException('Platform kh\u00f4ng h\u1ee3p l\u1ec7');
+    }
+    return this.platformFeeImportService.deleteFeesByBatch(platform, batchId);
+  }
+
+  @Post('fee/:platform/:id/mark-synced')
+  async markAsSynced(
+    @Param('platform') platform: string,
+    @Param('id') id: string,
+  ) {
+    if (!['shopee', 'tiktok', 'lazada'].includes(platform)) {
+      throw new BadRequestException('Platform kh\u00f4ng h\u1ee3p l\u1ec7');
+    }
+    return this.platformFeeImportService.markAsSynced(platform, id);
   }
 
   @Delete('fee-map/:id')
@@ -184,3 +217,4 @@ export class PlatformFeeImportController {
     return this.platformFeeImportService.deleteFeeMap(id);
   }
 }
+
