@@ -111,6 +111,7 @@ export class InvoiceLogicUtils {
     hasMaCtkm: boolean;
     hasMaCtkmTangHang: boolean;
     maCtkmTangHang?: string | null; // [NEW] Accept the actual code string to override wholesale category prefixes
+    maCk01?: string | null;         // [NEW] Accept explicit discount promo code to override wholesale categories
     loyaltyService?: any; // Allow injecting service
   }): Promise<AccountingAccounts> {
     const {
@@ -156,17 +157,20 @@ export class InvoiceLogicUtils {
 
     if (isWholesale) {
       // === LOGIC BÁN BUÔN (WHOLESALE) ===
+      const explicitPromoCode = params.maCk01 || params.maCtkmTangHang || null; // [NEW] Check for both explicit promo configs
+
       const wholesaleAccounts = await InvoiceLogicUtils.getWholesaleAccounts(
         isWholesale,
         productTypeWholesaleUpper,
         isEcode,
         loyaltyService,
-        params.maCtkmTangHang || null, // [NEW] Pass the string value here
+        explicitPromoCode, // [NEW] Pass to wholesale logic
       );
 
       if (wholesaleAccounts) {
         tkChietKhau = wholesaleAccounts.tkChietKhau || null;
         maPhi = wholesaleAccounts.maPhi || null;
+        tkChiPhi = wholesaleAccounts.tkChiPhi || null;
       } else {
         // Fallback if not matched
         tkChietKhau = sale.tkChietKhau || null;
@@ -213,15 +217,12 @@ export class InvoiceLogicUtils {
     return { tkChietKhau, tkChiPhi, maPhi };
   }
 
-  /**
-   * Helper xác định tài khoản cho đơn bán buôn (Wholesale)
-   */
   static async getWholesaleAccounts(
     isWholesale: boolean,
     productType: string | null,
     isEcode: boolean,
     loyaltyService?: any,
-    maCtkmTangHang?: string | null, // [NEW] Added to allow overriding with GT.TANGHANG etc.
+    explicitPromotionCode?: string | null, // [NEW] Added to allow overriding with GT.TANGHANG, CTKM.INAN etc.
   ): Promise<Partial<AccountingAccounts> | null> {
     if (!isWholesale) return null;
 
@@ -231,9 +232,9 @@ export class InvoiceLogicUtils {
 
     let promotionCode = '';
 
-    // [NEW] If there's a specific tang hang promotion code like GT.TANGHANG for this wholesale order, use it directly
-    if (maCtkmTangHang && maCtkmTangHang.trim() !== '') {
-      promotionCode = maCtkmTangHang.trim();
+    // [NEW] If there's a specific promotion code like GT.TANGHANG or CTKM.INAN for this wholesale order, use it directly
+    if (explicitPromotionCode && explicitPromotionCode.trim() !== '') {
+      promotionCode = explicitPromotionCode.trim();
     } else {
       if (isEcode) {
         // Ecode Logic
@@ -353,7 +354,10 @@ export class InvoiceLogicUtils {
         // User requirements: "Cut" like standard code (RMN.xxx-yyy -> RMN.xxx)
         // BUT: Do NOT add .I / .S / .V suffix.
         const cutCode = SalesUtils.getPromotionDisplayCode(code) || code;
-        maCtkmTangHang = cutCode.replace(/\.(I|S|V)$/, '');
+        // [FIX] Only overwrite if cutCode is available, preserving existing maCtkmTangHang like CTKM.INAN or GT.TANGHANG
+        if (cutCode && cutCode.trim() !== '') {
+          maCtkmTangHang = cutCode.replace(/\.(I|S|V)$/, '');
+        }
       }
     }
 
@@ -1447,6 +1451,8 @@ export class InvoiceLogicUtils {
         isTangHang,
         hasMaCtkm: !!(maCk01 || maCtkmTangHang),
         hasMaCtkmTangHang: !!maCtkmTangHang,
+        maCtkmTangHang: maCtkmTangHang, // [FIX] Forward to Accounting override
+        maCk01: maCk01, // [FIX] Forward to Accounting override
         loyaltyService,
       });
 

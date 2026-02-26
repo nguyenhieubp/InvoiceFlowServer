@@ -1092,6 +1092,7 @@ export class SalesPayloadService {
       hasMaCtkm: !!(maCk01 || maCtkmTangHang),
       hasMaCtkmTangHang: !!maCtkmTangHang,
       maCtkmTangHang: maCtkmTangHang, // [NEW] Pass the explicit value, e.g. GT.TANGHANG
+      maCk01: maCk01, // [NEW] Pass explicit maCk01 for wholesale override
       loyaltyService: this.loyaltyService,
     });
   }
