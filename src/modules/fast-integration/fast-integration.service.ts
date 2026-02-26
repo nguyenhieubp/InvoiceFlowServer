@@ -35,6 +35,12 @@ export class FastIntegrationService {
       dh_so: string;
       dh_ngay: string;
       dh_dvcs: string;
+      ngay_phi1?: string | null;
+      ngay_phi2?: string | null;
+      ngay_phi3?: string | null;
+      ngay_phi4?: string | null;
+      ngay_phi5?: string | null;
+      ngay_phi6?: string | null;
     };
     detail: Array<{
       dong: number;
@@ -93,20 +99,43 @@ export class FastIntegrationService {
             cp04_nt: 0,
             cp05_nt: 0,
             cp06_nt: 0,
+            ngay_phi1: null,
+            ngay_phi2: null,
+            ngay_phi3: null,
+            ngay_phi4: null,
+            ngay_phi5: null,
+            ngay_phi6: null,
           });
           historyMap.set(key, entry);
         }
 
         entry.ma_cp = item.ma_cp;
         (entry as any)[targetSlot] = safeNumber(item.cp01_nt);
-        this.logger.log(`[FastIntegration] Line ${item.dong}: ${targetSlot} = ${safeNumber(item.cp01_nt)}`);
+
+        // ngay_phiN ứng với dong=N: lưu ngày đẩy cho dòng này
+        const dongIndex = item.dong; // dong 1→ngay_phi1, dong 2→ngay_phi2...
+        const ngaySlot = `ngay_phi${dongIndex}` as keyof POChargeHistory;
+        const ngayFromMaster = (master as any)[`ngay_phi${dongIndex}`];
+        (entry as any)[ngaySlot] = ngayFromMaster ? new Date(ngayFromMaster) : new Date();
       }
 
       // 4. Build merged payload from history
       const finalList = Array.from(historyMap.values()).sort((a, b) => a.dong - b.dong);
 
+      // Build ngay_phi1–6: ngay_phiN lấy từ row có dong=N trong history
+      const historyByDong = new Map(finalList.map(h => [h.dong, h]));
+      const mergedMaster = {
+        ...master,
+        ngay_phi1: historyByDong.get(1)?.ngay_phi1 ?? null,
+        ngay_phi2: historyByDong.get(2)?.ngay_phi2 ?? null,
+        ngay_phi3: historyByDong.get(3)?.ngay_phi3 ?? null,
+        ngay_phi4: historyByDong.get(4)?.ngay_phi4 ?? null,
+        ngay_phi5: historyByDong.get(5)?.ngay_phi5 ?? null,
+        ngay_phi6: historyByDong.get(6)?.ngay_phi6 ?? null,
+      };
+
       const mergedPayload = {
-        master,
+        master: mergedMaster,
         detail: finalList.map((h) => ({
           dong: h.dong,
           ma_cp: h.ma_cp,
@@ -230,12 +259,20 @@ export class FastIntegrationService {
           continue;
         }
 
+        const orderDate = item.invoiceDate
+          ? new Date(item.invoiceDate).toISOString()
+          : (item.orderCreatedAt ? new Date(item.orderCreatedAt).toISOString() : new Date().toISOString());
+
         const master = {
           dh_so: item.erpOrderCode,
-          dh_ngay: item.invoiceDate
-            ? new Date(item.invoiceDate).toISOString()
-            : (item.orderCreatedAt ? new Date(item.orderCreatedAt).toISOString() : new Date().toISOString()),
+          dh_ngay: orderDate,
           dh_dvcs: "TTM",
+          ngay_phi1: orderDate,
+          ngay_phi2: orderDate,
+          ngay_phi3: orderDate,
+          ngay_phi4: orderDate,
+          ngay_phi5: orderDate,
+          ngay_phi6: orderDate,
         };
 
         const details: any[] = [];
