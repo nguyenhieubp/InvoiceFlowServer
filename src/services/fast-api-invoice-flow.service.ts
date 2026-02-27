@@ -1386,6 +1386,7 @@ export class FastApiInvoiceFlowService {
         tien_nt: 0,
         ma_lo: maLo,
         ma_bp: maBp,
+        ma_nx: '1561', // Fix cứng ma_nx = 1561 cho điều chuyển kho
         px_gia_dd: 0,
       });
     }
