@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 import { PurchaseOrder } from '../../entities/purchase-order.entity';
 import { ZappyApiService } from '../../services/zappy-api.service';
+import { LoyaltyService } from '../../services/loyalty.service';
+import { FastApiClientService } from '../../services/fast-api-client.service';
 
 @Injectable()
 export class PurchaseOrderService {
@@ -12,7 +14,9 @@ export class PurchaseOrderService {
     @InjectRepository(PurchaseOrder)
     private poRepository: Repository<PurchaseOrder>,
     private zappyService: ZappyApiService,
-  ) {}
+    private loyaltyService: LoyaltyService, // [NEW] Add LoyaltyService
+    private fastApiClientService: FastApiClientService, // [NEW] Add FastApiClientService
+  ) { }
 
   /**
    * Sync Purchase Orders for a date range
@@ -116,10 +120,124 @@ export class PurchaseOrderService {
     query.skip((page - 1) * limit).take(limit);
 
     const [data, total] = await query.getManyAndCount();
+
+    const uniqueBranchCodes = Array.from(
+      new Set(
+        data
+          .map((item) => item.shipToBranchCode)
+          .filter((code): code is string => !!code),
+      ),
+    );
+
+    const departmentMap = await this.loyaltyService.fetchLoyaltyDepartments(uniqueBranchCodes);
+
+    const enrichedData = data.map((item) => {
+      const department = item.shipToBranchCode ? departmentMap.get(item.shipToBranchCode) : null;
+      return {
+        ...item,
+        ma_dvcs: department?.ma_dvcs || null,
+      };
+    });
+
     return {
-      data,
+      data: enrichedData,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
+  }
+
+  /**
+   * Đồng bộ PO sang Fast (PO2)
+   */
+  async syncToFast(id: string) {
+    // 1. Lấy thông tin record được chọn
+    const selectedPo = await this.poRepository.findOne({ where: { id } });
+    if (!selectedPo) {
+      throw new Error(`Không tìm thấy Purchase Order với ID: ${id}`);
+    }
+
+    // 2. Lấy tất cả các dòng của PO này
+    const allPoLines = await this.poRepository.find({
+      where: { poCode: selectedPo.poCode },
+    });
+
+    if (!allPoLines.length) {
+      throw new Error(`Không tìm thấy chi tiết cho PO: ${selectedPo.poCode}`);
+    }
+
+    // Lấy branch code duy nhất để fetch ma_dvcs
+    const uniqueBranchCodes = Array.from(
+      new Set(
+        allPoLines
+          .map((item) => item.shipToBranchCode)
+          .filter((code): code is string => !!code),
+      ),
+    );
+
+    const departmentMap = await this.loyaltyService.fetchLoyaltyDepartments(
+      uniqueBranchCodes,
+    );
+
+    // Dùng dòng đầu tiên làm master
+    const masterLine = allPoLines[0];
+    const deptMaster = masterLine.shipToBranchCode
+      ? departmentMap.get(masterLine.shipToBranchCode)
+      : null;
+    const ma_dvcs_master = deptMaster?.ma_dvcs || '';
+
+    // 3. Build payload
+    const payload = {
+      master: {
+        ma_dvcs: ma_dvcs_master,
+        ngay_ct: masterLine.poDate ? masterLine.poDate.toISOString() : new Date().toISOString(),
+        so_ct: masterLine.poCode, // Dùng poCode làm số chứng từ
+        ma_gd: "1", // 1-Đơn hàng; 2-Hợp đồng
+        ma_kh: "NCC001", // TODO: Determine how exactly supplier/vendor code is mapped. Hardcoded temporarily if needed, but should be from item.maNhaCungCap if available in the future. Wait, po might have supplier code?
+        so_po: masterLine.poCode,
+        ma_tt: "",
+        dien_giai: `Sync PO ${masterLine.poCode} từ Hub`,
+        ma_nv: "",
+        ma_dc: "",
+        ma_htvc: masterLine.shipmentTransMethod || "",
+        ma_kho: deptMaster?.ma_kho || "", // Có thể lấy mã kho từ dept nếu có, hoặc để trống tuỳ Fast
+        ma_nt: "VND", // Mặc định VND
+        ty_gia: 1, // Mặc định 1
+        action: 0, // 0:Mới, sửa, 1:Đóng, 2:Xóa
+      },
+      detail: allPoLines.map((line, index) => {
+        const deptLine = line.shipToBranchCode
+          ? departmentMap.get(line.shipToBranchCode)
+          : null;
+        return {
+          dong: index + 1, // Dòng từ 1
+          ma_vt: line.itemCode,
+          dvt: "CAI", // DVT Tạm cứng, tuỳ theo item master
+          so_luong: line.qty,
+          gia_nt: line.price,
+          tien_nt: line.amount,
+          ma_thue_nk: "",
+          nk_nt: line.importTaxTotal,
+          ma_thue_pg: "",
+          thue_pg_nt: 0,
+          ma_thue_ttdb: "",
+          ttdb_nt: 0,
+          ma_thue: line.vatPct ? line.vatPct.toString() : "",
+          thue_nt: line.vatTotal,
+          ngay_giao: line.shipmentPlanDate ? line.shipmentPlanDate.toISOString() : (line.poDate ? line.poDate.toISOString() : new Date().toISOString()),
+          ngay_giao2: line.shipmentPlanDate ? line.shipmentPlanDate.toISOString() : (line.poDate ? line.poDate.toISOString() : new Date().toISOString()),
+          sl_nhan: line.receivedQty,
+          sl_xac_nhan: line.qty,
+          ma_vv: "",
+          ma_bp: deptLine?.ma_bp || "",
+          ma_sp: "",
+          ma_hd: "",
+          ma_phi: "",
+          ma_ku: "",
+        };
+      }),
+    };
+
+    // 4. Gọi API Fast
+    return await this.fastApiClientService.syncPurchaseOrder(payload);
   }
 
   // --- Helpers ---

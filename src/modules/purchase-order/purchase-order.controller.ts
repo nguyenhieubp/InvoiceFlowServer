@@ -1,9 +1,9 @@
-import { Controller, Get, Post, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Param } from '@nestjs/common';
 import { PurchaseOrderService } from './purchase-order.service';
 
 @Controller('purchase-orders')
 export class PurchaseOrderController {
-  constructor(private readonly purchaseOrderService: PurchaseOrderService) {}
+  constructor(private readonly purchaseOrderService: PurchaseOrderService) { }
 
   @Post('sync')
   async syncPO(
@@ -33,5 +33,10 @@ export class PurchaseOrderController {
       search,
       brand,
     });
+  }
+
+  @Post(':id/fast')
+  async syncToFast(@Param('id') id: string) {
+    return this.purchaseOrderService.syncToFast(id);
   }
 }

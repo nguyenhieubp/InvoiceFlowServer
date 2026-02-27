@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 import { GoodsReceipt } from '../../entities/goods-receipt.entity';
 import { ZappyApiService } from '../../services/zappy-api.service';
+import { LoyaltyService } from '../../services/loyalty.service';
 
 @Injectable()
 export class GoodsReceiptService {
@@ -12,7 +13,8 @@ export class GoodsReceiptService {
     @InjectRepository(GoodsReceipt)
     private grRepository: Repository<GoodsReceipt>,
     private zappyService: ZappyApiService,
-  ) {}
+    private loyaltyService: LoyaltyService,
+  ) { }
 
   /**
    * Sync Goods Receipts for a date range
@@ -109,8 +111,28 @@ export class GoodsReceiptService {
     query.skip((page - 1) * limit).take(limit);
 
     const [data, total] = await query.getManyAndCount();
+
+    // [NEW] Fetch ma_dvcs from Loyalty API for each unique shipToBranchCode
+    const uniqueBranchCodes = Array.from(
+      new Set(
+        data
+          .map((item) => item.shipToBranchCode)
+          .filter((code): code is string => !!code),
+      ),
+    );
+
+    const departmentMap = await this.loyaltyService.fetchLoyaltyDepartments(uniqueBranchCodes);
+
+    const enrichedData = data.map((item) => {
+      const department = item.shipToBranchCode ? departmentMap.get(item.shipToBranchCode) : null;
+      return {
+        ...item,
+        ma_dvcs: department?.ma_dvcs || null, // Lấy ma_dvcs từ API, gán null nếu không có
+      };
+    });
+
     return {
-      data,
+      data: enrichedData,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }

@@ -1404,7 +1404,7 @@ export class FastApiInvoiceFlowService {
       dien_giai:
         firstStockTransfer.docDesc ||
         `Phiếu điều chuyển kho ${firstStockTransfer.docCode}`,
-      so_buoc: 2, // Mặc định 2
+      so_buoc: 1, // Mặc định 2
       detail,
     };
 

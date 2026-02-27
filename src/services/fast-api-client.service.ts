@@ -1531,6 +1531,64 @@ export class FastApiClientService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Gọi API PO2 (Đơn hàng nhập khẩu)
+   * 2.27/ Đơn hàng nhập khẩu
+   */
+  async syncPurchaseOrder(payload: any): Promise<any> {
+    try {
+      // Lấy token (tự động refresh nếu cần)
+      const token = await this.getToken();
+      if (!token) {
+        throw new Error('Không thể lấy token đăng nhập');
+      }
+
+      // Gọi API PO2 với token
+      const endpoint = `${this.baseUrl}/PO2`;
+      this.logger.log(`Calling FastAPI endpoint: ${endpoint}`);
+
+      const response = await firstValueFrom(
+        this.httpService.post(endpoint, payload, {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      );
+
+      this.logger.log('PO2 submitted successfully');
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(
+        `Error submitting PO2: ${error?.message || error}`,
+      );
+
+      // Nếu lỗi 401 (Unauthorized), refresh token và retry
+      if (error?.response?.status === 401) {
+        this.logger.log('Token expired, refreshing and retrying PO2 API...');
+        const newToken = await this.login();
+        if (newToken) {
+          try {
+            const retryResponse = await firstValueFrom(
+              this.httpService.post(`${this.baseUrl}/PO2`, payload, {
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${newToken}`,
+                },
+              }),
+            );
+            return retryResponse.data;
+          } catch (retryError) {
+            this.logger.error(`Retry PO2 API failed: ${retryError}`);
+            throw retryError;
+          }
+        }
+      }
+
+      throw error;
+    }
+  }
+
   onModuleDestroy() {
     this.stopAutoRefresh();
   }
