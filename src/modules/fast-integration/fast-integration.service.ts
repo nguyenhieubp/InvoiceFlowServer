@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { format } from 'date-fns';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 import { POChargeHistory } from './entities/po-charge-history.entity';
@@ -126,12 +127,12 @@ export class FastIntegrationService {
       const historyByDong = new Map(finalList.map(h => [h.dong, h]));
       const mergedMaster = {
         ...master,
-        ngay_phi1: historyByDong.get(1)?.ngay_phi1 ?? null,
-        ngay_phi2: historyByDong.get(2)?.ngay_phi2 ?? null,
-        ngay_phi3: historyByDong.get(3)?.ngay_phi3 ?? null,
-        ngay_phi4: historyByDong.get(4)?.ngay_phi4 ?? null,
-        ngay_phi5: historyByDong.get(5)?.ngay_phi5 ?? null,
-        ngay_phi6: historyByDong.get(6)?.ngay_phi6 ?? null,
+        ngay_phi1: historyByDong.get(1)?.ngay_phi1 ? format(new Date(historyByDong.get(1)!.ngay_phi1!), "yyyy-MM-dd'T'HH:mm:ss") : null,
+        ngay_phi2: historyByDong.get(2)?.ngay_phi2 ? format(new Date(historyByDong.get(2)!.ngay_phi2!), "yyyy-MM-dd'T'HH:mm:ss") : null,
+        ngay_phi3: historyByDong.get(3)?.ngay_phi3 ? format(new Date(historyByDong.get(3)!.ngay_phi3!), "yyyy-MM-dd'T'HH:mm:ss") : null,
+        ngay_phi4: historyByDong.get(4)?.ngay_phi4 ? format(new Date(historyByDong.get(4)!.ngay_phi4!), "yyyy-MM-dd'T'HH:mm:ss") : null,
+        ngay_phi5: historyByDong.get(5)?.ngay_phi5 ? format(new Date(historyByDong.get(5)!.ngay_phi5!), "yyyy-MM-dd'T'HH:mm:ss") : null,
+        ngay_phi6: historyByDong.get(6)?.ngay_phi6 ? format(new Date(historyByDong.get(6)!.ngay_phi6!), "yyyy-MM-dd'T'HH:mm:ss") : null,
       };
 
       const mergedPayload = {
@@ -263,21 +264,26 @@ export class FastIntegrationService {
           ? new Date(item.invoiceDate).toISOString()
           : (item.orderCreatedAt ? new Date(item.orderCreatedAt).toISOString() : new Date().toISOString());
 
+        const config = (item.platform || '').toLowerCase() === 'tiktok' ? TIKTOK_FEE_CONFIG : SHOPEE_FEE_CONFIG;
+
+        const dateStr = item.invoiceDate
+          ? format(new Date(item.invoiceDate), "yyyy-MM-dd'T'HH:mm:ss")
+          : (item.orderCreatedAt ? format(new Date(item.orderCreatedAt), "yyyy-MM-dd'T'HH:mm:ss") : format(new Date(), "yyyy-MM-dd'T'HH:mm:ss"));
+
+
         const master = {
           dh_so: item.erpOrderCode,
           dh_ngay: orderDate,
           dh_dvcs: "TTM",
-          ngay_phi1: orderDate,
-          ngay_phi2: orderDate,
-          ngay_phi3: orderDate,
-          ngay_phi4: orderDate,
-          ngay_phi5: orderDate,
-          ngay_phi6: orderDate,
+          ngay_phi1: dateStr,
+          ngay_phi2: dateStr,
+          ngay_phi3: dateStr,
+          ngay_phi4: dateStr,
+          ngay_phi5: dateStr,
+          ngay_phi6: dateStr,
         };
 
         const details: any[] = [];
-        const config = (item.platform || '').toLowerCase() === 'tiktok' ? TIKTOK_FEE_CONFIG : SHOPEE_FEE_CONFIG;
-
         config.forEach((rule) => {
           const value = Number(item[rule.field]);
           if (value && value !== 0 && !isNaN(value)) {

@@ -135,7 +135,7 @@ export class PurchaseOrderService {
       const department = item.shipToBranchCode ? departmentMap.get(item.shipToBranchCode) : null;
       return {
         ...item,
-        ma_dvcs: department?.ma_dvcs || null,
+        ma_dvcs: department?.madv_cs || department?.ma_dvcs || null,
       };
     });
 
