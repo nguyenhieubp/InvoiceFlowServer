@@ -710,10 +710,10 @@ export class StockTransferSyncService {
       }
 
       // Filter by dateFrom & dateTo (Already parsed)
-      queryBuilder.andWhere('wp.processedDate >= :dateFrom', {
+      queryBuilder.andWhere('wp.transDate >= :dateFrom', {
         dateFrom: fromDate,
       });
-      queryBuilder.andWhere('wp.processedDate <= :dateTo', { dateTo: toDate });
+      queryBuilder.andWhere('wp.transDate <= :dateTo', { dateTo: toDate });
 
       // Get list data & total count for pagination
       // getManyAndCount is better than getCount + getMany separately
@@ -762,10 +762,10 @@ export class StockTransferSyncService {
       }
 
       // Date filters are mandatory now
-      statsQueryBuilder.andWhere('wp.processedDate >= :dateFrom', {
+      statsQueryBuilder.andWhere('wp.transDate >= :dateFrom', {
         dateFrom: fromDate,
       });
-      statsQueryBuilder.andWhere('wp.processedDate <= :dateTo', {
+      statsQueryBuilder.andWhere('wp.transDate <= :dateTo', {
         dateTo: toDate,
       });
 
