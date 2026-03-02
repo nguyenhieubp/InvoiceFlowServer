@@ -100,9 +100,10 @@ export class SalesWarehouseService {
           this.logger.warn(
             `[Warehouse] SKIP docCode=${stockTransfer.docCode}: ĐVCS Kho=${donViKho} khác ĐVCS Kho LQ=${donViKhoLienQuan} → bỏ qua, chưa hỗ trợ`,
           );
-          throw new BadRequestException(
-            `Không thể xử lý: ĐVCS Kho (${donViKho}) khác ĐVCS Kho liên quan (${donViKhoLienQuan}). Chức năng đang phát triển.`,
-          );
+          return;
+          // throw new BadRequestException(
+          //   `Không thể xử lý: ĐVCS Kho (${donViKho}) khác ĐVCS Kho liên quan (${donViKhoLienQuan}). Chức năng đang phát triển.`,
+          // );
         }
 
         // Cùng ĐVCS → dùng luồng điều chuyển kho
